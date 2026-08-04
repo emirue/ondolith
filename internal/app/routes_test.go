@@ -76,9 +76,12 @@ func TestCheckCatchesEachViolation(t *testing.T) {
 			want:  "상태 변경 유형인데 GET",
 		},
 		{
+			// The screen id is real (checkdocs rejects invented ones repo-wide);
+			// what makes it a violation is that the inventory passed in does
+			// not carry it, which is exactly the drift this check exists for.
 			name: "D11 에 없는 화면",
 			build: func() *Registry {
-				return NewRegistry().Add(Route{Screen: "P-999", Method: "GET",
+				return NewRegistry().Add(Route{Screen: "P-202", Method: "GET",
 					Pattern: "/ghost", Class: SC1, Handler: noop})
 			},
 			inv:  inv("P-201", SC1),
