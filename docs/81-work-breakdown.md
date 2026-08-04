@@ -56,7 +56,7 @@
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W1-07 | 권한 판정 순수 함수 `CanOn(perm, board)` | W1-04 | `internal/auth` | 표 테스트가 다음을 각각 확인한다 — 전역 부여(`board_id IS NULL`) 통과 / 스코프 부여의 해당 게시판만 통과 / 미부여 거부 / superuser 전건 통과 / 함의 없음(`board.manage` 보유가 `board.view`를 통과시키지 않음) / 익명 요청의 유효역할이 `{anonymous}` / 인증 요청이 `{anonymous, member} ∪ user_roles` |
+| W1-07 | 권한 판정 순수 함수 `CanOn(perm, board)` **(완료 — `internal/auth/permission.go`)** | W1-04 | `internal/auth` | 표 테스트가 다음을 각각 확인한다 — 전역 부여(`board_id IS NULL`) 통과 / 스코프 부여의 해당 게시판만 통과 / 미부여 거부 / superuser 전건 통과 / 함의 없음(`board.manage` 보유가 `board.view`를 통과시키지 않음) / 익명 요청의 유효역할이 `{anonymous}` / 인증 요청이 `{anonymous, member} ∪ user_roles` |
 | W1-08 | 스코프 부여 불변식 함수 | W1-07 | `internal/auth` | `is_scoped=false`인 권한에 `board_id`를 단 부여를 거부한다. **부여 핸들러와 시드가 같은 함수를 거친다**는 것이 호출부 테스트로 확인된다 (D15 2.4) |
 | W1-09 | 권한 상승 방어 규칙 R1~R5 | W1-07 | `internal/auth` | R1~R5 각각에 위반 케이스 1건 + 허용 케이스 1건. 자기 자신 역할 변경 거부(R1), 자기 권한 초과 부여 거부(R2), 비-superuser의 superuser 부여 거부(R3), 미보유 권한의 역할 추가 거부(R4), superuser 역할 편집 요청 거부(R5) |
 | W1-10 | rate limit 토큰 버킷 (메모리) | — | `internal/auth` | D15 4.3-2의 임계값 6종이 설정값으로 주입된다. 임계 초과 시 거부하고 시간 경과 후 회복하는 것을 가짜 시계로 검증한다. `-race`로 동시 접근 회귀 테스트를 남긴다 |

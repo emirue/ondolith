@@ -70,12 +70,12 @@ internal/
   install/             설치 트리 — 라우트 + 폼 검증 + 프로비저닝 + 템플릿(embed)
   app/                 운영 트리 — 풀·세션·라우트 조립
   migrations/          goose 마이그레이션 (embed.FS) + Run()
+  auth/                권한 판정 순수 함수 (CanOn, 유효 역할). DB 접근 없음
 ```
 
 Phase 1 이후 추가될 자리:
 
 ```
-  auth/                로그인, 세션 헬퍼, RBAC 검사
   theme/               테마 로더 (embed 폴백 + 디스크 오버라이드), 함수맵
   content/             페이지·게시판·글·댓글
   admin/               관리자 트리
