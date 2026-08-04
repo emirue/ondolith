@@ -67,9 +67,9 @@
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W1-13 | 유효 권한 집합 단일 쿼리 조회 | W1-04, W1-07 | `internal/auth` | 사용자 1명의 전체 권한 집합을 **쿼리 1회**로 가져온다. 통합 테스트가 쿼리 수를 세어 1임을 단언한다 (NFR-105). 역할을 부여·회수한 직후 다음 조회에 즉시 반영된다 (D15 4.3-1) |
-| W1-14 | 마지막 superuser 보호 트랜잭션 | W1-13 | `internal/auth` | `SELECT ... FOR UPDATE` 직렬화. **두 트랜잭션이 마지막 두 관리자를 서로 지울 때 정확히 하나만 성공한다.** 잠금 줄을 제거하면 이 테스트가 실패하는 것을 확인한다 (D15 5.2, M4) |
-| W1-15 | `users` 저장소 확장 | W1-03, W1-11 | `internal/auth` | 이메일 중복 INSERT가 DB UNIQUE로 거부된다. `is_active=false` 계정이 인증 조회에서 걸러진다. `sessions_valid_from` 갱신 쿼리가 존재한다 |
+| W1-13 | 유효 권한 집합 단일 쿼리 조회 **(완료 — `internal/auth/store.go` LoadPermissions)** | W1-04, W1-07 | `internal/auth` | 사용자 1명의 전체 권한 집합을 **쿼리 1회**로 가져온다. 통합 테스트가 쿼리 수를 세어 1임을 단언한다 (NFR-105). 역할을 부여·회수한 직후 다음 조회에 즉시 반영된다 (D15 4.3-1) |
+| W1-14 | 마지막 superuser 보호 트랜잭션 **(완료 — `internal/auth/store.go` SetActive)** | W1-13 | `internal/auth` | `SELECT ... FOR UPDATE` 직렬화. **두 트랜잭션이 마지막 두 관리자를 서로 지울 때 정확히 하나만 성공한다.** 잠금 줄을 제거하면 이 테스트가 실패하는 것을 확인한다 (D15 5.2, M4) |
+| W1-15 | `users` 저장소 확장 **(완료 — `internal/auth/store.go`)** | W1-03, W1-11 | `internal/auth` | 이메일 중복 INSERT가 DB UNIQUE로 거부된다. `is_active=false` 계정이 인증 조회에서 걸러진다. `sessions_valid_from` 갱신 쿼리가 존재한다 |
 | W1-16 | `pages`·`settings`·`menus` 저장소 | W1-05, W1-11 | `internal/content` | 슬러그 조회는 파라미터 바인딩만 사용한다. 발행 상태 필터가 `WHERE`에 있다(조회 후 Go 비교 금지). 메뉴 전체 트리를 쿼리 1회로 읽는다 |
 
 #### 테마 플랫폼
