@@ -237,3 +237,19 @@ func (s *Store) UpdateDisplayName(ctx context.Context, userID, name string) erro
 	}
 	return nil
 }
+
+// HoldsSuperuser reports whether the user holds the superuser role.
+//
+// R6 needs this before any destructive account operation: without it, revoking
+// the role is blocked while switching off its holder is not, and the two reach
+// the same end (D15 5.1).
+func (s *Store) HoldsSuperuser(ctx context.Context, userID string) (bool, error) {
+	var yes bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM user_roles ur
+		    JOIN roles r ON r.id = ur.role_id
+		    WHERE ur.user_id = $1 AND r.is_superuser
+		)`, userID).Scan(&yes)
+	return yes, err
+}
