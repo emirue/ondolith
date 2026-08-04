@@ -220,3 +220,20 @@ func (s *Store) SetActive(ctx context.Context, userID string, active bool) error
 	}
 	return tx.Commit(ctx)
 }
+
+// UpdateDisplayName changes the one profile field P-108 accepts.
+//
+// The predicate is the session's user id. There is no id in the form, so there
+// is nothing to tamper with — SC-3's ownership rule expressed as an absence
+// rather than as a check somebody has to remember.
+func (s *Store) UpdateDisplayName(ctx context.Context, userID, name string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1`, userID, name)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNoUser
+	}
+	return nil
+}
