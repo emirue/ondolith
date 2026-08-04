@@ -36,6 +36,10 @@ type Deps struct {
 	// it, returning a warning for a check it could not make. Injected so admin
 	// does not import theme.
 	ValidateTheme func(name string) (warn string, err error)
+	// OnThemeChange is called after A-202 records a new active theme, so the
+	// renderer can pick it up without a restart (FR-303). Injected because admin
+	// does not import theme.
+	OnThemeChange func(name string)
 	// SendReset delivers a forced-reset link (A-402). Injected and fire-and-
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.

@@ -13,9 +13,12 @@ import (
 // publicDeps serves the pages a visitor sees.
 type publicDeps struct {
 	content *content.Store
-	loader  *theme.Loader
-	log     *slog.Logger
-	site    func() theme.Site
+	// loader is a function, not a value: A-202 swaps the active theme while the
+	// server runs and FR-303 says the next request uses it. Holding the loader
+	// itself would mean "restart to change theme".
+	loader func() *theme.Loader
+	log    *slog.Logger
+	site   func() theme.Site
 	// dev decides how much an error page says (FR-306). In production it says
 	// nothing; in development it names the cause.
 	dev bool
@@ -50,7 +53,7 @@ func (d *publicDeps) page(w http.ResponseWriter, r *http.Request) {
 		// FR-404: a page may name its own template, but only one the active
 		// theme actually provides — otherwise a stored value picks an arbitrary
 		// file path.
-		if d.loader.HasBuiltin(p.Template) {
+		if d.loader().HasBuiltin(p.Template) {
 			name = p.Template
 		}
 	}
@@ -85,7 +88,7 @@ func (d *publicDeps) view(r *http.Request, title, desc string) theme.View {
 func (d *publicDeps) renderPage(w http.ResponseWriter, r *http.Request, name string, code int, v theme.View) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(code)
-	if err := d.loader.Render(w, name, v); err != nil {
+	if err := d.loader().Render(w, name, v); err != nil {
 		// The status line is already sent, so this cannot become a 500 — log it
 		// and let the truncated page speak for itself.
 		d.log.Error("템플릿 렌더링 실패", "template", name, "err", err)

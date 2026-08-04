@@ -126,7 +126,7 @@
 | W1-42 | 역할·권한 관리 (A-403, A-404, A-405) **(완료 — `internal/admin/handlers_rbac.go` Role*)** | W1-08, W1-09, W1-41 | `internal/admin` | R1~R5가 핸들러에서 전부 강제된다. superuser 역할 권한 편집 요청이 서버에서 거부된다(UI 숨김만으로 끝내지 않음). 스코프 부여가 `is_scoped=true` 6개에만 허용된다. 부여·회수가 다음 요청부터 즉시 반영된다 |
 | W1-43 | 시스템 정보 (A-602) **(완료 — `internal/admin/handlers.go` System)** | W1-35 | `internal/admin` | 버전(NFR-305), 적용된 마이그레이션 목록(NFR-302), 대기 마이그레이션 유무(NFR-303)가 표시된다. **DSN은 표시하지 않는다** |
 | W1-45 | 운영 라우트 트리 조립 **(완료 — `internal/app/tree.go`, `screens.go`, `admin_render.go`)** | W1-29, W1-35~W1-43 | `internal/app` | Phase 1 화면 전부가 `Registry`를 통해 등록되고 **`mux.HandleFunc` 직접 호출이 `internal/app` 에 남지 않는다** (W1-24). 부팅 자체 점검 5종이 실제 트리에서 돌고, D11 화면 목록에 없는 화면 ID나 권한 미선언 라우트가 있으면 기동이 중단된다. `httptest.NewServer` 로 띄운 트리에서 공개 화면·관리자 화면이 각각 응답한다 |
-| W1-44 | Phase 1 완료 기준 실측 + 문서 갱신 | W1-45 | `D80`, `CHANGELOG.md` | D80 Phase 1 완료 기준 4항을 실제 PostgreSQL에서 확인한다 — ① 기본 테마만으로 사이트 기동 ② 디스크 템플릿 1개 배치 시 그 부분만 재시작 없이 변경 ③ 관리자 로그인 → 페이지 생성 → 발행 → 공개 URL 노출 ④ 권한 없는 사용자의 `/admin/*` 차단. 재현 절차가 `make test-integration`에 남는다 |
+| W1-44 | Phase 1 완료 기준 실측 + 문서 갱신 **(완료 — `internal/app/tree_integration_test.go`, D80·CHANGELOG 갱신)** | W1-45 | `D80`, `CHANGELOG.md` | D80 Phase 1 완료 기준 4항을 실제 PostgreSQL에서 확인한다 — ① 기본 테마만으로 사이트 기동 ② 디스크 템플릿 1개 배치 시 그 부분만 재시작 없이 변경 ③ 관리자 로그인 → 페이지 생성 → 발행 → 공개 URL 노출 ④ 권한 없는 사용자의 `/admin/*` 차단. 재현 절차가 `make test-integration`에 남는다 |
 
 ### 임계 경로
 

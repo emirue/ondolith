@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -341,5 +342,145 @@ func TestBootRefusesWhenARouteNamesAMissingPermission(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "page.publish") {
 		t.Errorf("어느 키가 문제인지 말하지 않는다: %v", err)
+	}
+}
+
+// adminSession logs in an account holding the admin role and returns a client
+// with the session, plus a POST helper that satisfies the cross-origin check.
+func adminSession(t *testing.T, srv *httptest.Server, pool *pgxpool.Pool) (*http.Client,
+	func(path string, form url.Values) *http.Response,
+) {
+	t.Helper()
+	ctx := context.Background()
+	store := auth.NewStore(pool)
+	hash, err := auth.HashPassword("correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.CreateUser(ctx, "admin@example.com", hash, "관리자")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`,
+		id); err != nil {
+		t.Fatal(err)
+	}
+
+	c := client()
+	post := func(path string, form url.Values) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", srv.URL)
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		return resp
+	}
+	resp := post("/login", url.Values{
+		"email": {"admin@example.com"}, "password": {"correct horse battery"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("로그인 HTTP %d: %s", resp.StatusCode, body)
+	}
+	return c, post
+}
+
+func mustGet(t *testing.T, c *http.Client, url string) (int, string) {
+	t.Helper()
+	resp, err := c.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode, string(b)
+}
+
+// D80 Phase 1 완료 기준 ②: 디스크에 템플릿 하나를 놓으면 그 부분만 바뀐다,
+// 재시작 없이 (FR-302, FR-303).
+//
+// The theme is activated over HTTP through A-202, exactly as an operator would,
+// and the very next request has to use it. Capturing the theme directory at boot
+// is the failure this pins: it passes every unit test and means "restart to
+// change theme".
+func TestDiskThemeOverridesOnlyThatTemplateWithoutRestart(t *testing.T) {
+	srv, pool := liveSite(t)
+	c, post := adminSession(t, srv, pool)
+
+	// A page to look at, published, so the public URL renders the theme.
+	if rec := post("/admin/pages/new", url.Values{
+		"slug": {"about"}, "title": {"회사 소개"}, "body": {"본문입니다."}}); rec.StatusCode != http.StatusSeeOther {
+		t.Fatalf("페이지 생성 HTTP %d", rec.StatusCode)
+	}
+	var pageID string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM pages WHERE slug='about'`).Scan(&pageID); err != nil {
+		t.Fatal(err)
+	}
+	if rec := post("/admin/pages/"+pageID+"/publish",
+		url.Values{"status": {"published"}}); rec.StatusCode != http.StatusSeeOther {
+		t.Fatalf("발행 HTTP %d", rec.StatusCode)
+	}
+
+	// Before: the built-in page template.
+	code, before := mustGet(t, c, srv.URL+"/about")
+	if code != http.StatusOK {
+		t.Fatalf("공개 페이지 HTTP %d: %s", code, before)
+	}
+	if strings.Contains(before, "디스크에서 왔다") {
+		t.Fatal("아직 놓지도 않은 디스크 템플릿이 이미 쓰이고 있다")
+	}
+
+	// Place ONE template on disk. base.html is required for the directory to be
+	// a theme at all (D17); page.html is the override under test.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "base.html"),
+		[]byte(`<html><body>{{block "content" .}}{{end}}</body></html>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "page.html"),
+		[]byte(`{{define "content"}}디스크에서 왔다: {{.Data.Title}}{{end}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Activate it through A-202, with no restart in between.
+	resp := post("/admin/themes", url.Values{"theme": {dir}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther && resp.StatusCode != http.StatusOK {
+		t.Fatalf("테마 활성화 HTTP %d: %s", resp.StatusCode, body)
+	}
+
+	// The very next request uses it.
+	code, after := mustGet(t, c, srv.URL+"/about")
+	if code != http.StatusOK {
+		t.Fatalf("교체 후 공개 페이지 HTTP %d: %s", code, after)
+	}
+	if !strings.Contains(after, "디스크에서 왔다") {
+		t.Errorf("재시작 없이 디스크 템플릿이 적용되지 않았다 (FR-303): %s", after)
+	}
+
+	// ...and only that template. The home page has no disk override, so it must
+	// still come from the built-in theme rather than 404 or fall over.
+	code, home := mustGet(t, c, srv.URL+"/")
+	if code != http.StatusOK {
+		t.Errorf("오버라이드하지 않은 화면이 HTTP %d: %s", code, home)
+	}
+	if strings.Contains(home, "디스크에서 왔다") {
+		t.Errorf("오버라이드하지 않은 화면까지 디스크 템플릿이 먹었다: %s", home)
+	}
+
+	// Switching back to the built-in theme is also live.
+	resp = post("/admin/themes", url.Values{"theme": {""}})
+	resp.Body.Close()
+	if _, back := mustGet(t, c, srv.URL+"/about"); strings.Contains(back, "디스크에서 왔다") {
+		t.Errorf("내장 테마로 되돌아가는 것도 재시작이 필요하다: %s", back)
 	}
 }

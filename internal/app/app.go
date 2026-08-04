@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexedwards/scs/pgxstore"
@@ -139,7 +140,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	dev := setting("site.dev_mode")["site.dev_mode"] != ""
 	themeDir := func() string { return setting("theme.active")["theme.active"] }
 
-	loader := theme.New(theme.Builtin(), themeDir(), dev, theme.FuncMap(theme.Deps{}))
+	// The loader is swapped, not mutated: A-202 activates a theme on a running
+	// server and FR-303 says the next request uses it. A pointer swap means a
+	// request already rendering finishes against the loader it started with,
+	// instead of having its template set change underneath it.
+	var loaderRef atomic.Pointer[theme.Loader]
+	newLoader := func(dir string) *theme.Loader {
+		return theme.New(theme.Builtin(), dir, dev, theme.FuncMap(theme.Deps{}))
+	}
+	loaderRef.Store(newLoader(themeDir()))
+	loader := loaderRef.Load
 	limiter := auth.NewLimiter()
 	limits := auth.DefaultLimits()
 
@@ -165,12 +175,15 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		ValidateTheme: func(name string) (string, error) {
 			return theme.ValidateThemeDir(name, version)
 		},
+		OnThemeChange: func(name string) { loaderRef.Store(newLoader(name)) },
 		SendReset: func(email, token string) {
 			mailer.SendAsync(email, "비밀번호 재설정", "아래 링크로 재설정하세요:\n/password/reset/"+token)
 		},
 	}
 
-	registry := buildTree(pub, lg, acc, ad, loader.StaticHandler("/static/").ServeHTTP)
+	registry := buildTree(pub, lg, acc, ad, func(w http.ResponseWriter, r *http.Request) {
+		loader().StaticHandler("/static/").ServeHTTP(w, r)
+	})
 
 	perms, err := authStore.PermissionKeys(ctx)
 	if err != nil {

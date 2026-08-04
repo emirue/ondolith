@@ -245,6 +245,13 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 
 // ---- A-202 테마 -------------------------------------------------------------
 
+// themeChanged notifies the renderer, if anyone is listening.
+func (d *Deps) themeChanged(name string) {
+	if d.OnThemeChange != nil {
+		d.OnThemeChange(name)
+	}
+}
+
 // ThemeList is A-202's read. It shows which theme is active; discovering what
 // is installed is A-203's job (Phase 2), so this does not walk the disk.
 func (d *Deps) ThemeList(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +287,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 			return
 		}
+		d.themeChanged("")
 		http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)
 		return
 	}
@@ -297,6 +305,9 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// Only after the write: telling the renderer about a theme the database
+	// does not hold would survive until the next restart and then vanish.
+	d.themeChanged(name)
 	if warn != "" {
 		// D17: a dev build skips the version floor. The operator is told,
 		// because the alternative is a theme that misbehaves for no visible
