@@ -173,6 +173,29 @@ CanOn(perm, board) = ∃ 행 (role ∈ 유효역할) ∧ (permission = perm)
   참조할 수 없으므로 **애플리케이션 불변식**이다 — 부여 핸들러와 시드가 같은 함수를 거치게
   하고 그 함수에 테스트를 남긴다 (NFR-405)
 - 게시판 생성 시 **같은 트랜잭션에서** 기본 부여 행을 넣는다 (프리셋: 공개 / 회원전용 / 비공개).
+
+**프리셋의 정확한 구성** (구현: `internal/content/preset.go`)
+
+| 프리셋 | 부여 행 |
+|---|---|
+| **공개** | `anonymous: post.read` · `member: post.read, post.write, comment.write` · `operator: post.moderate, comment.moderate` |
+| **회원전용** | `member: post.read, post.write, comment.write` · `operator: post.moderate, comment.moderate` |
+| **비공개** | `editor: post.read, post.write, comment.write` · `operator: post.read, post.moderate, comment.moderate` |
+
+세 가지 규칙이 이 표를 정했다.
+
+1. **어떤 프리셋도 부여 행이 0개가 아니다.** 아무 부여도 없는 상태는 fail-closed 기본값이지
+   프리셋이 아니다. 빈 프리셋을 선택지로 두면 화면이 "설정했다"고 말하면서 아무것도 하지 않는다
+2. **모든 프리셋에 조정자가 있다.** 아무도 조정할 수 없는 게시판은 첫 스팸 글에 superuser 를
+   불러야 한다. `operator` 는 2.5 에서 이미 전역 조정 권한을 갖지만, 스코프 행을 명시해 A-404
+   화면에서 의도가 보이게 한다
+3. **`post.read_secret` 은 어떤 프리셋에도 없다.** 남의 비밀글을 읽는 권한이므로 드롭다운
+   기본값이 아니라 의도적인 부여여야 한다. **익명 쓰기**도 같은 이유로 없다 — 스팸의 기본값이
+   되어서는 안 된다
+
+프리셋 이름은 **게시판에 저장하지 않는다.** 저장하면 "누가 이 게시판을 읽을 수 있는가"에 대한
+두 번째 출처가 생기고, A-404 에서 부여 행을 한 번 고치는 순간 둘이 어긋난다. 프리셋은 생성
+시점의 출발점일 뿐이고, 그 뒤로는 평범한 `role_permissions` 행이다.
   **부여 행이 없는 게시판은 관리자 외 아무도 볼 수 없다 — fail-closed가 기본값이다**
 - 게시판 삭제 시 `ON DELETE CASCADE`
 
