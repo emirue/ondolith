@@ -181,7 +181,7 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
 | W2-09 | 게시판·필드 저장소 + 생성 트랜잭션 **(완료 — `internal/content/board.go`, `00009_board_seed.sql`)** | W2-07 | `internal/content` | **게시판 행과 권한 부여 행이 같은 트랜잭션에서 들어간다** (D14 4.2). 부여 행 INSERT를 실패시키면 게시판 행도 남지 않는 것을 통합 테스트가 확인한다. 게시판 삭제 시 `role_permissions`가 CASCADE된다 |
-| W2-10 | 글·댓글 저장소 | W2-02, W2-08 | `internal/content` | **목록 1페이지가 상수 개수 쿼리다** — 글 목록 + 댓글 수 + 첨부 유무 + 커스텀 필드를 합쳐 쿼리 수를 세는 테스트가 있다 (NFR-105). 대댓글은 `parent_id` 1단계. 조회수 증가는 세션 기반 중복 억제 (SC-1 3항) |
+| W2-10 | 글·댓글 저장소 **(완료 — `internal/content/post.go`)** | W2-02, W2-08 | `internal/content` | **목록 1페이지가 상수 개수 쿼리다** — 글 목록 + 댓글 수 + 첨부 유무 + 커스텀 필드를 합쳐 쿼리 수를 세는 테스트가 있다 (NFR-105). 대댓글은 `parent_id` 1단계. 조회수 증가는 세션 기반 중복 억제 (SC-1 3항) |
 | W2-11 | 첨부 저장소 + 파일 배치 | W2-06, W2-10 | `internal/content` | 파일이 **웹루트 밖**에 저장되고 DB에는 경로·원본명·mime·크기·체크섬만 남는다. 저장 디렉터리가 설정으로 지정되고 업그레이드 시 건드리지 않는다 (NFR-304) |
 | W2-12 | 게시판 스코프 권한 결합 | W2-09, Phase 1 W1-13 | `internal/auth` | `post.read`·`post.write`·`post.moderate`·`post.read_secret`·`comment.write`·`comment.moderate` 6개가 게시판 단위로 판정된다. 게시판 A에만 부여된 권한으로 게시판 B에 접근하면 거부된다 |
 
