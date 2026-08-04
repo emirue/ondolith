@@ -306,6 +306,15 @@ inject "인벤토리 유형이 D11 과 다름" internal/app/screens.go \
 inject "D11 화면이 인벤토리에 없음" internal/app/screens.go \
 	'perl -ni -e "print unless /^\\t\"A-601\":/" internal/app/screens.go' \
 	'docs/11-screens.md 의 화면이 internal/app/screens.go 에 없다: A-601'
+# Phase 마다 시드 파일이 하나씩 는다. 검사가 첫 파일만 읽으면 뒤의 시드는
+# D15 와 대조되지 않은 채 지나간다 — perl 에 여러 파일을 넘기고 <> 로 슬러프
+# 하면 첫 `-- +goose Down` 에서 잘려 정확히 그렇게 된다.
+inject "Phase 2 시드의 부여가 D15 와 다름" internal/migrations/00009_board_seed.sql \
+	"perl -0777 -pi -e \"s/^\\s*\\('operator', 'board\\.view'\\),\\n//m\" internal/migrations/00009_board_seed.sql" \
+	'심지 않았다: grant/operator/board.view'
+inject "Phase 2 시드가 스코프 권한을 전역 부여" internal/migrations/00009_board_seed.sql \
+	"perl -0777 -pi -e \"s/(\\('operator', 'board\\.view'\\),)/('member',   'post.read'),\\n    \\1/\" internal/migrations/00009_board_seed.sql" \
+	'없는 것을 심는다: grant/member/post.read'
 inject "화면에 작업 항목이 없음" docs/81-work-breakdown.md \
 	'perl -pi -e "s/\\(P-511~P-513\\)/(P-511~P-512)/" docs/81-work-breakdown.md' \
 	'작업 항목이 없는 화면: P-513'
@@ -380,8 +389,9 @@ inject "시드가 D15 의 부여를 빠뜨림" internal/migrations/00003_rbac_se
 inject "시드가 D15 에 없는 부여를 심음" internal/migrations/00003_rbac_seed.sql \
 	'perl -pi -e "s{^(    \\(.editor.,   .page\\.view.\\),)\$}{\$1\\n    (\x27member\x27,   \x27page.view\x27),}" internal/migrations/00003_rbac_seed.sql' \
 	'없는 것을 심는다: grant/member/page.view'
-inject "D15 가 권한을 다음 Phase 로 옮겼는데 시드가 그대로" docs/15-access-control.md \
-	'perl -pi -e "s{^(\\| .menu\\.manage. \\|[^|]*\\|[^|]*\\|)\\s*1\\s*(\\|)}{\${1} 2 \$2}" docs/15-access-control.md' \
+# 시드가 있는 Phase 는 1·2 다. 3 으로 옮기면 그 권한은 아직 심지 않아야 한다.
+inject "D15 가 권한을 아직 시드 없는 Phase 로 옮김" docs/15-access-control.md \
+	'perl -pi -e "s{^(\\| .menu\\.manage. \\|[^|]*\\|[^|]*\\|)\\s*1\\s*(\\|)}{\${1} 3 \$2}" docs/15-access-control.md' \
 	'없는 것을 심는다: grant/operator/menu.manage'
 inject "D15 매트릭스에서 부여가 사라졌는데 시드가 그대로" docs/15-access-control.md \
 	'perl -pi -e "if (/^### 2\\.5 /) { \$i = 1 } elsif (\$i && /^### /) { \$i = 0 } s/●/ / if \$i && /^\\| .menu\\.manage. \\|/" docs/15-access-control.md' \

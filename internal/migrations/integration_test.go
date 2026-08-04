@@ -92,22 +92,26 @@ func count(t *testing.T, pool *pgxpool.Pool, q string, args ...any) int64 {
 // migration does rather than about what someone believed it did.
 func seededGrants(t *testing.T) map[string][]string {
 	t.Helper()
-	sql, err := fs.ReadFile(FS, "00003_rbac_seed.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, _ := strings.Cut(string(sql), "-- +goose Down")
-
+	// 두 시드를 모두 읽는다. Phase 2 부여를 새 파일에 넣으면서 이 파서가
+	// 00003 만 보고 있으면, 늘어난 부여가 전부 "예상 밖"으로 보고된다 —
+	// 그때 기대값을 손으로 적어 맞추는 것이 M9 다.
+	seeds := []string{"00003_rbac_seed.sql", "00009_board_seed.sql"}
 	block := regexp.MustCompile(`(?s)INSERT INTO role_permissions.*?FROM \(VALUES(.*?)\)\s*AS`)
-	m := block.FindStringSubmatch(up)
-	if m == nil {
-		t.Fatal("00003_rbac_seed.sql 에서 role_permissions VALUES 블록을 찾지 못했다 — 이 테스트가 아무것도 검증하지 않는다")
-	}
-
 	pair := regexp.MustCompile(`\(\s*'([a-z_]+)'\s*,\s*'([a-z][a-z0-9._]*)'\s*\)`)
 	out := map[string][]string{}
-	for _, p := range pair.FindAllStringSubmatch(m[1], -1) {
-		out[p[1]] = append(out[p[1]], p[2])
+	for _, name := range seeds {
+		sql, err := fs.ReadFile(FS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, _ := strings.Cut(string(sql), "-- +goose Down")
+		m := block.FindStringSubmatch(up)
+		if m == nil {
+			t.Fatalf("%s 에서 role_permissions VALUES 블록을 찾지 못했다 — 이 테스트가 아무것도 검증하지 않는다", name)
+		}
+		for _, p := range pair.FindAllStringSubmatch(m[1], -1) {
+			out[p[1]] = append(out[p[1]], p[2])
+		}
 	}
 	if len(out) == 0 {
 		t.Fatal("시드에서 부여를 한 건도 읽지 못했다")
@@ -116,6 +120,37 @@ func seededGrants(t *testing.T) map[string][]string {
 		sort.Strings(v)
 	}
 	return out
+}
+
+// seededPermissions counts what the seed files insert, so the expectation comes
+// from the SQL rather than from a number typed here — the same chain
+// seededGrants keeps for grants.
+func seededPermissions(t *testing.T) (total, scoped int) {
+	t.Helper()
+	block := regexp.MustCompile(`(?s)INSERT INTO permissions \(key, description, is_scoped\) VALUES(.*?);`)
+	row := regexp.MustCompile(`\(\s*'([a-z][a-z0-9._]*)'\s*,\s*'[^']*'\s*,\s*(true|false)\s*\)`)
+	for _, name := range []string{"00003_rbac_seed.sql", "00009_board_seed.sql"} {
+		sql, err := fs.ReadFile(FS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, _ := strings.Cut(string(sql), "-- +goose Down")
+		m := block.FindStringSubmatch(up)
+		if m == nil {
+			t.Fatalf("%s 에서 permissions VALUES 블록을 찾지 못했다", name)
+		}
+		found := row.FindAllStringSubmatch(m[1], -1)
+		if len(found) == 0 {
+			t.Fatalf("%s 에서 권한을 한 건도 읽지 못했다", name)
+		}
+		for _, r := range found {
+			total++
+			if r[2] == "true" {
+				scoped++
+			}
+		}
+	}
+	return total, scoped
 }
 
 // FR-103, NFR-302: the whole shipped schema has to be something PostgreSQL
@@ -371,14 +406,15 @@ func TestSeedMatchesAccessControlDoc(t *testing.T) {
 		}
 	}
 
-	// D30: Phase 1 seeds only the 19 permissions D15 §2.2 marks Phase 1.
-	// Seeding all 37 would make D15 §4.4's unused-permission warning fire 18
-	// times every boot, and a warning that always fires is not read.
-	if n := count(t, pool, `SELECT count(*) FROM permissions`); n != 19 {
-		t.Errorf("permissions %d행, want 19행 (Phase 1 분만)", n)
+	// 권한은 Phase 마다 심는다. 37개를 한 번에 심으면 D15 4.4 의 "어떤 라우트도
+	// 쓰지 않는 권한" 경고가 매 부팅 여러 건을 뱉어 검사 자체가 무시된다.
+	// 기대값은 시드 SQL 에서 읽는다 — 여기에 숫자를 적으면 세 번째 사본이다.
+	wantPerms, wantScoped := seededPermissions(t)
+	if n := count(t, pool, `SELECT count(*) FROM permissions`); n != int64(wantPerms) {
+		t.Errorf("permissions %d행, want %d행", n, wantPerms)
 	}
-	if n := count(t, pool, `SELECT count(*) FROM permissions WHERE is_scoped`); n != 0 {
-		t.Errorf("스코프 권한이 %d행 시딩됐다 — 대상 6개는 전부 Phase 2다", n)
+	if n := count(t, pool, `SELECT count(*) FROM permissions WHERE is_scoped`); n != int64(wantScoped) {
+		t.Errorf("스코프 권한 %d행, want %d행 (D15 2.4 의 6개)", n, wantScoped)
 	}
 
 	// The expected grants are read out of the seed SQL itself, not written here

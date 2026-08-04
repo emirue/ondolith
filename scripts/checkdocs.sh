@@ -750,34 +750,45 @@ fi
 # This is the same drift M9/M11/M12 recorded three times: a decision changes in
 # one document and its copy elsewhere keeps the old answer.
 begin
-SEED=internal/migrations/00003_rbac_seed.sql
-if [ ! -f "$SEED" ] || [ ! -f "$ACL" ]; then
+# Phase 마다 시드 파일이 하나씩 는다. 목록을 한 곳에 두고 전부 읽는다 —
+# 한 파일만 보면 다음 Phase 의 시드가 D15 와 대조되지 않은 채 지나간다.
+SEEDS="internal/migrations/00003_rbac_seed.sql internal/migrations/00009_board_seed.sql"
+SEED_OK=1
+for f in $SEEDS; do [ -f "$f" ] || SEED_OK=0; done
+if [ "$SEED_OK" = 0 ] || [ ! -f "$ACL" ]; then
 	err "RBAC 시드 마이그레이션 또는 권한 문서가 없다"
 else
-	# Up half only: Down deletes rows, it does not declare them.
-	perl -e 'my $s = do { local $/; <> };
-		($s) = $s =~ /(.*?)^-- \+goose Down/ms or exit;
-		if ($s =~ /INSERT INTO permissions[^;]*?VALUES(.*?);/s) {
-			my $b = $1;
-			print "perm\t$1\n" while $b =~ /\(\s*'"'"'([a-z][a-z0-9._]*)'"'"'/g;
-		}
-		if ($s =~ /INSERT INTO role_permissions[^;]*?FROM \(VALUES(.*?)\)\s*AS/s) {
-			my $b = $1;
-			print "grant\t$1\t$2\n"
-				while $b =~ /\(\s*'"'"'([a-z_]+)'"'"'\s*,\s*'"'"'([a-z][a-z0-9._]*)'"'"'\s*\)/g;
-		}
-		if ($s =~ /INSERT INTO roles[^;]*?VALUES(.*?);/s) {
-			my $b = $1;
-			print "role\t$1\n" while $b =~ /\(\s*'"'"'([a-z_]+)'"'"'/g;
-		}' "$SEED" >/tmp/cd_seed_sql
+	# 파일마다 돌린다. perl 에 여러 파일을 주고 <> 로 한 번에 슬러프하면 내용이
+	# 이어 붙고, 첫 `-- +goose Down` 에서 자르는 순간 **두 번째 시드가 통째로
+	# 사라진다** — 검사는 조용히 통과한다.
+	: >/tmp/cd_seed_sql
+	for f in $SEEDS; do
+		perl -e 'my $s = do { local $/; <> };
+			($s) = $s =~ /(.*?)^-- \+goose Down/ms or exit;
+			if ($s =~ /INSERT INTO permissions[^;]*?VALUES(.*?);/s) {
+				my $b = $1;
+				print "perm\t$1\n" while $b =~ /\(\s*'"'"'([a-z][a-z0-9._]*)'"'"'/g;
+			}
+			if ($s =~ /INSERT INTO role_permissions[^;]*?FROM \(VALUES(.*?)\)\s*AS/s) {
+				my $b = $1;
+				print "grant\t$1\t$2\n"
+					while $b =~ /\(\s*'"'"'([a-z_]+)'"'"'\s*,\s*'"'"'([a-z][a-z0-9._]*)'"'"'\s*\)/g;
+			}
+			if ($s =~ /INSERT INTO roles[^;]*?VALUES(.*?);/s) {
+				my $b = $1;
+				print "role\t$1\n" while $b =~ /\(\s*'"'"'([a-z_]+)'"'"'/g;
+			}' "$f" >>/tmp/cd_seed_sql
+	done
 
-	# D15 §2.2, Phase 1 rows only — the phase column decides what ships now.
+	# D15 §2.2, Phase 1·2 rows — those are the phases whose seeds exist.
 	perl -nle 'if (/^### 2\.2 /) { $i = 1; next } if ($i && /^### /) { $i = 0 }
 		next unless $i;
-		print "perm\t$1" if /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|[^|]*\|[^|]*\|\s*1\s*\|/' \
+		print "perm\t$1" if /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|[^|]*\|[^|]*\|\s*[12]\s*\|/' \
 		"$ACL" | sort -u >/tmp/cd_seed_doc
 	# D15 §2.5, restricted to those permissions. ● is a global grant; ◐ is board
-	# scoped and belongs to Phase 2, so it must not appear in this migration.
+	# scoped and the preset writes it when a board is created (2.4) — it must
+	# never appear in a seed, or every board is already public before anyone
+	# chooses a preset.
 	perl -nle 'if (/^### 2\.5 /) { $i = 1; next } if ($i && /^### /) { $i = 0 }
 		next unless $i;
 		next unless /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|/;
@@ -801,10 +812,10 @@ else
 		/tmp/cd_seed_p1 /tmp/cd_seed_doc_s >/tmp/cd_seed_want
 
 	for l in $(comm -23 /tmp/cd_seed_want /tmp/cd_seed_sql_s | tr '\t' '/'); do
-		err "$SEED 가 $ACL 에 있는 것을 심지 않았다: $l"
+		err "RBAC 시드가 $ACL 에 있는 것을 심지 않았다: $l"
 	done
 	for l in $(comm -13 /tmp/cd_seed_want /tmp/cd_seed_sql_s | tr '\t' '/'); do
-		err "$SEED 가 $ACL 에 없는 것을 심는다: $l"
+		err "RBAC 시드가 $ACL 에 없는 것을 심는다: $l"
 	done
 	n_seed=$(wc -l </tmp/cd_seed_want | tr -d ' ')
 	[ "$n_seed" -gt 0 ] || err "$ACL 에서 시드 대상을 하나도 읽지 못했다 (검사가 헛돌았다)"
