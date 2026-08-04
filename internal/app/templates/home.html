@@ -1,0 +1,19 @@
+{{define "home.html"}}<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Name}}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+         max-width: 42rem; margin: 0 auto; padding: 4rem 1.25rem; }
+  code { background: #8881; padding: .1rem .3rem; border-radius: .2rem; }
+</style>
+</head>
+<body>
+<h1>{{.Name}}</h1>
+<p>Ondolith가 운영 모드로 동작 중입니다.</p>
+<p>테마와 관리자 화면은 Phase 1에서 붙습니다. 설정 파일: <code>ondolith.json</code></p>
+</body>
+</html>{{end}}

@@ -1,0 +1,97 @@
+{{define "install.html"}}<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Ondolith 설치</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+         max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
+  .sub { color: #6b7280; margin: 0 0 2rem; }
+  fieldset { border: 1px solid #d1d5db; border-radius: .5rem; padding: 1rem 1.25rem 1.25rem; margin: 0 0 1.5rem; }
+  legend { padding: 0 .4rem; font-weight: 600; }
+  label { display: block; margin: .9rem 0 .25rem; font-size: .9rem; font-weight: 500; }
+  input, select { width: 100%; padding: .5rem .6rem; font: inherit; font-size: .95rem;
+                  border: 1px solid #9ca3af; border-radius: .375rem; background: Canvas; color: CanvasText; }
+  .row { display: flex; gap: 1rem; }
+  .row > div { flex: 1; }
+  .hint { color: #6b7280; font-size: .8rem; margin: .3rem 0 0; }
+  button { font: inherit; font-weight: 600; padding: .65rem 1.4rem; border: 0; border-radius: .375rem;
+           background: #b45309; color: #fff; cursor: pointer; }
+  .error { border: 1px solid #dc2626; background: #fef2f2; color: #991b1b;
+           padding: .75rem 1rem; border-radius: .375rem; margin: 0 0 1.5rem; }
+  @media (prefers-color-scheme: dark) { .error { background: #2a0e0e; color: #fca5a5; } }
+</style>
+</head>
+<body>
+<h1>Ondolith 설치</h1>
+<p class="sub">데이터베이스와 관리자 계정을 설정하면 설치가 끝납니다.</p>
+
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+<form method="post" action="/install">
+  <fieldset>
+    <legend>데이터베이스 (PostgreSQL)</legend>
+    <div class="row">
+      <div style="flex:3">
+        <label for="db_host">호스트</label>
+        <input id="db_host" name="db_host" value="{{.DBHost}}" required>
+      </div>
+      <div>
+        <label for="db_port">포트</label>
+        <input id="db_port" name="db_port" value="{{.DBPort}}" inputmode="numeric" required>
+      </div>
+    </div>
+    <label for="db_name">데이터베이스 이름</label>
+    <input id="db_name" name="db_name" value="{{.DBName}}" required>
+    <p class="hint">비어 있는 데이터베이스를 미리 만들어 두세요.</p>
+    <div class="row">
+      <div>
+        <label for="db_user">사용자</label>
+        <input id="db_user" name="db_user" value="{{.DBUser}}" autocomplete="off" required>
+      </div>
+      <div>
+        <label for="db_password">비밀번호</label>
+        <input id="db_password" name="db_password" type="password" autocomplete="off">
+      </div>
+    </div>
+    <label for="db_sslmode">SSL 모드</label>
+    <select id="db_sslmode" name="db_sslmode">
+      {{$m := .DBSSLMode}}
+      {{range $v := .SSLModes}}
+        <option value="{{$v}}"{{if eq $v $m}} selected{{end}}>{{$v}}</option>
+      {{end}}
+    </select>
+    <p class="hint">같은 서버의 데이터베이스라면 <code>disable</code>, 원격이라면 <code>require</code> 이상을 권장합니다.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>사이트</legend>
+    <label for="site_name">사이트 이름</label>
+    <input id="site_name" name="site_name" value="{{.SiteName}}" required>
+  </fieldset>
+
+  <fieldset>
+    <legend>관리자 계정</legend>
+    <label for="admin_email">이메일</label>
+    <input id="admin_email" name="admin_email" type="email" value="{{.AdminEmail}}" autocomplete="off" required>
+    <div class="row">
+      <div>
+        <label for="admin_password">비밀번호</label>
+        <input id="admin_password" name="admin_password" type="password" autocomplete="new-password" required>
+        <p class="hint">10자 이상</p>
+      </div>
+      <div>
+        <label for="admin_password_confirm">비밀번호 확인</label>
+        <input id="admin_password_confirm" name="admin_password_confirm" type="password" autocomplete="new-password" required>
+      </div>
+    </div>
+  </fieldset>
+
+  <button type="submit">설치</button>
+</form>
+</body>
+</html>{{end}}
