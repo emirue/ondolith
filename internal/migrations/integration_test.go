@@ -127,11 +127,13 @@ func TestAllMigrationsApply(t *testing.T) {
 		t.Fatalf("마이그레이션 적용 실패: %v", err)
 	}
 
-	// D30 §3-3 Phase 0 + Phase 1. goose_db_version is goose's own bookkeeping.
+	// D30 §3-3 Phase 0 + Phase 1 + Phase 2 게시판.
+	// goose_db_version is goose's own bookkeeping.
 	want := []string{
+		"attachments", "board_fields", "boards", "comments",
 		"email_verification_tokens", "goose_db_version", "menus", "pages",
-		"password_reset_tokens", "permissions", "role_permissions", "roles",
-		"sessions", "settings", "social_accounts", "user_roles", "users",
+		"password_reset_tokens", "permissions", "posts", "role_permissions",
+		"roles", "sessions", "settings", "social_accounts", "user_roles", "users",
 	}
 	got := tableNames(t, pool)
 	if len(got) != len(want) {
@@ -478,5 +480,229 @@ func TestIsAdminIsCarriedIntoUserRoles(t *testing.T) {
 		SELECT count(*) FROM information_schema.columns
 		WHERE table_name = 'users' AND column_name = 'is_admin'`); n != 1 {
 		t.Error("is_admin 컬럼이 사라졌다 — Phase 1 에서 지우면 다운그레이드 경로가 없다")
+	}
+}
+
+// D30 Phase 2's constraints are the ones a handler bug would otherwise turn
+// into bad rows. Each case is a thing the database has to refuse on its own.
+func TestBoardSchemaConstraintsBite(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	var boardID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('free', '자유게시판') RETURNING id`).
+		Scan(&boardID); err != nil {
+		t.Fatal(err)
+	}
+
+	refused := map[string]string{
+		"대문자 슬러그":     `INSERT INTO boards (slug, name) VALUES ('Free', 'x')`,
+		"빈 슬러그":       `INSERT INTO boards (slug, name) VALUES ('', 'x')`,
+		"슬러그 중복":      `INSERT INTO boards (slug, name) VALUES ('free', '다른 이름')`,
+		"경로를 벗어나는 스킨": `INSERT INTO boards (slug, name, skin) VALUES ('b1','x','../etc')`,
+		"페이지 크기 범위 밖": `INSERT INTO boards (slug, name, per_page) VALUES ('b2','x',0)`,
+		"필드 키에 대문자": `INSERT INTO board_fields (board_id, key, label, field_type)
+			VALUES ('` + boardID + `', 'Key', 'x', 'text')`,
+		"알 수 없는 필드 타입": `INSERT INTO board_fields (board_id, key, label, field_type)
+			VALUES ('` + boardID + `', 'k', 'x', 'richtext')`,
+		"select 인데 선택지가 없음": `INSERT INTO board_fields (board_id, key, label, field_type)
+			VALUES ('` + boardID + `', 'k', 'x', 'select')`,
+		"text 인데 선택지가 있음": `INSERT INTO board_fields (board_id, key, label, field_type, options)
+			VALUES ('` + boardID + `', 'k', 'x', 'text', '["a"]')`,
+		"커스텀 필드가 객체가 아님": `INSERT INTO posts (board_id, title, body, custom_fields)
+			VALUES ('` + boardID + `', 't', 'b', '[]')`,
+		"알 수 없는 글 상태": `INSERT INTO posts (board_id, title, body, status)
+			VALUES ('` + boardID + `', 't', 'b', 'deleted')`,
+		"조회수 음수": `INSERT INTO posts (board_id, title, body, view_count)
+			VALUES ('` + boardID + `', 't', 'b', -1)`,
+		"제목이 빈 글": `INSERT INTO posts (board_id, title, body) VALUES ('` + boardID + `', '', 'b')`,
+	}
+	for name, q := range refused {
+		if _, err := pool.Exec(ctx, q); err == nil {
+			t.Errorf("%s: DB가 통과시켰다", name)
+		}
+	}
+
+	// ...and the legitimate shapes go in.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO board_fields (board_id, key, label, field_type, options)
+		 VALUES ($1, 'color', '색상', 'select', '["빨강","파랑"]')`, boardID); err != nil {
+		t.Errorf("정상 select 필드가 거부됐다: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO board_fields (board_id, key, label, field_type)
+		 VALUES ($1, 'memo', '메모', 'text')`, boardID); err != nil {
+		t.Errorf("정상 text 필드가 거부됐다: %v", err)
+	}
+	// Same key on the same board is the collision (board_id, key) exists for.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO board_fields (board_id, key, label, field_type)
+		 VALUES ($1, 'memo', '중복', 'text')`, boardID); err == nil {
+		t.Error("같은 게시판에 같은 키가 두 번 들어갔다")
+	}
+}
+
+// D30: the attachment path regex refuses `../` at the database, not only in the
+// handler. A stored path is joined to the upload root, so a traversal that gets
+// past the handler becomes a read anywhere on disk.
+func TestAttachmentPathRefusesTraversal(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var boardID, postID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('free','자유') RETURNING id`).Scan(&boardID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO posts (board_id, title, body) VALUES ($1,'t','b') RETURNING id`,
+		boardID).Scan(&postID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		"../../etc/passwd",
+		"2026/08/../../../etc/passwd",
+		"/etc/passwd",
+		"2026/08/abc.php",                             // extension
+		"2026/8/0189a1b2-c3d4-5e6f-7081-92a3b4c5d6e7", // unpadded month
+		"2026/08/not-a-uuid",
+	} {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO attachments (post_id, stored_path, original_name, mime_type, byte_size)
+			 VALUES ($1, $2, 'x.png', 'image/png', 1)`, postID, path); err == nil {
+			t.Errorf("경로 %q 가 통과했다", path)
+		}
+	}
+	good := "2026/08/0189a1b2-c3d4-5e6f-7081-92a3b4c5d6e7"
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO attachments (post_id, stored_path, original_name, mime_type, byte_size)
+		 VALUES ($1, $2, 'x.png', 'image/png', 1)`, postID, good); err != nil {
+		t.Errorf("정상 경로가 거부됐다: %v", err)
+	}
+	// Two rows on one file: deleting either would take the other's bytes.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO attachments (post_id, stored_path, original_name, mime_type, byte_size)
+		 VALUES ($1, $2, 'y.png', 'image/png', 1)`, postID, good); err == nil {
+		t.Error("같은 저장 경로가 두 행에 들어갔다")
+	}
+}
+
+// D30: a comment with replies cannot be deleted (NO ACTION), which is what
+// forces the tombstone. Deleting the post takes both in one statement.
+func TestCommentDeletionRulesAreEnforcedByTheDatabase(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var boardID, postID, parentID, childID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('free','자유') RETURNING id`).Scan(&boardID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO posts (board_id, title, body) VALUES ($1,'t','b') RETURNING id`,
+		boardID).Scan(&postID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO comments (post_id, body) VALUES ($1,'부모') RETURNING id`,
+		postID).Scan(&parentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO comments (post_id, parent_id, body) VALUES ($1,$2,'자식') RETURNING id`,
+		postID, parentID).Scan(&childID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM comments WHERE id = $1`, parentID); err == nil {
+		t.Error("자식이 있는 댓글이 물리 삭제됐다 — 툼스톤 규칙의 근거가 사라진다")
+	}
+	// The tombstone shape: emptied body, deleted_at set.
+	if _, err := pool.Exec(ctx,
+		`UPDATE comments SET body = '', deleted_at = now() WHERE id = $1`, parentID); err != nil {
+		t.Errorf("툼스톤 전환이 거부됐다: %v", err)
+	}
+	// A tombstone that still has a body is the state the theme would render.
+	if _, err := pool.Exec(ctx,
+		`UPDATE comments SET body = '남아있음' WHERE id = $1`, parentID); err == nil {
+		t.Error("삭제 표시된 댓글에 본문이 남았다")
+	}
+	// A child with no replies is a physical delete.
+	if _, err := pool.Exec(ctx, `DELETE FROM comments WHERE id = $1`, childID); err != nil {
+		t.Errorf("자식 없는 댓글의 물리 삭제가 거부됐다: %v", err)
+	}
+	// Deleting the post takes the rest in one statement.
+	if _, err := pool.Exec(ctx, `DELETE FROM posts WHERE id = $1`, postID); err != nil {
+		t.Errorf("글 삭제가 댓글 FK 에 걸렸다: %v", err)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM comments`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Errorf("글을 지웠는데 댓글 %d행이 남았다", left)
+	}
+}
+
+// D15 2.4: the same permission on two boards is two grants, and the same global
+// grant twice is one. NULLS NOT DISTINCT is what makes the second half true —
+// under the default rule two NULL board_ids never collide.
+func TestScopedGrantUniquenessCountsNulls(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var a, b string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('free','자유') RETURNING id`).Scan(&a); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('notice','공지') RETURNING id`).Scan(&b); err != nil {
+		t.Fatal(err)
+	}
+	const grant = `INSERT INTO role_permissions (role_id, permission_id, board_id)
+		SELECT r.id, p.id, $1 FROM roles r, permissions p
+		WHERE r.key = 'member' AND p.key = 'page.view'`
+
+	if _, err := pool.Exec(ctx, grant, a); err != nil {
+		t.Fatalf("게시판 A 부여 실패: %v", err)
+	}
+	if _, err := pool.Exec(ctx, grant, b); err != nil {
+		t.Errorf("다른 게시판에 같은 권한을 못 준다: %v", err)
+	}
+	if _, err := pool.Exec(ctx, grant, a); err == nil {
+		t.Error("같은 게시판에 같은 권한이 두 번 들어갔다")
+	}
+	// A global grant stores NULL. Two of them must collide even though SQL's
+	// default rule says NULL <> NULL — that is what NULLS NOT DISTINCT buys,
+	// and without it the same global grant lands as many times as it is sent.
+	if _, err := pool.Exec(ctx, grant, nil); err != nil {
+		t.Fatalf("전역 부여 실패: %v", err)
+	}
+	if _, err := pool.Exec(ctx, grant, nil); err == nil {
+		t.Error("전역 부여가 중복으로 들어갔다 — NULLS NOT DISTINCT 가 없다")
+	}
+	// Dropping a board takes its grants with it.
+	if _, err := pool.Exec(ctx, `DELETE FROM boards WHERE id = $1`, a); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM role_permissions WHERE board_id = $1`, a).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("게시판을 지웠는데 스코프 부여 %d행이 남았다", n)
 	}
 }

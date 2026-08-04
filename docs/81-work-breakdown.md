@@ -163,7 +163,7 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
 | W2-01 | `users.is_admin` 컬럼 삭제 (릴리즈 N+1) | Phase 1 릴리즈 | `00006_drop_is_admin.sql`, `CHANGELOG.md` | 컬럼이 사라지고 코드에 참조가 남지 않는다(`grep`으로 확인). **되돌릴 수 없는 마이그레이션임을 CHANGELOG에 파괴적 변경으로 표시**한다 (NFR-303, NFR-308). Down은 컬럼을 되살리되 값 복원이 불가함을 주석에 적는다 |
-| W2-02 | 게시판 스키마 마이그레이션 | W2-01 | `00007_board.sql`, `D30`·`D16` 갱신 | `boards`·`board_fields`·`posts`·`comments`·`attachments` 생성. `boards.slug` UNIQUE, `board_fields (board_id, key)` UNIQUE. `posts (board_id, created_at DESC)` 인덱스. 모든 FK에 `ON DELETE` 명시. D16에 5행 추가 |
+| W2-02 | 게시판 스키마 마이그레이션 **(완료 — `00007_board.sql`)** | — | `00007_board.sql`, `D30`·`D16` 갱신 | `boards`·`board_fields`·`posts`·`comments`·`attachments` 생성. `boards.slug` UNIQUE, `board_fields (board_id, key)` UNIQUE. `posts (board_id, created_at DESC)` 인덱스. 모든 FK에 `ON DELETE` 명시. D16에 5행 추가 |
 | W2-03 | 전문검색 인덱스 | W2-02 | `00008_post_search.sql` | `posts`에 `tsvector` 생성 컬럼 + GIN 인덱스. 한국어 제목·본문 질의가 인덱스를 탄다는 것을 `EXPLAIN`으로 확인한다 (FR-507). `custom_fields` GIN은 **만들지 않는다** (D30 — 실제로 느려질 때 추가) |
 | W2-04 | (선택) 작업 로그 스키마 | W2-02 | `00009_oplog.sql`, `D16` 갱신 | `operation_logs` 생성. `actor_user_id`는 `ON DELETE SET NULL`, `actor_email`은 스냅샷 컬럼. UPDATE·DELETE 경로가 코드에 없다 (D15 7절) |
 
@@ -222,7 +222,10 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 
 **A-512(W3-35)는 반품·교환(W3-18)보다 먼저 끝나야 한다.** 반품 처리가 그 정책값을 읽어 환불액을 계산하므로, 순서가 뒤집히면 기간·배송비를 코드에 박아 두고 나중에 설정으로 빼는 일이 생긴다.
 
-**W2-01(`is_admin` 삭제)은 Phase 2의 첫 작업이지만 임계 경로가 아니다.** 다른 작업을 막지 않는다. 다만 **Phase 1 릴리즈가 실제로 나간 뒤에만** 할 수 있다 — 두 릴리즈 규칙이 시간 간격을 요구하기 때문이다. Phase 1과 2를 한 릴리즈로 합치면 이 작업은 규칙 위반이 된다.
+**W2-01(`is_admin` 삭제)은 Phase 2의 첫 작업이지만 임계 경로가 아니다.** 다른 작업을 막지 않는다 —
+그래서 W2-02의 선행에서 뺐다. 표에 적어 두면 Phase 2 전체가 릴리즈를 기다리게 되는데, 게시판
+스키마는 `is_admin`과 아무 관계가 없다. **본문과 표가 어긋나면 표가 이긴다** — 착수 판단을
+기계(`scripts/next-task.sh`)가 하기 때문이다. 다만 **Phase 1 릴리즈가 실제로 나간 뒤에만** 할 수 있다 — 두 릴리즈 규칙이 시간 간격을 요구하기 때문이다. Phase 1과 2를 한 릴리즈로 합치면 이 작업은 규칙 위반이 된다.
 
 ### 이 Phase에서 처음 생기는 위험
 

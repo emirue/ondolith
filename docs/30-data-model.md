@@ -318,7 +318,7 @@ D15 4.4의 "어떤 라우트도 쓰지 않는 권한 → 경고" 검사가 매 �
 | `id` | uuid | PK |
 | `role_id` | uuid | NOT NULL REFERENCES `roles(id)` |
 | `permission_id` | uuid | NOT NULL REFERENCES `permissions(id)` |
-| `board_id` | uuid | NULL REFERENCES `boards(id)` — **Phase 2에서 추가** |
+| `board_id` | uuid | NULL REFERENCES `boards(id)` ON DELETE CASCADE |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 ```sql
@@ -331,7 +331,11 @@ ALTER TABLE role_permissions DROP CONSTRAINT role_permissions_uniq;
 ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_uniq
   UNIQUE NULLS NOT DISTINCT (role_id, permission_id, board_id);
 CREATE INDEX role_permissions_permission_id_idx ON role_permissions (permission_id);
-CREATE INDEX role_permissions_board_id_idx      ON role_permissions (board_id);
+-- 부분 인덱스다. 전역 부여(board_id IS NULL)가 행의 대부분이고 스코프 판정은
+-- board_id 가 있는 행만 찾으므로, NULL 행을 색인에 넣으면 크기만 커지고 답은
+-- 같다.
+CREATE INDEX role_permissions_board_id_idx ON role_permissions (board_id)
+  WHERE board_id IS NOT NULL;
 ```
 
 > **`NULLS NOT DISTINCT`가 필요한 이유.** 기본 동작에서 NULL은 서로 같지 않으므로 평범한
