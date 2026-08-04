@@ -1,39 +1,50 @@
 {{define "content"}}
-<div class="overflow">
-<table>
-  <thead><tr><th>역할</th><th>키</th><th>비고</th></tr></thead>
-  <tbody>
-  {{range .Roles}}
-    <tr>
-      <td>{{.Name}}</td>
-      <td class="muted">{{.Key}}</td>
-      <td>{{if .IsSuperuser}}superuser — 서버에서 편집이 거부됩니다{{end}}</td>
-    </tr>
-  {{else}}
-    <tr><td colspan="3" class="muted">역할이 없습니다.</td></tr>
-  {{end}}
-  </tbody>
-</table>
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>역할 키</th><th>권한</th><th>비고</th></tr></thead>
+      <tbody>
+      {{range .Roles}}
+        <tr>
+          <td>{{.Key}}</td>
+          <td class="muted">{{len .Permissions}}개 권한</td>
+          <td>{{if .Superuser}}<span class="adm-badge">superuser — 서버에서 편집이 거부됩니다</span>{{end}}</td>
+        </tr>
+      {{else}}
+        <tr><td colspan="3" class="adm-empty">역할이 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
 </div>
-<h3>역할에 권한 부여</h3>
-<form method="post" action="/admin/roles/grant">
-  <label for="grant-role">역할 키</label>
-  <input type="text" id="grant-role" name="role" required>
-  <label for="grant-perm">권한 키</label>
-  <input type="text" id="grant-perm" name="permission" required>
-  <label for="grant-board">게시판 (스코프 권한만)</label>
-  <input type="text" id="grant-board" name="board_id">
-  <p><button class="primary">부여</button></p>
-</form>
-<h3>사용자에게 역할 부여</h3>
-<form method="post" action="/admin/users/assign">
-  <label for="assign-user">사용자 ID</label>
-  <input type="text" id="assign-user" name="user_id" required>
-  <label for="assign-role">역할 키</label>
-  <input type="text" id="assign-role" name="role" required>
-  <p><button class="primary">부여</button></p>
-</form>
-<p class="muted">
-  자기 자신에게는 부여할 수 없습니다. 보유하지 않은 권한은 어떤 역할에도 넣을 수 없습니다.
-</p>
+
+<div class="adm-card">
+  <h2>역할에 권한 부여</h2>
+  <form method="post" action="/admin/roles/-/permissions">
+    <div class="adm-field-row">
+      <label class="adm-field"><span>역할 키</span><input type="text" name="role" required></label>
+      <label class="adm-field"><span>권한 키</span><input type="text" name="permission" required></label>
+      <label class="adm-field"><span>게시판 (스코프 권한만)</span><input type="text" name="board_id"></label>
+    </div>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">부여</button>
+    </div>
+  </form>
+</div>
+
+<div class="adm-card">
+  <h2>사용자에게 역할 부여</h2>
+  <form method="post" action="/admin/users/-/roles">
+    <div class="adm-field-row">
+      <label class="adm-field"><span>사용자 ID</span><input type="text" name="user_id" required></label>
+      <label class="adm-field"><span>역할 키</span><input type="text" name="role" required></label>
+    </div>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">부여</button>
+    </div>
+  </form>
+  <p class="adm-hint">
+    자기 자신에게는 부여할 수 없습니다. 보유하지 않은 권한은 어떤 역할에도 넣을 수 없습니다.
+  </p>
+</div>
 {{end}}

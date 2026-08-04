@@ -706,3 +706,86 @@ func TestScopedGrantUniquenessCountsNulls(t *testing.T) {
 		t.Errorf("게시판을 지웠는데 스코프 부여 %d행이 남았다", n)
 	}
 }
+
+// FR-507: Korean title and body queries have to reach the index, not scan.
+//
+// 실측 (2026-08-05, PostgreSQL 18):
+//
+//	본문이 서로 다른 90,000행에서 `게시판:*` 질의가 Bitmap Index Scan on
+//	posts_search_idx 로 계획된다. 70,000행에서는 여전히 Seq Scan 이다 —
+//	교차점이 그 사이다.
+//
+// 두 가지가 이 숫자를 만든다. ① 접두 tsquery 의 기본 선택도는 2% 고정이라
+// 추정 행수가 테이블과 함께 커진다. 즉 "행을 늘리면 언젠가 인덱스를 탄다"가
+// 저절로 성립하지는 않는다. ② 모든 행이 같은 단어를 담으면 통계가 무너져
+// 어떤 크기에서도 Seq Scan 이다 — 처음 이 테스트를 '제목 1', '본문 1' 같은
+// 연번 텍스트로 짰을 때 150,000행에서도 인덱스를 타지 않았다. 실제 게시판은
+// 글마다 본문이 다르므로 여기서도 다르게 만든다.
+//
+// 그래서 이 테스트는 인덱스를 "쓸 수 있다"(enable_seqscan=off)가 아니라
+// "고른다"를 단언한다. 전자는 인덱스가 없어도 문법만 맞으면 통과한다.
+func TestKoreanSearchUsesTheIndex(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var boardID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('free','자유') RETURNING id`).Scan(&boardID); err != nil {
+		t.Fatal(err)
+	}
+	// 서로 다른 본문. 같은 단어를 반복하면 통계가 무너져 어떤 크기에서도
+	// 인덱스를 타지 않는다 (위 ②).
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO posts (board_id, title, body)
+		SELECT $1, md5(g::text), md5((g*7)::text) || ' ' || md5((g*13)::text)
+		FROM generate_series(1, 90000) g`, boardID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO posts (board_id, title, body) VALUES ($1, '공지 게시판 안내', '게시판을 새로 열었습니다')`,
+		boardID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `ANALYZE posts`); err != nil {
+		t.Fatal(err)
+	}
+
+	// D30 이 측정한 것: 조사가 붙은 토큰 때문에 비접두 질의는 본문을 놓치고,
+	// 접두 질의가 그것을 덮는다. 질의 모양을 "정리"하면 여기서 걸린다.
+	var hits int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM posts WHERE search_vector @@ to_tsquery('simple', $1)`,
+		"게시판:*").Scan(&hits); err != nil {
+		t.Fatal(err)
+	}
+	if hits == 0 {
+		t.Error("접두 질의가 한 건도 찾지 못했다 (FR-507)")
+	}
+
+	rows, err := pool.Query(ctx, `
+		EXPLAIN SELECT id FROM posts WHERE search_vector @@ to_tsquery('simple', '게시판:*')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		plan += line + "\n"
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "posts_search_idx") {
+		t.Errorf("전문검색이 인덱스를 타지 않는다 (FR-507):\n%s", plan)
+	}
+	if strings.Contains(plan, "Seq Scan on posts") {
+		t.Errorf("순차 스캔으로 떨어졌다:\n%s", plan)
+	}
+}

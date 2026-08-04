@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/migrations"
@@ -482,5 +483,56 @@ func TestDiskThemeOverridesOnlyThatTemplateWithoutRestart(t *testing.T) {
 	resp.Body.Close()
 	if _, back := mustGet(t, c, srv.URL+"/about"); strings.Contains(back, "디스크에서 왔다") {
 		t.Errorf("내장 테마로 되돌아가는 것도 재시작이 필요하다: %s", back)
+	}
+}
+
+// Every administrator screen renders, with the design system's shell around it.
+//
+// The handlers had tests before this and all of them passed while the templates
+// referenced fields that do not exist — a template error is a runtime error, so
+// nothing but rendering the real thing finds it (M13's shape again).
+func TestEveryAdminScreenRenders(t *testing.T) {
+	srv, pool := liveSite(t)
+	c, post := adminSession(t, srv, pool)
+	post("/admin/pages/new", url.Values{"slug": {"about"}, "title": {"회사 소개"}, "body": {"본문"}})
+	post("/admin/menus", url.Values{"title": {"홈"}, "url": {"/"}})
+
+	for _, p := range []string{
+		"/admin/", "/admin/pages", "/admin/menus", "/admin/users",
+		"/admin/roles", "/admin/settings", "/admin/settings/mail",
+		"/admin/themes", "/admin/system",
+	} {
+		code, body := mustGet(t, c, srv.URL+p)
+		if code != http.StatusOK {
+			t.Errorf("%s → HTTP %d: %.200s", p, code, body)
+			continue
+		}
+		// The shell, and the tokens the whole design hangs off.
+		for _, want := range []string{"adm-header", "adm-sidebar", "adm-main", "--accent:"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: %q 가 없다 — 디자인이 적용되지 않았다", p, want)
+			}
+		}
+		// html/template refuses to inline a value it cannot prove is CSS and
+		// leaves ZgotmplZ behind. A stylesheet that silently vanished would
+		// still return 200.
+		if strings.Contains(body, "ZgotmplZ") {
+			t.Errorf("%s: CSS 가 이스케이프됐다", p)
+		}
+	}
+}
+
+// A menu entry with no route 404s, and to the person clicking it that is
+// indistinguishable from a screen they lack permission for — so nobody reports
+// it. The boot check compares the two lists.
+func TestAdminMenuOnlyPointsAtRegisteredRoutes(t *testing.T) {
+	srv, pool := liveSite(t)
+	c, _ := adminSession(t, srv, pool)
+
+	for _, p := range admin.NavPaths() {
+		code, _ := mustGet(t, c, srv.URL+p)
+		if code == http.StatusNotFound {
+			t.Errorf("메뉴 항목 %s 가 404 다", p)
+		}
 	}
 }

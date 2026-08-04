@@ -1,35 +1,57 @@
 {{define "content"}}
-<div class="overflow">
-<table>
-  <thead><tr><th>이메일</th><th>이름</th><th>역할</th><th>상태</th><th></th></tr></thead>
-  <tbody>
-  {{range .Users}}
-    <tr>
-      <td><a href="/admin/users/{{.ID}}">{{.Email}}</a></td>
-      <td>{{.DisplayName}}</td>
-      <td class="muted">{{range .Roles}}{{.}} {{end}}</td>
-      <td>{{if .IsActive}}활성{{else}}비활성{{end}}{{if not .Verified}} · 미인증{{end}}</td>
-      <td><a href="/admin/users/{{.ID}}">상세</a></td>
-    </tr>
-  {{else}}
-    <tr><td colspan="5" class="muted">사용자가 없습니다.</td></tr>
-  {{end}}
-  </tbody>
-</table>
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead>
+        <tr><th>이메일</th><th>이름</th><th>역할</th><th>상태</th></tr>
+      </thead>
+      <tbody>
+      {{range .Users}}
+        <tr>
+          <td><a href="/admin/users/{{.ID}}">{{.Email}}</a></td>
+          <td>{{.DisplayName}}</td>
+          <td class="muted">{{range .Roles}}{{.}} {{end}}</td>
+          <td>
+            {{if .IsActive}}<span class="adm-badge">활성</span>
+            {{else}}<span class="adm-badge adm-badge--outline">비활성</span>{{end}}
+            {{if not .Verified}}<span class="adm-badge adm-badge--outline">미인증</span>{{end}}
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="4" class="adm-empty">사용자가 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  <div class="adm-pagination">
+    <span class="adm-count">{{len .Users}}명 · {{.PageNo}}쪽</span>
+    {{if gt .Page 0}}<a href="/admin/users?page={{.PrevPage}}" aria-label="이전">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    <a href="/admin/users?page={{.NextPage}}" aria-label="다음">›</a>
+  </div>
 </div>
-<p class="actions">
-  {{if gt .Page 0}}<a href="/admin/users?page={{.Prev}}"><button>이전</button></a>{{end}}
-  <a href="/admin/users?page={{.Next}}"><button>다음</button></a>
-</p>
-<h3>사용자 추가</h3>
-<form method="post" action="/admin/users">
-  <label for="email">이메일</label>
-  <input type="email" id="email" name="email" required>
-  <label for="display_name">표시 이름</label>
-  <input type="text" id="display_name" name="display_name" required>
-  <label for="password">초기 비밀번호</label>
-  <input type="password" id="password" name="password" autocomplete="new-password" required>
-  <p><button class="primary">생성</button></p>
-</form>
-<p class="muted">역할은 생성 시 붙지 않습니다. 역할·권한 화면에서 부여하세요.</p>
+
+<div class="adm-card">
+  <h2>사용자 추가</h2>
+  <form method="post" action="/admin/users/new">
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>이메일</span>
+        <input type="email" name="email" required>
+      </label>
+      <label class="adm-field">
+        <span>표시 이름</span>
+        <input type="text" name="display_name" required>
+      </label>
+      <label class="adm-field">
+        <span>초기 비밀번호</span>
+        <input type="password" name="password" autocomplete="new-password" required>
+      </label>
+    </div>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">생성</button>
+    </div>
+    <p class="adm-hint">역할은 생성 시 붙지 않습니다. 역할·권한 화면에서 부여하세요.</p>
+  </form>
+</div>
 {{end}}

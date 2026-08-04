@@ -156,7 +156,13 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	roleKey := r.PostFormValue("role")
+	// The role comes from the path (D11 A-404 is /admin/roles/{id}/permissions).
+	// "-" is the form's placeholder when the screen has no role selected yet, in
+	// which case the body names it.
+	roleKey := r.PathValue("id")
+	if roleKey == "" || roleKey == "-" {
+		roleKey = r.PostFormValue("role")
+	}
 	permKey := r.PostFormValue("permission")
 	board := auth.BoardID(r.PostFormValue("board_id"))
 
@@ -214,7 +220,11 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	targetUser := r.PostFormValue("user_id")
+	// D11 A-405 is /admin/users/{id}/roles.
+	targetUser := r.PathValue("id")
+	if targetUser == "" || targetUser == "-" {
+		targetUser = r.PostFormValue("user_id")
+	}
 	roleKey := r.PostFormValue("role")
 
 	role, err := d.Auth.RoleByKey(ctx, roleKey)

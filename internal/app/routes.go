@@ -75,6 +75,22 @@ func (r *Registry) Add(rt Route) *Registry {
 	return r
 }
 
+// HasPath reports whether any route serves this exact pattern.
+//
+// Used to compare the administrator menu against the tree: a menu entry with no
+// route is indistinguishable, to the person clicking it, from one they lack the
+// permission for.
+func (r *Registry) HasPath(pattern string) bool {
+	for _, rt := range r.routes {
+		// `/admin/{$}` is the pattern; `/admin/` is the URL it serves. The menu
+		// holds URLs, so the exact-match marker is stripped before comparing.
+		if strings.TrimSuffix(rt.Pattern, "{$}") == pattern {
+			return true
+		}
+	}
+	return false
+}
+
 // Routes returns a copy for inspection.
 func (r *Registry) Routes() []Route { return slices.Clone(r.routes) }
 

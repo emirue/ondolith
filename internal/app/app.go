@@ -162,7 +162,13 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			return setting("auth.email_verification_required")["auth.email_verification_required"] != ""
 		}}
 
-	adminUI := newAdminRenderer(func() string { return site().Name }, log)
+	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
+	// five directions share one markup, so switching is a token swap.
+	adminUI, err := newAdminRenderer(func() string { return site().Name },
+		setting("admin.theme")["admin.theme"], log)
+	if err != nil {
+		return fail(fmt.Errorf("app: 관리자 스타일: %w", err))
+	}
 	ad := &admin.Deps{
 		Content: contentStore,
 		Auth:    authStore,
@@ -189,6 +195,18 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	if err != nil {
 		return fail(fmt.Errorf("app: 권한 목록: %w", err))
 	}
+	// The administrator menu is still a second list (internal/admin/shell.go)
+	// rather than something derived from the route table, which is what W1-35's
+	// criterion asked for. Until it is derived, this compares them: a menu entry
+	// with no route is a link that 404s, and it looks exactly like a link the
+	// caller lacks permission for — nobody reports it.
+	for _, p := range admin.NavPaths() {
+		if !registry.HasPath(p) {
+			res0 := "관리자 메뉴가 등록되지 않은 경로를 가리킨다: " + p
+			return fail(fmt.Errorf("app: %s", res0))
+		}
+	}
+
 	res := registry.Check(perms, screenInventory)
 	for _, w := range res.Warnings {
 		log.Warn("라우트 자체 점검", "경고", w)

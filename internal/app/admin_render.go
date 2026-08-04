@@ -12,7 +12,7 @@ import (
 	"github.com/emirue/ondolith/internal/admin"
 )
 
-//go:embed templates/admin/*.html
+//go:embed templates/admin/*.html templates/admin/admin.css
 var adminFS embed.FS
 
 // adminRenderer draws the administrator screens.
@@ -27,13 +27,33 @@ var adminFS embed.FS
 type adminRenderer struct {
 	site func() string
 	log  *slog.Logger
+	// css is the design system, inlined rather than served at its own path.
+	// A route would need a D11 screen id and a boot-check entry for an asset
+	// that only authenticated administrators ever fetch; one <style> block is
+	// smaller than that whole apparatus.
+	css template.CSS
+	// theme selects one of the handoff's five directions (1a~1e). Empty means
+	// 1a, the default the stylesheet ships with.
+	theme string
 
 	mu    sync.RWMutex
 	cache map[string]*template.Template
 }
 
-func newAdminRenderer(site func() string, log *slog.Logger) *adminRenderer {
-	return &adminRenderer{site: site, log: log, cache: map[string]*template.Template{}}
+func newAdminRenderer(site func() string, theme string, log *slog.Logger) (*adminRenderer, error) {
+	b, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		return nil, err
+	}
+	// The stylesheet is ours, from the embedded FS — not user input. It is
+	// marked CSS so html/template inlines it instead of escaping every brace.
+	return &adminRenderer{
+		site:  site,
+		log:   log,
+		css:   template.CSS(b),
+		theme: theme,
+		cache: map[string]*template.Template{},
+	}, nil
 }
 
 func (a *adminRenderer) lookup(name string) (*template.Template, error) {
@@ -84,10 +104,13 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	actor := ActorFrom(r.Context())
 	groups := admin.Nav(actor.Can)
 	view := map[string]any{
-		"Title":    adminScreenTitles[name],
-		"SiteName": a.site(),
-		"Nav":      groups,
-		"Current":  admin.CurrentGroup(groups, r.URL.Path),
+		"Title":      adminScreenTitles[name],
+		"SiteName":   a.site(),
+		"Nav":        groups,
+		"Current":    admin.CurrentGroup(groups, r.URL.Path),
+		"CSS":        a.css,
+		"AdminTheme": a.theme,
+		"UserName":   actorName(actor),
 	}
 	// The screen's own payload is merged in, never nested: the templates were
 	// written against the map the handlers already build.
@@ -110,6 +133,15 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	if _, err := w.Write(buf.Bytes()); err != nil {
 		a.log.Error("관리자 응답 쓰기", "screen", name, "err", err)
 	}
+}
+
+// actorName is what the header greets. Only the display name — the header is
+// on every admin screen, and an email there is one screenshot from a leak.
+func actorName(a *Actor) string {
+	if a == nil || a.User == nil {
+		return ""
+	}
+	return a.User.DisplayName
 }
 
 // adminCaller adapts the request's Actor to what the admin package needs.

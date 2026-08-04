@@ -318,8 +318,16 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	prev := page - 1
+	if prev < 0 {
+		prev = 0
+	}
 	d.Render(w, r, "admin/users.html", http.StatusOK, map[string]any{
 		"Users": users, "Page": page,
+		// Pre-computed rather than arithmetic in the template: html/template has
+		// no maths, and adding an `add` function to the map is a function the
+		// next screen will also reach for something it should not compute.
+		"PageNo": page + 1, "PrevPage": prev, "NextPage": page + 1,
 	})
 }
 

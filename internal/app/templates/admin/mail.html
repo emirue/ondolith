@@ -1,36 +1,56 @@
 {{define "content"}}
-<form method="post" action="/admin/settings/mail">
-  <label for="mail.smtp_host">SMTP 호스트</label>
-  <input type="text" id="mail.smtp_host" name="mail.smtp_host" value="{{index .Settings "mail.smtp_host"}}">
+<div class="adm-card">
+  <form method="post" action="/admin/settings/mail">
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>SMTP 호스트</span>
+        <input type="text" name="mail.smtp_host" value="{{index .Settings "mail.smtp_host"}}">
+      </label>
+      <label class="adm-field">
+        <span>포트</span>
+        <input type="text" name="mail.smtp_port" value="{{index .Settings "mail.smtp_port"}}">
+      </label>
+    </div>
 
-  <label for="mail.smtp_port">포트</label>
-  <input type="text" id="mail.smtp_port" name="mail.smtp_port" value="{{index .Settings "mail.smtp_port"}}">
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>사용자</span>
+        <input type="text" name="mail.smtp_user" value="{{index .Settings "mail.smtp_user"}}">
+      </label>
+      <label class="adm-field">
+        <span>비밀번호</span>
+        <input type="password" name="mail.smtp_password" value="" autocomplete="new-password">
+      </label>
+    </div>
+    <p class="adm-hint">
+      {{if index .SecretSaved "mail.smtp_password"}}저장돼 있습니다. 바꿀 때만 입력하세요.
+      {{else}}아직 저장되지 않았습니다.{{end}}
+      저장된 값은 화면에 다시 표시하지 않습니다.
+    </p>
 
-  <label for="mail.smtp_user">사용자</label>
-  <input type="text" id="mail.smtp_user" name="mail.smtp_user" value="{{index .Settings "mail.smtp_user"}}">
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>TLS</span>
+        {{$m := index .Settings "mail.tls_mode"}}
+        <select name="mail.tls_mode">
+          <option value="none"{{if eq $m "none"}} selected{{end}}>없음</option>
+          <option value="starttls"{{if eq $m "starttls"}} selected{{end}}>STARTTLS</option>
+          <option value="tls"{{if eq $m "tls"}} selected{{end}}>TLS</option>
+        </select>
+      </label>
+      <label class="adm-field">
+        <span>보내는 주소</span>
+        <input type="text" name="mail.from_address" value="{{index .Settings "mail.from_address"}}">
+      </label>
+      <label class="adm-field">
+        <span>보내는 이름</span>
+        <input type="text" name="mail.from_name" value="{{index .Settings "mail.from_name"}}">
+      </label>
+    </div>
 
-  <label for="mail.smtp_password">비밀번호</label>
-  <input type="password" id="mail.smtp_password" name="mail.smtp_password" value="" autocomplete="new-password">
-  <p class="muted">
-    {{if index .SecretSaved "mail.smtp_password"}}저장돼 있습니다. 바꿀 때만 입력하세요.
-    {{else}}아직 저장되지 않았습니다.{{end}}
-    저장된 값은 화면에 다시 표시하지 않습니다.
-  </p>
-
-  <label for="mail.tls_mode">TLS</label>
-  <select id="mail.tls_mode" name="mail.tls_mode">
-    {{$m := index .Settings "mail.tls_mode"}}
-    <option value="none"{{if eq $m "none"}} selected{{end}}>없음</option>
-    <option value="starttls"{{if eq $m "starttls"}} selected{{end}}>STARTTLS</option>
-    <option value="tls"{{if eq $m "tls"}} selected{{end}}>TLS</option>
-  </select>
-
-  <label for="mail.from_address">보내는 주소</label>
-  <input type="text" id="mail.from_address" name="mail.from_address" value="{{index .Settings "mail.from_address"}}">
-
-  <label for="mail.from_name">보내는 이름</label>
-  <input type="text" id="mail.from_name" name="mail.from_name" value="{{index .Settings "mail.from_name"}}">
-
-  <p><button class="primary">저장</button></p>
-</form>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+</div>
 {{end}}

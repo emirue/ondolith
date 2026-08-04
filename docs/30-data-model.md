@@ -548,7 +548,7 @@ CHECK (jsonb_typeof(custom_fields) = 'object' AND octet_length(custom_fields::te
 
 CREATE INDEX posts_board_list_idx ON posts (board_id, is_pinned DESC, created_at DESC, id DESC);
 CREATE INDEX posts_author_id_idx  ON posts (author_id);
-CREATE INDEX posts_search_idx     ON posts USING GIN (search_vector);
+CREATE INDEX posts_search_idx     ON posts USING GIN (search_vector);  -- 00008
 ```
 
 **측정한 것 — 인덱스 끝의 `id`는 FR-508 때문이다.** 20,000행에서 `LIMIT 20 OFFSET 19000`은
@@ -564,6 +564,17 @@ CREATE INDEX posts_search_idx     ON posts USING GIN (search_vector);
 메모리 정렬로 간다(FR-509는 `선택`). **정렬 키는 파라미터 바인딩된다** — `ORDER BY
 custom_fields->>$1`이 문자열 연결 없이 동작하는 것을 확인했다(NFR-202 유지). 그래도
 `board_fields`에 있는 key인지 검사한다.
+
+**측정한 것 — GIN 인덱스는 90,000행부터 선택된다 (2026-08-05, PG 18).** 본문이 서로 다른
+90,000행에서 `게시판:*`이 `Bitmap Index Scan on posts_search_idx`로 계획됐고, 70,000행에서는
+여전히 Seq Scan 이었다. 두 가지가 이 숫자를 만든다 — ① **접두 tsquery 의 기본 선택도는 2%
+고정**이라 추정 행수가 테이블과 함께 커진다. "행이 많아지면 언젠가 인덱스를 탄다"가 저절로
+성립하지 않는다는 뜻이다. ② **모든 행이 같은 단어를 담으면 통계가 무너져 어떤 크기에서도
+Seq Scan 이다** — `제목 1`·`본문 1` 같은 연번 텍스트로 15만 행을 넣었을 때 인덱스를 타지
+않았다. 실제 게시판은 글마다 본문이 다르므로 실측도 다르게 만들어야 한다.
+
+이 수치는 튜닝 대상이 아니라 **작은 사이트에서 Seq Scan 이 나오는 것이 정상**이라는 뜻이다.
+검색이 느리다는 신고가 오면 먼저 행 수를 본다.
 
 **측정한 것 — 전문검색은 `simple` config + 접두 질의여야 한다.** 스톡 PostgreSQL에 한국어 사전이
 없고 `english`는 한국어를 망가뜨린다. 본문 "게시판을 새로 열었습니다"에 대해

@@ -29,14 +29,13 @@ type NavItem struct {
 // screen works, the link does not exist, and nobody finds out until somebody
 // looks for it.
 var nav = []NavItem{
-	{Screen: "A-101", Title: "대시보드", Path: "/admin", Group: "", Permission: "admin.access", Order: 0},
+	{Screen: "A-101", Title: "대시보드", Path: "/admin/", Group: "", Permission: "admin.access", Order: 0},
 	{Screen: "A-301", Title: "페이지", Path: "/admin/pages", Group: "콘텐츠", Permission: "page.view", Order: 10},
 	{Screen: "A-204", Title: "메뉴", Path: "/admin/menus", Group: "콘텐츠", Permission: "menu.manage", Order: 20},
 	{Screen: "A-401", Title: "사용자", Path: "/admin/users", Group: "사용자", Permission: "user.view", Order: 30},
 	{Screen: "A-403", Title: "역할·권한", Path: "/admin/roles", Group: "사용자", Permission: "role.view", Order: 40},
 	{Screen: "A-201", Title: "사이트 설정", Path: "/admin/settings", Group: "설정", Permission: "settings.update", Order: 50},
 	{Screen: "A-205", Title: "메일", Path: "/admin/settings/mail", Group: "설정", Permission: "settings.update", Order: 60},
-	{Screen: "A-206", Title: "소셜 로그인", Path: "/admin/settings/social", Group: "설정", Permission: "settings.update", Order: 70},
 	{Screen: "A-202", Title: "테마", Path: "/admin/themes", Group: "설정", Permission: "theme.view", Order: 80},
 	{Screen: "A-602", Title: "시스템 정보", Path: "/admin/system", Group: "설정", Permission: "settings.view", Order: 90},
 }

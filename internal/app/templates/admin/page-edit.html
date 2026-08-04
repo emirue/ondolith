@@ -1,19 +1,32 @@
 {{define "content"}}
-<form method="post" action="/admin/pages">
-  {{with .Page}}<input type="hidden" name="id" value="{{.ID}}">{{end}}
-  <label for="title">제목</label>
-  <input type="text" id="title" name="title" value="{{with .Page}}{{.Title}}{{end}}" required>
+<div class="adm-card">
+  <form method="post" action="/admin/pages/{{if .Page}}{{.Page.ID}}{{else}}new{{end}}">
+    <label class="adm-field">
+      <span>제목</span>
+      <input type="text" name="title" value="{{with .Page}}{{.Title}}{{end}}" required>
+    </label>
 
-  <label for="slug">슬러그</label>
-  <input type="text" id="slug" name="slug" value="{{with .Page}}{{.Slug}}{{end}}" required>
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>슬러그</span>
+        <input type="text" name="slug" value="{{with .Page}}{{.Slug}}{{end}}" required>
+      </label>
+      <label class="adm-field">
+        <span>템플릿</span>
+        <input type="text" name="template" value="{{with .Page}}{{.Template}}{{end}}" placeholder="page.html">
+      </label>
+    </div>
 
-  <label for="template">템플릿</label>
-  <input type="text" id="template" name="template" value="{{with .Page}}{{.Template}}{{end}}" placeholder="page.html">
+    <label class="adm-field">
+      <span>본문</span>
+      <textarea name="body">{{with .Page}}{{.Body}}{{end}}</textarea>
+    </label>
 
-  <label for="body">본문</label>
-  <textarea id="body" name="body">{{with .Page}}{{.Body}}{{end}}</textarea>
-
-  <p><button class="primary">저장</button></p>
-</form>
-<p class="muted">발행은 별도 권한입니다 (page.publish). 목록에서 수행하세요.</p>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <a class="adm-btn" href="/admin/pages">취소</a>
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+    <p class="adm-hint">발행은 별도 권한입니다 (page.publish). 목록에서 수행하세요.</p>
+  </form>
+</div>
 {{end}}

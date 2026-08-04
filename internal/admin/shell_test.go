@@ -93,7 +93,9 @@ func TestNavPathsAreUnderTheAdminTree(t *testing.T) {
 func TestCurrentGroupMatchesDeepestPath(t *testing.T) {
 	groups := Nav(func(string) bool { return true })
 	tests := map[string]string{
-		"/admin":                "/admin",
+		// `/admin/` with the slash: A-101's pattern is `/admin/{$}`, so that is
+		// the URL the route actually serves.
+		"/admin/":               "/admin/",
 		"/admin/settings":       "/admin/settings",
 		"/admin/settings/mail":  "/admin/settings/mail",
 		"/admin/pages/new":      "/admin/pages",

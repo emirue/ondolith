@@ -1,26 +1,39 @@
 {{define "content"}}
-<form method="post" action="/admin/settings">
-  <label for="site.name">사이트 이름</label>
-  <input type="text" id="site.name" name="site.name" value="{{index .Settings "site.name"}}">
+<div class="adm-card">
+  <form method="post" action="/admin/settings">
+    <label class="adm-field">
+      <span>사이트 이름</span>
+      <input type="text" name="site.name" value="{{index .Settings "site.name"}}">
+    </label>
+    <label class="adm-field">
+      <span>기본 메타 설명</span>
+      <input type="text" name="site.meta_description" value="{{index .Settings "site.meta_description"}}">
+    </label>
+    <label class="adm-field">
+      <span>기본 OG 이미지 URL</span>
+      <input type="text" name="site.og_image" value="{{index .Settings "site.og_image"}}">
+    </label>
 
-  <label for="site.meta_description">기본 메타 설명</label>
-  <input type="text" id="site.meta_description" name="site.meta_description" value="{{index .Settings "site.meta_description"}}">
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>사이트 유형</span>
+        <select name="site.type">
+          <option value="cms"{{if eq (index .Settings "site.type") "cms"}} selected{{end}}>cms — 콘텐츠</option>
+          <option value="shop"{{if eq (index .Settings "site.type") "shop"}} selected{{end}}>shop — 커머스</option>
+        </select>
+      </label>
+      <label class="adm-field">
+        <span>이메일 인증 요구</span>
+        <select name="auth.email_verification_required">
+          <option value="">아니오</option>
+          <option value="1"{{if index .Settings "auth.email_verification_required"}} selected{{end}}>예</option>
+        </select>
+      </label>
+    </div>
 
-  <label for="site.og_image">기본 OG 이미지 URL</label>
-  <input type="text" id="site.og_image" name="site.og_image" value="{{index .Settings "site.og_image"}}">
-
-  <label for="site.type">사이트 유형</label>
-  <select id="site.type" name="site.type">
-    <option value="cms"{{if eq (index .Settings "site.type") "cms"}} selected{{end}}>cms — 콘텐츠</option>
-    <option value="shop"{{if eq (index .Settings "site.type") "shop"}} selected{{end}}>shop — 커머스</option>
-  </select>
-
-  <label for="auth.email_verification_required">이메일 인증 요구</label>
-  <select id="auth.email_verification_required" name="auth.email_verification_required">
-    <option value="">아니오</option>
-    <option value="1"{{if index .Settings "auth.email_verification_required"}} selected{{end}}>예</option>
-  </select>
-
-  <p><button class="primary">저장</button></p>
-</form>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+</div>
 {{end}}

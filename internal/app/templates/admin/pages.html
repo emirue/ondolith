@@ -1,26 +1,41 @@
+{{define "pageactions"}}
+<div class="adm-actions">
+  <a class="adm-btn adm-btn--primary" href="/admin/pages/new">새 페이지</a>
+</div>
+{{end}}
 {{define "content"}}
-<p><a href="/admin/pages/new"><button>새 페이지</button></a></p>
-<div class="overflow">
-<table>
-  <thead><tr><th>제목</th><th>슬러그</th><th>상태</th><th>동작</th></tr></thead>
-  <tbody>
-  {{range .Pages}}
-    <tr>
-      <td><a href="/admin/pages/{{.ID}}">{{.Title}}</a></td>
-      <td class="muted">/{{.Slug}}</td>
-      <td>{{.Status}}</td>
-      <td class="actions">
-        <form method="post" action="/admin/pages/{{.ID}}/publish">
-          <input type="hidden" name="status" value="{{if eq .Status "published"}}draft{{else}}published{{end}}">
-          <button>{{if eq .Status "published"}}발행 취소{{else}}발행{{end}}</button>
-        </form>
-        <form method="post" action="/admin/pages/{{.ID}}/delete"><button>삭제</button></form>
-      </td>
-    </tr>
-  {{else}}
-    <tr><td colspan="4" class="muted">페이지가 없습니다.</td></tr>
-  {{end}}
-  </tbody>
-</table>
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead>
+        <tr><th>제목</th><th>슬러그</th><th>상태</th><th>동작</th></tr>
+      </thead>
+      <tbody>
+      {{range .Pages}}
+        <tr>
+          <td><a href="/admin/pages/{{.ID}}">{{.Title}}</a></td>
+          <td class="muted">/{{.Slug}}</td>
+          <td>
+            {{if eq .Status "published"}}<span class="adm-badge">공개</span>
+            {{else}}<span class="adm-badge adm-badge--outline">초안</span>{{end}}
+          </td>
+          <td>
+            <div class="adm-actions">
+              <form method="post" action="/admin/pages/{{.ID}}/publish">
+                <input type="hidden" name="status" value="{{if eq .Status "published"}}draft{{else}}published{{end}}">
+                <button class="adm-btn adm-btn--sm">{{if eq .Status "published"}}발행 취소{{else}}발행{{end}}</button>
+              </form>
+              <form method="post" action="/admin/pages/{{.ID}}/delete">
+                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="4" class="adm-empty">페이지가 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
 </div>
 {{end}}
