@@ -6,7 +6,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"html/template"
 	"log/slog"
 	"net/http"
 	"time"
@@ -16,8 +15,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/emirue/ondolith/internal/admin"
+	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/config"
+	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/migrations"
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 //go:embed templates/*.html
@@ -68,12 +71,17 @@ func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
 	return http.NewCrossOriginProtection().Handler(h)
 }
 
-// New brings up the operating tree: connection pool, session store, and
-// routes. The returned func releases the pool and must be called on shutdown.
+// New brings up the operating tree: connection pool, session store, and the
+// route table. The returned func releases the pool and must be called on
+// shutdown.
 //
-// Pending migrations are applied here rather than only at install time, so
-// that upgrading is "replace the binary and restart".
-func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (http.Handler, func(), error) {
+// Pending migrations are applied here rather than only at install time, so that
+// upgrading is "replace the binary and restart".
+//
+// The boot self-check runs before a single route serves, and a failure returns
+// an error rather than starting anyway (FR-110): a server that comes up in the
+// wrong state has its wrong state discovered by a visitor.
+func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger) (http.Handler, func(), error) {
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app: pool: %w", err)
@@ -84,34 +92,111 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (http.Handle
 	}
 
 	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
 	if err := migrations.Run(ctx, db); err != nil {
+		_ = db.Close()
 		pool.Close()
 		return nil, nil, fmt.Errorf("app: 마이그레이션: %w", err)
 	}
 
-	store := pgxstore.New(pool)
-	sessions := newSessionManager(store, cfg.SecureCookies)
-
-	tmpl, err := template.ParseFS(templatesFS, "templates/*.html")
-	if err != nil {
+	sessionStore := pgxstore.New(pool)
+	sessions := newSessionManager(sessionStore, cfg.SecureCookies)
+	fail := func(err error) (http.Handler, func(), error) {
+		sessionStore.StopCleanup()
+		_ = db.Close()
 		pool.Close()
 		return nil, nil, err
 	}
 
-	site := newSiteView(cfg)
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.ExecuteTemplate(w, "home.html", site); err != nil {
-			log.Error("렌더링 실패", "err", err)
-		}
-	})
+	authStore := auth.NewStore(pool)
+	contentStore := content.NewStore(pool)
 
-	h := withMiddleware(mux, sessions)
+	// Settings are read per request, not cached: A-201 changes them from the
+	// running server and FR-303 says the next request reflects it.
+	setting := func(keys ...string) map[string]string {
+		kv, err := contentStore.Settings(ctx, keys...)
+		if err != nil {
+			log.Error("설정 조회", "err", err)
+			return map[string]string{}
+		}
+		return kv
+	}
+	site := func() theme.Site {
+		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type")
+		s := theme.Site{
+			Name:            kv["site.name"],
+			MetaDescription: kv["site.meta_description"],
+			OGImage:         kv["site.og_image"],
+			Type:            kv["site.type"],
+		}
+		if s.Name == "" {
+			s.Name = cfg.SiteName
+		}
+		if s.Type == "" {
+			s.Type = "cms"
+		}
+		return s
+	}
+	dev := setting("site.dev_mode")["site.dev_mode"] != ""
+	themeDir := func() string { return setting("theme.active")["theme.active"] }
+
+	loader := theme.New(theme.Builtin(), themeDir(), dev, theme.FuncMap(theme.Deps{}))
+	limiter := auth.NewLimiter()
+	limits := auth.DefaultLimits()
+
+	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site, dev: dev}
+	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
+		render: pub.renderNamed}
+	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
+	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: "",
+		verifyRequired: func() bool {
+			return setting("auth.email_verification_required")["auth.email_verification_required"] != ""
+		}}
+
+	adminUI := newAdminRenderer(func() string { return site().Name }, log)
+	ad := &admin.Deps{
+		Content: contentStore,
+		Auth:    authStore,
+		Caller: func(r *http.Request) admin.Caller {
+			return adminCaller{a: ActorFrom(r.Context()), now: time.Now}
+		},
+		Render:     adminUI.Render,
+		Version:    version,
+		Migrations: func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
+		ValidateTheme: func(name string) (string, error) {
+			return theme.ValidateThemeDir(name, version)
+		},
+		SendReset: func(email, token string) {
+			mailer.SendAsync(email, "비밀번호 재설정", "아래 링크로 재설정하세요:\n/password/reset/"+token)
+		},
+	}
+
+	registry := buildTree(pub, lg, acc, ad, loader.StaticHandler("/static/").ServeHTTP)
+
+	perms, err := authStore.PermissionKeys(ctx)
+	if err != nil {
+		return fail(fmt.Errorf("app: 권한 목록: %w", err))
+	}
+	res := registry.Check(perms, screenInventory)
+	for _, w := range res.Warnings {
+		log.Warn("라우트 자체 점검", "경고", w)
+	}
+	if err := res.Err(); err != nil {
+		return fail(err)
+	}
+
+	mux := http.NewServeMux()
+	registry.Mount(mux)
+	// D15 4.1's order, outermost first: [1] CSRF, [2] session, [3] actor load,
+	// [4] tree gate + rate limit, [5] mux. The gate reads the Actor, so it has
+	// to sit INSIDE the loader — outside it, every request looks anonymous and
+	// the gate sends a logged-in administrator to the login form.
+	h := withActor(sessions, authStore)(
+		withAdminRateLimit(limiter, limits.AdminTreeIP)(withTreeGate(mux)))
+	h = withMiddleware(h, sessions)
 
 	cleanup := func() {
-		store.StopCleanup()
+		sessionStore.StopCleanup()
+		_ = db.Close()
 		pool.Close()
 	}
 	return h, cleanup, nil

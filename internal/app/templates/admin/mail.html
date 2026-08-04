@@ -1,0 +1,36 @@
+{{define "content"}}
+<form method="post" action="/admin/settings/mail">
+  <label for="mail.smtp_host">SMTP 호스트</label>
+  <input type="text" id="mail.smtp_host" name="mail.smtp_host" value="{{index .Settings "mail.smtp_host"}}">
+
+  <label for="mail.smtp_port">포트</label>
+  <input type="text" id="mail.smtp_port" name="mail.smtp_port" value="{{index .Settings "mail.smtp_port"}}">
+
+  <label for="mail.smtp_user">사용자</label>
+  <input type="text" id="mail.smtp_user" name="mail.smtp_user" value="{{index .Settings "mail.smtp_user"}}">
+
+  <label for="mail.smtp_password">비밀번호</label>
+  <input type="password" id="mail.smtp_password" name="mail.smtp_password" value="" autocomplete="new-password">
+  <p class="muted">
+    {{if index .SecretSaved "mail.smtp_password"}}저장돼 있습니다. 바꿀 때만 입력하세요.
+    {{else}}아직 저장되지 않았습니다.{{end}}
+    저장된 값은 화면에 다시 표시하지 않습니다.
+  </p>
+
+  <label for="mail.tls_mode">TLS</label>
+  <select id="mail.tls_mode" name="mail.tls_mode">
+    {{$m := index .Settings "mail.tls_mode"}}
+    <option value="none"{{if eq $m "none"}} selected{{end}}>없음</option>
+    <option value="starttls"{{if eq $m "starttls"}} selected{{end}}>STARTTLS</option>
+    <option value="tls"{{if eq $m "tls"}} selected{{end}}>TLS</option>
+  </select>
+
+  <label for="mail.from_address">보내는 주소</label>
+  <input type="text" id="mail.from_address" name="mail.from_address" value="{{index .Settings "mail.from_address"}}">
+
+  <label for="mail.from_name">보내는 이름</label>
+  <input type="text" id="mail.from_name" name="mail.from_name" value="{{index .Settings "mail.from_name"}}">
+
+  <p><button class="primary">저장</button></p>
+</form>
+{{end}}

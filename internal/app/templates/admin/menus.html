@@ -1,0 +1,32 @@
+{{define "content"}}
+<div class="overflow">
+<table>
+  <thead><tr><th>제목</th><th>URL</th><th>부모</th><th>동작</th></tr></thead>
+  <tbody>
+  {{range .Items}}
+    <tr>
+      <form method="post" action="/admin/menus/{{.ID}}">
+      <td><input type="text" name="title" value="{{.Title}}"></td>
+      <td><input type="text" name="url" value="{{.URL}}"></td>
+      <td><input type="text" name="parent_id" value="{{.ParentID}}" placeholder="(최상위)"></td>
+      <td class="actions"><button>수정</button></form>
+        <form method="post" action="/admin/menus/{{.ID}}/delete"><button>삭제</button></form>
+      </td>
+    </tr>
+  {{else}}
+    <tr><td colspan="4" class="muted">메뉴 항목이 없습니다.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+<h3>추가</h3>
+<form method="post" action="/admin/menus">
+  <label for="new-title">제목</label>
+  <input type="text" id="new-title" name="title" required>
+  <label for="new-url">URL</label>
+  <input type="text" id="new-url" name="url">
+  <label for="new-parent">부모 ID</label>
+  <input type="text" id="new-parent" name="parent_id" placeholder="(최상위)">
+  <p><button class="primary">추가</button></p>
+</form>
+{{end}}

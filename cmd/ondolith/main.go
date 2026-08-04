@@ -159,7 +159,7 @@ func run() error {
 
 	// startOperating builds the operating tree and makes it live.
 	startOperating := func(cfg *config.Config) error {
-		h, cleanup, err := app.New(ctx, cfg, log)
+		h, cleanup, err := app.New(ctx, cfg, versionString(), log)
 		if err != nil {
 			return err
 		}

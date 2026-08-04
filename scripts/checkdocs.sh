@@ -962,6 +962,34 @@ else
 	done_ "$ARCH 패키지 구조 $(wc -l </tmp/cd_pkg_real | tr -d ' ') 개가 internal/ 과 일치"
 fi
 
+# --- 19e. internal/app/screens.go matches D11's screen table ----------------
+# The boot self-check (D15 4.4 검사 5) compares every registered route against
+# this map. A map that disagrees with D11 makes that check confidently wrong in
+# both directions: a screen D11 renamed passes as unknown, and a class D11
+# changed passes as agreeing. It is a hand-copied table, which is the exact
+# shape of .ai/MISTAKES.md M9 — so it is compared, every build.
+begin
+INV=internal/app/screens.go
+if [ ! -f "$INV" ]; then
+	err "화면 인벤토리가 없다: $INV"
+else
+	perl -nle 'print "$1 $2" if /^\t"([PA]-\d+)":\s+SC(\d)/' "$INV" | sort >/tmp/cd_inv_go
+	perl -F'\|' -nle 'next unless /^\| [PA]-\d+ /;
+		for (@F) { s/^\s+|\s+$//g }
+		$F[7] =~ /^SC-(\d)$/ and print "$F[1] $1"' "$SCR" | sort >/tmp/cd_inv_doc
+
+	if [ ! -s /tmp/cd_inv_go ] || [ ! -s /tmp/cd_inv_doc ]; then
+		err "$INV 또는 $SCR 에서 화면을 하나도 읽지 못했다 (검사가 헛돌았다)"
+	fi
+	for l in $(comm -23 /tmp/cd_inv_go /tmp/cd_inv_doc | tr ' ' ':'); do
+		err "$INV 의 항목이 $SCR 과 다르다: $(echo "$l" | tr ':' ' ') — D11 에 없거나 유형이 다르다"
+	done
+	for l in $(comm -13 /tmp/cd_inv_go /tmp/cd_inv_doc | tr ' ' ':'); do
+		err "$SCR 의 화면이 $INV 에 없다: $(echo "$l" | tr ':' ' ') — 부팅 점검이 이 화면을 모른다"
+	done
+	done_ "$INV 화면 $(wc -l </tmp/cd_inv_doc | tr -d ' ') 개가 $SCR 과 일치"
+fi
+
 # --- 20. D80's planning-completeness table counts match the documents -------
 # That table is what anyone asking "얼마나 됐나" reads first, and every number in
 # it is copied by hand from another document. The 2026-08-02 version was stale

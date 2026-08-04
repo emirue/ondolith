@@ -1,0 +1,19 @@
+{{define "content"}}
+<form method="post" action="/admin/pages">
+  {{with .Page}}<input type="hidden" name="id" value="{{.ID}}">{{end}}
+  <label for="title">제목</label>
+  <input type="text" id="title" name="title" value="{{with .Page}}{{.Title}}{{end}}" required>
+
+  <label for="slug">슬러그</label>
+  <input type="text" id="slug" name="slug" value="{{with .Page}}{{.Slug}}{{end}}" required>
+
+  <label for="template">템플릿</label>
+  <input type="text" id="template" name="template" value="{{with .Page}}{{.Template}}{{end}}" placeholder="page.html">
+
+  <label for="body">본문</label>
+  <textarea id="body" name="body">{{with .Page}}{{.Body}}{{end}}</textarea>
+
+  <p><button class="primary">저장</button></p>
+</form>
+<p class="muted">발행은 별도 권한입니다 (page.publish). 목록에서 수행하세요.</p>
+{{end}}

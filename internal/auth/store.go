@@ -135,6 +135,27 @@ func (s *Store) FindUserByID(ctx context.Context, id string) (*User, error) {
 	return &u, err
 }
 
+// PermissionKeys lists every permission the database holds. The boot check
+// compares the route table against it: a route naming a key that is not there
+// judges always-false, and one nobody names is dead weight in the role editor
+// (D15 4.4).
+func (s *Store) PermissionKeys(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT key FROM permissions ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // UserRow is one line of A-401. It is deliberately narrower than User: a list
 // screen has no use for the session cutoff, and `password_hash` has no business
 // leaving the database at all (D19 A-401).

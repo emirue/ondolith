@@ -1,0 +1,59 @@
+{{define "admin/layout.html"}}<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} — 관리자</title>
+<style>
+:root{--line:#d7d7d7;--muted:#666;--bg:#fff;--fg:#1a1a1a;--accent:#0b57d0;--warn:#8a5a00;--err:#b3261e}
+@media(prefers-color-scheme:dark){:root{--line:#3a3a3a;--muted:#9a9a9a;--bg:#161616;--fg:#e8e8e8;--accent:#8ab4f8;--warn:#e0a33e;--err:#f2b8b5}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;background:var(--bg);color:var(--fg)}
+.wrap{display:flex;min-height:100vh}
+nav{width:220px;border-right:1px solid var(--line);padding:1rem;flex:none}
+nav h1{font-size:1rem;margin:0 0 1rem}
+nav h2{font-size:.75rem;color:var(--muted);text-transform:uppercase;margin:1.25rem 0 .35rem;letter-spacing:.04em}
+nav a{display:block;padding:.35rem .5rem;border-radius:4px;text-decoration:none;color:inherit}
+nav a[aria-current]{background:var(--accent);color:var(--bg)}
+main{flex:1;padding:1.5rem 2rem;min-width:0}
+h2.screen{margin-top:0}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.85rem}
+label{display:block;margin:.75rem 0 .2rem;font-size:.9rem;color:var(--muted)}
+input[type=text],input[type=email],input[type=password],input[type=number],select,textarea{
+  width:100%;max-width:34rem;padding:.4rem .5rem;border:1px solid var(--line);border-radius:4px;
+  background:var(--bg);color:var(--fg);font:inherit}
+textarea{min-height:12rem}
+button{padding:.4rem .9rem;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg);font:inherit;cursor:pointer}
+button.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.msg{padding:.6rem .8rem;border-radius:4px;margin-bottom:1rem}
+.msg.err{border:1px solid var(--err);color:var(--err)}
+.msg.warn{border:1px solid var(--warn);color:var(--warn)}
+.muted{color:var(--muted)}
+.actions{display:flex;gap:.4rem;flex-wrap:wrap}
+.overflow{overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1><a href="/">{{.SiteName}}</a></h1>
+  {{range .Nav}}
+    {{if .Title}}<h2>{{.Title}}</h2>{{end}}
+    {{range .Items}}
+      <a href="{{.Path}}"{{if eq .Path $.Current}} aria-current="page"{{end}}>{{.Title}}</a>
+    {{end}}
+  {{end}}
+  <h2>세션</h2>
+  <form method="post" action="/logout"><button>로그아웃</button></form>
+</nav>
+<main>
+  <h2 class="screen">{{.Title}}</h2>
+  {{if .Error}}<p class="msg err">{{.Error}}</p>{{end}}
+  {{if .Warning}}<p class="msg warn">{{.Warning}}</p>{{end}}
+  {{template "content" .}}
+</main>
+</div>
+</body>
+</html>{{end}}

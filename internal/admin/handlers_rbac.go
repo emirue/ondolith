@@ -245,6 +245,21 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 
 // ---- A-202 테마 -------------------------------------------------------------
 
+// ThemeList is A-202's read. It shows which theme is active; discovering what
+// is installed is A-203's job (Phase 2), so this does not walk the disk.
+func (d *Deps) ThemeList(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "theme.view"); !ok {
+		return
+	}
+	kv, err := d.Content.Settings(r.Context(), "theme.active")
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/themes.html", http.StatusOK,
+		map[string]any{"Active": kv["theme.active"]})
+}
+
 // ThemeActivate switches the active theme.
 //
 // base.html is checked BEFORE the switch: activating a theme without it leaves

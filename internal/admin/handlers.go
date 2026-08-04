@@ -182,7 +182,45 @@ func (d *Deps) PageList(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "page.view"); !ok {
 		return
 	}
-	d.Render(w, r, "admin/pages.html", http.StatusOK, nil)
+	pages, err := d.Content.Pages(r.Context())
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/pages.html", http.StatusOK, map[string]any{"Pages": pages})
+}
+
+// PageForm is A-302's GET. The id "new" is the empty form rather than a second
+// screen: D11 gives A-302 one path, and a separate /new route would be a screen
+// with no id in the inventory.
+func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "page.update"); !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if id == "new" {
+		d.Render(w, r, "admin/page-edit.html", http.StatusOK, nil)
+		return
+	}
+	p, err := d.Content.PageByID(r.Context(), id)
+	if errors.Is(err, content.ErrNotFound) {
+		http.Error(w, "페이지를 찾을 수 없습니다.", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/page-edit.html", http.StatusOK, map[string]any{"Page": p})
+}
+
+// Dashboard is A-101. It shows nothing but the shell: FR-702 makes the panel
+// optional, and an empty screen beats numbers nobody specified.
+func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "admin.access"); !ok {
+		return
+	}
+	d.Render(w, r, "admin/dashboard.html", http.StatusOK, nil)
 }
 
 func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +246,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	// Status is absent on purpose: publishing is page.publish, and letting an
 	// edit carry a status would hand page.update the other permission's power.
 	var err error
-	if id := r.PostFormValue("id"); id != "" {
+	if id := r.PathValue("id"); id != "" && id != "new" {
 		err = d.Content.UpdatePage(r.Context(), id, p)
 	} else {
 		_, err = d.Content.CreatePage(r.Context(), p)

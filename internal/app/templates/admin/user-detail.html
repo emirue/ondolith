@@ -1,0 +1,20 @@
+{{define "content"}}
+{{with .User}}
+<table>
+  <tr><th>이메일</th><td>{{.Email}}</td></tr>
+  <tr><th>표시 이름</th><td>{{.DisplayName}}</td></tr>
+  <tr><th>상태</th><td>{{if .IsActive}}활성{{else}}비활성{{end}}</td></tr>
+  <tr><th>이메일 인증</th><td>{{if .EmailVerifiedAt.IsZero}}미인증{{else}}{{.EmailVerifiedAt.Format "2006-01-02"}}{{end}}</td></tr>
+</table>
+<h3>동작</h3>
+<p class="actions">
+  <form method="post" action="/admin/users/{{.ID}}/deactivate"><button>비활성화</button></form>
+  <form method="post" action="/admin/users/{{.ID}}/reset-password"><button>비밀번호 재설정 강제</button></form>
+  <form method="post" action="/admin/users/{{.ID}}/delete"><button>삭제</button></form>
+</p>
+<p class="muted">
+  비밀번호를 대신 설정하지는 않습니다. 재설정 링크를 보내고, 기존 세션을 모두 끝냅니다.
+  파괴적 동작에는 비밀번호 재확인이 필요합니다.
+</p>
+{{end}}
+{{end}}

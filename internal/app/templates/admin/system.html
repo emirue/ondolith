@@ -1,0 +1,9 @@
+{{define "content"}}
+<table>
+  <tr><th>버전</th><td>{{.Version}}</td></tr>
+  <tr><th>데이터베이스</th><td>{{if .DBReadable}}읽을 수 있음{{else}}읽을 수 없음{{end}}</td></tr>
+  <tr><th>대기 마이그레이션</th><td>{{.Pending}}</td></tr>
+</table>
+<h3>적용된 마이그레이션</h3>
+<ul class="muted">{{range .Applied}}<li>{{.}}</li>{{else}}<li>없음</li>{{end}}</ul>
+{{end}}

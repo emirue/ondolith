@@ -31,6 +31,11 @@ const (
 
 var allClasses = []SecurityClass{SC1, SC2, SC3, SC4, SC5, SC6, SC7, SC8}
 
+// isSafeMethod is P5's set: these must not change permission-bearing state.
+func isSafeMethod(m string) bool {
+	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
+}
+
 // Route is one registered screen.
 type Route struct {
 	// Screen is the D11 id (P-101, A-201...). It is what ties a running route
@@ -135,11 +140,20 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 				where+": 상태 변경 유형인데 GET 이다 (D15 P5)")
 		}
 
-		// 5. the route table and D11 must agree, in both directions.
+		// 5. the route table and D11 must agree.
+		//
+		// D11 gives a class to a SCREEN; a Route carries the class of one
+		// OPERATION, and a change screen holds both its form (GET) and its
+		// submission (POST). D15 4.4 fixes the one pair this allows: the read
+		// route of an SC-5/SC-6 screen registers as SC-4. Anything else is a
+		// disagreement and stops the boot.
 		want, ok := inventory[rt.Screen]
-		if !ok {
+		switch {
+		case !ok:
 			res.Errors = append(res.Errors, where+": D11 인벤토리에 없는 화면")
-		} else if want != rt.Class {
+		case want == rt.Class:
+		case rt.Class == SC4 && (want == SC5 || want == SC6) && isSafeMethod(rt.Method):
+		default:
 			res.Errors = append(res.Errors,
 				fmt.Sprintf("%s: 화면 유형이 D11 과 다르다 (라우트 %s / D11 %s)", where, rt.Class, want))
 		}

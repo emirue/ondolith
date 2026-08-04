@@ -93,6 +93,15 @@ func (d *publicDeps) renderPage(w http.ResponseWriter, r *http.Request, name str
 }
 
 // P-903 — not found.
+// renderNamed is the render func the auth and account screens use: they build
+// a plain map, and the view model wraps it so the theme still gets .Site, .Menu
+// and .User (D17 뷰 모델 규약).
+func (d *publicDeps) renderNamed(w http.ResponseWriter, r *http.Request, name string, code int, data any) {
+	v := d.view(r, "", "")
+	v.Data = data
+	d.renderPage(w, r, name, code, v)
+}
+
 func (d *publicDeps) notFound(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, "찾을 수 없습니다", "")
 	d.renderPage(w, r, "error.html", http.StatusNotFound, v)

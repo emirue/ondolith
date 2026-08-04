@@ -148,6 +148,37 @@ func (d *accountDeps) verify(w http.ResponseWriter, r *http.Request) {
 	d.render(w, r, "auth/verify-done.html", http.StatusOK, nil)
 }
 
+// signupForm's GET. Already-authenticated callers are sent on rather than shown
+// a form that would create a second account under a session they already have.
+func (d *accountDeps) signupForm(w http.ResponseWriter, r *http.Request) {
+	if ActorFrom(r.Context()).IsAuthenticated() {
+		http.Redirect(w, r, "/me", http.StatusSeeOther)
+		return
+	}
+	d.render(w, r, "auth/signup.html", http.StatusOK, nil)
+}
+
+// P-108 GET — own profile. The subject is the session, so there is no id.
+func (d *accountDeps) profileForm(w http.ResponseWriter, r *http.Request) {
+	a := ActorFrom(r.Context())
+	if !a.IsAuthenticated() {
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
+		return
+	}
+	d.render(w, r, "account/profile.html", http.StatusOK, map[string]any{
+		"DisplayName": a.User.DisplayName, "Email": a.User.Email,
+	})
+}
+
+// P-109 GET — the password form.
+func (d *accountDeps) passwordForm(w http.ResponseWriter, r *http.Request) {
+	if !ActorFrom(r.Context()).IsAuthenticated() {
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
+		return
+	}
+	d.render(w, r, "account/password.html", http.StatusOK, nil)
+}
+
 // profileForm is P-108's whole surface. `role`, `is_active` and `is_admin` are
 // absent by construction — the escalation they would allow cannot be typed.
 type profileForm struct{ DisplayName string }

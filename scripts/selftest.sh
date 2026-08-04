@@ -297,6 +297,15 @@ inject "D20 이 없는 패키지를 현재 구조로 적음" docs/20-architectur
 inject_new "새 패키지가 D20 에 없음" internal/ghostpkg/x.go \
 	'mkdir -p internal/ghostpkg && printf "package ghostpkg\\n" > internal/ghostpkg/x.go' \
 	'internal/ghostpkg 가 docs/20-architecture.md 「패키지 구조」에 없다'
+# The boot self-check trusts screens.go to say what D11 declares. A copy that
+# drifts makes that check confidently wrong in both directions, so both are
+# injected: an entry the doc does not have, and a doc screen the map lost.
+inject "인벤토리 유형이 D11 과 다름" internal/app/screens.go \
+	'perl -pi -e "s/^(\\t\"P-101\": SC)2,/\${1}5,/" internal/app/screens.go' \
+	'internal/app/screens.go 의 항목이 docs/11-screens.md 과 다르다: P-101'
+inject "D11 화면이 인벤토리에 없음" internal/app/screens.go \
+	'perl -ni -e "print unless /^\\t\"A-601\":/" internal/app/screens.go' \
+	'docs/11-screens.md 의 화면이 internal/app/screens.go 에 없다: A-601'
 inject "화면에 작업 항목이 없음" docs/81-work-breakdown.md \
 	'perl -pi -e "s/\\(P-511~P-513\\)/(P-511~P-512)/" docs/81-work-breakdown.md' \
 	'작업 항목이 없는 화면: P-513'

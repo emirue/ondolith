@@ -63,6 +63,36 @@ func (s *Store) scanPage(ctx context.Context, q string, args ...any) (*Page, err
 	return &p, err
 }
 
+// Pages lists every page for A-301, drafts included: the admin list is where an
+// unpublished page is found, so filtering by status here would hide the rows the
+// screen exists to show.
+func (s *Store) Pages(ctx context.Context) ([]Page, error) {
+	const q = `
+		SELECT id, slug, title, body, status, coalesce(template, '')
+		FROM pages ORDER BY updated_at DESC, id`
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Page
+	for rows.Next() {
+		var p Page
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Title, &p.Body, &p.Status, &p.Template); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// PageByID is A-302's read. Like PageBySlug it does not filter on status: the
+// edit screen is how a draft gets finished.
+func (s *Store) PageByID(ctx context.Context, id string) (*Page, error) {
+	return s.scanPage(ctx,
+		`SELECT id, slug, title, body, status, coalesce(template, '') FROM pages WHERE id = $1`, id)
+}
+
 // CreatePage lets UNIQUE (slug) decide on collisions. Checking first and
 // inserting after passes two simultaneous requests; the index is what actually
 // serialises them (D30 pages).

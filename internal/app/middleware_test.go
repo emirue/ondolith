@@ -29,7 +29,7 @@ func do(h http.Handler, method, target string) *httptest.ResponseRecorder {
 }
 
 func anon() *Actor { return &Actor{Perms: auth.NewPermissions(false, nil)} }
-func admin() *Actor {
+func adminActor() *Actor {
 	return &Actor{
 		User:  &auth.User{ID: "u1"},
 		Perms: auth.NewPermissions(false, []auth.Grant{{Permission: "admin.access", Board: auth.Global}}),
@@ -67,7 +67,7 @@ func TestTreeGateForbidsWithoutPermission(t *testing.T) {
 }
 
 func TestTreeGateAllowsAdmin(t *testing.T) {
-	h := actorHandler(admin(), withTreeGate(http.HandlerFunc(ok)))
+	h := actorHandler(adminActor(), withTreeGate(http.HandlerFunc(ok)))
 	if rec := do(h, http.MethodGet, "/admin/pages"); rec.Code != http.StatusOK {
 		t.Errorf("HTTP %d, want 200", rec.Code)
 	}
@@ -98,7 +98,7 @@ func TestTreeGateMatchesSegmentNotPrefix(t *testing.T) {
 
 func TestAdminRateLimit(t *testing.T) {
 	lim := auth.Limit{Burst: 3, Window: 60_000_000_000} // 3 per minute
-	h := actorHandler(admin(),
+	h := actorHandler(adminActor(),
 		withAdminRateLimit(auth.NewLimiter(), lim)(http.HandlerFunc(ok)))
 
 	for i := 0; i < 3; i++ {
@@ -132,7 +132,7 @@ func TestAdminRateLimitDoesNotTouchPublicPaths(t *testing.T) {
 // limit does not exist.
 func TestRateLimitBucketIgnoresForwardedFor(t *testing.T) {
 	lim := auth.Limit{Burst: 2, Window: 60_000_000_000}
-	h := actorHandler(admin(), withAdminRateLimit(auth.NewLimiter(), lim)(http.HandlerFunc(ok)))
+	h := actorHandler(adminActor(), withAdminRateLimit(auth.NewLimiter(), lim)(http.HandlerFunc(ok)))
 
 	send := func(xff string) int {
 		rec := httptest.NewRecorder()

@@ -1,0 +1,26 @@
+{{define "content"}}
+<form method="post" action="/admin/settings">
+  <label for="site.name">사이트 이름</label>
+  <input type="text" id="site.name" name="site.name" value="{{index .Settings "site.name"}}">
+
+  <label for="site.meta_description">기본 메타 설명</label>
+  <input type="text" id="site.meta_description" name="site.meta_description" value="{{index .Settings "site.meta_description"}}">
+
+  <label for="site.og_image">기본 OG 이미지 URL</label>
+  <input type="text" id="site.og_image" name="site.og_image" value="{{index .Settings "site.og_image"}}">
+
+  <label for="site.type">사이트 유형</label>
+  <select id="site.type" name="site.type">
+    <option value="cms"{{if eq (index .Settings "site.type") "cms"}} selected{{end}}>cms — 콘텐츠</option>
+    <option value="shop"{{if eq (index .Settings "site.type") "shop"}} selected{{end}}>shop — 커머스</option>
+  </select>
+
+  <label for="auth.email_verification_required">이메일 인증 요구</label>
+  <select id="auth.email_verification_required" name="auth.email_verification_required">
+    <option value="">아니오</option>
+    <option value="1"{{if index .Settings "auth.email_verification_required"}} selected{{end}}>예</option>
+  </select>
+
+  <p><button class="primary">저장</button></p>
+</form>
+{{end}}
