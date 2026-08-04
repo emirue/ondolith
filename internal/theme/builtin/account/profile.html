@@ -1,0 +1,13 @@
+{{define "body"}}
+<h1>내 정보</h1>
+{{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
+<form method="post" action="/me" class="form">
+  <label>이메일</label>
+  <p class="readonly">{{with .User}}{{.Email}}{{end}}</p>
+  <label for="display_name">표시 이름</label>
+  <input id="display_name" name="display_name" type="text" maxlength="100"
+         value="{{with .User}}{{.DisplayName}}{{end}}" required>
+  <button type="submit">저장</button>
+</form>
+<p><a href="/me/password">비밀번호 변경</a> · <a href="/me/delete">회원 탈퇴</a></p>
+{{end}}

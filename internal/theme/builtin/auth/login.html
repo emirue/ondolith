@@ -1,0 +1,14 @@
+{{define "body"}}
+<h1>로그인</h1>
+{{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
+<form method="post" action="/login" class="form">
+  <label for="email">이메일</label>
+  <input id="email" name="email" type="email" required autocomplete="username"
+         value="{{with .Data}}{{.Email}}{{end}}">
+  <label for="password">비밀번호</label>
+  <input id="password" name="password" type="password" required autocomplete="current-password">
+  <input type="hidden" name="next" value="{{with .Data}}{{.Next}}{{end}}">
+  <button type="submit">로그인</button>
+</form>
+<p><a href="/signup">회원가입</a> · <a href="/password/reset">비밀번호를 잊으셨나요?</a></p>
+{{end}}

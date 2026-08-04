@@ -1,0 +1,15 @@
+<header class="site-header">
+  <a class="site-name" href="/">{{.Site.Name}}</a>
+  {{template "partials/menu.html" .}}
+  <nav class="account-nav">
+    {{if .User}}
+      <span class="who">{{.User.DisplayName}}</span>
+      <a href="/me">내 정보</a>
+      <form method="post" action="/logout" class="inline"><button type="submit">로그아웃</button></form>
+    {{else}}
+      <a href="/login">로그인</a>
+      <a href="/signup">회원가입</a>
+    {{end}}
+  </nav>
+</header>
+{{if .Flash}}<ul class="flash">{{range .Flash}}<li class="flash-{{.Kind}}">{{.Text}}</li>{{end}}</ul>{{end}}

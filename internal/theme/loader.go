@@ -161,6 +161,22 @@ func (l *Loader) Template(name string) (*template.Template, error) {
 	if _, err := t.Parse(baseSrc); err != nil {
 		return nil, fmt.Errorf("theme: base.html 파싱: %w", err)
 	}
+	// Fragments come along. A layout that pulls in partials/header.html has no
+	// way to say "load this too", so parsing only base + page leaves every
+	// {{template}} call unresolved — which surfaces as a 500 on the first page
+	// a visitor opens, not at boot.
+	//
+	// Each fragment resolves through the same disk-then-builtin path, so a theme
+	// can override one fragment and inherit the rest.
+	for _, frag := range l.fragments() {
+		fsrc, _, ferr := l.resolve(frag)
+		if ferr != nil {
+			continue
+		}
+		if _, err := t.New(frag).Parse(fsrc); err != nil {
+			return nil, fmt.Errorf("theme: %s 파싱: %w", frag, err)
+		}
+	}
 	if _, err := t.New(name).Parse(src); err != nil {
 		return nil, fmt.Errorf("theme: %s 파싱: %w", name, err)
 	}
@@ -171,6 +187,39 @@ func (l *Loader) Template(name string) (*template.Template, error) {
 		l.mu.Unlock()
 	}
 	return t, nil
+}
+
+// fragments lists the partials to parse alongside every page: the union of what
+// the built-in theme ships and what the active theme adds. Listing them by
+// convention (the partials/ directory) rather than by a hardcoded set means a
+// theme can add its own fragment without a core change.
+func (l *Loader) fragments() []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(name string) {
+		if _, dup := seen[name]; dup {
+			return
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if entries, err := fs.ReadDir(l.builtin, "partials"); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".html") {
+				add("partials/" + e.Name())
+			}
+		}
+	}
+	if l.dir != "" {
+		if entries, err := os.ReadDir(filepath.Join(l.dir, "partials")); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".html") {
+					add("partials/" + e.Name())
+				}
+			}
+		}
+	}
+	return out
 }
 
 // Render executes name into w. The page template is executed first so its

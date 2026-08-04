@@ -142,7 +142,7 @@ func TestAssetURLUsesContentHash(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(css, "style.css"), []byte("a{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l := New(builtinFS(), dir, true, nil)
+	l := New(fakeBuiltin(), dir, true, nil)
 
 	first := l.AssetURL("css/style.css")
 	if !strings.HasPrefix(first, "/static/css/style.css?v=") {
@@ -160,7 +160,7 @@ func TestAssetURLUsesContentHash(t *testing.T) {
 }
 
 func TestAssetURLFallsBackToBuiltin(t *testing.T) {
-	l := New(builtinFS(), "", false, nil)
+	l := New(fakeBuiltin(), "", false, nil)
 	if got := l.AssetURL("css/style.css"); !strings.Contains(got, "?v=") {
 		t.Errorf("내장 자산에 해시가 없다: %q", got)
 	}

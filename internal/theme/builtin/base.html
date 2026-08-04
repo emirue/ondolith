@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .Meta.Title}}{{.Meta.Title}} · {{end}}{{.Site.Name}}</title>
+{{if .Meta.Description}}<meta name="description" content="{{.Meta.Description}}">{{end}}
+<meta property="og:title" content="{{if .Meta.Title}}{{.Meta.Title}}{{else}}{{.Site.Name}}{{end}}">
+{{if .Meta.OGImage}}<meta property="og:image" content="{{.Meta.OGImage}}">{{end}}
+<link rel="stylesheet" href="{{asset "css/style.css"}}">
+<script src="{{asset "js/htmx.min.js"}}" defer></script>
+</head>
+<body>
+{{template "partials/header.html" .}}
+<main id="main">{{block "body" .}}{{end}}</main>
+{{template "partials/footer.html" .}}
+</body>
+</html>

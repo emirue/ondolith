@@ -72,7 +72,7 @@ internal/
   migrations/          goose 마이그레이션 (embed.FS) + Run()
   auth/                권한 판정 순수 함수 (CanOn, 사다리 차단, rate limit). DB 접근 없음
   content/             입력 검증·페이지 상태 전이·메뉴 트리 + 콘텐츠 저장소
-  theme/               테마 로더(내장 폴백 + 디스크 오버라이드), 함수맵, 뷰 모델
+  theme/               테마 로더(내장 폴백 + 디스크 오버라이드), 함수맵, 뷰 모델, 내장 테마
 ```
 
 Phase 1 이후 추가될 자리:

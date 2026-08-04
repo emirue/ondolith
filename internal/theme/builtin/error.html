@@ -1,0 +1,8 @@
+{{define "body"}}
+<div class="error-page">
+  <h1>{{.Meta.Title}}</h1>
+  <p>요청을 처리하지 못했습니다. 주소를 확인하거나 잠시 후 다시 시도하세요.</p>
+  {{with .Data}}{{with .Detail}}<pre class="dev-detail">{{.}}</pre>{{end}}{{end}}
+  <p><a href="/">홈으로</a></p>
+</div>
+{{end}}

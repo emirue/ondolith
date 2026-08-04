@@ -1,0 +1,5 @@
+{{define "body"}}
+<h1>인증하지 못했습니다</h1>
+{{with .Data}}{{with .Error}}<p class="error">{{.}}</p>{{end}}{{end}}
+<p>링크는 24시간 동안, 한 번만 유효합니다. <a href="/login">로그인</a> 후 다시 요청하세요.</p>
+{{end}}

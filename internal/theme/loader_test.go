@@ -12,7 +12,7 @@ import (
 	"testing/fstest"
 )
 
-func builtinFS() fstest.MapFS {
+func fakeBuiltin() fstest.MapFS {
 	return fstest.MapFS{
 		"base.html":       {Data: []byte(`<html>{{block "body" .}}내장 본문{{end}}</html>`)},
 		"page.html":       {Data: []byte(`{{define "body"}}내장 페이지{{end}}`)},
@@ -37,7 +37,7 @@ func TestPartialOverride(t *testing.T) {
 	write(t, dir, "base.html", `<html>{{block "body" .}}x{{end}}</html>`)
 	write(t, dir, "page.html", `{{define "body"}}디스크 페이지{{end}}`)
 
-	l := New(builtinFS(), dir, false, nil)
+	l := New(fakeBuiltin(), dir, false, nil)
 
 	if got := render(t, l, "page.html"); !strings.Contains(got, "디스크 페이지") {
 		t.Errorf("디스크 템플릿이 안 쓰였다: %s", got)
@@ -49,7 +49,7 @@ func TestPartialOverride(t *testing.T) {
 }
 
 func TestBuiltinOnlyWhenNoDir(t *testing.T) {
-	l := New(builtinFS(), "", false, nil)
+	l := New(fakeBuiltin(), "", false, nil)
 	if got := render(t, l, "page.html"); !strings.Contains(got, "내장 페이지") {
 		t.Errorf("내장 테마가 안 쓰였다: %s", got)
 	}
@@ -58,7 +58,7 @@ func TestBuiltinOnlyWhenNoDir(t *testing.T) {
 // A name the built-in theme lacks is a core bug, not a theme error — there is
 // no floor to fall back to.
 func TestMissingEverywhereIsAnError(t *testing.T) {
-	l := New(builtinFS(), "", false, nil)
+	l := New(fakeBuiltin(), "", false, nil)
 	if _, err := l.Template("nope.html"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -75,7 +75,7 @@ func TestPathTraversalIsRefused(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Remove(outside) })
 
-	l := New(builtinFS(), dir, false, nil)
+	l := New(fakeBuiltin(), dir, false, nil)
 	for _, name := range []string{
 		"../secret.html",
 		"../../etc/passwd",
@@ -105,7 +105,7 @@ func TestSymlinkOutOfThemeIsRefused(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "link.html")); err != nil {
 		t.Skipf("symlink 불가: %v", err)
 	}
-	l := New(builtinFS(), dir, false, nil)
+	l := New(fakeBuiltin(), dir, false, nil)
 	if _, err := l.Template("link.html"); !errors.Is(err, ErrOutside) {
 		t.Errorf("심볼릭 링크로 테마 밖을 읽었다: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestDevModeRereadsAndProductionCaches(t *testing.T) {
 	write(t, dir, "base.html", `<html>{{block "body" .}}x{{end}}</html>`)
 	write(t, dir, "page.html", `{{define "body"}}처음{{end}}`)
 
-	prod := New(builtinFS(), dir, false, nil)
+	prod := New(fakeBuiltin(), dir, false, nil)
 	if got := render(t, prod, "page.html"); !strings.Contains(got, "처음") {
 		t.Fatal(got)
 	}
@@ -127,7 +127,7 @@ func TestDevModeRereadsAndProductionCaches(t *testing.T) {
 		t.Error("운영 모드가 매 요청 재파싱하고 있다")
 	}
 
-	dev := New(builtinFS(), dir, true, nil)
+	dev := New(fakeBuiltin(), dir, true, nil)
 	if got := render(t, dev, "page.html"); !strings.Contains(got, "수정됨") {
 		t.Errorf("개발 모드가 재파싱하지 않았다: %s", got)
 	}
@@ -154,7 +154,7 @@ func TestValidateThemeDirRequiresBase(t *testing.T) {
 }
 
 func TestHasBuiltin(t *testing.T) {
-	l := New(builtinFS(), "", false, nil)
+	l := New(fakeBuiltin(), "", false, nil)
 	if !l.HasBuiltin("page.html") {
 		t.Error("내장에 있는 이름을 없다고 한다")
 	}
@@ -169,7 +169,7 @@ func TestOutputIsEscaped(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "base.html", `{{block "body" .}}{{end}}`)
 	write(t, dir, "page.html", `{{define "body"}}{{.}}{{end}}`)
-	l := New(builtinFS(), dir, false, template.FuncMap{})
+	l := New(fakeBuiltin(), dir, false, template.FuncMap{})
 	var b bytes.Buffer
 	if err := l.Render(&b, "page.html", "<script>alert(1)</script>"); err != nil {
 		t.Fatal(err)

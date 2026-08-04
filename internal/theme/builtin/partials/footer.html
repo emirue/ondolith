@@ -1,0 +1,6 @@
+<footer class="site-footer">
+  <p>{{.Site.Name}}</p>
+  {{if .Site.Business}}<dl class="business">
+    {{range $k, $v := .Site.Business}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}
+  </dl>{{end}}
+</footer>

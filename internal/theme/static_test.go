@@ -18,7 +18,7 @@ func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder
 }
 
 func TestStaticServesBuiltin(t *testing.T) {
-	l := New(builtinFS(), "", false, nil)
+	l := New(fakeBuiltin(), "", false, nil)
 	rec := get(t, l.StaticHandler("/static"), "/static/css/style.css")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("HTTP %d", rec.Code)
@@ -33,7 +33,7 @@ func TestStaticServesBuiltin(t *testing.T) {
 func TestStaticDiskOverridesBuiltin(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "css/style.css", "body{color:red}")
-	l := New(builtinFS(), dir, false, nil)
+	l := New(fakeBuiltin(), dir, false, nil)
 	h := l.StaticHandler("/static")
 
 	if got := get(t, h, "/static/css/style.css").Body.String(); !strings.Contains(got, "red") {
@@ -56,7 +56,7 @@ func TestStaticRefusesEscape(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Remove(outside) })
 
-	l := New(builtinFS(), dir, false, nil)
+	l := New(fakeBuiltin(), dir, false, nil)
 	h := l.StaticHandler("/static")
 
 	for _, target := range []string{
@@ -90,7 +90,7 @@ func TestStaticRefusesSymlinkOutOfTheme(t *testing.T) {
 		t.Skipf("symlink 불가: %v", err)
 	}
 
-	l := New(builtinFS(), dir, false, nil)
+	l := New(fakeBuiltin(), dir, false, nil)
 	rec := get(t, l.StaticHandler("/static"), "/static/leak.txt")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("심볼릭 링크로 테마 밖 파일을 서빙했다: HTTP %d, %q", rec.Code, rec.Body.String())
@@ -101,7 +101,7 @@ func TestStaticRefusesSymlinkOutOfTheme(t *testing.T) {
 }
 
 func TestStaticMissingIs404(t *testing.T) {
-	l := New(builtinFS(), "", false, nil)
+	l := New(fakeBuiltin(), "", false, nil)
 	if rec := get(t, l.StaticHandler("/static"), "/static/none.css"); rec.Code != http.StatusNotFound {
 		t.Errorf("HTTP %d, want 404", rec.Code)
 	}
