@@ -95,6 +95,14 @@
   (순환이 있으면 루프는 "착수 가능한 작업 없음"만 반복하며 교착된다), 완료로 표시된 작업의
   산출물 실재. 요약표 ↔ 실제 작업 수 대조도 함께
 
+- **`make test-integration`이 DB를 직접 띄운다** (`scripts/testdb.sh`, `postgres:18-alpine`).
+  `ONDOLITH_TEST_DSN`이 있으면 그쪽이 우선한다. 컨테이너는 다음 실행을 위해 남고
+  `make test-db-down`으로 지운다 — **사람이 DB를 준비하는 단계가 루프 안에서 사라졌다**
+  ([D82](docs/82-execution-loop.md) 2절)
+- 통합 테스트는 `DROP SCHEMA public CASCADE`로 시작한다. 그래서 `testdb.sh`는 **자기가 띄운
+  컨테이너의 DSN만** 넘기고, 포트를 다른 컨테이너가 쥐고 있으면 **중단한다** — 남의 데이터를
+  지우느니 실행하지 않는다
+
 ### Fixed
 - [D19](docs/19-screen-io.md)가 **자기 자신과 어긋나 있었다** — P-514·A-512를 추가하면서
   머리말 개수(61)와 대상 표를 안 고쳐 63개를 명세하면서 61개라고 적고 있었고, A-512 절은

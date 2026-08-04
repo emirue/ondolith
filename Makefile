@@ -3,7 +3,7 @@ PKG     := ./cmd/ondolith
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help build run check test vet fmt docs selftest vuln release clean
+.PHONY: help build run check test test-integration test-db-down vet fmt docs selftest vuln release clean
 
 help:
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t20
@@ -28,8 +28,11 @@ test: ## 테스트 (경합 탐지 포함). DB 불필요
 	# 떠 있으면 여기서도 돈다. 패키지가 병렬로 돌면 같은 DB의 스키마를 서로 드롭한다.
 	go test -race -p 1 ./...
 
-test-integration: ## 실제 PostgreSQL 대상 설치 흐름 테스트. ONDOLITH_TEST_DSN 필요
+test-integration: ## 실제 PostgreSQL 대상 통합 테스트. DSN 없으면 Docker 로 띄운다
 	@sh scripts/integration.sh
+
+test-db-down: ## 로컬 테스트 DB 컨테이너 제거
+	@sh scripts/testdb.sh down
 
 vet: ## go vet
 	go vet ./...

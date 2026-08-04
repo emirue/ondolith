@@ -458,12 +458,30 @@ expect_ctr 0 "FAIL 만 있으면 검사기는 통과 (실패 판정은 go test �
 FAIL	github.com/x/a	0.1s
 '
 
-# integration.sh must refuse to run without a DSN rather than quietly pass.
-(unset ONDOLITH_TEST_DSN; sh "$ROOT/scripts/integration.sh" >/dev/null 2>&1)
-if [ $? -eq 0 ]; then
-	err "integration.sh 가 DSN 없이 통과했다"
+# integration.sh must never exit 0 without having actually run the DB tests.
+#
+# It used to guarantee that by refusing whenever ONDOLITH_TEST_DSN was unset. It
+# now starts a local container instead, so the guarantee moves: with no DSN and
+# no docker there is no database to be had, and it must fail rather than report
+# success. The path WITH docker is exercised by `make test-integration` itself.
+#
+# /usr/bin:/bin keeps sh and dirname but drops /usr/local/bin, where docker
+# lives. Emptying PATH entirely would make this pass for the wrong reason — the
+# script would die on a missing `dirname` before ever reaching the docker check
+# (M10), and the output below is asserted to prove which branch ran.
+out=$(unset ONDOLITH_TEST_DSN; PATH=/usr/bin:/bin; export PATH;
+	/bin/sh "$ROOT/scripts/integration.sh" 2>&1)
+code=$?
+case "$out" in
+*"docker 가 없다"*) reason=docker ;;
+*) reason=other ;;
+esac
+if [ "$code" -eq 0 ]; then
+	err "integration.sh 가 DB 없이 통과했다"
+elif [ "$reason" != docker ]; then
+	err "integration.sh 가 실패하긴 했으나 docker 부재 때문이 아니다: $out"
 else
-	ok "integration.sh 는 DSN 없이 거부한다"
+	ok "integration.sh 는 DB 를 얻지 못하면 거부한다"
 fi
 
 echo "selftest: 작업 선택기 (next-task.sh)"
@@ -517,6 +535,49 @@ expect_nt 1 "표를 하나도 읽지 못한다" \
 expect_nt 0 "표 밖 선행은 착수를 막지 않는다" \
 	'| W2-01 | 첫 작업 | Phase 1 릴리즈 | `a.sql` | 기준 |
 '
+
+echo "selftest: 테스트 DB 관리 (testdb.sh)"
+
+# testdb.sh hands the DB-backed tests their DSN, and those tests open with
+# DROP SCHEMA public CASCADE. The branches checked here are the ones that must
+# not silently do nothing: an unknown subcommand, and a machine with no docker.
+#
+# The docker-dependent paths (create / reuse / refuse a port someone else holds)
+# need a daemon, so they are exercised by `make test-integration` itself rather
+# than here — `make check` has to run offline.
+TDB=$ROOT/scripts/testdb.sh
+
+# expect_tdb <expected-exit> <name> <args> [PATH override]
+expect_tdb() {
+	if [ $# -ge 4 ]; then
+		# /bin/sh by absolute path: with PATH emptied the shell itself would not
+		# be found and the run would exit 127 before reaching the script.
+		( PATH=$4 && export PATH && /bin/sh "$TDB" $3 ) >/dev/null 2>&1
+	else
+		sh "$TDB" $3 >/dev/null 2>&1
+	fi
+	code=$?
+	if [ "$code" -eq "$1" ]; then
+		ok "$2 → exit $code"
+	else
+		err "$2 → exit $code, want $1"
+	fi
+}
+
+expect_tdb 0 "dsn 은 띄우지 않고 출력만 한다" dsn
+expect_tdb 2 "모르는 하위 명령은 거부한다" bogus
+# An empty PATH removes docker. Without the guard the script would run
+# `docker inspect`, get "command not found", and wait 60 seconds on a container
+# that can never exist — the failure this branch replaces.
+expect_tdb 1 "docker 가 없으면 즉시 중단한다" up /nonexistent-bin
+
+# The DSN it prints must be the one it starts: if these drifted apart the tests
+# would connect somewhere the script never created.
+if [ "$(sh "$TDB" dsn)" = "postgres://ondolith:ondolith@127.0.0.1:55432/ondolith?sslmode=disable" ]; then
+	ok "dsn 출력이 스크립트가 띄우는 컨테이너와 일치"
+else
+	err "dsn 출력이 기대와 다르다: $(sh "$TDB" dsn)"
+fi
 
 echo "selftest: gofmt 훅"
 

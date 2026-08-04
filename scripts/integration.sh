@@ -9,12 +9,13 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
+# An explicit DSN wins: CI and anyone pointing at their own server keep the
+# behaviour they had. Only when it is unset do we bring up a local container,
+# because a loop that stops to ask for a database is not a loop.
 if [ -z "${ONDOLITH_TEST_DSN:-}" ]; then
-	echo "ONDOLITH_TEST_DSN 를 설정하세요. 예:"
-	echo "  docker run -d --name ondolith-test -e POSTGRES_PASSWORD=testpw \\"
-	echo "    -e POSTGRES_DB=ondolith -p 55432:5432 postgres:16-alpine"
-	echo "  export ONDOLITH_TEST_DSN='postgres://postgres:testpw@127.0.0.1:55432/ondolith?sslmode=disable'"
-	exit 1
+	ONDOLITH_TEST_DSN=$(sh "$(dirname "$0")/testdb.sh" up) || exit 1
+	export ONDOLITH_TEST_DSN
+	echo "테스트 DB: 로컬 컨테이너 (지우려면 scripts/testdb.sh down)"
 fi
 
 log=$(mktemp) || exit 1
