@@ -71,13 +71,13 @@ internal/
   app/                 운영 트리 — 풀·세션·라우트 조립
   migrations/          goose 마이그레이션 (embed.FS) + Run()
   auth/                권한 판정 순수 함수 (CanOn, 사다리 차단, rate limit). DB 접근 없음
-  content/             입력 검증·페이지 상태 전이·메뉴 트리. DB 접근 없음
+  content/             입력 검증·페이지 상태 전이·메뉴 트리 + 콘텐츠 저장소
+  theme/               테마 로더(내장 폴백 + 디스크 오버라이드), 함수맵, 뷰 모델
 ```
 
 Phase 1 이후 추가될 자리:
 
 ```
-  theme/               테마 로더 (embed 폴백 + 디스크 오버라이드), 함수맵
   admin/               관리자 트리
   commerce/            상품·주문·PG 어댑터
   hooks/               훅 포인트 (NFR-401, 로더 없음)
