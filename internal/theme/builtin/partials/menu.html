@@ -1,10 +1,10 @@
 {{if .Menu}}
 <nav class="site-menu"><ul>
   {{range .Menu}}
-  <li{{if isCurrent .URL}} class="current"{{end}}>
+  <li{{if eq $.Path .URL}} class="current"{{end}}>
     {{if .URL}}<a href="{{.URL}}">{{.Title}}</a>{{else}}<span>{{.Title}}</span>{{end}}
     {{if .Children}}<ul>{{range .Children}}
-      <li{{if isCurrent .URL}} class="current"{{end}}><a href="{{.URL}}">{{.Title}}</a></li>
+      <li{{if eq $.Path .URL}} class="current"{{end}}><a href="{{.URL}}">{{.Title}}</a></li>
     {{end}}</ul>{{end}}
   </li>
   {{end}}

@@ -29,6 +29,10 @@ func (l *Loader) StaticHandler(prefix string) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		// D17 puts assets under the theme's `static/` directory, and only that
+		// directory is served. Without this the whole theme is reachable —
+		// `/static/page.html` would return the raw template, `{{...}}` and all.
+		name = path.Join("static", name)
 
 		if l.dir != "" {
 			p := filepath.Join(l.dir, filepath.FromSlash(name))

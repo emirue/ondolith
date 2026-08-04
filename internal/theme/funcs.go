@@ -22,11 +22,11 @@ import (
 // becomes API that themes depend on and that we then cannot remove.
 var FuncNames = []string{
 	// URL
-	"url", "asset", "isCurrent",
+	"url", "asset",
 	// 포맷
 	"date", "dateAgo", "money", "number", "filesize",
 	// 문자열·구조
-	"truncate", "nl2br", "field", "fields", "pages", "can",
+	"truncate", "nl2br", "field", "fields", "pages",
 }
 
 // Forbidden names, spelled out so the test can assert their absence rather than
@@ -38,11 +38,14 @@ var ForbiddenFuncNames = []string{"raw", "safeHTML", "html", "js", "query", "exe
 // Deps are the request-scoped values the functions close over. Passing them in
 // keeps this package free of the http and database imports — a theme function
 // that could reach the database would let one theme take the site down (FR-305).
+// Deps holds only values that are the same for every request.
+//
+// `isCurrent` and `can` used to live here and were removed: both change per
+// request, but a func map is bound when a template is parsed and the parse is
+// cached (NFR-104). A closure over a per-request value is either frozen at the
+// first request or raced between concurrent ones. The view model already
+// carries `.Path` and `.Can` — see D17.
 type Deps struct {
-	// Path is the current request path, for isCurrent.
-	Path string
-	// Can answers permission questions for display only (D15 4.3).
-	Can func(perm string) bool
 	// AssetURL returns the hashed URL for a theme asset.
 	AssetURL func(name string) string
 	// URLFor builds an application URL by kind.
@@ -69,8 +72,6 @@ func FuncMap(d Deps) template.FuncMap {
 			}
 			return d.AssetURL(name)
 		},
-		"isCurrent": func(p string) bool { return d.Path == p },
-
 		"date":    func(t time.Time, layout string) string { return t.Format(layout) },
 		"dateAgo": func(t time.Time) string { return ago(d.Now().Sub(t)) },
 		// money takes an integer minor unit and never a float: D30 keeps money
@@ -90,12 +91,6 @@ func FuncMap(d Deps) template.FuncMap {
 		"field":  func(m map[string]any, key string) any { return m[key] },
 		"fields": func(m map[string]any) map[string]any { return m },
 		"pages":  pageNumbers,
-		"can": func(perm string) bool {
-			if d.Can == nil {
-				return false // fail-closed: an unwired Can hides buttons, never shows them
-			}
-			return d.Can(perm)
-		},
 	}
 }
 
@@ -221,6 +216,10 @@ func (a *assetHasher) Forget(name string) {
 }
 
 func (a *assetHasher) hash(name string) string {
+	// Same mapping the handler uses: the URL says `css/style.css`, the file
+	// lives at `static/css/style.css` (D17). Hashing a path the handler would
+	// not serve produces a URL that 404s with a version string on it.
+	name = path.Join("static", name)
 	var b []byte
 	if a.dir != "" {
 		p := filepath.Join(a.dir, filepath.FromSlash(name))

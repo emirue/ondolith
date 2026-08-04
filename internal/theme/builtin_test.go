@@ -55,8 +55,6 @@ func fullView() View {
 func newBuiltinLoader() *Loader {
 	l := New(Builtin(), "", false, nil)
 	l.funcs = FuncMap(Deps{
-		Path:     "/about",
-		Can:      func(string) bool { return true },
 		AssetURL: l.AssetURL,
 		URLFor:   func(kind string, args ...string) string { return "/" + kind },
 		Now:      func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },

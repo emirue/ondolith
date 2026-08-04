@@ -46,13 +46,17 @@ func TestForbiddenFunctionsAreAbsent(t *testing.T) {
 	}
 }
 
-// An unwired Can must hide, never show. Failing open here would surface admin
-// buttons on a public page the first time somebody forgets to populate Deps.
-func TestCanFailsClosedWhenUnwired(t *testing.T) {
+// `can` and `isCurrent` were removed from the map, not renamed: both are
+// per-request and a func map is bound at parse time, so either they freeze at
+// the first request or they race. The view model carries `.Can` and `.Path`
+// instead (D17). This asserts they are gone — a template still calling them
+// fails to parse, which is the loud failure we want.
+func TestPerRequestFuncsAreNotInTheMap(t *testing.T) {
 	m := FuncMap(Deps{})
-	fn := m["can"].(func(string) bool)
-	if fn("settings.update") {
-		t.Error("Can 이 연결되지 않았는데 true 를 반환했다")
+	for _, name := range []string{"can", "isCurrent"} {
+		if _, ok := m[name]; ok {
+			t.Errorf("%s 가 함수맵에 남아 있다 — 요청마다 달라지는 값이다", name)
+		}
 	}
 }
 
@@ -135,7 +139,7 @@ func TestPageNumbers(t *testing.T) {
 // does, and a version-keyed URL does not change for it.
 func TestAssetURLUsesContentHash(t *testing.T) {
 	dir := t.TempDir()
-	css := filepath.Join(dir, "css")
+	css := filepath.Join(dir, "static", "css")
 	if err := os.MkdirAll(css, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -177,11 +181,11 @@ func TestAssetURLFallsBackToBuiltin(t *testing.T) {
 func TestFuncsUsableFromTemplate(t *testing.T) {
 	fsys := fstest.MapFS{
 		"base.html": {Data: []byte(`{{block "body" .}}{{end}}`)},
-		"page.html": {Data: []byte(`{{define "body"}}{{money 1500}}|{{truncate "가나다라" 2}}|{{if can "x"}}Y{{else}}N{{end}}{{end}}`)},
+		"page.html": {Data: []byte(`{{define "body"}}{{money 1500}}|{{truncate "가나다라" 2}}|{{if index .Can "x"}}Y{{else}}N{{end}}{{end}}`)},
 	}
-	l := New(fsys, "", false, FuncMap(Deps{Can: func(p string) bool { return p == "ok" }}))
+	l := New(fsys, "", false, FuncMap(Deps{}))
 	var b bytes.Buffer
-	if err := l.Render(&b, "page.html", nil); err != nil {
+	if err := l.Render(&b, "page.html", View{Can: map[string]bool{"ok": true}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := b.String(); got != "1,500원|가나…|N" {

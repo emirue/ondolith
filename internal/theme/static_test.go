@@ -32,16 +32,17 @@ func TestStaticServesBuiltin(t *testing.T) {
 // stylesheet still gets the built-in images.
 func TestStaticDiskOverridesBuiltin(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, "css/style.css", "body{color:red}")
+	write(t, dir, "static/css/style.css", "body{color:red}")
 	l := New(fakeBuiltin(), dir, false, nil)
 	h := l.StaticHandler("/static")
 
 	if got := get(t, h, "/static/css/style.css").Body.String(); !strings.Contains(got, "red") {
 		t.Errorf("디스크 자산이 안 쓰였다: %q", got)
 	}
-	// Not overridden → built-in.
-	if rec := get(t, h, "/static/page.html"); rec.Code != http.StatusOK {
-		t.Errorf("내장 폴백이 안 됐다: HTTP %d", rec.Code)
+	// D17 은 `static/` 만 서빙한다. 템플릿은 자산이 아니다 — 원문이 나가면
+	// 테마 작성자가 무엇을 어떻게 그리는지가 그대로 공개된다.
+	if rec := get(t, h, "/static/page.html"); rec.Code != http.StatusNotFound {
+		t.Errorf("템플릿이 /static 으로 서빙됐다: HTTP %d", rec.Code)
 	}
 }
 

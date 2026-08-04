@@ -536,3 +536,38 @@ func TestAdminMenuOnlyPointsAtRegisteredRoutes(t *testing.T) {
 		}
 	}
 }
+
+// 공개 화면도 내장 테마의 디자인을 실제로 받는다. 스타일시트는 별도 요청이라
+// 페이지가 200 이어도 자산이 404 면 아무 스타일 없이 뜬다.
+func TestPublicScreensCarryTheBuiltInDesign(t *testing.T) {
+	srv, pool := liveSite(t)
+	c, post := adminSession(t, srv, pool)
+	post("/admin/pages/new", url.Values{"slug": {"about"}, "title": {"회사 소개"}, "body": {"본문입니다."}})
+	post("/admin/menus", url.Values{"title": {"회사소개"}, "url": {"/about"}})
+
+	code, home := mustGet(t, c, srv.URL+"/")
+	if code != http.StatusOK {
+		t.Fatalf("홈 HTTP %d", code)
+	}
+	for _, want := range []string{`class="hero"`, `class="site-header"`, "css/style.css"} {
+		if !strings.Contains(home, want) {
+			t.Errorf("홈에 %q 가 없다: %.400s", want, home)
+		}
+	}
+
+	// The stylesheet URL carries a content hash; follow whatever the page asked
+	// for rather than guessing the path.
+	href := home[strings.Index(home, "css/style.css")-1:]
+	href = href[:strings.IndexAny(href, `"`)+0]
+	start := strings.LastIndex(home[:strings.Index(home, "css/style.css")], `href="`)
+	href = home[start+len(`href="`):]
+	href = href[:strings.Index(href, `"`)]
+
+	code, css := mustGet(t, c, srv.URL+href)
+	if code != http.StatusOK {
+		t.Fatalf("스타일시트 %s → HTTP %d", href, code)
+	}
+	if !strings.Contains(css, "--accent:") {
+		t.Errorf("스타일시트에 토큰이 없다: %.200s", css)
+	}
+}

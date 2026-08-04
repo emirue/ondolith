@@ -145,11 +145,24 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// request already rendering finishes against the loader it started with,
 	// instead of having its template set change underneath it.
 	var loaderRef atomic.Pointer[theme.Loader]
+	loader := loaderRef.Load
+	// asset() has to reach the loader that is current when the template runs,
+	// and the loader owns the func map — so the closure reads the pointer
+	// rather than capturing a loader that does not exist yet. Passing an empty
+	// theme.Deps here is how every stylesheet URL came out as "" before.
+	funcs := theme.FuncMap(theme.Deps{
+		AssetURL: func(name string) string {
+			if l := loader(); l != nil {
+				return l.AssetURL(name)
+			}
+			return ""
+		},
+		URLFor: urlFor,
+	})
 	newLoader := func(dir string) *theme.Loader {
-		return theme.New(theme.Builtin(), dir, dev, theme.FuncMap(theme.Deps{}))
+		return theme.New(theme.Builtin(), dir, dev, funcs)
 	}
 	loaderRef.Store(newLoader(themeDir()))
-	loader := loaderRef.Load
 	limiter := auth.NewLimiter()
 	limits := auth.DefaultLimits()
 

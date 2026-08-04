@@ -17,7 +17,10 @@ func fakeBuiltin() fstest.MapFS {
 		"base.html":       {Data: []byte(`<html>{{block "body" .}}내장 본문{{end}}</html>`)},
 		"page.html":       {Data: []byte(`{{define "body"}}내장 페이지{{end}}`)},
 		"board/view.html": {Data: []byte(`{{define "body"}}내장 게시판{{end}}`)},
-		"css/style.css":   {Data: []byte("body{}")},
+		// D17: 자산은 테마의 `static/` 아래 있다. 이 픽스처가 루트에 두는
+		// 바람에 `/static/page.html` 이 템플릿 원문을 서빙하는데도 검사가
+		// 초록이었다 — 픽스처가 실물과 다르면 통과는 아무 뜻이 없다.
+		"static/css/style.css": {Data: []byte("body{}")},
 	}
 }
 

@@ -1,4 +1,14 @@
 {{define "body"}}
-<h1>{{.Site.Name}}</h1>
-{{if .Site.MetaDescription}}<p class="lede">{{.Site.MetaDescription}}</p>{{end}}
+{{/* 핸드오프의 프론트 히어로. 아이브로·사업영역 3열·공지 목록은 그 자리에
+     들어갈 데이터가 아직 없다 — 게시판이 Phase 2 다. 없는 것을 그리는 대신
+     사이트가 실제로 가진 것(이름·설명·메뉴)으로 채운다. */}}
+<section class="hero">
+  <h1>{{.Site.Name}}</h1>
+  {{if .Site.MetaDescription}}<p class="lede">{{.Site.MetaDescription}}</p>{{end}}
+  {{if .Menu}}
+  <div class="hero-cta">
+    {{range .Menu}}{{if .URL}}<a class="btn" href="{{.URL}}">{{.Title}}</a>{{end}}{{end}}
+  </div>
+  {{end}}
+</section>
 {{end}}
