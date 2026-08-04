@@ -86,8 +86,8 @@
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W1-22 | 인증 로드 미들웨어 (D15 4.1 [3]) | W1-13, W1-15 | `internal/app` | 세션의 `user_id`로 Actor를 구성한다. `is_active=false`이면 즉시 거부하고 세션을 파기한다. `auth_at < sessions_valid_from`인 세션이 거부된다. **미들웨어가 리소스 단위 판정을 하지 않는다**(게시판 슬러그 파싱 없음)를 코드 리뷰 항목으로 명시 |
-| W1-23 | 트리 게이트 + rate limit 미들웨어 (D15 4.1 [4]) | W1-10, W1-22 | `internal/app` | `/admin/*` 미인증 요청이 P-101로 이동한다. 인증됐으나 `admin.access` 미보유는 403. `/admin/*` IP당 60회/분 초과가 429다 |
+| W1-22 | 인증 로드 미들웨어 (D15 4.1 [3]) **(완료 — `internal/app/middleware_auth.go`)** | W1-13, W1-15 | `internal/app` | 세션의 `user_id`로 Actor를 구성한다. `is_active=false`이면 즉시 거부하고 세션을 파기한다. `auth_at < sessions_valid_from`인 세션이 거부된다. **미들웨어가 리소스 단위 판정을 하지 않는다**(게시판 슬러그 파싱 없음)를 코드 리뷰 항목으로 명시 |
+| W1-23 | 트리 게이트 + rate limit 미들웨어 (D15 4.1 [4]) **(완료 — `internal/app/middleware_gate.go`)** | W1-10, W1-22 | `internal/app` | `/admin/*` 미인증 요청이 P-101로 이동한다. 인증됐으나 `admin.access` 미보유는 403. `/admin/*` IP당 60회/분 초과가 429다 |
 | W1-24 | 라우트 등록 헬퍼 + 부팅 자체 점검 (D15 4.4) | W1-04, W1-23 | `internal/app` | `mux.HandleFunc` 직접 호출이 코드에 없다. 부팅 시 5종 점검이 돌고 **하나라도 어긋나면 기동 중단**한다: ① 라우트 권한 키가 `permissions`에 실재 ② 미사용 권한 경고 ③ 화면 유형이 SC-1~8 중 하나 ④ SC-5·SC-6인데 GET이면 실패 ⑤ 라우트 테이블과 D11 인벤토리 대조. 각 점검에 위반을 주입해 실제로 잡히는지 확인한다 |
 
 #### 핸들러 (D22 9절 5)
