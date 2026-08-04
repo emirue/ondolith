@@ -60,8 +60,8 @@
 | W1-08 | 스코프 부여 불변식 함수 **(완료 — `internal/auth/escalation.go` ValidateGrantScope)** | W1-07 | `internal/auth` | `is_scoped=false`인 권한에 `board_id`를 단 부여를 거부한다. **부여 핸들러와 시드가 같은 함수를 거친다**는 것이 호출부 테스트로 확인된다 (D15 2.4) |
 | W1-09 | 권한 상승 방어 규칙 R1~R5 **(완료 — `internal/auth/escalation.go` R1~R6)** | W1-07 | `internal/auth` | R1~R5 각각에 위반 케이스 1건 + 허용 케이스 1건. 자기 자신 역할 변경 거부(R1), 자기 권한 초과 부여 거부(R2), 비-superuser의 superuser 부여 거부(R3), 미보유 권한의 역할 추가 거부(R4), superuser 역할 편집 요청 거부(R5) |
 | W1-10 | rate limit 토큰 버킷 (메모리) **(완료 — `internal/auth/ratelimit.go`)** | — | `internal/auth` | D15 4.3-2의 임계값 6종이 설정값으로 주입된다. 임계 초과 시 거부하고 시간 경과 후 회복하는 것을 가짜 시계로 검증한다. `-race`로 동시 접근 회귀 테스트를 남긴다 |
-| W1-11 | 입력 검증 규칙 + 페이지 상태 전이 | — | `internal/content` | 이메일 소문자화·형식, 비밀번호 최소 규칙, 슬러그 허용 문자·예약어를 표 테스트로 검증. `draft ⇄ published` 외의 전이를 거부한다 |
-| W1-12 | 메뉴 트리 조립·권한 필터 | W1-07, W1-11 | `internal/content` | `parent_id` 평면 목록에서 트리를 만들고, 권한 없는 항목이 트리에서 제거되며, **자식이 제거돼도 부모가 고아 노드로 남지 않는다**. 순환 `parent_id`를 입력하면 오류를 반환한다 (무한 루프 금지) |
+| W1-11 | 입력 검증 규칙 + 페이지 상태 전이 **(완료 — `internal/content/validate.go`)** | — | `internal/content` | 이메일 소문자화·형식, 비밀번호 최소 규칙, 슬러그 허용 문자·예약어를 표 테스트로 검증. `draft ⇄ published` 외의 전이를 거부한다 |
+| W1-12 | 메뉴 트리 조립·권한 필터 **(완료 — `internal/content/menu.go`)** | W1-07, W1-11 | `internal/content` | `parent_id` 평면 목록에서 트리를 만들고, 권한 없는 항목이 트리에서 제거되며, **자식이 제거돼도 부모가 고아 노드로 남지 않는다**. 순환 `parent_id`를 입력하면 오류를 반환한다 (무한 루프 금지) |
 
 #### 저장소 (D22 9절 3)
 
