@@ -141,14 +141,14 @@ func TestDevModeRereadsAndProductionCaches(t *testing.T) {
 // leaves every page unrenderable, so A-202 refuses before switching.
 func TestValidateThemeDirRequiresBase(t *testing.T) {
 	dir := t.TempDir()
-	if err := ValidateThemeDir(dir); !errors.Is(err, ErrNoBase) {
+	if _, err := ValidateThemeDir(dir, "1.0.0"); !errors.Is(err, ErrNoBase) {
 		t.Errorf("base.html 없는 테마가 통과했다: %v", err)
 	}
 	write(t, dir, "base.html", "x")
-	if err := ValidateThemeDir(dir); err != nil {
+	if _, err := ValidateThemeDir(dir, "1.0.0"); err != nil {
 		t.Errorf("base.html 이 있는데 거부됐다: %v", err)
 	}
-	if err := ValidateThemeDir(""); err != nil {
+	if _, err := ValidateThemeDir("", "1.0.0"); err != nil {
 		t.Errorf("내장 전용이 거부됐다: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/emirue/ondolith/internal/auth"
@@ -31,6 +32,14 @@ type Deps struct {
 	// the thing that is unwell.
 	Version    string
 	Migrations func(context.Context) (applied []string, pending int, err error)
+	// ValidateTheme checks a candidate theme directory before A-202 switches to
+	// it, returning a warning for a check it could not make. Injected so admin
+	// does not import theme.
+	ValidateTheme func(name string) (warn string, err error)
+	// SendReset delivers a forced-reset link (A-402). Injected and fire-and-
+	// forget: mail delivery must not decide whether an account operation
+	// succeeded, and the raw token is never logged or rendered.
+	SendReset func(email, token string)
 }
 
 // require is the per-handler permission check.
@@ -248,38 +257,210 @@ func (d *Deps) PageDelete(w http.ResponseWriter, r *http.Request) {
 
 // ---- A-402 사용자 -------------------------------------------------------------
 
+// userPageSize bounds A-401. An unbounded list is one seed script away from
+// loading every account into memory to draw one screen.
+const userPageSize = 50
+
+// UserList is A-401. It needs user.view, which A-402 does not imply — the two
+// permissions exist separately in D15 2.2 and nothing here may join them.
+func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "user.view"); !ok {
+		return
+	}
+	page := 0
+	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
+		page = n
+	}
+	users, err := d.Auth.ListUsers(r.Context(), userPageSize, page*userPageSize)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/users.html", http.StatusOK, map[string]any{
+		"Users": users, "Page": page,
+	})
+}
+
+// UserDetail is the A-402 read. D19 puts it behind user.update, not user.view:
+// user.view is the list (A-401), and the two are separate rows in D15 2.2.
+func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "user.update"); !ok {
+		return
+	}
+	u, err := d.Auth.FindUserByID(r.Context(), r.PathValue("id"))
+	if errors.Is(err, auth.ErrNoUser) {
+		http.Error(w, "사용자를 찾을 수 없습니다.", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// The hash is not in User, and nothing here puts it back: D19 lists it
+	// under "받지 않는 필드" in both directions.
+	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u})
+}
+
+// guardAccountOp is the shared front door for the destructive A-402 actions —
+// deactivate, delete and forced password reset.
+//
+// All three are the last step of an account takeover, so D19 puts the same
+// three refusals on each: re-authentication (D15 5.3-1), R6 (only a superuser
+// may operate on a superuser holder), and no self-targeting. Writing them once
+// is what keeps a later fourth action from getting two of the three.
+func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, target string) bool {
+	if c.NeedsReauth() {
+		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
+		return false
+	}
+	if target == c.UserID() {
+		// Locking yourself out, or deleting the actor the log points at.
+		http.Error(w, "자기 계정에는 이 작업을 할 수 없습니다.", http.StatusForbidden)
+		return false
+	}
+	holds, err := d.Auth.HoldsSuperuser(r.Context(), target)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return false
+	}
+	actor := auth.Actor{UserID: c.UserID(), Perms: auth.NewPermissions(c.IsSuperuser(), nil)}
+	if err := auth.CanOperateOnAccount(actor, holds); err != nil {
+		Forbidden(w)
+		return false
+	}
+	return true
+}
+
 // UserDeactivate is the destructive account operation R6 and 5.2 both guard.
 func (d *Deps) UserDeactivate(w http.ResponseWriter, r *http.Request) {
 	c, ok := d.require(w, r, "user.update")
 	if !ok {
 		return
 	}
-	// D15 5.3-1: destructive, so the password is re-confirmed. The session
-	// being open is not the same as the operator being present.
-	if c.NeedsReauth() {
-		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
-		return
-	}
 	target := r.PathValue("id")
-
-	// R6: only a superuser may switch off a superuser holder. Without it R3 is
-	// theatre — the role survives while its holder is turned off.
-	holds, err := d.Auth.HoldsSuperuser(r.Context(), target)
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if !d.guardAccountOp(w, r, c, target) {
 		return
 	}
-	actor := auth.Actor{UserID: c.UserID(), Perms: auth.NewPermissions(c.IsSuperuser(), nil)}
-	if err := auth.CanOperateOnAccount(actor, holds); err != nil {
-		Forbidden(w)
-		return
-	}
-
 	// 5.2: the last superuser cannot be switched off, and two administrators
 	// doing it at once must not both succeed. The store serialises.
 	if err := d.Auth.SetActive(r.Context(), target, false); err != nil {
 		if errors.Is(err, auth.ErrLastSuperuser) {
 			http.Error(w, "마지막 관리자는 비활성화할 수 없습니다.", http.StatusConflict)
+			return
+		}
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+}
+
+// UserDelete needs user.delete — reaching A-402 with user.update is not enough,
+// because D19 gives each action its own row.
+func (d *Deps) UserDelete(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "user.delete")
+	if !ok {
+		return
+	}
+	target := r.PathValue("id")
+	if !d.guardAccountOp(w, r, c, target) {
+		return
+	}
+	err := d.Auth.DeleteUser(r.Context(), target)
+	switch {
+	case errors.Is(err, auth.ErrLastSuperuser):
+		http.Error(w, "마지막 관리자는 삭제할 수 없습니다.", http.StatusConflict)
+	case errors.Is(err, auth.ErrUserInUse):
+		// FR-212: an order needs its buyer to exist for settlement and disputes.
+		// Deactivation is the answer, which is why D15 5.3 makes it the default.
+		http.Error(w, "기록이 남아 있어 삭제할 수 없습니다. 비활성화하세요.", http.StatusConflict)
+	case errors.Is(err, auth.ErrNoUser):
+		http.Error(w, "사용자를 찾을 수 없습니다.", http.StatusNotFound)
+	case err != nil:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	default:
+		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+	}
+}
+
+// UserResetPassword forces a reset. It does NOT set a password: D19 keeps
+// "타인의 비밀번호를 설정하지 않는다" and offers only the forced reset, so an
+// administrator never learns a credential they could then use as that user.
+//
+// An inactive account is a legal target — it is part of coming back (D19).
+func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "user.reset_password")
+	if !ok {
+		return
+	}
+	target := r.PathValue("id")
+	if !d.guardAccountOp(w, r, c, target) {
+		return
+	}
+	ctx := r.Context()
+	u, err := d.Auth.FindUserByID(ctx, target)
+	if errors.Is(err, auth.ErrNoUser) {
+		http.Error(w, "사용자를 찾을 수 없습니다.", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// Sessions end first. Issuing the token first would leave a window where
+	// the takeover being undone is still logged in (D15 5.4).
+	if err := d.Auth.InvalidateSessions(ctx, target); err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	raw, err := d.Auth.IssueToken(ctx, auth.KindPasswordReset, target)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	if d.SendReset != nil {
+		d.SendReset(u.Email, raw)
+	}
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+}
+
+// UserCreate needs user.create, which is again its own permission (D19).
+func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "user.create"); !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	email, err := content.ValidateEmail(r.PostFormValue("email"))
+	if err != nil {
+		d.Render(w, r, "admin/user-detail.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": err.Error()})
+		return
+	}
+	password := r.PostFormValue("password")
+	if err := content.ValidatePassword(password); err != nil {
+		d.Render(w, r, "admin/user-detail.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": err.Error()})
+		return
+	}
+	name := strings.TrimSpace(r.PostFormValue("display_name"))
+	if n := len([]rune(name)); n < 1 || n > 50 {
+		d.Render(w, r, "admin/user-detail.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": "표시 이름은 1~50자입니다."})
+		return
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// No role is assigned here. Handing user.create the ability to pick a role
+	// would make it a way to mint an administrator (A-405 owns that).
+	if _, err := d.Auth.CreateUser(r.Context(), email, hash, name); err != nil {
+		if errors.Is(err, auth.ErrEmailTaken) {
+			d.Render(w, r, "admin/user-detail.html", http.StatusConflict,
+				map[string]any{"Error": "이미 사용 중인 이메일입니다."})
 			return
 		}
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)

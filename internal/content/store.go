@@ -212,6 +212,26 @@ func (s *Store) CreateMenuItem(ctx context.Context, m MenuItem) (string, error) 
 	return id, err
 }
 
+// UpdateMenuItem edits one row, re-parenting included.
+//
+// This is the operation that can build a cycle: pointing an entry at one of its
+// own descendants is legal for the row and for the foreign key, and only shows
+// up when the tree is assembled. The caller checks first (A-204) — the store
+// writes what it is told.
+func (s *Store) UpdateMenuItem(ctx context.Context, id string, m MenuItem) error {
+	const q = `
+		UPDATE menus SET title = $2, url = $3, parent_id = nullif($4, '')::uuid, sort_order = $5
+		WHERE id = $1`
+	tag, err := s.pool.Exec(ctx, q, id, m.Title, m.URL, m.ParentID, m.Sort)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) DeleteMenuItem(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM menus WHERE id = $1`, id)
 	if err != nil {

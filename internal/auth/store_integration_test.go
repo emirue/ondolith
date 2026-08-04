@@ -316,3 +316,61 @@ func TestConcurrentDeactivationLeavesOneSuperuser(t *testing.T) {
 		}
 	}
 }
+
+// FR-704 / D15 5.2: two administrators deleting the last two superuser holders
+// at the same moment must not both succeed.
+//
+// Deletion and deactivation reach the same end state — a site with nobody who
+// can let anyone back in — so the lock has to cover both. One pair races too
+// rarely to be evidence; 30 rounds fail on the first one when the lock is gone.
+func TestConcurrentDeletionCannotEmptyTheSuperuserRole(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+
+	for round := range 30 {
+		if _, err := pool.Exec(ctx, `DELETE FROM user_roles`); err != nil {
+			t.Fatal(err)
+		}
+		a, err := s.CreateUser(ctx, fmt.Sprintf("a%d@example.com", round), "h", "A")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := s.CreateUser(ctx, fmt.Sprintf("b%d@example.com", round), "h", "B")
+		if err != nil {
+			t.Fatal(err)
+		}
+		grantRole(t, pool, a, "admin")
+		grantRole(t, pool, b, "admin")
+
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		for _, pair := range [][2]string{{a, b}, {b, a}} {
+			go func(victim string) {
+				<-start
+				errs <- s.DeleteUser(ctx, victim)
+			}(pair[0])
+		}
+		close(start)
+		var failures int
+		for range 2 {
+			if err := <-errs; err != nil {
+				if !errors.Is(err, ErrLastSuperuser) {
+					t.Fatalf("round %d: 예상 밖 오류: %v", round, err)
+				}
+				failures++
+			}
+		}
+
+		var left int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM users u
+			JOIN user_roles ur ON ur.user_id = u.id
+			JOIN roles r ON r.id = ur.role_id
+			WHERE r.is_superuser AND u.is_active`).Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left == 0 {
+			t.Fatalf("round %d: 두 요청이 모두 성공해 관리자가 0명이 됐다 (거부 %d건)", round, failures)
+		}
+	}
+}

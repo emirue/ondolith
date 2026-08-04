@@ -244,13 +244,22 @@ func (l *Loader) HasBuiltin(name string) bool {
 }
 
 // ValidateThemeDir checks a candidate directory before it is activated.
-// base.html is the one required file (D17): everything else falls back.
-func ValidateThemeDir(dir string) error {
+//
+// base.html is the one required file (D17): everything else falls back. The
+// `requires` floor is checked here too, because activating a theme the binary
+// is too old for breaks every page — including the screen that would switch
+// back. The returned warning covers the cases where the version comparison
+// cannot be made; it is advice, not a refusal.
+func ValidateThemeDir(dir, current string) (warn string, err error) {
 	if dir == "" {
-		return nil // built-in only
+		return "", nil // built-in only
 	}
 	if _, err := os.Stat(filepath.Join(dir, "base.html")); err != nil {
-		return ErrNoBase
+		return "", ErrNoBase
 	}
-	return nil
+	m, err := ReadManifest(dir)
+	if err != nil {
+		return "", err
+	}
+	return CheckRequires(m.Requires, current)
 }

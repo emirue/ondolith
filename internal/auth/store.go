@@ -14,6 +14,7 @@ var (
 	ErrNoUser        = errors.New("auth: 사용자가 없습니다")
 	ErrEmailTaken    = errors.New("auth: 이미 사용 중인 이메일입니다")
 	ErrLastSuperuser = errors.New("auth: 마지막 관리자는 비활성·삭제할 수 없습니다")
+	ErrUserInUse     = errors.New("auth: 다른 기록이 이 사용자를 참조하고 있습니다")
 )
 
 // Store is the database side of authentication. The judgement lives in
@@ -134,6 +135,50 @@ func (s *Store) FindUserByID(ctx context.Context, id string) (*User, error) {
 	return &u, err
 }
 
+// UserRow is one line of A-401. It is deliberately narrower than User: a list
+// screen has no use for the session cutoff, and `password_hash` has no business
+// leaving the database at all (D19 A-401).
+type UserRow struct {
+	ID          string
+	Email       string
+	DisplayName string
+	IsActive    bool
+	Verified    bool
+	Roles       []string
+}
+
+// ListUsers reads one page of the user list.
+//
+// Roles arrive in the same query rather than one lookup per row: the list is
+// the screen most likely to grow, and a per-row query turns it into N+1 the
+// moment it does.
+func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]UserRow, error) {
+	const q = `
+		SELECT u.id, u.email, u.display_name, u.is_active,
+		       u.email_verified_at IS NOT NULL,
+		       coalesce(array_agg(r.key ORDER BY r.key) FILTER (WHERE r.key IS NOT NULL), '{}')
+		FROM users u
+		LEFT JOIN user_roles ur ON ur.user_id = u.id
+		LEFT JOIN roles r ON r.id = ur.role_id
+		GROUP BY u.id
+		ORDER BY u.created_at DESC, u.id
+		LIMIT $1 OFFSET $2`
+	rows, err := s.pool.Query(ctx, q, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserRow
+	for rows.Next() {
+		var u UserRow
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.IsActive, &u.Verified, &u.Roles); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 // CreateUser inserts and lets the database decide on duplicates. Checking first
 // and inserting after lets two simultaneous signups both pass the check; the
 // UNIQUE index is the only thing that actually serialises them.
@@ -158,20 +203,14 @@ func (s *Store) InvalidateSessions(ctx context.Context, userID string) error {
 	return err
 }
 
-// SetActive deactivates or reactivates an account, refusing to switch off the
-// last superuser holder.
+// withLastSuperuserGuard runs apply in a transaction that has every active
+// superuser holder locked FOR UPDATE, refusing when userID is the last one.
 //
-// The count and the update run in ONE transaction with the holders locked
-// FOR UPDATE. Without the lock two administrators deactivating each other both
-// read "2 remaining", both proceed, and the site is left with nobody who can
-// let anyone back in (D15 5.2).
-func (s *Store) SetActive(ctx context.Context, userID string, active bool) error {
-	if active {
-		_, err := s.pool.Exec(ctx,
-			`UPDATE users SET is_active = true, updated_at = now() WHERE id = $1`, userID)
-		return err
-	}
-
+// Deactivation and deletion share it deliberately. Without the lock two
+// administrators removing each other both read "2 remaining", both proceed, and
+// the site is left with nobody who can let anyone back in (D15 5.2) — and a
+// second copy of this logic is exactly where the lock goes missing.
+func (s *Store) withLastSuperuserGuard(ctx context.Context, userID string, apply func(pgx.Tx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -214,11 +253,49 @@ func (s *Store) SetActive(ctx context.Context, userID string, active bool) error
 		return ErrLastSuperuser
 	}
 
-	if _, err := tx.Exec(ctx,
-		`UPDATE users SET is_active = false, updated_at = now() WHERE id = $1`, userID); err != nil {
+	if err := apply(tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// SetActive deactivates or reactivates an account, refusing to switch off the
+// last superuser holder.
+func (s *Store) SetActive(ctx context.Context, userID string, active bool) error {
+	if active {
+		_, err := s.pool.Exec(ctx,
+			`UPDATE users SET is_active = true, updated_at = now() WHERE id = $1`, userID)
+		return err
+	}
+	return s.withLastSuperuserGuard(ctx, userID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`UPDATE users SET is_active = false, updated_at = now() WHERE id = $1`, userID)
+		return err
+	})
+}
+
+// DeleteUser removes an account, under the same last-superuser lock as
+// deactivation: the two operations reach the same end state, so guarding only
+// one of them guards neither (D19 A-402).
+//
+// A row another table still references (orders are RESTRICT, D30 3-1) comes
+// back as ErrUserInUse rather than a 500: the refusal is the designed
+// behaviour, not a failure.
+func (s *Store) DeleteUser(ctx context.Context, userID string) error {
+	return s.withLastSuperuserGuard(ctx, userID, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return ErrUserInUse
+		}
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNoUser
+		}
+		return nil
+	})
 }
 
 // UpdateDisplayName changes the one profile field P-108 accepts.
@@ -252,4 +329,81 @@ func (s *Store) HoldsSuperuser(ctx context.Context, userID string) (bool, error)
 		    WHERE ur.user_id = $1 AND r.is_superuser
 		)`, userID).Scan(&yes)
 	return yes, err
+}
+
+// ErrNoRole reports an unknown role key.
+var ErrNoRole = errors.New("auth: 역할이 없습니다")
+
+// Roles lists every role for A-403.
+func (s *Store) Roles(ctx context.Context) ([]Role, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.key, r.name, r.is_superuser,
+		       coalesce(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), '{}')
+		FROM roles r
+		LEFT JOIN role_permissions rp ON rp.role_id = r.id
+		LEFT JOIN permissions p       ON p.id = rp.permission_id
+		GROUP BY r.id, r.key, r.name, r.is_superuser
+		ORDER BY r.key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Role
+	for rows.Next() {
+		var r Role
+		var name string
+		if err := rows.Scan(&r.Key, &name, &r.Superuser, &r.Permissions); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RoleByKey loads one role with its permissions, which R2 and R5 both need.
+func (s *Store) RoleByKey(ctx context.Context, key string) (Role, error) {
+	var r Role
+	err := s.pool.QueryRow(ctx, `
+		SELECT r.key, r.is_superuser,
+		       coalesce(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), '{}')
+		FROM roles r
+		LEFT JOIN role_permissions rp ON rp.role_id = r.id
+		LEFT JOIN permissions p       ON p.id = rp.permission_id
+		WHERE r.key = $1
+		GROUP BY r.id, r.key, r.is_superuser`, key).
+		Scan(&r.Key, &r.Superuser, &r.Permissions)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Role{}, ErrNoRole
+	}
+	return r, err
+}
+
+// PermissionIsScoped reports whether a permission may carry a board_id.
+func (s *Store) PermissionIsScoped(ctx context.Context, key string) (bool, error) {
+	var scoped bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT is_scoped FROM permissions WHERE key = $1`, key).Scan(&scoped)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, errors.New("auth: 권한이 없습니다: " + key)
+	}
+	return scoped, err
+}
+
+// GrantPermission adds a permission to a role, ignoring a repeat.
+func (s *Store) GrantPermission(ctx context.Context, roleKey, permKey string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO role_permissions (role_id, permission_id)
+		SELECT r.id, p.id FROM roles r, permissions p
+		WHERE r.key = $1 AND p.key = $2
+		ON CONFLICT ON CONSTRAINT role_permissions_uniq DO NOTHING`, roleKey, permKey)
+	return err
+}
+
+// AssignRole gives a user a role, ignoring a repeat.
+func (s *Store) AssignRole(ctx context.Context, userID, roleKey string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id)
+		SELECT $1, r.id FROM roles r WHERE r.key = $2 AND r.is_assignable
+		ON CONFLICT ON CONSTRAINT user_roles_uniq DO NOTHING`, userID, roleKey)
+	return err
 }
