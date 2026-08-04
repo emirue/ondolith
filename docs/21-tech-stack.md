@@ -118,6 +118,7 @@ curl -s https://api.osv.dev/v1/query -d '{"package":{"name":"<module>","ecosyste
 | 필요한 것 | 용도 |
 |---|---|
 | Go (1절의 버전 이상) | 빌드·테스트 |
+| htmx 2.0.9 | 프런트 인터랙션. **CDN 아닌 내장** (`internal/theme/builtin/static/js/`). 버전·sha256 은 같은 디렉터리 `htmx.VERSION`. 근거 [DEC-2.2](../.ai/DECISIONS.md) |
 | PostgreSQL 18 | `make test-integration`이 **`ONDOLITH_TEST_DSN`이 없으면 Docker로 직접 띄운다** (`scripts/testdb.sh`, `postgres:18-alpine`). 컨테이너는 다음 실행을 위해 남으며 `make test-db-down`으로 지운다. DSN을 명시하면 그쪽이 우선한다 |
 | `jq` | `gofmt` 훅이 후크 페이로드를 읽는다 |
 | `perl` | `checkdocs.sh`의 패턴 추출 |

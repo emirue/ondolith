@@ -32,7 +32,7 @@ MySQL 동시 지원은 배제됐다. JSONB 없이 커스텀 필드를 재설계�
 | 세션 | `alexedwards/scs/v2` + `scs/pgxstore` | v2.9.0 / v0.0.0-20251002162104 |
 | 마이그레이션 | `pressly/goose/v3` | v3.27.3 |
 | DB 드라이버 | `jackc/pgx/v5` (+ `pgx/v5/stdlib` 브리지) | v5.10.0 |
-| 인터랙션 | htmx | (CDN/embed, Phase 1에서 확정) |
+| 인터랙션 | htmx **2.0.9 내장** | `internal/theme/builtin/static/js/`. CDN 아님 — DEC-2.2 |
 | 소셜 로그인 | `markbates/goth` | v1.82.0 (Phase 1) |
 | 정적 자산 | `embed.FS` | stdlib |
 
@@ -65,6 +65,24 @@ goose에는 `stdlib.OpenDBFromPool(pool)`로 `*sql.DB`를 만들어 넘긴다. �
 알려진 트레이드오프: `Sec-Fetch-Site`와 `Origin`이 **둘 다 없는** 요청은 통과된다
 (Go 팀이 명시한 설계 — 2023년 이후 모든 브라우저가 `Sec-Fetch-Site`를 보낸다).
 비브라우저 클라이언트에는 CSRF 개념이 적용되지 않으므로 수용 가능하다.
+
+---
+
+### DEC-2.2 htmx: CDN 아닌 **내장** (W1-21)
+
+- **버전 2.0.9** (2026-04-20 릴리즈). 최신 태그는 `v4.0.0-beta5`지만 베타 라인이라
+  제품에 쓰지 않는다. 공식 릴리즈 목록을 조회해 확인했다 (2026-08-04, [M1](MISTAKES.md))
+- 위치: `internal/theme/builtin/static/js/htmx.min.js`, `embed.FS`로 바이너리에 포함
+- sha256 과 출처는 같은 디렉터리의 `htmx.VERSION` 에 적는다. 갱신은 두 파일을
+  같은 커밋에서 고친다
+
+**CDN을 쓰지 않는 이유는 단일 바이너리 원칙이다** ([D00](../docs/00-overview.md)):
+"바이너리 + PostgreSQL 외에 설치할 것이 없다". CDN은 런타임 외부 의존이라
+사내망·오프라인 설치처에서 화면이 조용히 죽고, 그런 설치처가 이 제품의 대상이다.
+부수 효과로 CSP가 단순해지고 제3자 스크립트 공급망이 사라진다.
+
+대가: htmx 갱신이 릴리즈에 묶인다. 보안 패치가 나오면 우리 릴리즈를 내야 한다 —
+`make vuln` 대상이 아니므로 릴리즈 전 점검 항목에 넣는다.
 
 ---
 
@@ -128,7 +146,6 @@ operation log 모델 등은 참고하거나 발췌해도 된다 (저작권 고�
 |---|---|---|
 | 토스페이먼츠 `go-react` 샘플 유지 상태 | Phase 3 | 미확인 |
 | 토스페이먼츠 API 스펙 재확인 (승인 엔드포인트/10분 만료) | Phase 3 | 요청서 기준, 재확인 필요 |
-| htmx 최신 버전 및 배포 방식 | Phase 1 | 미확인 |
 | goth 프로바이더 설정 API | Phase 1 | 미확인 |
 
 `github.com/emirue/ondolith` 사용으로 GitHub 조직명 가용성 확인은 불필요해졌다.
