@@ -927,6 +927,41 @@ else
 	fi
 fi
 
+# --- 19d. D20's package list matches internal/ ------------------------------
+# W1-02 was written as "재확인" — go look and compare. A one-time look is worth
+# nothing the next time a package is added, and the package list is what someone
+# reads to decide where new code goes. So the comparison runs every build.
+#
+# Only the shipped block counts. D20 also lists "Phase 1 이후 추가될 자리"
+# (auth/, theme/, content/ ...), which are deliberately absent from the tree.
+begin
+ARCH=docs/20-architecture.md
+if [ ! -f "$ARCH" ]; then
+	err "아키텍처 문서가 없다: $ARCH"
+else
+	perl -nle 'if (/^## 패키지 구조/) { $i = 1; next }
+		if ($i && /^Phase 1 이후/) { $i = 0 }
+		next unless $i;
+		print $1 if /^\s{2}([a-z][a-z0-9_]*)\/\s/' "$ARCH" | sort -u >/tmp/cd_pkg_doc
+
+	# A directory is a package when it holds a non-test .go file. templates/
+	# dirs hold embedded assets and no Go, so they are not packages and must not
+	# be listed.
+	find internal -name '*.go' -not -name '*_test.go' 2>/dev/null |
+		sed 's|^internal/||; s|/[^/]*$||' | grep -v '/' | sort -u >/tmp/cd_pkg_real
+
+	if [ ! -s /tmp/cd_pkg_doc ] || [ ! -s /tmp/cd_pkg_real ]; then
+		err "$ARCH 또는 internal/ 에서 패키지를 하나도 읽지 못했다 (검사가 헛돌았다)"
+	fi
+	for p in $(comm -23 /tmp/cd_pkg_doc /tmp/cd_pkg_real); do
+		err "$ARCH 이 없는 패키지를 현재 구조로 적었다: internal/$p (「Phase 1 이후」 블록으로 옮길 것)"
+	done
+	for p in $(comm -13 /tmp/cd_pkg_doc /tmp/cd_pkg_real); do
+		err "internal/$p 가 $ARCH 「패키지 구조」에 없다 — 새 코드를 어디 둘지 문서가 답하지 못한다"
+	done
+	done_ "$ARCH 패키지 구조 $(wc -l </tmp/cd_pkg_real | tr -d ' ') 개가 internal/ 과 일치"
+fi
+
 # --- 20. D80's planning-completeness table counts match the documents -------
 # That table is what anyone asking "얼마나 됐나" reads first, and every number in
 # it is copied by hand from another document. The 2026-08-02 version was stale

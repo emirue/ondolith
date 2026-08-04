@@ -77,7 +77,7 @@
 - [x] 이미 계정이 있는 DB에 재설치 시도 → 거부 (FR-108)
 - [x] `ondolith -version`
 - [x] 위 항목이 `make test-integration`으로 저장소에 남아 재현 가능하다
-- [ ] 문서 [D20](20-architecture.md) 구조와 코드가 일치 — Phase 1 착수 시 재확인
+- [x] 문서 [D20](20-architecture.md) 구조와 코드가 일치 — **`make check`가 매번 대조한다** (W1-02)
 
 ---
 

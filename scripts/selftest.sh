@@ -288,6 +288,15 @@ inject "요약표 합계가 실제 작업 수와 다름" docs/81-work-breakdown.
 inject "요약표 Phase 작업 수가 실제와 다름" docs/81-work-breakdown.md \
 	'perl -pi -e "s/^(\\| Phase 3 — 커머스 \\| )(\\d+)( \\|)/qq(\$1) . (\$2-1) . qq(\$3)/e" docs/81-work-breakdown.md' \
 	'요약표 W3 작업 수'
+# D20's package list is where someone reads to decide where new code goes.
+# W1-02 asked for a one-time re-check; a one-time look is worth nothing the next
+# time a package appears, so both directions run every build.
+inject "D20 이 없는 패키지를 현재 구조로 적음" docs/20-architecture.md \
+	'perl -pi -e "s|^(  migrations/)|  ghostpkg/           없는 패키지\\n\$1|" docs/20-architecture.md' \
+	'없는 패키지를 현재 구조로 적었다: internal/ghostpkg'
+inject_new "새 패키지가 D20 에 없음" internal/ghostpkg/x.go \
+	'mkdir -p internal/ghostpkg && printf "package ghostpkg\\n" > internal/ghostpkg/x.go' \
+	'internal/ghostpkg 가 docs/20-architecture.md 「패키지 구조」에 없다'
 inject "화면에 작업 항목이 없음" docs/81-work-breakdown.md \
 	'perl -pi -e "s/\\(P-511~P-513\\)/(P-511~P-512)/" docs/81-work-breakdown.md' \
 	'작업 항목이 없는 화면: P-513'
