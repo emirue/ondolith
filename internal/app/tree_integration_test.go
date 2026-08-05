@@ -559,7 +559,7 @@ func TestAdminMenuOnlyPointsAtRegisteredRoutes(t *testing.T) {
 	srv, pool := liveSite(t)
 	c, _ := adminSession(t, srv, pool)
 
-	for _, p := range admin.NavPaths() {
+	for _, p := range admin.NavPaths(false) {
 		code, _ := mustGet(t, c, srv.URL+p)
 		if code == http.StatusNotFound {
 			t.Errorf("메뉴 항목 %s 가 404 다", p)

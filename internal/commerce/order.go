@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -528,4 +529,123 @@ func (s *Store) Shipments(ctx context.Context, orderID string) ([]Shipment, erro
 		out = append(out, sh)
 	}
 	return out, rows.Err()
+}
+
+var ErrShipmentExists = errors.New("commerce: 이미 최초 발송이 기록된 주문입니다")
+
+// AllStatuses is the full vocabulary, for A-504's filter.
+//
+// **드롭다운이 아니다.** A-506 의 선택지는 Next() 가 낸다 — 이것은 목록을
+// 거르는 필터이고, 필터에 없는 상태를 고르는 것은 아무것도 못 찾는 일이지
+// 규칙 위반이 아니다.
+func AllStatuses() []Status {
+	out := make([]Status, 0, len(transitions))
+	for s := range transitions {
+		out = append(out, s)
+	}
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j] < out[j-1]; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
+// AdminOrders is A-504's read. status "" means every order.
+func (s *Store) AdminOrders(ctx context.Context, status string, page int) ([]OrderDetail, error) {
+	if status != "" && !Known(Status(status)) {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownStatus, status)
+	}
+	limit, offset := ProductQuery{Page: page}.clamp()
+	rows, err := s.pool.Query(ctx, `
+		SELECT order_no, status, total_amount, orderer_email, created_at
+		FROM orders
+		WHERE ($1::text IS NULL OR status = $1)
+		ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, nullable(status), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrderDetail
+	for rows.Next() {
+		var o OrderDetail
+		var st string
+		if err := rows.Scan(&o.OrderNo, &st, &o.Total, &o.OrdererEmail, &o.CreatedAt); err != nil {
+			return nil, err
+		}
+		o.Status = Status(st)
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+// TransitionOrder is A-506's write: the state machine decides, then the row moves.
+//
+// 잠그고 읽는다. 두 관리자가 동시에 서로 다른 전이를 하면 하나만 성공해야
+// 하는데 (D14 「동시성」), 잠그지 않으면 둘 다 같은 현재 상태를 읽고 각자
+// 합법인 전이를 해서 나중 것이 먼저 것을 덮는다.
+func (s *Store) TransitionOrder(ctx context.Context, orderNo string, to Status, actor Actor) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var id, from string
+	err = tx.QueryRow(ctx,
+		`SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE`, orderNo).Scan(&id, &from)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := CanTransition(Status(from), to, actor); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`, id, string(to)); err != nil {
+		return err
+	}
+	// 배송완료 전이는 시각을 남긴다. A-512 의 반품 기간·자동 확정이 전부 이
+	// 시각 기준이고, operation_logs 는 감사 흔적이지 운영 데이터가 아니다 (D30).
+	if to == StatusDelivered {
+		if _, err := tx.Exec(ctx,
+			`UPDATE orders SET delivered_at = now() WHERE id = $1 AND delivered_at IS NULL`,
+			id); err != nil {
+			return err
+		}
+	}
+	if to == StatusConfirmed {
+		if _, err := tx.Exec(ctx,
+			`UPDATE orders SET confirmed_at = now() WHERE id = $1 AND confirmed_at IS NULL`,
+			id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// RecordShipment is A-510's write — the first dispatch only.
+//
+// 상태를 함께 옮기지 않는다. 옮기면 `배송준비 → 배송중` 을 일으키는 화면이
+// 둘이 되고, FR-623 이 A-516 에 대해 지적한 것과 같은 문제가 된다.
+func (s *Store) RecordShipment(ctx context.Context, orderNo, carrier, tracking string,
+	at time.Time) error {
+	var orderID string
+	err := s.pool.QueryRow(ctx, `SELECT id FROM orders WHERE order_no = $1`, orderNo).Scan(&orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO shipments (order_id, kind, carrier, tracking_no, shipped_at)
+		VALUES ($1, '최초발송', $2, $3, $4)`, orderID, carrier, tracking, at)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrShipmentExists
+	}
+	return err
 }

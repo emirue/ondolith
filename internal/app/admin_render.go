@@ -28,6 +28,8 @@ var adminFS embed.FS
 type adminRenderer struct {
 	site func() string
 	log  *slog.Logger
+	// shop mirrors FR-710: cms 모드에서는 커머스 메뉴가 없다.
+	shop bool
 	// css is the design system, inlined rather than served at its own path.
 	// A route would need a D11 screen id and a boot-check entry for an asset
 	// that only authenticated administrators ever fetch; one <style> block is
@@ -41,7 +43,7 @@ type adminRenderer struct {
 	cache map[string]*template.Template
 }
 
-func newAdminRenderer(site func() string, theme string, log *slog.Logger) (*adminRenderer, error) {
+func newAdminRenderer(site func() string, theme string, shop bool, log *slog.Logger) (*adminRenderer, error) {
 	b, err := adminFS.ReadFile("templates/admin/admin.css")
 	if err != nil {
 		return nil, err
@@ -49,6 +51,7 @@ func newAdminRenderer(site func() string, theme string, log *slog.Logger) (*admi
 	// The stylesheet is ours, from the embedded FS — not user input. It is
 	// marked CSS so html/template inlines it instead of escaping every brace.
 	return &adminRenderer{
+		shop:  shop,
 		site:  site,
 		log:   log,
 		css:   template.CSS(b),
@@ -95,6 +98,11 @@ var adminScreenTitles = map[string]string{
 	"admin/attachments.html":  "첨부 관리",
 	"admin/oplog.html":        "작업 로그",
 	"admin/theme-upload.html": "테마 업로드",
+	"admin/products.html":     "상품",
+	"admin/categories.html":   "카테고리",
+	"admin/orders.html":       "주문",
+	"admin/order.html":        "주문 상세",
+	"admin/shipping.html":     "송장 입력",
 }
 
 // Render writes one administrator screen.
@@ -111,7 +119,7 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	}
 
 	actor := ActorFrom(r.Context())
-	groups := admin.Nav(actor.Can)
+	groups := admin.Nav(actor.Can, a.shop)
 	view := map[string]any{
 		"Title":      adminScreenTitles[name],
 		"SiteName":   a.site(),

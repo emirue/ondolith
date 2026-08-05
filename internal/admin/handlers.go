@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/emirue/ondolith/internal/auth"
+	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
 )
 
@@ -50,6 +51,9 @@ type Deps struct {
 	OnThemeChange func(name string)
 	// Attachments is A-309's store. Injected because the upload directory is
 	// configuration (NFR-304) and admin must not resolve it.
+	// Commerce is the Phase 3 store. nil 이면 커머스 화면이 등록되지 않은
+	// 것이고 (FR-710), 그 라우트는 애초에 트리에 없다.
+	Commerce    *commerce.Store
 	Attachments *content.Attachments
 	// OpLog records D15 7절's audit entries. Injected so admin does not decide
 	// where the trail lives.

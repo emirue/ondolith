@@ -1,0 +1,19 @@
+{{define "content"}}
+<h1>송장 입력</h1>
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+{{/* 송장 입력은 상태를 옮기지 않는다. 옮기면 `배송준비 → 배송중` 을 일으키는
+     화면이 둘이 되고, FR-623 이 A-516 에 대해 지적한 것과 같은 문제가 된다. */}}
+<form method="post" class="form">
+  <label for="carrier">택배사</label>
+  <input id="carrier" name="carrier" required maxlength="32">
+  <label for="tracking_no">송장번호</label>
+  <input id="tracking_no" name="tracking_no" required maxlength="64">
+  <button type="submit">기록</button>
+</form>
+<ul>
+  {{range .Shipments}}<li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}}</li>{{end}}
+</ul>
+{{end}}
+{{end}}

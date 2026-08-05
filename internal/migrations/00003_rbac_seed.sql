@@ -1,5 +1,12 @@
 -- +goose Up
 
+-- Phase 1 권한과 그 전역 부여.
+--
+-- 이 줄이 형식이다. `make check` 가 시드 파일들에서 Phase 번호를 읽어 D15 2.2
+-- 와 대조할 범위를 정한다 — 범위를 검사기에 적어 두면 다음 Phase 에서 낡고,
+-- 시드가 심은 것에서 유도하면 "문서가 권한을 나중 Phase 로 옮겼다" 를 잡지
+-- 못한다 (그 권한 자신이 범위를 넓혀 버린다).
+--
 -- Roles are data (D15 P2): an installation may add its own. These five are the
 -- ones the code reasons about, so they ship as is_builtin.
 --

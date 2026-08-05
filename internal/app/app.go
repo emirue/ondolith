@@ -184,8 +184,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
 	// five directions share one markup, so switching is a token swap.
+	shopMode := site().Type == "shop"
+	commerceStore := commerce.NewStore(pool)
 	adminUI, err := newAdminRenderer(func() string { return site().Name },
-		setting("admin.theme")["admin.theme"], log)
+		setting("admin.theme")["admin.theme"], shopMode, log)
 	if err != nil {
 		return fail(fmt.Errorf("app: 관리자 스타일: %w", err))
 	}
@@ -196,6 +198,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			return adminCaller{a: ActorFrom(r.Context()), now: time.Now}
 		},
 		Render:      adminUI.Render,
+		Commerce:    commerceStore,
 		Attachments: contentStore.AttachmentsIn(cfg.Uploads()),
 		OpLog:       contentStore.OpLog(),
 		Logger:      log,
@@ -221,7 +224,6 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
 		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore}
 
-	commerceStore := commerce.NewStore(pool)
 	sh := &shopDeps{publicDeps: pub, sm: sessions, store: commerceStore, log: log,
 		limiter: limiter, limits: limits,
 		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
@@ -246,7 +248,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 	// FR-710: 조립 시점에 정한다. site.type 이 shop 이 아니면 커머스 라우트는
 	// 등록되지 않고, 등록되지 않은 것은 404 다.
-	registry := buildTree(pub, lg, acc, bd, ad, sh, site().Type == "shop", static)
+	registry := buildTree(pub, lg, acc, bd, ad, sh, shopMode, static)
 
 	perms, err := authStore.PermissionKeys(ctx)
 	if err != nil {
@@ -257,7 +259,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// criterion asked for. Until it is derived, this compares them: a menu entry
 	// with no route is a link that 404s, and it looks exactly like a link the
 	// caller lacks permission for — nobody reports it.
-	for _, p := range admin.NavPaths() {
+	for _, p := range admin.NavPaths(shopMode) {
 		if !registry.HasPath(p) {
 			res0 := "관리자 메뉴가 등록되지 않은 경로를 가리킨다: " + p
 			return fail(fmt.Errorf("app: %s", res0))

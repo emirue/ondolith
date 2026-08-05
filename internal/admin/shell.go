@@ -19,6 +19,10 @@ type NavItem struct {
 	Group      string
 	Permission string
 	Order      int
+	// Shop marks a commerce screen. cms 모드에서는 라우트가 등록되지 않으므로
+	// 메뉴에도 없어야 한다 — 부팅 점검이 "메뉴가 없는 경로를 가리킨다" 로
+	// 잡는다.
+	Shop bool
 }
 
 // nav is the administrator menu.
@@ -50,6 +54,12 @@ var nav = []NavItem{
 	{Screen: "A-205", Title: "메일", Path: "/admin/settings/mail", Group: "설정", Permission: "settings.update", Order: 60},
 	{Screen: "A-202", Title: "테마", Path: "/admin/themes", Group: "설정", Permission: "theme.view", Order: 80},
 	{Screen: "A-601", Title: "작업 로그", Path: "/admin/oplog", Group: "설정", Permission: "log.view", Order: 85},
+	// 커머스 항목. Shop=true 라 site.type=cms 에서는 메뉴에도 트리에도 없다
+	// (FR-710) — 등록되지 않은 경로를 가리키는 메뉴는 404 링크이고, 그것은
+	// 권한이 없어 안 열리는 링크와 똑같이 보인다.
+	{Screen: "A-501", Title: "상품", Path: "/admin/products", Group: "커머스", Permission: "product.view", Order: 22, Shop: true},
+	{Screen: "A-509", Title: "카테고리", Path: "/admin/categories", Group: "커머스", Permission: "product.manage", Order: 24, Shop: true},
+	{Screen: "A-504", Title: "주문", Path: "/admin/orders", Group: "커머스", Permission: "order.view", Order: 26, Shop: true},
 	{Screen: "A-602", Title: "시스템 정보", Path: "/admin/system", Group: "설정", Permission: "settings.view", Order: 90},
 }
 
@@ -64,13 +74,16 @@ type NavGroup struct {
 // Hiding an item is UX, not security (D15 4.3) — every path still checks on its
 // own. But a menu that advertises screens the caller cannot open is a list of
 // things to go and try, so the filter is worth having.
-func Nav(can func(string) bool) []NavGroup {
+func Nav(can func(string) bool, shop bool) []NavGroup {
 	byGroup := map[string][]NavItem{}
 	var order []string
 	items := append([]NavItem(nil), nav...)
 	sort.Slice(items, func(i, j int) bool { return items[i].Order < items[j].Order })
 
 	for _, it := range items {
+		if it.Shop && !shop {
+			continue
+		}
 		if it.Permission != "" && !can(it.Permission) {
 			continue
 		}
@@ -88,9 +101,12 @@ func Nav(can func(string) bool) []NavGroup {
 
 // NavScreens is the set of screen ids the menu points at, so a test can compare
 // it against the registered routes.
-func NavScreens() []string {
+func NavScreens(shop bool) []string {
 	out := make([]string, 0, len(nav))
 	for _, it := range nav {
+		if it.Shop && !shop {
+			continue
+		}
 		out = append(out, it.Screen)
 	}
 	sort.Strings(out)
@@ -98,9 +114,12 @@ func NavScreens() []string {
 }
 
 // NavPaths is the same for paths.
-func NavPaths() []string {
+func NavPaths(shop bool) []string {
 	out := make([]string, 0, len(nav))
 	for _, it := range nav {
+		if it.Shop && !shop {
+			continue
+		}
 		out = append(out, it.Path)
 	}
 	sort.Strings(out)

@@ -291,6 +291,24 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.orderDetail})
 		r.Add(Route{Screen: "P-505", Method: "GET", Pattern: "/orders/{orderNo}/shipping", Class: SC3,
 			Handler: sh.orderShipping})
+
+		// ---- 관리자 커머스 (A-5xx) -----------------------------------------
+		r.Add(Route{Screen: "A-501", Method: "GET", Pattern: "/admin/products", Class: SC4,
+			Permission: "product.view", Handler: ad.ProductList})
+		r.Add(Route{Screen: "A-509", Method: "GET", Pattern: "/admin/categories", Class: SC4,
+			Permission: "product.manage", Handler: ad.CategoryList})
+		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories", Class: SC5,
+			Permission: "product.manage", Handler: ad.CategoryReparent})
+		r.Add(Route{Screen: "A-504", Method: "GET", Pattern: "/admin/orders", Class: SC4,
+			Permission: "order.view", Handler: ad.OrderList})
+		r.Add(Route{Screen: "A-505", Method: "GET", Pattern: "/admin/orders/{no}", Class: SC4,
+			Permission: "order.view", Handler: ad.OrderDetail})
+		r.Add(Route{Screen: "A-506", Method: "POST", Pattern: "/admin/orders/{no}/transition", Class: SC5,
+			Permission: "order.update", Handler: ad.OrderTransition})
+		r.Add(Route{Screen: "A-510", Method: "GET", Pattern: "/admin/orders/{no}/shipping", Class: SC4,
+			Permission: "order.update", Handler: ad.ShippingForm})
+		r.Add(Route{Screen: "A-510", Method: "POST", Pattern: "/admin/orders/{no}/shipping", Class: SC5,
+			Permission: "order.update", Handler: ad.ShippingSave})
 	}
 
 	return r

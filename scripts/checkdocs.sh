@@ -815,12 +815,12 @@ fi
 # This is the same drift M9/M11/M12 recorded three times: a decision changes in
 # one document and its copy elsewhere keeps the old answer.
 begin
-# Phase 마다 시드 파일이 하나씩 는다. 목록을 한 곳에 두고 전부 읽는다 —
-# 한 파일만 보면 다음 Phase 의 시드가 D15 와 대조되지 않은 채 지나간다.
-SEEDS="internal/migrations/00003_rbac_seed.sql internal/migrations/00009_board_seed.sql"
-SEED_OK=1
-for f in $SEEDS; do [ -f "$f" ] || SEED_OK=0; done
-if [ "$SEED_OK" = 0 ] || [ ! -f "$ACL" ]; then
+# Phase 마다 시드 파일이 하나씩 는다. 목록을 **적지 않고 찾는다** — 적어
+# 두었더니 Phase 3 시드를 새 파일에 넣는 순간 검사가 그것을 못 보고, 권한을
+# 하나 빼도 조용히 통과했다. 목록은 다음 Phase 에서 또 낡는다.
+SEEDS=$(grep -l 'INSERT INTO permissions\|INSERT INTO role_permissions' \
+	internal/migrations/*.sql 2>/dev/null | sort | tr '\n' ' ')
+if [ -z "$SEEDS" ] || [ ! -f "$ACL" ]; then
 	err "RBAC 시드 마이그레이션 또는 권한 문서가 없다"
 else
 	# 파일마다 돌린다. perl 에 여러 파일을 주고 <> 로 한 번에 슬러프하면 내용이
@@ -845,11 +845,31 @@ else
 			}' "$f" >>/tmp/cd_seed_sql
 	done
 
-	# D15 §2.2, Phase 1·2 rows — those are the phases whose seeds exist.
+	# D15 §2.2. **어느 Phase 까지 볼지를 적지 않고 유도한다** — `[12]` 로
+	# 굳어 있었더니 Phase 3 시드를 넣는 순간 그 권한들이 "문서에 없는 것" 으로
+	# 보고됐다. 심어진 권한의 Phase 중 가장 큰 값까지가 대조 범위다.
 	perl -nle 'if (/^### 2\.2 /) { $i = 1; next } if ($i && /^### /) { $i = 0 }
 		next unless $i;
-		print "perm\t$1" if /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|[^|]*\|[^|]*\|\s*[12]\s*\|/' \
-		"$ACL" | sort -u >/tmp/cd_seed_doc
+		print "$1\t$2" if /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|[^|]*\|[^|]*\|\s*(\d+)\s*\|/' \
+		"$ACL" | sort -u >/tmp/cd_perm_phase
+	# 범위는 **시드 파일이 스스로 밝힌 Phase** 에서 온다. 심어진 권한의 Phase
+	# 최대값으로 구하면 순환이다 — 문서가 어떤 권한을 나중 Phase 로 옮겨도 그
+	# 권한 자신이 범위를 넓혀서 위반이 사라진다. 시드는 "Phase N 권한" 이라고
+	# 적고, 그 줄이 없으면 검사가 멈춘다.
+	# 파일마다 요구한다. 하나만 있으면 되게 두면 새 시드가 표시를 빠뜨려도
+	# 조용히 지나가고, 그 파일의 권한은 범위 밖으로 밀려 "심지 않았다" 가 아니라
+	# 아무 말도 없이 통과한다.
+	max_phase=0
+	for f in $SEEDS; do
+		ph=$(perl -nle 'print $1 if /^-- Phase (\d+) 권한/' "$f" | head -1)
+		if [ -z "$ph" ]; then
+			err "$f 에 '-- Phase N 권한' 표시가 없다 (대조 범위를 정할 수 없다)"
+			continue
+		fi
+		[ "$ph" -gt "$max_phase" ] && max_phase=$ph
+	done
+	awk -F'\t' -v m="$max_phase" '$2+0 <= m { print "perm\t" $1 }' \
+		/tmp/cd_perm_phase | sort -u >/tmp/cd_seed_doc
 	# D15 §2.5, restricted to those permissions. ● is a global grant; ◐ is board
 	# scoped and the preset writes it when a board is created (2.4) — it must
 	# never appear in a seed, or every board is already public before anyone

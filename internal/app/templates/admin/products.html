@@ -1,0 +1,17 @@
+{{define "content"}}
+<h1>상품</h1>
+{{with .Data}}
+<table>
+  <thead><tr><th>이름</th><th>주소</th><th>가격</th><th>노출</th><th>재고</th></tr></thead>
+  <tbody>
+    {{range .Products}}
+    <tr><td>{{.Name}}</td><td>{{.Slug}}</td><td>{{.BasePrice}}</td>
+        <td>{{if .Visible}}노출{{else}}숨김{{end}}</td>
+        <td>{{if .InStock}}있음{{else}}품절{{end}}</td></tr>
+    {{else}}
+    <tr><td colspan="5">등록된 상품이 없습니다.</td></tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}

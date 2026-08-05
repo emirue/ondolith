@@ -1,0 +1,42 @@
+{{define "content"}}
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Order}}
+<h1>주문 {{.OrderNo}}</h1>
+<p>상태 <strong>{{.Status}}</strong> · 주문일 {{.CreatedAt}}</p>
+<table>
+  <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
+  <tbody>
+    {{range .Items}}
+    <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
+        <td>{{.UnitPrice}}</td><td>{{.Quantity}}</td><td>{{.LineAmount}}</td></tr>
+    {{end}}
+  </tbody>
+</table>
+<p>결제 금액 {{.Total}}</p>
+<address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
+{{end}}
+
+{{/* 선택지는 상태머신이 낸 목록이다. 전체 상태를 나열하고 서버에서 검증하지
+     않는 것이 D14 5절이 지목한 가장 흔한 구현 실수다 — 좁히는 것은 편의이고,
+     거부하는 것은 서버다. */}}
+{{if .Next}}
+<form method="post" action="/admin/orders/{{.Order.OrderNo}}/transition" class="form">
+  <label for="to">다음 상태</label>
+  <select id="to" name="to" required>
+    {{range .Next}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <button type="submit">변경</button>
+</form>
+{{else}}
+<p>더 이상 옮길 수 있는 상태가 없습니다.</p>
+{{end}}
+
+<h2>배송</h2>
+<ul>
+  {{range .Shipments}}<li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{.ShippedAt}})</li>
+  {{else}}<li>발송 정보가 없습니다.</li>{{end}}
+</ul>
+<p><a href="/admin/orders/{{.Order.OrderNo}}/shipping">송장 입력</a></p>
+{{end}}
+{{end}}

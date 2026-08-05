@@ -28,7 +28,7 @@ func flatten(groups []NavGroup) []string {
 // go and try. Hiding is UX (D15 4.3) — the paths still check — but the list
 // should not be a directory of targets.
 func TestNavHidesItemsWithoutPermission(t *testing.T) {
-	got := flatten(Nav(allowOnly("admin.access", "page.view")))
+	got := flatten(Nav(allowOnly("admin.access", "page.view"), false))
 	want := map[string]bool{"A-101": true, "A-301": true}
 
 	if len(got) != len(want) {
@@ -42,20 +42,66 @@ func TestNavHidesItemsWithoutPermission(t *testing.T) {
 }
 
 func TestNavShowsEverythingToASuperuser(t *testing.T) {
-	got := flatten(Nav(func(string) bool { return true }))
+	// shop=true 여야 전부다. cms 에서는 커머스 항목이 빠지는 것이 정상이고,
+	// 그 차이를 아래 테스트가 따로 본다.
+	got := flatten(Nav(func(string) bool { return true }, true))
 	if len(got) != len(nav) {
 		t.Errorf("항목 %d개, want %d개", len(got), len(nav))
 	}
 }
 
+// FR-710: cms 모드에서는 커머스 메뉴가 없다.
+//
+// 등록되지 않은 경로를 가리키는 메뉴는 404 링크이고, 그것은 권한이 없어 안
+// 열리는 링크와 똑같이 보인다 — 아무도 신고하지 않는다.
+func TestNavHidesCommerceInCmsMode(t *testing.T) {
+	cms := flatten(Nav(func(string) bool { return true }, false))
+	shop := flatten(Nav(func(string) bool { return true }, true))
+
+	if len(shop) <= len(cms) {
+		t.Fatalf("shop %d개, cms %d개 — 커머스 항목이 없다", len(shop), len(cms))
+	}
+	inCms := map[string]bool{}
+	for _, id := range cms {
+		inCms[id] = true
+	}
+	marked := map[string]bool{}
+	for _, it := range nav {
+		marked[it.Screen] = it.Shop
+	}
+	extra := 0
+	for _, id := range shop {
+		if inCms[id] {
+			continue
+		}
+		extra++
+		if !marked[id] {
+			t.Errorf("%s 가 shop 에만 있는데 Shop 표시가 없다", id)
+		}
+	}
+	if extra == 0 {
+		t.Error("커머스 전용 항목을 하나도 찾지 못했다")
+	}
+	// 반대 방향: cms 에만 있는 항목은 없어야 한다.
+	inShop := map[string]bool{}
+	for _, id := range shop {
+		inShop[id] = true
+	}
+	for _, id := range cms {
+		if !inShop[id] {
+			t.Errorf("cms 에만 있는 메뉴: %s", id)
+		}
+	}
+}
+
 func TestNavIsEmptyWithoutPermissions(t *testing.T) {
-	if got := Nav(func(string) bool { return false }); len(got) != 0 {
+	if got := Nav(func(string) bool { return false }, false); len(got) != 0 {
 		t.Errorf("권한이 없는데 %d 그룹이 나왔다", len(got))
 	}
 }
 
 func TestNavIsOrdered(t *testing.T) {
-	groups := Nav(func(string) bool { return true })
+	groups := Nav(func(string) bool { return true }, false)
 	last := -1
 	for _, g := range groups {
 		for _, it := range g.Items {
@@ -91,7 +137,7 @@ func TestNavPathsAreUnderTheAdminTree(t *testing.T) {
 }
 
 func TestCurrentGroupMatchesDeepestPath(t *testing.T) {
-	groups := Nav(func(string) bool { return true })
+	groups := Nav(func(string) bool { return true }, false)
 	tests := map[string]string{
 		// `/admin/` with the slash: A-101's pattern is `/admin/{$}`, so that is
 		// the URL the route actually serves.

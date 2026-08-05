@@ -1,0 +1,25 @@
+{{define "content"}}
+<h1>카테고리</h1>
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+<table>
+  <thead><tr><th>이름</th><th>주소</th><th>상위</th></tr></thead>
+  <tbody>
+    {{range .Categories}}
+    <tr><td>{{.Name}}</td><td>{{.Slug}}</td><td>{{.ParentID}}</td></tr>
+    {{else}}
+    <tr><td colspan="3">카테고리가 없습니다.</td></tr>
+    {{end}}
+  </tbody>
+</table>
+{{/* 순환 지정은 서버가 거부한다 (A-509). DB 는 못 잡는다 — FK 는 순환을 보지
+     못하고 `parent_id <> id` 는 직접 자기 참조만 잡는다. */}}
+<form method="post" class="form">
+  <label for="id">카테고리 ID</label>
+  <input id="id" name="id" required>
+  <label for="parent_id">새 상위 ID (비우면 최상위)</label>
+  <input id="parent_id" name="parent_id">
+  <button type="submit">이동</button>
+</form>
+{{end}}
+{{end}}

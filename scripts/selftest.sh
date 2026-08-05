@@ -429,10 +429,18 @@ inject "시드가 D15 의 부여를 빠뜨림" internal/migrations/00003_rbac_se
 inject "시드가 D15 에 없는 부여를 심음" internal/migrations/00003_rbac_seed.sql \
 	'perl -pi -e "s{^(    \\(.editor.,   .page\\.view.\\),)\$}{\$1\\n    (\x27member\x27,   \x27page.view\x27),}" internal/migrations/00003_rbac_seed.sql' \
 	'없는 것을 심는다: grant/member/page.view'
-# 시드가 있는 Phase 는 1·2 다. 3 으로 옮기면 그 권한은 아직 심지 않아야 한다.
+# 시드가 있는 Phase 는 1·2·3 이다. 4 로 옮기면 그 권한은 아직 심지 않아야 한다.
+#
+# 예전에는 3 으로 옮겼다. Phase 3 시드가 생기면서 그 이동이 더 이상 위반이
+# 아니게 됐고, 검사 범위를 시드에서 유도하도록 고치자 이 주입이 잡히지 않았다
+# — selftest 가 그것을 잡아 줬다.
 inject "D15 가 권한을 아직 시드 없는 Phase 로 옮김" docs/15-access-control.md \
-	'perl -pi -e "s{^(\\| .menu\\.manage. \\|[^|]*\\|[^|]*\\|)\\s*1\\s*(\\|)}{\${1} 3 \$2}" docs/15-access-control.md' \
+	'perl -pi -e "s{^(\\| .menu\\.manage. \\|[^|]*\\|[^|]*\\|)\\s*1\\s*(\\|)}{\${1} 4 \$2}" docs/15-access-control.md' \
 	'없는 것을 심는다: grant/operator/menu.manage'
+# 시드가 스스로 밝힌 Phase 표시가 사라지면 대조 범위를 정할 수 없다.
+inject "시드에 Phase 표시가 없음" internal/migrations/00015_commerce_seed.sql \
+	'perl -pi -e "s/^-- Phase 3 권한.*/-- 권한./" internal/migrations/00015_commerce_seed.sql' \
+	'표시가 없다 (대조 범위를 정할 수 없다)'
 inject "D15 매트릭스에서 부여가 사라졌는데 시드가 그대로" docs/15-access-control.md \
 	'perl -pi -e "if (/^### 2\\.5 /) { \$i = 1 } elsif (\$i && /^### /) { \$i = 0 } s/●/ / if \$i && /^\\| .menu\\.manage. \\|/" docs/15-access-control.md' \
 	'없는 것을 심는다: grant/operator/menu.manage'

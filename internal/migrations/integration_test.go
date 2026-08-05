@@ -92,14 +92,13 @@ func count(t *testing.T, pool *pgxpool.Pool, q string, args ...any) int64 {
 // migration does rather than about what someone believed it did.
 func seededGrants(t *testing.T) map[string][]string {
 	t.Helper()
-	// 두 시드를 모두 읽는다. Phase 2 부여를 새 파일에 넣으면서 이 파서가
-	// 00003 만 보고 있으면, 늘어난 부여가 전부 "예상 밖"으로 보고된다 —
-	// 그때 기대값을 손으로 적어 맞추는 것이 M9 다.
-	seeds := []string{"00003_rbac_seed.sql", "00009_board_seed.sql"}
+	// 시드 파일 목록을 적지 않고 **찾는다.** 목록을 적어 두었더니 Phase 3
+	// 시드를 새 파일에 넣는 순간 파서가 그것을 못 보고, 늘어난 부여가 전부
+	// "예상 밖" 으로 보고됐다 — 그때 기대값을 손으로 맞추는 것이 M9 다.
 	block := regexp.MustCompile(`(?s)INSERT INTO role_permissions.*?FROM \(VALUES(.*?)\)\s*AS`)
 	pair := regexp.MustCompile(`\(\s*'([a-z_]+)'\s*,\s*'([a-z][a-z0-9._]*)'\s*\)`)
 	out := map[string][]string{}
-	for _, name := range seeds {
+	for _, name := range seedFiles(t) {
 		sql, err := fs.ReadFile(FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -107,7 +106,7 @@ func seededGrants(t *testing.T) map[string][]string {
 		up, _, _ := strings.Cut(string(sql), "-- +goose Down")
 		m := block.FindStringSubmatch(up)
 		if m == nil {
-			t.Fatalf("%s 에서 role_permissions VALUES 블록을 찾지 못했다 — 이 테스트가 아무것도 검증하지 않는다", name)
+			continue // 부여를 심지 않는 마이그레이션
 		}
 		for _, p := range pair.FindAllStringSubmatch(m[1], -1) {
 			out[p[1]] = append(out[p[1]], p[2])
@@ -129,7 +128,7 @@ func seededPermissions(t *testing.T) (total, scoped int) {
 	t.Helper()
 	block := regexp.MustCompile(`(?s)INSERT INTO permissions \(key, description, is_scoped\) VALUES(.*?);`)
 	row := regexp.MustCompile(`\(\s*'([a-z][a-z0-9._]*)'\s*,\s*'[^']*'\s*,\s*(true|false)\s*\)`)
-	for _, name := range []string{"00003_rbac_seed.sql", "00009_board_seed.sql"} {
+	for _, name := range seedFiles(t) {
 		sql, err := fs.ReadFile(FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -137,7 +136,7 @@ func seededPermissions(t *testing.T) (total, scoped int) {
 		up, _, _ := strings.Cut(string(sql), "-- +goose Down")
 		m := block.FindStringSubmatch(up)
 		if m == nil {
-			t.Fatalf("%s 에서 permissions VALUES 블록을 찾지 못했다", name)
+			continue // 권한을 심지 않는 마이그레이션
 		}
 		found := row.FindAllStringSubmatch(m[1], -1)
 		if len(found) == 0 {
@@ -149,6 +148,9 @@ func seededPermissions(t *testing.T) (total, scoped int) {
 				scoped++
 			}
 		}
+	}
+	if total == 0 {
+		t.Fatal("어떤 마이그레이션에서도 권한을 읽지 못했다 — 검사가 헛돌았다")
 	}
 	return total, scoped
 }
@@ -1806,4 +1808,28 @@ func TestReturnIsRestrictedWhileMoneyPointsAtIt(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM returns WHERE id = $1`, retID); err == nil {
 		t.Error("결제가 가리키는 반품 건이 지워졌다")
 	}
+}
+
+// seedFiles lists every embedded migration, so a new seed file is seen without
+// anyone editing this test.
+//
+// 목록을 적어 두면 다음 Phase 의 시드가 조용히 빠지고, 그때 기대값을 손으로
+// 맞추게 된다 (M9). 파일을 찾는 쪽이 짧고 틀릴 곳이 없다.
+func seedFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := fs.ReadDir(FS, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			out = append(out, e.Name())
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("마이그레이션 파일을 하나도 찾지 못했다")
+	}
+	sort.Strings(out)
+	return out
 }
