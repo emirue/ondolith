@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,7 +54,8 @@ func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permission
 		SELECT
 		    bool_or(e.is_superuser) AS superuser,
 		    coalesce(
-		        array_agg(p.key) FILTER (WHERE p.key IS NOT NULL),
+		        array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+		            FILTER (WHERE p.key IS NOT NULL),
 		        '{}'
 		    ) AS perms
 		FROM effective e
@@ -65,13 +67,23 @@ func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permission
 	if err := s.pool.QueryRow(ctx, q, userID).Scan(&superuser, &keys); err != nil {
 		return nil, err
 	}
-	grants := make([]Grant, 0, len(keys))
-	for _, k := range keys {
-		// board_id is Phase 2; until then every grant is global. Scoped grants
-		// arrive with the boards table, and this is the one place that changes.
-		grants = append(grants, Grant{Permission: k, Board: Global})
+	return NewPermissions(superuser != nil && *superuser, parseGrants(keys)), nil
+}
+
+// parseGrants splits the "<permission> <board_id>" pairs the queries above pack
+// into one array.
+//
+// Two columns would need two aggregates and a second pass to line them up; one
+// string keeps the whole permission set at ONE query, which is what D15 4.3-1
+// and NFR-105 both ask for. The separator is a space because neither a
+// permission key nor a uuid can contain one (both are CHECK-constrained, D30).
+func parseGrants(rows []string) []Grant {
+	out := make([]Grant, 0, len(rows))
+	for _, r := range rows {
+		key, board, _ := strings.Cut(r, " ")
+		out = append(out, Grant{Permission: key, Board: BoardID(board)})
 	}
-	return NewPermissions(superuser != nil && *superuser, grants), nil
+	return out
 }
 
 // LoadAnonymousPermissions is the same for a request with no user. It exists so
@@ -79,7 +91,10 @@ func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permission
 // an installation may grant permissions to `anonymous` (D15 2.5).
 func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, error) {
 	const q = `
-		SELECT coalesce(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), '{}')
+		SELECT coalesce(
+		    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+		        FILTER (WHERE p.key IS NOT NULL),
+		    '{}')
 		FROM roles r
 		LEFT JOIN role_permissions rp ON rp.role_id = r.id
 		LEFT JOIN permissions p       ON p.id = rp.permission_id
@@ -88,11 +103,7 @@ func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, err
 	if err := s.pool.QueryRow(ctx, q).Scan(&keys); err != nil {
 		return nil, err
 	}
-	grants := make([]Grant, 0, len(keys))
-	for _, k := range keys {
-		grants = append(grants, Grant{Permission: k, Board: Global})
-	}
-	return NewPermissions(false, grants), nil
+	return NewPermissions(false, parseGrants(keys)), nil
 }
 
 // FindActiveUserByEmail is the login lookup. Inactive accounts are filtered in

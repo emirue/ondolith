@@ -374,3 +374,109 @@ func TestConcurrentDeletionCannotEmptyTheSuperuserRole(t *testing.T) {
 		}
 	}
 }
+
+// D15 2.4: 게시판 스코프 권한은 게시판 단위로 판정된다. 게시판 A 에만 부여된
+// 권한으로 게시판 B 에 접근하면 거부된다 — 그러지 않으면 게시판 하나에 글쓰기를
+// 준 것이 사이트 전체에 준 것이 된다.
+func TestScopedPermissionsAreJudgedPerBoard(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+
+	var boardA, boardB string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('a','게시판 A') RETURNING id`).Scan(&boardA); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('b','게시판 B') RETURNING id`).Scan(&boardB); err != nil {
+		t.Fatal(err)
+	}
+
+	uid, err := s.CreateUser(ctx, "u@example.com", "h", "사용자")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// member 는 암묵 역할이라 user_roles 행 없이도 유효하다 (D15 2.3).
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO role_permissions (role_id, permission_id, board_id)
+		SELECT r.id, p.id, $1 FROM roles r, permissions p
+		WHERE r.key = 'member' AND p.key = 'post.write'`, boardA); err != nil {
+		t.Fatal(err)
+	}
+
+	perms, err := s.LoadPermissions(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !perms.CanOn("post.write", BoardID(boardA)) {
+		t.Error("부여한 게시판에서 거부됐다")
+	}
+	if perms.CanOn("post.write", BoardID(boardB)) {
+		t.Error("게시판 A 의 부여로 게시판 B 에 글을 쓴다")
+	}
+	// 스코프 부여는 전역이 아니다. 전역으로 읽히면 게시판이 없는 화면까지 뚫린다.
+	if perms.Can("post.write") {
+		t.Error("스코프 부여가 전역 권한으로 읽혔다")
+	}
+}
+
+// 전역 부여는 모든 게시판에서 참이다. 스코프를 도입하면서 전역이 좁아지면
+// Phase 1 화면들이 조용히 닫힌다.
+func TestGlobalGrantsStillAnswerForEveryBoard(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	var board string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('a','게시판 A') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	uid, err := s.CreateUser(ctx, "op@example.com", "h", "운영자")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantRole(t, pool, uid, "operator")
+
+	perms, err := s.LoadPermissions(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// operator 는 post.read 를 전역으로 갖는다 (D15 2.5 의 ●).
+	if !perms.Can("post.read") {
+		t.Error("전역 부여가 사라졌다")
+	}
+	if !perms.CanOn("post.read", BoardID(board)) {
+		t.Error("전역 부여가 특정 게시판에서 거부됐다")
+	}
+	// 그리고 여전히 Phase 1 권한을 갖는다.
+	if !perms.Can("admin.access") {
+		t.Error("Phase 1 전역 권한이 사라졌다")
+	}
+}
+
+// 익명도 스코프 부여를 받는다 — 공개 게시판 프리셋이 그렇게 만든다.
+func TestAnonymousGetsScopedGrantsToo(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	var board string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('a','게시판 A') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO role_permissions (role_id, permission_id, board_id)
+		SELECT r.id, p.id, $1 FROM roles r, permissions p
+		WHERE r.key = 'anonymous' AND p.key = 'post.read'`, board); err != nil {
+		t.Fatal(err)
+	}
+
+	perms, err := s.LoadAnonymousPermissions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !perms.CanOn("post.read", BoardID(board)) {
+		t.Error("익명이 공개 게시판을 못 읽는다")
+	}
+	if perms.CanOn("post.read", BoardID("00000000-0000-0000-0000-000000000000")) {
+		t.Error("익명의 스코프 부여가 다른 게시판에도 먹는다")
+	}
+}
