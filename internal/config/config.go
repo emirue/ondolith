@@ -28,6 +28,40 @@ type Config struct {
 	// install time from the request; edit this file to correct it if the
 	// server later moves behind (or out from behind) TLS.
 	SecureCookies bool `json:"secure_cookies"`
+
+	// UploadDir holds attachments. It is configuration and not a fixed path
+	// because NFR-304 says an upgrade replaces the binary and nothing else —
+	// a path compiled in would move with the binary, and the files would not.
+	//
+	// It lives OUTSIDE the web root: nothing serves it as a directory, and a
+	// download goes through a handler that checks the parent post's permission
+	// (D60 §3). Empty means "uploads/" beside the config file.
+	UploadDir string `json:"upload_dir"`
+
+	// ThemeDir is where disk themes live, for the same reason.
+	ThemeDir string `json:"theme_dir"`
+}
+
+// Uploads resolves the upload directory, relative to the config file's own
+// directory when the setting is a relative path. An operator who moves the
+// installation moves both together.
+func (c *Config) Uploads(configPath string) string {
+	return resolveDir(configPath, c.UploadDir, "uploads")
+}
+
+// Themes resolves the theme directory the same way.
+func (c *Config) Themes(configPath string) string {
+	return resolveDir(configPath, c.ThemeDir, "themes")
+}
+
+func resolveDir(configPath, set, fallback string) string {
+	if set == "" {
+		set = fallback
+	}
+	if filepath.IsAbs(set) {
+		return set
+	}
+	return filepath.Join(filepath.Dir(configPath), set)
 }
 
 // Load reads the config at path. It returns ErrNotInstalled if the file does
