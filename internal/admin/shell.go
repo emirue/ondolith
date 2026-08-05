@@ -49,6 +49,7 @@ var nav = []NavItem{
 	{Screen: "A-201", Title: "사이트 설정", Path: "/admin/settings", Group: "설정", Permission: "settings.update", Order: 50},
 	{Screen: "A-205", Title: "메일", Path: "/admin/settings/mail", Group: "설정", Permission: "settings.update", Order: 60},
 	{Screen: "A-202", Title: "테마", Path: "/admin/themes", Group: "설정", Permission: "theme.view", Order: 80},
+	{Screen: "A-601", Title: "작업 로그", Path: "/admin/oplog", Group: "설정", Permission: "log.view", Order: 85},
 	{Screen: "A-602", Title: "시스템 정보", Path: "/admin/system", Group: "설정", Permission: "settings.view", Order: 90},
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -338,5 +339,79 @@ func TestAttachmentManagementIsScopedAndLogged(t *testing.T) {
 	}
 	if !saw {
 		t.Error("첨부 삭제가 작업 로그에 없다")
+	}
+}
+
+// A-601: 작업 로그 화면. log.view 가 필요하고, 표는 읽기 전용이다.
+func TestOpLogScreenNeedsLogViewAndShowsEntries(t *testing.T) {
+	srv, pool := liveSite(t)
+	ctx := context.Background()
+	store := content.NewStore(pool)
+	boardID := mkBoard(t, pool, "free", content.PresetPublic)
+	postID, _ := store.CreatePost(ctx, content.Post{BoardID: boardID, Title: "글", Body: "본문"})
+
+	// 조정으로 기록을 하나 만든다.
+	admin, _ := adminSession(t, srv, pool)
+	resp := httpPost(t, admin, srv.URL+"/admin/posts",
+		url.Values{"post_id": {postID}, "action": {"delete"}})
+	resp.Body.Close()
+
+	code, body := mustGet(t, admin, srv.URL+"/admin/oplog")
+	if code != http.StatusOK {
+		t.Fatalf("작업 로그 HTTP %d", code)
+	}
+	if !strings.Contains(body, "post.moderate") {
+		t.Errorf("기록이 화면에 없다: %.400s", body)
+	}
+	if !strings.Contains(body, "admin@example.com") {
+		t.Error("주체 이메일이 화면에 없다")
+	}
+
+	// 한 쪽에 상한이 걸린다. 이 표는 영원히 늘어나므로 (D15 7절이 지우지
+	// 않는다) 상한 없는 조회는 매일 느려지는 질의다.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO operation_logs (actor_email, action, target_type, summary)
+		SELECT 'bulk@example.com', 'user.update', 'user', '대량 ' || g
+		FROM generate_series(1, 120) g`); err != nil {
+		t.Fatal(err)
+	}
+	_, page1 := mustGet(t, admin, srv.URL+"/admin/oplog")
+	if n := strings.Count(page1, "user.update"); n > 100 {
+		t.Errorf("한 쪽에 %d행 — 상한 100 이 안 걸렸다", n)
+	}
+	if n := strings.Count(page1, "user.update"); n < 90 {
+		t.Errorf("한 쪽에 %d행 — 다른 이유로 잘렸다", n)
+	}
+	// 다음 쪽이 있고, 앞 쪽과 다른 행을 보여준다.
+	if !strings.Contains(page1, "/admin/oplog?page=1") {
+		t.Error("다음 쪽 링크가 없다")
+	}
+	_, page2 := mustGet(t, admin, srv.URL+"/admin/oplog?page=1")
+	// 쪽 번호는 본문에 찍히므로 두 쪽은 언제나 다르게 보인다. 겹치는지는
+	// **행 내용**으로 봐야 한다 — 같은 요약이 두 쪽에 다 있으면 오프셋이
+	// 질의에 닿지 않은 것이다.
+	onFirst := map[string]bool{}
+	for i := 1; i <= 120; i++ {
+		if strings.Contains(page1, "대량 "+strconv.Itoa(i)+"<") {
+			onFirst[strconv.Itoa(i)] = true
+		}
+	}
+	if len(onFirst) == 0 {
+		t.Fatal("첫 쪽에서 행을 하나도 못 읽었다")
+	}
+	for id := range onFirst {
+		if strings.Contains(page2, "대량 "+id+"<") {
+			t.Errorf("행 '대량 %s' 가 두 쪽에 모두 있다 — 오프셋이 질의에 닿지 않았다", id)
+			break
+		}
+	}
+
+	// log.view 없는 사람은 못 본다. operator 는 갖고 있고 editor 는 없다.
+	uid := mkUser(t, pool, "ed@example.com")
+	assignRole(t, pool, uid, "editor")
+	c := client()
+	login(t, srv.URL, "ed@example.com", c)
+	if code, _ := mustGet(t, c, srv.URL+"/admin/oplog"); code != http.StatusForbidden {
+		t.Errorf("log.view 없이 작업 로그가 HTTP %d 로 열렸다", code)
 	}
 }

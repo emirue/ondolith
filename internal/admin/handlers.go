@@ -573,3 +573,45 @@ func (d *Deps) log(r *http.Request, c Caller, action, targetType, targetID, summ
 		d.Logger.Error("작업 로그 기록 실패", "action", action, "target", targetID, "err", err)
 	}
 }
+
+// ---- A-601 작업 로그 -----------------------------------------------------------
+
+// oplogPageSize bounds the log screen. The table only grows (D15 7절 keeps it
+// forever), so an unbounded read is a query that gets slower every day.
+const oplogPageSize = 100
+
+// OpLogList is A-601. It is read-only by construction: OpLog has no Update and
+// no Delete, and the database refuses both anyway (D30).
+func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "log.view"); !ok {
+		return
+	}
+	if d.OpLog == nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	page := 0
+	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
+		page = n
+	}
+	ctx := r.Context()
+	entries, err := d.OpLog.Recent(ctx, oplogPageSize, page*oplogPageSize)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	total, err := d.OpLog.Count(ctx)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	prev := page - 1
+	if prev < 0 {
+		prev = 0
+	}
+	d.Render(w, r, "admin/oplog.html", http.StatusOK, map[string]any{
+		"Entries": entries, "Total": total,
+		"PageNo": page + 1, "PrevPage": prev, "NextPage": page + 1,
+		"HasPrev": page > 0, "HasNext": int64((page+1)*oplogPageSize) < total,
+	})
+}

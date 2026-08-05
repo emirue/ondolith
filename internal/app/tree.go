@@ -193,6 +193,9 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "A-309", Method: "POST", Pattern: "/admin/attachments", Class: SC7,
 		Permission: "admin.access", Handler: ad.AttachmentDelete})
 
+	r.Add(Route{Screen: "A-601", Method: "GET", Pattern: "/admin/oplog", Class: SC4,
+		Permission: "log.view", Handler: ad.OpLogList})
+
 	r.Add(Route{Screen: "A-602", Method: "GET", Pattern: "/admin/system", Class: SC4,
 		Permission: "settings.view", Handler: ad.System})
 

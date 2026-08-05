@@ -1,0 +1,32 @@
+{{define "content"}}
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>시각</th><th>주체</th><th>동작</th><th>대상</th><th>요약</th><th>IP</th></tr></thead>
+      <tbody>
+      {{range .Entries}}
+        <tr>
+          <td class="muted">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+          <td>{{if .ActorEmail}}{{.ActorEmail}}{{else}}<span class="muted">시스템</span>{{end}}</td>
+          <td><span class="adm-badge">{{.Action}}</span></td>
+          <td class="muted">{{.TargetType}}{{if .TargetID}} · {{.TargetID}}{{end}}</td>
+          <td>{{.Summary}}</td>
+          <td class="muted">{{.IP}}</td>
+        </tr>
+      {{else}}
+        <tr><td colspan="6" class="adm-empty">기록이 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  <div class="adm-pagination">
+    <span class="adm-count">{{.Total}}건 · {{.PageNo}}쪽</span>
+    {{if .HasPrev}}<a href="/admin/oplog?page={{.PrevPage}}">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    {{if .HasNext}}<a href="/admin/oplog?page={{.NextPage}}">›</a>{{end}}
+  </div>
+</div>
+<p class="adm-hint">
+  이 표는 수정·삭제하지 않습니다 (D15 7절). 데이터베이스가 강제합니다.
+</p>
+{{end}}

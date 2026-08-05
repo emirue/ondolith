@@ -93,6 +93,7 @@ var adminScreenTitles = map[string]string{
 	"admin/posts.html":        "글 관리",
 	"admin/comments.html":     "댓글 관리",
 	"admin/attachments.html":  "첨부 관리",
+	"admin/oplog.html":        "작업 로그",
 }
 
 // Render writes one administrator screen.
