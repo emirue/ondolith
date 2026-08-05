@@ -206,6 +206,15 @@ inject "미결 대장이 비어 읽히지 않음" docs/18-open-decisions.md \
 	'perl -pi -e "s/^\| OPEN-/| XPEN-/" docs/18-open-decisions.md' \
 	'OPEN- 항목을 하나도 읽지 못했다'
 
+# P5 예외 (안전 메서드가 상태를 바꾸는 라우트). 아무도 검토하지 않은 예외는
+# 규칙이 없는 것과 같다 — 목록이 D15 에 있고 코드와 대조된다.
+inject "코드에만 있는 P5 예외" docs/15-access-control.md \
+	'perl -ni -e "print unless /^\| .GET \/checkout\/success. \(P-408\)/" docs/15-access-control.md' \
+	'「P5 예외」에 없다: P-408'
+inject "문서에만 있는 P5 예외" docs/15-access-control.md \
+	'perl -pi -e "s/^\| .GET \/checkout\/success. \(P-408\)/| `GET \/nowhere` (P-999)/" docs/15-access-control.md' \
+	'코드에 없다: P-999'
+
 # 문서가 자기 자신의 낡은 사본을 품는 것. D50 이 153줄짜리 중간 블록을 3벌
 # 갖고 있었고, 그 사본들은 W3-02 가 닫은 결정을 "아직 정하지 않은 것" 이라고
 # 적고 있었다 — 링크도 ID도 제목도 멀쩡해서 다른 검사는 전부 통과했다.

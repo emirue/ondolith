@@ -231,6 +231,13 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 				FlatFee:       atoiOr(kv["shipping.flat_fee"], 0),
 				FreeThreshold: atoiOr(kv["shipping.free_threshold"], 0),
 			}
+		},
+		pgName: func() string { return "toss" },
+		// 공개 키다. 시크릿은 어떤 경로로도 화면에 오지 않는다 (D19 P-407).
+		pgClientKey: func() string { return setting("pg.client_key")["pg.client_key"] },
+		gateway: func() commerce.Gateway {
+			return commerce.NewToss(setting("pg.secret_key")["pg.secret_key"],
+				"https://api.tosspayments.com", commerce.AuthWindow)
 		}}
 
 	static := func(w http.ResponseWriter, r *http.Request) {

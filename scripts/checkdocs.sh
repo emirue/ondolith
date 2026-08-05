@@ -1066,6 +1066,31 @@ else
 	done_ "$INV 화면 $(wc -l </tmp/cd_inv_doc | tr -d ' ') 개가 $SCR 과 일치"
 fi
 
+# --- 19g. P5 exemptions in code match D15's list ----------------------------
+# UnsafeGETReason turns off "안전 메서드는 상태를 바꾸지 않는다" for one route.
+# An exemption nobody reviewed is the same as no rule, so the list lives in D15
+# and the code is compared against it every build.
+begin
+TREE=internal/app/tree.go
+if [ ! -f "$TREE" ]; then
+	err "라우트 트리가 없다: $TREE"
+else
+	# 코드 쪽: UnsafeGETReason 이 붙은 라우트의 화면 ID.
+	perl -nle 'if (/Screen: "([PA]-\d+)"/) { $id = $1 }
+		print $id if /UnsafeGETReason:/ && $id' "$TREE" | sort -u >/tmp/cd_p5_go
+	# 문서 쪽: 「P5 예외」표의 화면 ID.
+	perl -nle 'if (/^### P5 예외/) { $in = 1; next } if ($in && /^#{2,3} /) { $in = 0 }
+		print $1 if $in && /^\|.*\(([PA]-\d+)\)/' "$ACL" | sort -u >/tmp/cd_p5_doc
+
+	for l in $(comm -23 /tmp/cd_p5_go /tmp/cd_p5_doc); do
+		err "$TREE 의 P5 예외가 $ACL 「P5 예외」에 없다: $l"
+	done
+	for l in $(comm -13 /tmp/cd_p5_go /tmp/cd_p5_doc); do
+		err "$ACL 이 예외로 적었는데 코드에 없다: $l"
+	done
+	done_ "P5 예외 $(wc -l </tmp/cd_p5_doc | tr -d ' ') 건이 $ACL 과 $TREE 에서 일치"
+fi
+
 # --- 19f. internal/commerce/state.go matches D14's order state diagram ------
 # D14 5절 opens by naming the commonest mistake: a dropdown listing every status
 # with no server check. The defence is that the Go table IS the diagram — so the

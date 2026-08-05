@@ -252,6 +252,30 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.cartUpdate})
 		r.Add(Route{Screen: "P-404", Method: "DELETE", Pattern: "/cart/items/{id}", Class: SC3,
 			Handler: sh.cartUpdate})
+
+		// SC-6: 돈이 움직이는 화면이다. 무엇을 결제할지는 **세션**이 정하고
+		// (sessPendingOrder), 콜백의 orderId 는 대조에만 쓴다 — 조회 키로
+		// 쓰면 남의 주문번호로 남의 주문을 승인시킬 수 있다 (D19 P-408).
+		// 읽기 라우트는 SC-4 다 (D15 4.4). 폼을 그리는 것은 상태를 바꾸지
+		// 않으므로 P5 가 적용되고, 그 규칙과 D11 의 화면 유형을 함께
+		// 만족시키는 조합이 이것 하나다.
+		r.Add(Route{Screen: "P-405", Method: "GET", Pattern: "/checkout", Class: SC4,
+			Handler: sh.checkoutForm})
+		r.Add(Route{Screen: "P-406", Method: "POST", Pattern: "/checkout", Class: SC6,
+			Handler: sh.checkoutCreate})
+		r.Add(Route{Screen: "P-407", Method: "GET", Pattern: "/checkout/pay", Class: SC4,
+			Handler: sh.checkoutPay})
+		// **P5 예외다.** PG 가 브라우저를 GET 으로 돌려보내고 그 GET 이
+		// 승인을 일으킨다 — 결제 프로토콜이 정한 것이고 우리가 고를 수
+		// 있는 것이 아니다. 방어는 다른 곳에 있다 (아래 사유).
+		r.Add(Route{Screen: "P-408", Method: "GET", Pattern: "/checkout/success", Class: SC6,
+			UnsafeGETReason: "PG successUrl 은 GET 리다이렉트다. 무엇을 승인할지는 " +
+				"세션이 정하고 콜백 값은 대조에만 쓰이며, DB 유니크가 재실행을 막는다",
+			Handler: sh.checkoutSuccess})
+		r.Add(Route{Screen: "P-409", Method: "GET", Pattern: "/checkout/fail", Class: SC4,
+			Handler: sh.checkoutFail})
+		r.Add(Route{Screen: "P-410", Method: "GET", Pattern: "/checkout/complete", Class: SC3,
+			Handler: sh.checkoutComplete})
 	}
 
 	return r

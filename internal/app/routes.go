@@ -50,7 +50,14 @@ type Route struct {
 	// screen open to anonymous callers. Empty is a declaration, not a default:
 	// it has to be written down.
 	Permission string
-	Handler    http.HandlerFunc
+	// UnsafeGETReason exempts this route from P5 (안전 메서드는 상태를 바꾸지
+	// 않는다). 비어 있으면 예외가 아니다 — 이유를 적는 것이 예외의 조건이고,
+	// grep 하면 예외 전부가 한 번에 나온다.
+	//
+	// D15 4.4 「P5 예외」가 허용 목록이다. 여기 붙는 라우트를 늘리려면 그
+	// 문서를 먼저 고쳐야 한다.
+	UnsafeGETReason string
+	Handler         http.HandlerFunc
 }
 
 // Registry collects routes so they can be checked before any of them serve.
@@ -152,8 +159,23 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 		// 3. P5: safe methods do not change state. A GET that deletes is
 		//    reachable by a crawler and by a prefetching browser.
 		if (rt.Class == SC5 || rt.Class == SC6) && rt.Method == http.MethodGet {
-			res.Errors = append(res.Errors,
-				where+": 상태 변경 유형인데 GET 이다 (D15 P5)")
+			// 예외는 **이유를 적어야** 성립한다. 빈 문자열이면 예외가 아니다.
+			//
+			// 지금 이 자리에 오는 것은 PG 가 브라우저를 돌려보내는
+			// successUrl 하나뿐이다 (P-408). 그 GET 이 승인을 일으키는 것은
+			// 결제 프로토콜이 정한 것이고 우리가 고를 수 있는 것이 아니다 —
+			// 대신 방어가 다른 곳에 걸려 있다: 무엇을 승인할지는 세션이
+			// 정하고, 콜백 값은 대조에만 쓰이며, DB 유니크가 재실행을 막는다
+			// (D15 4.4 「P5 예외」).
+			if rt.UnsafeGETReason == "" {
+				res.Errors = append(res.Errors,
+					where+": 상태 변경 유형인데 GET 이다 (D15 P5)")
+			}
+		}
+		// 이유만 적어 두고 GET 이 아닌 라우트에 붙는 것을 막는다. 붙어 있으면
+		// 예외가 아니라 죽은 주석이고, 다음 사람은 그것을 예외로 읽는다.
+		if rt.UnsafeGETReason != "" && rt.Method != http.MethodGet {
+			res.Errors = append(res.Errors, where+": GET 이 아닌데 P5 예외 사유가 붙어 있다")
 		}
 
 		// 5. the route table and D11 must agree.
@@ -167,8 +189,7 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 		switch {
 		case !ok:
 			res.Errors = append(res.Errors, where+": D11 인벤토리에 없는 화면")
-		case want == rt.Class:
-		case rt.Class == SC4 && (want == SC5 || want == SC6) && isSafeMethod(rt.Method):
+		case classAgrees(rt, want):
 		default:
 			res.Errors = append(res.Errors,
 				fmt.Sprintf("%s: 화면 유형이 D11 과 다르다 (라우트 %s / D11 %s)", where, rt.Class, want))
@@ -189,4 +210,19 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 	}
 
 	return res
+}
+
+// classAgrees is D15 4.4's comparison rule, in one place.
+//
+// D11 은 **화면**에 유형을 주고 Route 는 **연산**에 준다. 상태 변경 화면은
+// 폼(GET)과 제출(POST)을 함께 갖는데, 그 GET 을 SC-5·SC-6 으로 등록하면 P5
+// 검사가 잡는다 — 그래서 읽기 라우트는 SC-4 다. 허용되는 쌍은 그 하나뿐이다.
+//
+// 함수로 뗀 이유: 이 규칙을 두 곳에 적으면 한쪽만 고쳐진다. 테스트도 이것을
+// 부른다.
+func classAgrees(rt Route, want SecurityClass) bool {
+	if rt.Class == want {
+		return true
+	}
+	return rt.Class == SC4 && (want == SC5 || want == SC6) && isSafeMethod(rt.Method)
 }

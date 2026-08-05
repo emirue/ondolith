@@ -21,6 +21,11 @@ type shopDeps struct {
 	// shipping is read per request, not captured: A-512 changes it and the
 	// checkout screen must show what is true now, not what was true at boot.
 	shipping func() commerce.Shipping
+	// gateway·pgName·pgClientKey 도 요청마다 읽는다. A-2xx 가 PG 설정을
+	// 바꾸면 재시작 없이 반영돼야 한다.
+	gateway     func() commerce.Gateway
+	pgName      func() string
+	pgClientKey func() string
 }
 
 // guestKey returns the session-scoped cart key for a visitor who is not

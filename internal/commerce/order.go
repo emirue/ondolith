@@ -273,3 +273,191 @@ func OptionLabel(opts map[string]string) string {
 	}
 	return out
 }
+
+// Term is one row of terms, as the checkout screen shows it.
+type Term struct {
+	ID       string
+	Kind     string
+	Version  string
+	Body     string
+	Required bool
+}
+
+// TermsInForce lists the newest effective version of each kind at `now`.
+//
+// 화면이 보여주는 것과 서버가 요구하는 것이 **같은 함수에서** 나와야 한다.
+// 두 곳에서 고르면 화면은 v2 를 보여주고 서버는 v1 을 요구하는 일이 생기고,
+// 그때 사용자는 체크했는데도 거부당한다.
+func (s *Store) TermsInForce(ctx context.Context, now time.Time) ([]Term, error) {
+	const q = `
+		SELECT DISTINCT ON (kind) id, kind, version, body, is_required
+		FROM terms WHERE effective_at <= $1
+		ORDER BY kind, effective_at DESC`
+	rows, err := s.pool.Query(ctx, q, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Term
+	for rows.Next() {
+		var t Term
+		if err := rows.Scan(&t.ID, &t.Kind, &t.Version, &t.Body, &t.Required); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// OrderDetail is what P-410/P-502 draw, snapshots only.
+type OrderDetail struct {
+	ID            string
+	OrderNo       string
+	Status        Status
+	Total         int
+	ReceiverName  string
+	ReceiverPhone string
+	Postcode      string
+	Address1      string
+	Address2      string
+	OrdererEmail  string
+	OrdererPhone  string
+	CreatedAt     time.Time
+	Items         []OrderItem
+}
+
+// OrderItem is one line, from the snapshot columns only.
+//
+// 상품 표를 조인하지 않는다. 조인해 현재 이름·가격을 보여주면 FR-612 가
+// 깨진다 — 주문서는 그때 산 것을 재현해야 한다.
+type OrderItem struct {
+	ProductName string
+	OptionLabel string
+	UnitPrice   int
+	Quantity    int
+	LineAmount  int
+}
+
+// OrderByNo reads one order, scoped to who may see it.
+//
+// 소유권이 WHERE 절에 있다 (SC-3). userID 가 비어 있으면 비회원 경로이고,
+// 그때는 주문번호만으로 열지 않고 **연락처 대조**를 함께 요구한다 (P-504) —
+// 주문번호 하나로 열리면 그 번호가 곧 열쇠가 된다.
+func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone string) (*OrderDetail, error) {
+	const q = `
+		SELECT id, order_no, status, total_amount, receiver_name, receiver_phone,
+		       postcode, address1, address2, orderer_email, orderer_phone, created_at
+		FROM orders
+		WHERE order_no = $1
+		  AND ( ($2::uuid IS NOT NULL AND user_id = $2)
+		     OR ($3::text IS NOT NULL AND orderer_phone = $3) )`
+	var o OrderDetail
+	var status string
+	err := s.pool.QueryRow(ctx, q, orderNo, nullable(userID), nullable(ordererPhone)).
+		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.ReceiverName, &o.ReceiverPhone,
+			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	o.Status = Status(status)
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT product_name, option_label, unit_price, quantity, line_amount
+		FROM order_items WHERE order_id = $1 ORDER BY created_at, id`, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var it OrderItem
+		if err := rows.Scan(&it.ProductName, &it.OptionLabel, &it.UnitPrice,
+			&it.Quantity, &it.LineAmount); err != nil {
+			return nil, err
+		}
+		o.Items = append(o.Items, it)
+	}
+	return &o, rows.Err()
+}
+
+// MyOrders is P-501.
+func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderDetail, error) {
+	if userID == "" {
+		return nil, ErrNotFound
+	}
+	limit, offset := ProductQuery{Page: page}.clamp()
+	rows, err := s.pool.Query(ctx, `
+		SELECT order_no, status, total_amount, created_at
+		FROM orders WHERE user_id = $1
+		ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrderDetail
+	for rows.Next() {
+		var o OrderDetail
+		var status string
+		if err := rows.Scan(&o.OrderNo, &status, &o.Total, &o.CreatedAt); err != nil {
+			return nil, err
+		}
+		o.Status = Status(status)
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+// OrderByNoUnscoped reads an order without an ownership predicate.
+//
+// **호출자가 소유권을 이미 판정했을 때만 쓴다.** 지금 그런 곳은 하나뿐이다:
+// 세션이 방금 만든 주문의 결제 화면(P-407·P-408·P-410). 그 경로에는 사용자
+// 입력이 끼어들 자리가 없고, 주문번호는 세션에서 온다.
+//
+// 이름에 Unscoped 를 박아 둔 이유는 grep 으로 찾기 위해서다 — 소유권 없는
+// 읽기가 늘어나는 것을 눈에 보이게 한다.
+func (s *Store) OrderByNoUnscoped(ctx context.Context, orderNo string) (*OrderDetail, error) {
+	const q = `
+		SELECT id, order_no, status, total_amount, receiver_name, receiver_phone,
+		       postcode, address1, address2, orderer_email, orderer_phone, created_at
+		FROM orders WHERE order_no = $1`
+	var o OrderDetail
+	var status string
+	err := s.pool.QueryRow(ctx, q, orderNo).
+		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.ReceiverName, &o.ReceiverPhone,
+			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	o.Status = Status(status)
+	items, err := s.orderItems(ctx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	o.Items = items
+	return &o, nil
+}
+
+func (s *Store) orderItems(ctx context.Context, orderID string) ([]OrderItem, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT product_name, option_label, unit_price, quantity, line_amount
+		FROM order_items WHERE order_id = $1 ORDER BY created_at, id`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrderItem
+	for rows.Next() {
+		var it OrderItem
+		if err := rows.Scan(&it.ProductName, &it.OptionLabel, &it.UnitPrice,
+			&it.Quantity, &it.LineAmount); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}

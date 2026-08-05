@@ -154,6 +154,26 @@ func payloadFor(name string) any {
 				PriceDelta: 1000, Stock: 3},
 			"Picked": map[string]string{"크기": "L"},
 		}
+	case "shop/checkout.html":
+		return map[string]any{
+			"Items": []cartItemLike{{ID: "ci1", Name: "티셔츠",
+				Option: map[string]string{"크기": "L"}, UnitPrice: 13000, Quantity: 2}},
+			"Goods": 26000, "Fee": 3000, "Total": 29000,
+			"Email": "a@example.com",
+			"Terms": []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
+			"Error": "필수 약관에 동의해야 합니다",
+		}
+	case "shop/pay.html", "shop/complete.html":
+		return map[string]any{
+			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "결제대기",
+				Total: 29000, ReceiverName: "받는이", ReceiverPhone: "010-0000-0000",
+				Postcode: "12345", Address1: "서울시 어딘가",
+				Items: []orderItemLike{{ProductName: "티셔츠", OptionLabel: "크기: L",
+					UnitPrice: 13000, Quantity: 2, LineAmount: 26000}}},
+			"ClientKey": "test_ck_public",
+		}
+	case "shop/fail.html":
+		return map[string]any{"Message": "결제를 취소하셨습니다."}
 	case "shop/cart.html":
 		return map[string]any{
 			"Items": []cartItemLike{{ID: "ci1", VariantID: "v1", ProductID: "p1",
@@ -365,4 +385,21 @@ type cartItemLike struct {
 	Option                         map[string]string
 	UnitPrice, Quantity, Stock     int
 	Sellable                       bool
+}
+
+type termLike struct {
+	ID, Kind, Version, Body string
+	Required                bool
+}
+
+type orderItemLike struct {
+	ProductName, OptionLabel        string
+	UnitPrice, Quantity, LineAmount int
+}
+
+type orderLike struct {
+	OrderNo, Status                                           string
+	Total                                                     int
+	ReceiverName, ReceiverPhone, Postcode, Address1, Address2 string
+	Items                                                     []orderItemLike
 }

@@ -126,8 +126,12 @@ themes/{이름}/
 | `shop/cart.html` | P-402 | 폴백 |
 | `shop/checkout.html` | P-405 | 폴백 |
 | `shop/pay.html` | P-407 | 폴백 |
-| `shop/complete.html` | P-408, P-410 | 폴백 |
-| `shop/fail.html` | P-409 | 폴백 |
+| `shop/complete.html` | P-410 | 폴백 |
+
+> **P-408 이 `fail.html` 을 쓰는 이유.** 승인에 성공하면 P-410 으로 리다이렉트하므로
+> 자기 템플릿이 없다. 실패·만료·금액 불일치만 화면을 그리고, 그 화면이 P-409 와 같다 —
+> 사용자가 보는 것도 할 일도 같기 때문이다.
+| `shop/fail.html` | P-408, P-409 | 폴백 |
 
 ### 주문 (커머스 모듈)
 

@@ -246,8 +246,11 @@ func TestCommerceScreensAreInTheInventory(t *testing.T) {
 			t.Errorf("%s 가 화면 인벤토리에 없다", rt.Screen)
 			continue
 		}
-		if class != rt.Class {
-			t.Errorf("%s 보안 등급: 트리 %v, 인벤토리 %v", rt.Screen, rt.Class, class)
+		// D15 4.4 가 허용하는 한 쌍: 상태 변경 화면(SC-5·SC-6)의 **읽기**
+		// 라우트는 SC-4 로 등록한다. 이 규칙을 여기서 다시 적으면 부팅 점검과
+		// 갈라지므로, 같은 판정 함수를 쓴다.
+		if !classAgrees(rt, class) {
+			t.Errorf("%s %s: 트리 %v, 인벤토리 %v", rt.Method, rt.Pattern, rt.Class, class)
 		}
 	}
 }
