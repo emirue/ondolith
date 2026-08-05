@@ -206,6 +206,13 @@ inject "미결 대장이 비어 읽히지 않음" docs/18-open-decisions.md \
 	'perl -pi -e "s/^\| OPEN-/| XPEN-/" docs/18-open-decisions.md' \
 	'OPEN- 항목을 하나도 읽지 못했다'
 
+# 문서가 자기 자신의 낡은 사본을 품는 것. D50 이 153줄짜리 중간 블록을 3벌
+# 갖고 있었고, 그 사본들은 W3-02 가 닫은 결정을 "아직 정하지 않은 것" 이라고
+# 적고 있었다 — 링크도 ID도 제목도 멀쩡해서 다른 검사는 전부 통과했다.
+inject "문서 안에 낡은 사본이 남음" docs/50-commerce.md \
+	'sed -n "1,40p" docs/50-commerce.md >> docs/50-commerce.md' \
+	'그대로 복제돼 있다'
+
 # Theme contract (FR-308): a screen with no template silently falls through to
 # whatever the core happens to render.
 inject "템플릿도 예외도 없는 공개 화면" docs/17-theme-contract.md \

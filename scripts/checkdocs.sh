@@ -360,6 +360,36 @@ else
 	done_ "테마 템플릿 $n_tpl 종 · GET 공개 화면 $(wc -l </tmp/cd_tpl_get | tr -d ' ') 개 전부 배정 또는 예외 (FR-308)"
 fi
 
+# --- 14-4b. no document contains a verbatim copy of itself ------------------
+# docs/50-commerce.md carried THREE stale copies of its own 153-line middle,
+# and the copies still said "아직 정하지 않은 것" about decisions W3-02 had
+# closed. Every other check passed: the links resolved, the IDs existed, the
+# headings were well-formed. A reader landing on the wrong copy would have
+# implemented against a superseded document.
+#
+# 20 lines is the window. Shorter runs repeat legitimately — table headers,
+# rule preambles, the `|---|---|` separators — and a rule that fires on those
+# would be turned off within a week.
+begin
+dupes=0
+for f in docs/*.md .ai/*.md; do
+	[ -f "$f" ] || continue
+	# Blank and separator-only lines are dropped before windowing: a run of
+	# them is not duplicated prose, and keeping them lets two unrelated tables
+	# look identical.
+	d=$(grep -vE '^\s*$|^\|[-| :]+\|$' "$f" |
+		perl -e 'my @l = <STDIN>; my %seen;
+			for my $i (0 .. $#l - 19) {
+				my $w = join "", @l[$i .. $i + 19];
+				print "dup\n" and last if $seen{$w}++;
+			}')
+	if [ -n "$d" ]; then
+		err "$f 안에 20줄 이상이 그대로 복제돼 있다 — 낡은 사본이 남았을 수 있다"
+		dupes=1
+	fi
+done
+[ "$dupes" -eq 0 ] && done_ "문서 안에 통째로 복제된 블록 없음"
+
 # --- 14-5. open decisions live in one ledger --------------------------------
 # Per-document tables drifted: six items stayed listed after being decided, and
 # one item appeared in four documents at once (.ai/MISTAKES.md M9). Whoever
