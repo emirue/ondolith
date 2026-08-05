@@ -189,7 +189,7 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W2-13 | 게시판 공개 화면 4개 (P-203~P-206) | W2-10, W2-12 | `internal/content` | 목록·상세·쓰기·수정이 돈다. 폼이 스키마를 읽어 생성되고 **필드 목록이 코드에 없다**. 폼이 `board_id`·`author_id`를 받지 않는다 (SC-2 5항). 수정은 `WHERE id=$1 AND author_id=$2` (SC-3 1항) |
+| W2-13 | 게시판 공개 화면 4개 (P-203~P-206) **(완료 — `internal/app/handler_board.go`, `internal/theme/builtin/board/`)** | W2-10, W2-12 | `internal/content` | 목록·상세·쓰기·수정이 돈다. 폼이 스키마를 읽어 생성되고 **필드 목록이 코드에 없다**. 폼이 `board_id`·`author_id`를 받지 않는다 (SC-2 5항). 수정은 `WHERE id=$1 AND author_id=$2` (SC-3 1항) |
 | W2-14 | 글 삭제 + 댓글 3화면 (P-207~P-210) | W2-13 | `internal/content` | 삭제는 POST만(GET 거부, P5). 남의 글·댓글은 404이지 403이 아니다. 댓글은 게시판 설정 `allow_comments`가 꺼져 있으면 등록되지 않는다 |
 | W2-15 | 첨부 다운로드 (P-211) | W2-11, W2-12 | `internal/content` | **다운로드 핸들러가 부모 글의 `post.read`를 다시 검사한다.** 비공개 게시판의 첨부 ID를 직접 요청하면 404가 되는 테스트가 있다 (D15 8절 1번). SVG는 `Content-Disposition: attachment`로만 나간다 |
 | W2-16 | 검색 (P-212) | W2-03, W2-08 | `internal/content` | 제목·본문 전문검색. **권한 없는 게시판의 글이 결과에 섞이지 않는다**(권한을 `WHERE`에서 거른다). 페이지네이션이 큰 오프셋에서도 무너지지 않는다 (FR-508) |

@@ -200,7 +200,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		},
 	}
 
-	registry := buildTree(pub, lg, acc, ad, func(w http.ResponseWriter, r *http.Request) {
+	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log}
+	registry := buildTree(pub, lg, acc, bd, ad, func(w http.ResponseWriter, r *http.Request) {
 		loader().StaticHandler("/static/").ServeHTTP(w, r)
 	})
 

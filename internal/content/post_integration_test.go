@@ -136,7 +136,7 @@ func TestSecretPostsAreFilteredInSQL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n != tc.want {
+		if n != int64(tc.want) {
 			t.Errorf("%s: count %d, want %d — 목록과 합계가 다르면 페이저가 거짓말한다", name, n, tc.want)
 		}
 	}

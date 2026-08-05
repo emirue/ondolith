@@ -124,6 +124,54 @@ func payloadFor(name string) any {
 		return &pageLike{Title: "회사 소개", Body: "본문입니다.\n둘째 줄"}
 	case "error.html":
 		return map[string]any{"Detail": "자세한 내용"}
+	case "board/list.html":
+		return map[string]any{
+			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판", PerPage: 20},
+			"Posts": []postLike{{
+				ID: "p1", Title: "첫 글", AuthorName: "홍길동", ViewCount: 12,
+				CommentCount: 3, HasAttachment: true, IsPinned: true,
+				CustomFields: map[string]any{"color": "빨강"},
+				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
+			}},
+			"Total":    int64(1),
+			"Query":    struct{ Search string }{Search: "검색어"},
+			"Columns":  []fieldLike{{Key: "color", Label: "색상"}},
+			"CanWrite": true,
+		}
+	case "board/view.html":
+		return map[string]any{
+			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
+			"Post": postLike{ID: "p1", Title: "첫 글", Body: "본문\n둘째 줄",
+				AuthorName: "홍길동", ViewCount: 12,
+				CustomFields: map[string]any{"color": "빨강"},
+				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)},
+			"Comments": []commentLike{
+				{ID: "c1", AuthorName: "홍길동", Body: "댓글",
+					CreatedAt: time.Date(2026, 8, 5, 9, 30, 0, 0, time.UTC)},
+				{ID: "c2", ParentID: "c1", Body: "",
+					DeletedAt: time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC),
+					CreatedAt: time.Date(2026, 8, 5, 9, 40, 0, 0, time.UTC)},
+			},
+			"Fields":     []fieldLike{{Key: "color", Label: "색상"}},
+			"CanComment": true, "CanEdit": true, "CanModerate": true,
+		}
+	case "board/write.html":
+		return map[string]any{
+			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
+			"Post": &postLike{Title: "고칠 글", Body: "본문",
+				CustomFields: map[string]any{"color": "빨강"}},
+			"Fields": []fieldLike{
+				{Key: "memo", Label: "메모", Type: "text"},
+				{Key: "detail", Label: "상세", Type: "textarea"},
+				{Key: "qty", Label: "수량", Type: "number"},
+				{Key: "color", Label: "색상", Type: "select", Options: []string{"빨강", "파랑"}, Required: true},
+				{Key: "tags", Label: "태그", Type: "multiselect", Options: []string{"A", "B"}},
+				{Key: "agree", Label: "동의", Type: "checkbox"},
+				{Key: "due", Label: "기한", Type: "date"},
+				{Key: "site", Label: "링크", Type: "url"},
+			},
+			"CanSecret": true, "Error": "오류 메시지",
+		}
 	default:
 		return map[string]any{
 			"Error": "오류 메시지", "Email": "a@example.com", "Next": "/admin",
@@ -181,4 +229,33 @@ func TestHtmxVersionFileMatchesTheVendoredFile(t *testing.T) {
 	if len(js) < 10_000 {
 		t.Errorf("htmx 파일이 %d 바이트뿐이다 — 받다 만 것 같다", len(js))
 	}
+}
+
+// 게시판 화면이 받는 모양. 실제 content 타입을 쓰지 않는 이유는 pageLike 와
+// 같다 — 테마 패키지가 content 에 의존하면 테마 계약이 저장소 구조를 따라
+// 움직인다. 필드 이름이 어긋나면 이 테스트가 렌더링에서 실패한다.
+type boardLike struct {
+	ID, Slug, Name, Skin string
+	AllowComments        bool
+	PerPage              int
+}
+
+type postLike struct {
+	ID, Title, Body, AuthorName string
+	CustomFields                map[string]any
+	IsPinned, IsSecret          bool
+	ViewCount, CommentCount     int64
+	HasAttachment               bool
+	CreatedAt                   time.Time
+}
+
+type commentLike struct {
+	ID, ParentID, AuthorName, Body string
+	DeletedAt, CreatedAt           time.Time
+}
+
+type fieldLike struct {
+	Key, Label, Type string
+	Options          []string
+	Required         bool
 }

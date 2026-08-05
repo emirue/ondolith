@@ -1,0 +1,56 @@
+{{define "body"}}
+{{with .Data}}
+<article class="page">
+  <nav class="crumb"><a href="/board/{{.Board.Slug}}">{{.Board.Name}}</a></nav>
+  <h1>{{.Post.Title}}</h1>
+  <p class="meta">
+    {{if .Post.AuthorName}}{{.Post.AuthorName}}{{else}}(탈퇴){{end}} ·
+    {{date .Post.CreatedAt "2006-01-02 15:04"}} · 조회 {{number .Post.ViewCount}}
+  </p>
+
+  {{if .Fields}}
+  <dl class="custom-fields">
+    {{$p := .Post}}
+    {{range .Fields}}
+      {{$v := field $p.CustomFields .Key}}
+      {{if $v}}<dt>{{.Label}}</dt><dd>{{$v}}</dd>{{end}}
+    {{end}}
+  </dl>
+  {{end}}
+
+  <div class="page-body">{{nl2br .Post.Body}}</div>
+
+  <p class="actions">
+    {{if .CanEdit}}<a class="btn" href="/board/{{.Board.Slug}}/{{.Post.ID}}/edit">수정</a>{{end}}
+    <a class="btn" href="/board/{{.Board.Slug}}">목록</a>
+  </p>
+</article>
+
+<section class="comments">
+  <h2>댓글 {{len .Comments}}</h2>
+  <ul>
+    {{range .Comments}}
+      <li class="{{if .ParentID}}reply{{end}}">
+        {{if .DeletedAt.IsZero}}
+          <p class="meta">{{if .AuthorName}}{{.AuthorName}}{{else}}(탈퇴){{end}} · {{dateAgo .CreatedAt}}</p>
+          <p>{{nl2br .Body}}</p>
+        {{else}}
+          {{/* 툼스톤. 본문은 DB 에서 이미 비어 있다 — 테마의 if 에 기대지 않는다 */}}
+          <p class="deleted">삭제된 댓글입니다.</p>
+        {{end}}
+      </li>
+    {{else}}
+      <li class="empty">댓글이 없습니다.</li>
+    {{end}}
+  </ul>
+
+  {{if .CanComment}}
+  <form class="form" method="post" action="/board/{{.Board.Slug}}/{{.Post.ID}}/comments">
+    <label for="comment-body">댓글</label>
+    <textarea id="comment-body" name="body" required></textarea>
+    <button>등록</button>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{end}}

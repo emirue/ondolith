@@ -21,8 +21,8 @@ import (
 // handler's own check refuse a request (D15 4.2) — what this declaration buys is
 // the boot check: a key that does not exist stops the server, and a permission
 // no route names is reported as dead weight in the role editor.
-func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, ad *admin.Deps,
-	static http.HandlerFunc,
+func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
+	ad *admin.Deps, static http.HandlerFunc,
 ) *Registry {
 	r := NewRegistry()
 
@@ -43,6 +43,25 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, ad *admin.Deps,
 	r.Add(Route{Screen: "P-108", Method: "POST", Pattern: "/me", Class: SC3, Handler: acc.updateProfile})
 	r.Add(Route{Screen: "P-109", Method: "GET", Pattern: "/me/password", Class: SC3, Handler: acc.passwordForm})
 	r.Add(Route{Screen: "P-109", Method: "POST", Pattern: "/me/password", Class: SC3, Handler: acc.changePassword})
+
+	// ---- 게시판 (SC-1 은 읽기, SC-2 는 폼, SC-3 은 본인 글) ---------------------
+	// Permission is "" on all of them: the board's permission is scoped, so it
+	// cannot be judged from the path alone (the slug names the board, and the
+	// board id is what role_permissions holds). Every handler calls CanOn with
+	// the board it just loaded — D15 4.2's "the gate sees a prefix, the handler
+	// sees the target", in its sharpest form.
+	r.Add(Route{Screen: "P-203", Method: "GET", Pattern: "/board/{slug}", Class: SC1,
+		Handler: bd.boardList})
+	r.Add(Route{Screen: "P-205", Method: "GET", Pattern: "/board/{slug}/write", Class: SC2,
+		Handler: bd.postForm})
+	r.Add(Route{Screen: "P-205", Method: "POST", Pattern: "/board/{slug}/write", Class: SC2,
+		Handler: bd.postCreate})
+	r.Add(Route{Screen: "P-204", Method: "GET", Pattern: "/board/{slug}/{id}", Class: SC1,
+		Handler: bd.postView})
+	r.Add(Route{Screen: "P-206", Method: "GET", Pattern: "/board/{slug}/{id}/edit", Class: SC3,
+		Handler: bd.postEditForm})
+	r.Add(Route{Screen: "P-206", Method: "POST", Pattern: "/board/{slug}/{id}/edit", Class: SC3,
+		Handler: bd.postUpdate})
 
 	// ---- 관리자 -------------------------------------------------------------
 	// admin.access is the tree gate's key; every screen below also names the

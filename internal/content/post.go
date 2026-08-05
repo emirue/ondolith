@@ -11,18 +11,20 @@ import (
 
 // Post is one row of posts, plus the counts a list screen shows.
 type Post struct {
-	ID            string
-	BoardID       string
-	AuthorID      string // empty when the author is gone (SET NULL)
-	AuthorName    string
-	Title         string
-	Body          string
-	CustomFields  map[string]any
-	Status        string
-	IsPinned      bool
-	IsSecret      bool
-	ViewCount     int
-	CommentCount  int
+	ID           string
+	BoardID      string
+	AuthorID     string // empty when the author is gone (SET NULL)
+	AuthorName   string
+	Title        string
+	Body         string
+	CustomFields map[string]any
+	Status       string
+	IsPinned     bool
+	IsSecret     bool
+	// int64 because D17 의 number 함수가 int64 를 받는다. 뷰 모델에서 변환하면
+	// 그 변환을 잊은 화면만 조용히 다른 형식으로 나온다.
+	ViewCount     int64
+	CommentCount  int64
 	HasAttachment bool
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -111,12 +113,12 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery,
 // one: a count cannot ride along with a LIMIT.
 func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery,
 	viewerID string, canSecret bool,
-) (int, error) {
+) (int64, error) {
 	tsq := ""
 	if q.Search != "" {
 		tsq = toPrefixQuery(q.Search)
 	}
-	var n int
+	var n int64
 	err := s.pool.QueryRow(ctx, `
 		SELECT count(*) FROM posts p
 		WHERE p.board_id = $1 AND p.status = 'published'
