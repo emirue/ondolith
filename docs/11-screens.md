@@ -128,8 +128,8 @@
 | P-402 | 장바구니 보기 | `/cart` | GET | 공개 | 없음 | SC-1 | FR-603 |
 | P-403 | 장바구니 수량 변경 | `/cart/items/{id}` | PATCH | 본인 | 있음 | SC-3 | FR-602, FR-603 |
 | P-404 | 장바구니 항목 삭제 | `/cart/items/{id}` | DELETE | 본인 | 있음 | SC-3 | FR-603 |
-| P-405 | 주문서 작성 | `/checkout` | GET | 공개 | 없음 | SC-6 | FR-604, FR-613 |
-| P-406 | 주문 생성 | `/checkout` | POST | 공개 | 있음 | SC-6 | FR-602, FR-604, FR-613 |
+| P-405 | 주문서 작성 | `/checkout` | GET | 공개 | 없음 | SC-6 | FR-604, FR-613, FR-626 |
+| P-406 | 주문 생성 | `/checkout` | POST | 공개 | 있음 | SC-6 | FR-602, FR-604, FR-613, FR-626 |
 | P-407 | 결제창 호출 | `/checkout/pay` | GET | 본인 | 있음 | SC-6 | FR-604, FR-605 |
 | P-408 | 결제 승인 (successUrl) | `/checkout/success` | GET | 본인 | 있음 | SC-6 | FR-606, FR-607, FR-608, FR-609 |
 | P-409 | 결제 실패 (failUrl) | `/checkout/fail` | GET | 본인 | 있음 | SC-6 | FR-609 |
@@ -144,8 +144,8 @@
 | P-503 | 비회원 주문 조회 폼 | `/orders/guest` | GET | 공개 | 없음 | SC-2 | FR-604 |
 | P-504 | 비회원 주문 조회 실행 | `/orders/guest` | POST | 공개 | 있음 | SC-2 | FR-604, NFR-207 |
 | P-505 | 배송 조회 | `/orders/{orderNo}/shipping` | GET | 본인 | 없음 | SC-3 | FR-604 |
-| P-506 | 취소 요청 | `/orders/{orderNo}/cancel` | POST | 본인 | 있음 | SC-6 | FR-604, FR-611 |
-| P-507 | 부분 환불 요청 | `/orders/{orderNo}/refund` | POST | 본인 | 있음 | SC-6 | FR-611 |
+| P-506 | 취소 요청 | `/orders/{orderNo}/cancel` | POST | 본인 | 있음 | SC-6 | FR-604, FR-611, FR-625 |
+| P-507 | 부분 환불 요청 | `/orders/{orderNo}/refund` | POST | 본인 | 있음 | SC-6 | FR-611, FR-625 |
 | P-508 | 취소·환불 상태 | `/orders/{orderNo}/refunds` | GET | 본인 | 없음 | SC-3 | FR-611 |
 | P-509 | 주문서·영수증 | `/orders/{orderNo}/receipt` | GET | 본인 | 없음 | SC-3 | FR-612 |
 | P-510 | 구매확정 | `/orders/{orderNo}/confirm` | POST | 본인 | 있음 | SC-3 | FR-604 |
@@ -228,7 +228,7 @@
 | A-504 | 주문 목록 | `/admin/orders` | GET | 권한:order.view | 없음 | SC-4 | FR-508, FR-604, FR-706 |
 | A-505 | 주문 상세 | `/admin/orders/{no}` | GET | 권한:order.view | 없음 | SC-4 | FR-604, FR-612 |
 | A-506 | 주문 상태 변경 | `/admin/orders/{no}/transition` | POST | 권한:order.update | 있음 | SC-5 | FR-604 |
-| A-507 | 취소·환불 처리 | `/admin/orders/{no}/refund` | GET, POST | 권한:order.refund | 있음 | SC-6 | FR-604, FR-611 |
+| A-507 | 취소·환불 처리 | `/admin/orders/{no}/refund` | GET, POST | 권한:order.refund | 있음 | SC-6 | FR-604, FR-611, FR-625 |
 | A-508 | 결제 대사 | `/admin/payments/reconcile` | GET, POST | 권한:payment.view | 있음 | SC-6 | FR-608, FR-609, FR-610 |
 | A-509 | 상품 카테고리 관리 | `/admin/categories` | GET, POST, DELETE | 권한:product.manage | 있음 | SC-5 | FR-615 |
 | A-510 | 배송 정보·송장 입력 | `/admin/orders/{no}/shipping` | GET, POST | 권한:order.update | 있음 | SC-5 | FR-616 |

@@ -1,0 +1,20 @@
+{{define "body"}}
+{{with .Data}}{{with .Order}}
+<h1>주문서·영수증</h1>
+<p>주문번호 {{.OrderNo}} · 주문일 {{.CreatedAt}}</p>
+{{/* 스냅샷만으로 재발행한다 (FR-612). 상품 표를 조인하면 상품이 바뀐 뒤
+     영수증 내용이 달라지고, 그 영수증은 증빙이 아니다. */}}
+<table class="order-items">
+  <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
+  <tbody>
+    {{range .Items}}
+    <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
+        <td>{{.UnitPrice}}원</td><td>{{.Quantity}}</td><td>{{.LineAmount}}원</td></tr>
+    {{end}}
+  </tbody>
+</table>
+<dl class="totals"><dt>결제 금액</dt><dd>{{.Total}}원</dd></dl>
+<address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
+<p>{{.OrdererEmail}} · {{.OrdererPhone}}</p>
+{{end}}{{end}}
+{{end}}

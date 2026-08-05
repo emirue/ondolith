@@ -1,0 +1,47 @@
+{{define "body"}}
+<h1>취소·환불</h1>
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+<dl class="totals">
+  {{with .Order}}{{if .Discount}}<dt>주문 할인</dt><dd>−{{.Discount}}원</dd>{{end}}{{end}}
+  <dt>결제 금액</dt><dd>{{.Approved}}원</dd>
+  <dt>환불 접수·완료</dt><dd>{{.Refunded}}원</dd>
+  <dt>남은 금액</dt><dd>{{.Remaining}}원</dd>
+</dl>
+<ul class="refunds">
+  {{range .Refunds}}
+  <li>{{.CreatedAt}} · {{.Requester}} · {{.Amount}}원 · {{.Status}}
+      {{with .Reason}}<span class="reason">{{.}}</span>{{end}}</li>
+  {{else}}
+  <li class="empty">접수된 요청이 없습니다.</li>
+  {{end}}
+</ul>
+{{/* **금액 입력란이 없다.** 품목과 수량만 고르고 금액은 서버가 스냅샷에서
+     계산한다 (FR-617, FR-625) — 여러 개 산 것 중 하나만 취소하는 경우가
+     정상이고, 그때 할인이 붙어 있으면 단가 × 수량은 틀린 답이다. */}}
+<form method="post" action="/orders/{{.Order.OrderNo}}/refund" class="form">
+  <fieldset>
+    <legend>환불할 품목</legend>
+    {{range .Order.Items}}
+    <div class="refund-line">
+      <label>
+        <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .Remaining}} disabled{{end}}>
+        {{.ProductName}} {{.OptionLabel}}
+        <span class="qty">주문 {{.Quantity}}개 · 남은 {{.Remaining}}개</span>
+        {{if .Discount}}<span class="discount">할인 {{.Discount}}원 적용</span>{{end}}
+      </label>
+      <input name="qty_{{.ID}}" type="number" min="1" max="{{.Remaining}}" value="1"
+             {{if not .Remaining}}disabled{{end}}>
+    </div>
+    {{end}}
+  </fieldset>
+  <label for="reason">사유</label>
+  <input id="reason" name="reason" maxlength="500">
+  <button type="submit">환불 요청</button>
+</form>
+<form method="post" action="/orders/{{.Order.OrderNo}}/cancel" class="form">
+  <button type="submit">주문 취소</button>
+</form>
+{{end}}
+{{end}}

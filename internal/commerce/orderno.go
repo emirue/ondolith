@@ -48,3 +48,9 @@ func newRandomKey() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
+
+// NewRequestKey is the idempotency key for a refund request.
+//
+// 서버가 만든다. 폼에서 받으면 같은 키를 두 번 보내 접수를 막거나, 매번 다른
+// 키를 보내 이중 접수를 만들 수 있다 — 멱등 키의 목적이 뒤집힌다.
+func NewRequestKey() (string, error) { return newRandomKey() }

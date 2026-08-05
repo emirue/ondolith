@@ -41,7 +41,7 @@ func TestCreateOrderSnapshotsAndTakesStock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	order, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, time.Now())
+	order, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestFailedOrderLeavesStockUntouched(t *testing.T) {
 	mkTerm(t, pool, "이용약관", true)
 
 	// 필수 약관 미동의 → 거부.
-	if _, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, time.Now()); !errors.Is(err, ErrTermsRequired) {
+	if _, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, 0, time.Now()); !errors.Is(err, ErrTermsRequired) {
 		t.Fatalf("약관 미동의 = %v, want ErrTermsRequired", err)
 	}
 	assertStock(t, pool, variant, 5)
@@ -132,7 +132,7 @@ func TestFailedOrderLeavesStockUntouched(t *testing.T) {
 	// 주문자 연락처 없음 → 거부.
 	bad := testForm()
 	bad.OrdererPhone = ""
-	if _, err := s.CreateOrder(ctx, owner, "", bad, testShipping, time.Now()); !errors.Is(err, ErrOrdererContact) {
+	if _, err := s.CreateOrder(ctx, owner, "", bad, testShipping, 0, time.Now()); !errors.Is(err, ErrOrdererContact) {
 		t.Errorf("연락처 없는 주문 = %v, want ErrOrdererContact — 제약 위반이면 화면이 500 을 그린다", err)
 	}
 	assertStock(t, pool, variant, 5)
@@ -144,7 +144,7 @@ func TestFailedOrderLeavesStockUntouched(t *testing.T) {
 	term := mkTerm(t, pool, "구매약관", true)
 	form := testForm()
 	form.AgreedTerms = []string{term}
-	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, time.Now()); !errors.Is(err, ErrOutOfStock) {
+	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, 0, time.Now()); !errors.Is(err, ErrOutOfStock) {
 		t.Errorf("재고 부족 = %v, want ErrOutOfStock", err)
 	}
 	assertStock(t, pool, variant, 1)
@@ -197,7 +197,7 @@ func TestConcurrentOrdersForTheLastUnit(t *testing.T) {
 			go func(i int, o CartOwner) {
 				defer wg.Done()
 				<-gate
-				_, errs[i] = s.CreateOrder(ctx, o, "", testForm(), testShipping, time.Now())
+				_, errs[i] = s.CreateOrder(ctx, o, "", testForm(), testShipping, 0, time.Now())
 			}(i, o)
 		}
 		close(gate)
@@ -250,7 +250,7 @@ func TestOrderRecordsTermAgreements(t *testing.T) {
 
 	form := testForm()
 	form.AgreedTerms = []string{required, optional}
-	order, err := s.CreateOrder(ctx, owner, "", form, testShipping, time.Now())
+	order, err := s.CreateOrder(ctx, owner, "", form, testShipping, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,11 +290,11 @@ func TestOnlyTheLatestRequiredTermPerKindIsDemanded(t *testing.T) {
 
 	form := testForm()
 	form.AgreedTerms = []string{old}
-	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, time.Now()); !errors.Is(err, ErrTermsRequired) {
+	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, 0, time.Now()); !errors.Is(err, ErrTermsRequired) {
 		t.Errorf("옛 버전만 동의 = %v, want ErrTermsRequired", err)
 	}
 	form.AgreedTerms = []string{newer}
-	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, time.Now()); err != nil {
+	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, 0, time.Now()); err != nil {
 		t.Errorf("최신 버전 동의가 막혔다: %v", err)
 	}
 }
@@ -303,7 +303,7 @@ func TestOnlyTheLatestRequiredTermPerKindIsDemanded(t *testing.T) {
 func TestEmptyCartCannotOrder(t *testing.T) {
 	s, _ := testStore(t)
 	owner := CartOwner{GuestKey: "guest-0123456789abc"}
-	if _, err := s.CreateOrder(context.Background(), owner, "", testForm(), testShipping, time.Now()); !errors.Is(err, ErrCartEmpty) {
+	if _, err := s.CreateOrder(context.Background(), owner, "", testForm(), testShipping, 0, time.Now()); !errors.Is(err, ErrCartEmpty) {
 		t.Errorf("= %v, want ErrCartEmpty", err)
 	}
 }
@@ -341,7 +341,7 @@ func TestOptionalTermsDoNotBlockTheOrder(t *testing.T) {
 
 	form := testForm()
 	form.AgreedTerms = []string{required}
-	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, time.Now()); err != nil {
+	if _, err := s.CreateOrder(ctx, owner, "", form, testShipping, 0, time.Now()); err != nil {
 		t.Errorf("선택 약관 미동의로 주문이 막혔다: %v", err)
 	}
 }
@@ -372,7 +372,7 @@ func TestDoubleSubmitCreatesOneOrder(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				<-gate
-				_, errs[i] = s.CreateOrder(ctx, owner, "", testForm(), testShipping, time.Now())
+				_, errs[i] = s.CreateOrder(ctx, owner, "", testForm(), testShipping, 0, time.Now())
 			}(i)
 		}
 		close(gate)
@@ -417,7 +417,7 @@ func TestHiddenAfterAddingCannotBeOrdered(t *testing.T) {
 		if _, err := pool.Exec(ctx, hide, product); err != nil {
 			t.Fatal(err)
 		}
-		_, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, time.Now())
+		_, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, 0, time.Now())
 		if !errors.Is(err, ErrNotSellable) {
 			t.Errorf("%s → %v, want ErrNotSellable", hide, err)
 		}
@@ -428,7 +428,7 @@ func TestHiddenAfterAddingCannotBeOrdered(t *testing.T) {
 		}
 	}
 	// 다시 보이면 주문된다 — 위 실패가 숨김 때문이라는 것.
-	if _, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, time.Now()); err != nil {
+	if _, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, 0, time.Now()); err != nil {
 		t.Errorf("복구 뒤 주문이 막혔다: %v", err)
 	}
 }

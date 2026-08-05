@@ -193,6 +193,26 @@ func payloadFor(name string) any {
 			"Shipments": []shipmentLike{{Kind: "최초발송", Carrier: "cj",
 				TrackingNo: "T-1", ShippedAt: "2026-08-05"}},
 		}
+	case "order/refunds.html":
+		return map[string]any{
+			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "결제완료", Discount: 1000,
+				Items: []orderItemLike{{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L",
+					UnitPrice: 13000, Quantity: 3, LineAmount: 39000, Discount: 1000, Settled: 1}}},
+			"Refunds": []refundLike{{Status: "요청", Requester: "구매자", Amount: 5000,
+				Reason: "단순 변심", CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
+			"Approved": 29000, "Refunded": 5000, "Remaining": 24000,
+			"Error": "환불 가능 금액을 넘었습니다.",
+		}
+	case "order/receipt.html":
+		return map[string]any{
+			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "구매확정", Total: 29000,
+				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
+				ReceiverName: "받는이", ReceiverPhone: "010-0000-0000",
+				Postcode: "12345", Address1: "서울시 어딘가",
+				OrdererEmail: "a@example.com", OrdererPhone: "010-1111-1111",
+				Items: []orderItemLike{{ProductName: "티셔츠", OptionLabel: "크기: L",
+					UnitPrice: 13000, Quantity: 2, LineAmount: 26000}}},
+		}
 	case "order/guest-form.html":
 		return map[string]any{"Error": "주문 정보를 찾을 수 없습니다."}
 	case "shop/fail.html":
@@ -416,16 +436,30 @@ type termLike struct {
 }
 
 type orderItemLike struct {
+	ID                              string
 	ProductName, OptionLabel        string
 	UnitPrice, Quantity, LineAmount int
+	Discount, Settled               int
 }
+
+// Remaining mirrors commerce.OrderItem.Remaining — 템플릿이 부르는 메서드는
+// 표본에도 있어야 렌더링 테스트가 그 경로를 지나간다.
+func (it orderItemLike) Remaining() int { return it.Quantity - it.Settled }
 
 type orderLike struct {
 	OrderNo, Status                                           string
 	Total                                                     int
 	ReceiverName, ReceiverPhone, Postcode, Address1, Address2 string
 	CreatedAt                                                 time.Time
+	OrdererEmail, OrdererPhone                                string
+	Discount                                                  int
 	Items                                                     []orderItemLike
 }
 
 type shipmentLike struct{ Kind, Carrier, TrackingNo, ShippedAt string }
+
+type refundLike struct {
+	Status, Requester, Reason string
+	Amount                    int
+	CreatedAt                 time.Time
+}

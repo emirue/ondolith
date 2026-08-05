@@ -291,6 +291,18 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.orderDetail})
 		r.Add(Route{Screen: "P-505", Method: "GET", Pattern: "/orders/{orderNo}/shipping", Class: SC3,
 			Handler: sh.orderShipping})
+		// SC-6: 돈이 움직인다. 취소는 배송 전이라 구매자가 직접 일으키고
+		// (D14 5-1), 부분 환불은 요청 행만 만든다 — 승인은 A-507 이다.
+		r.Add(Route{Screen: "P-506", Method: "POST", Pattern: "/orders/{orderNo}/cancel", Class: SC6,
+			Handler: sh.orderCancel})
+		r.Add(Route{Screen: "P-507", Method: "POST", Pattern: "/orders/{orderNo}/refund", Class: SC6,
+			Handler: sh.refundRequest})
+		r.Add(Route{Screen: "P-508", Method: "GET", Pattern: "/orders/{orderNo}/refunds", Class: SC3,
+			Handler: sh.refundStatus})
+		r.Add(Route{Screen: "P-509", Method: "GET", Pattern: "/orders/{orderNo}/receipt", Class: SC3,
+			Handler: sh.orderReceipt})
+		r.Add(Route{Screen: "P-510", Method: "POST", Pattern: "/orders/{orderNo}/confirm", Class: SC3,
+			Handler: sh.orderConfirm})
 
 		// ---- 관리자 커머스 (A-5xx) -----------------------------------------
 		r.Add(Route{Screen: "A-501", Method: "GET", Pattern: "/admin/products", Class: SC4,

@@ -96,7 +96,10 @@ func (d *shopDeps) checkoutCreate(w http.ResponseWriter, r *http.Request) {
 		form.OrdererEmail = a.User.Email
 	}
 
-	order, err := d.store.CreateOrder(ctx, owner, userID, form, d.shipping(), time.Now())
+	// 할인은 **서버가 정한다.** 지금은 0 이고, 그 값을 무엇이 정하는지(쿠폰
+	// 발급 등)는 별도 설계다 (D50). 폼에 할인 필드를 두지 않는 것이 핵심이다 —
+	// 두는 순간 FR-607 의 금액 대조가 자기 자신과의 대조가 된다.
+	order, err := d.store.CreateOrder(ctx, owner, userID, form, d.shipping(), 0, time.Now())
 	switch {
 	case errors.Is(err, commerce.ErrCartEmpty):
 		http.Redirect(w, r, "/cart", http.StatusSeeOther)

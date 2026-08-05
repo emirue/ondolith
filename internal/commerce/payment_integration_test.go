@@ -66,7 +66,7 @@ func seedOrder(t *testing.T, s *Store, pool *pgxpool.Pool, slug string, qty int)
 	if err := s.AddToCart(ctx, owner, variant, qty); err != nil {
 		t.Fatal(err)
 	}
-	order, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, time.Now())
+	order, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -836,7 +836,8 @@ CREATE UNIQUE INDEX ON cart_items (cart_id, variant_id);
 | `order_no` | text | NOT NULL UNIQUE — `crypto/rand` 기반, **순번이 아니다** |
 | `user_id` | uuid | NULL REFERENCES `users(id)` ON DELETE SET NULL |
 | `status` | text | NOT NULL DEFAULT '결제대기', `CHECK` 아래 |
-| `total_amount` | integer | NOT NULL `CHECK (>= 0)` — P-408 금액 대조의 단일 출처 |
+| `total_amount` | integer | NOT NULL `CHECK (>= 0)` — P-408 금액 대조의 단일 출처. **할인을 뺀 값**이다 |
+| `discount_amount` | integer | NOT NULL DEFAULT 0 `CHECK (>= 0)` — 주문 단위 할인 (FR-626) |
 | `receiver_name` | text | NOT NULL |
 | `receiver_phone` | text | NOT NULL |
 | `postcode` | text | NOT NULL |
@@ -893,6 +894,7 @@ CREATE INDEX ON orders (delivered_at) WHERE status = '배송완료';
 | `unit_price` | integer | NOT NULL `CHECK (>= 0)` — **스냅샷** = `base_price + price_delta` |
 | `quantity` | integer | NOT NULL `CHECK (>= 1)` |
 | `line_amount` | integer | GENERATED ALWAYS AS (`unit_price * quantity`) STORED |
+| `discount_amount` | integer | NOT NULL DEFAULT 0 `CHECK (>= 0 AND <= unit_price * quantity)` — **배분된 할인 스냅샷** |
 | `settled_quantity` | integer | NOT NULL DEFAULT 0, `CHECK (BETWEEN 0 AND quantity)` |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
@@ -901,6 +903,12 @@ FR-612("스냅샷만으로 주문서 재발행")를 만족하려면 **상품명 
 `line_amount` 생성 컬럼이 품목 금액과 단가·수량의 어긋남을 구조적으로 없앤다.
 `settled_quantity`는 `refunded_amount`와 같은 패턴이다 — 잔여 수량을 매번 합산으로 구하면
 동시 요청 두 건이 함께 통과한다.
+
+**`discount_amount`가 품목에 있는 이유** (FR-626). 주문 할인을 환불할 때마다 비례로 다시
+계산하면 반올림이 매번 달라져 마지막 품목에서 합이 안 맞는다. 주문 생성 시 한 번 배분해
+스냅샷으로 두면 부분 취소가 **뺄셈**이 되고, 전 품목을 나눠 환불한 합계가 상품 합계와
+1원도 다르지 않다. 배분 규칙(품목 금액 비례 + 최대 나머지법)은 [D50](50-commerce.md)
+「Phase 3 정책값」에 있다.
 
 **표시는 스냅샷 컬럼만 쓴다.** `product_id`·`variant_id`는 관리자 화면 이동 링크용이며,
 조인해 현재 상품명·가격을 보여주면 FR-612가 깨진다.

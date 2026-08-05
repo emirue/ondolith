@@ -39,12 +39,13 @@ type OrderForm struct {
 
 // Order is the created row, as the confirmation screen needs it.
 type Order struct {
-	ID      string
-	OrderNo string
-	Status  Status
-	Goods   int
-	Fee     int
-	Total   int
+	ID       string
+	OrderNo  string
+	Status   Status
+	Goods    int
+	Fee      int
+	Discount int
+	Total    int
 }
 
 // CreateOrder is P-406's body: one transaction, and nothing outside it.
@@ -62,7 +63,7 @@ type Order struct {
 // 되돌린다. 재고를 먼저 커밋하고 주문을 나중에 쓰는 구조는 "재고는 줄었는데
 // 주문이 없는" 상태를 만들고, 그것을 되돌리는 화면은 없다.
 func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
-	form OrderForm, ship Shipping, now time.Time) (*Order, error) {
+	form OrderForm, ship Shipping, discount int, now time.Time) (*Order, error) {
 
 	if !o.Valid() {
 		return nil, ErrCartOwner
@@ -148,10 +149,26 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 		return nil, err
 	}
 
-	// (3) 금액은 서버가 계산한다. 폼에는 금액 필드가 없다.
+	// (3) 금액은 서버가 계산한다. 폼에는 금액 필드가 없다 — 할인도 마찬가지다.
+	// discount 는 호출자가 정한 값이고, 그 값이 어디서 오는지는 호출자의 몫이다
+	// (지금은 0; 쿠폰 발급은 별도 설계다 — D50).
 	goods, fee, total, err := Total(amounts, ship)
 	if err != nil {
 		return nil, err
+	}
+	// 할인을 품목에 배분해 **스냅샷으로** 저장한다 (FR-626). 환불할 때마다
+	// 비례 계산을 다시 하면 반올림이 매번 달라져 마지막 품목에서 합이 안 맞는다.
+	lineAmounts := make([]int, len(amounts))
+	for i := range amounts {
+		lineAmounts[i], _ = amounts[i].Amount()
+	}
+	perItem, err := Apportion(lineAmounts, discount)
+	if err != nil {
+		return nil, err
+	}
+	total -= discount
+	if total < 0 {
+		return nil, fmt.Errorf("%w: 총액 %d", ErrDiscountTooLarge, total)
 	}
 
 	// (5-a) 필수 약관을 먼저 확인한다. 주문 행을 쓴 뒤에 거부하면 롤백으로
@@ -172,28 +189,29 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 
 	// (4) 주문 기록. 상태는 상태머신의 시작점이다.
 	order := &Order{OrderNo: NewOrderNo(now), Status: StatusPaymentPending,
-		Goods: goods, Fee: fee, Total: total}
+		Goods: goods, Fee: fee, Discount: discount, Total: total}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO orders (order_no, user_id, status, total_amount,
+		INSERT INTO orders (order_no, user_id, status, total_amount, discount_amount,
 		                    receiver_name, receiver_phone, postcode, address1, address2,
 		                    delivery_memo, orderer_email, orderer_phone)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-		order.OrderNo, nullable(userID), string(order.Status), total,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+		order.OrderNo, nullable(userID), string(order.Status), total, discount,
 		form.ReceiverName, form.ReceiverPhone, form.Postcode, form.Address1, form.Address2,
 		form.DeliveryMemo, form.OrdererEmail, form.OrdererPhone).Scan(&order.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, l := range lines {
+	for i, l := range lines {
 		// 상품명·옵션 표기·단가는 스냅샷이다 (FR-612). FK 조인으로 대체하지
 		// 않는다 — 조합이 은퇴한 뒤에도 그때 산 것이 재현돼야 한다.
+		// 배분된 할인도 같은 이유로 스냅샷이다 (FR-626).
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO order_items (order_id, product_id, variant_id, product_name,
-			                         option_label, unit_price, quantity)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			                         option_label, unit_price, quantity, discount_amount)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 			order.ID, l.productID, l.variantID, l.name, l.optionLabel,
-			l.unitPrice, l.quantity); err != nil {
+			l.unitPrice, l.quantity, perItem[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -316,6 +334,7 @@ type OrderDetail struct {
 	OrderNo       string
 	Status        Status
 	Total         int
+	Discount      int
 	ReceiverName  string
 	ReceiverPhone string
 	Postcode      string
@@ -332,12 +351,24 @@ type OrderDetail struct {
 // 상품 표를 조인하지 않는다. 조인해 현재 이름·가격을 보여주면 FR-612 가
 // 깨진다 — 주문서는 그때 산 것을 재현해야 한다.
 type OrderItem struct {
+	ID          string
 	ProductName string
 	OptionLabel string
 	UnitPrice   int
 	Quantity    int
 	LineAmount  int
+	// Discount 는 주문 생성 시 배분된 스냅샷이다 (FR-626).
+	Discount int
+	// Settled 는 이미 환불·반품으로 소진된 수량이다. 남은 수량은
+	// Quantity - Settled 이고, 그 이상은 DB CHECK 가 막는다.
+	Settled int
 }
+
+// Net is what this line is worth after its share of the discount.
+func (it OrderItem) Net() int { return it.LineAmount - it.Discount }
+
+// Remaining is how many units may still be refunded.
+func (it OrderItem) Remaining() int { return it.Quantity - it.Settled }
 
 // OrderByNo reads one order, scoped to who may see it.
 //
@@ -346,7 +377,8 @@ type OrderItem struct {
 // 주문번호 하나로 열리면 그 번호가 곧 열쇠가 된다.
 func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone string) (*OrderDetail, error) {
 	const q = `
-		SELECT id, order_no, status, total_amount, receiver_name, receiver_phone,
+		SELECT id, order_no, status, total_amount, discount_amount,
+		       receiver_name, receiver_phone,
 		       postcode, address1, address2, orderer_email, orderer_phone, created_at
 		FROM orders
 		WHERE order_no = $1
@@ -355,7 +387,7 @@ func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone str
 	var o OrderDetail
 	var status string
 	err := s.pool.QueryRow(ctx, q, orderNo, nullable(userID), nullable(ordererPhone)).
-		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.ReceiverName, &o.ReceiverPhone,
+		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.Discount, &o.ReceiverName, &o.ReceiverPhone,
 			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -366,7 +398,8 @@ func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone str
 	o.Status = Status(status)
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT product_name, option_label, unit_price, quantity, line_amount
+		SELECT id, product_name, option_label, unit_price, quantity, line_amount,
+		       discount_amount, settled_quantity
 		FROM order_items WHERE order_id = $1 ORDER BY created_at, id`, o.ID)
 	if err != nil {
 		return nil, err
@@ -374,8 +407,8 @@ func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone str
 	defer rows.Close()
 	for rows.Next() {
 		var it OrderItem
-		if err := rows.Scan(&it.ProductName, &it.OptionLabel, &it.UnitPrice,
-			&it.Quantity, &it.LineAmount); err != nil {
+		if err := rows.Scan(&it.ID, &it.ProductName, &it.OptionLabel, &it.UnitPrice,
+			&it.Quantity, &it.LineAmount, &it.Discount, &it.Settled); err != nil {
 			return nil, err
 		}
 		o.Items = append(o.Items, it)
@@ -420,13 +453,14 @@ func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderD
 // 읽기가 늘어나는 것을 눈에 보이게 한다.
 func (s *Store) OrderByNoUnscoped(ctx context.Context, orderNo string) (*OrderDetail, error) {
 	const q = `
-		SELECT id, order_no, status, total_amount, receiver_name, receiver_phone,
+		SELECT id, order_no, status, total_amount, discount_amount,
+		       receiver_name, receiver_phone,
 		       postcode, address1, address2, orderer_email, orderer_phone, created_at
 		FROM orders WHERE order_no = $1`
 	var o OrderDetail
 	var status string
 	err := s.pool.QueryRow(ctx, q, orderNo).
-		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.ReceiverName, &o.ReceiverPhone,
+		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.Discount, &o.ReceiverName, &o.ReceiverPhone,
 			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -445,7 +479,8 @@ func (s *Store) OrderByNoUnscoped(ctx context.Context, orderNo string) (*OrderDe
 
 func (s *Store) orderItems(ctx context.Context, orderID string) ([]OrderItem, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT product_name, option_label, unit_price, quantity, line_amount
+		SELECT id, product_name, option_label, unit_price, quantity, line_amount,
+		       discount_amount, settled_quantity
 		FROM order_items WHERE order_id = $1 ORDER BY created_at, id`, orderID)
 	if err != nil {
 		return nil, err
@@ -454,8 +489,8 @@ func (s *Store) orderItems(ctx context.Context, orderID string) ([]OrderItem, er
 	var out []OrderItem
 	for rows.Next() {
 		var it OrderItem
-		if err := rows.Scan(&it.ProductName, &it.OptionLabel, &it.UnitPrice,
-			&it.Quantity, &it.LineAmount); err != nil {
+		if err := rows.Scan(&it.ID, &it.ProductName, &it.OptionLabel, &it.UnitPrice,
+			&it.Quantity, &it.LineAmount, &it.Discount, &it.Settled); err != nil {
 			return nil, err
 		}
 		out = append(out, it)
@@ -476,7 +511,8 @@ func (s *Store) GuestOrder(ctx context.Context, orderNo, phone, email string) (*
 		return nil, ErrNotFound
 	}
 	const q = `
-		SELECT id, order_no, status, total_amount, receiver_name, receiver_phone,
+		SELECT id, order_no, status, total_amount, discount_amount,
+		       receiver_name, receiver_phone,
 		       postcode, address1, address2, orderer_email, orderer_phone, created_at
 		FROM orders
 		WHERE order_no = $1
@@ -486,7 +522,7 @@ func (s *Store) GuestOrder(ctx context.Context, orderNo, phone, email string) (*
 	var o OrderDetail
 	var status string
 	err := s.pool.QueryRow(ctx, q, orderNo, nullable(phone), nullable(email)).
-		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.ReceiverName, &o.ReceiverPhone,
+		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.Discount, &o.ReceiverName, &o.ReceiverPhone,
 			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
