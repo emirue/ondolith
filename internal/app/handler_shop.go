@@ -8,6 +8,7 @@ import (
 
 	"github.com/alexedwards/scs/v2"
 
+	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/theme"
 )
@@ -26,6 +27,9 @@ type shopDeps struct {
 	gateway     func() commerce.Gateway
 	pgName      func() string
 	pgClientKey func() string
+	// limiter·limits 는 비회원 주문 조회의 두 겹 제한에 쓴다 (NFR-207).
+	limiter *auth.Limiter
+	limits  auth.Limits
 }
 
 // guestKey returns the session-scoped cart key for a visitor who is not

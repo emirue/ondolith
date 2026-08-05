@@ -223,6 +223,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	commerceStore := commerce.NewStore(pool)
 	sh := &shopDeps{publicDeps: pub, sm: sessions, store: commerceStore, log: log,
+		limiter: limiter, limits: limits,
 		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
 		// 부팅 때 붙잡아 두면 재시작 전까지 옛 값으로 계산한다.
 		shipping: func() commerce.Shipping {

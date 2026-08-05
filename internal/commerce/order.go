@@ -461,3 +461,71 @@ func (s *Store) orderItems(ctx context.Context, orderID string) ([]OrderItem, er
 	}
 	return out, rows.Err()
 }
+
+// GuestOrder is P-504's read: order number AND a matching contact.
+//
+// 대조가 **쿼리 안**에 있다 (D19 P-504). 조회한 뒤 Go 에서 비교하면 그 시점에
+// 이미 남의 주문이 프로세스 안에 들어와 있고, 그 뒤의 실수 하나가 곧 유출이다.
+//
+// 회원 주문은 열리지 않는다 — `user_id IS NULL` 이 그것을 막는다. 회원이
+// 자기 주문을 비회원 경로로 여는 길을 남기면, 그 길은 남의 회원 주문에도
+// 열려 있다.
+func (s *Store) GuestOrder(ctx context.Context, orderNo, phone, email string) (*OrderDetail, error) {
+	if orderNo == "" || (phone == "" && email == "") {
+		return nil, ErrNotFound
+	}
+	const q = `
+		SELECT id, order_no, status, total_amount, receiver_name, receiver_phone,
+		       postcode, address1, address2, orderer_email, orderer_phone, created_at
+		FROM orders
+		WHERE order_no = $1
+		  AND user_id IS NULL
+		  AND ( ($2::text IS NOT NULL AND orderer_phone = $2)
+		     OR ($3::text IS NOT NULL AND orderer_email = $3) )`
+	var o OrderDetail
+	var status string
+	err := s.pool.QueryRow(ctx, q, orderNo, nullable(phone), nullable(email)).
+		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.ReceiverName, &o.ReceiverPhone,
+			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	o.Status = Status(status)
+	items, err := s.orderItems(ctx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	o.Items = items
+	return &o, nil
+}
+
+// Shipment is one row of shipments, as P-505 draws it.
+type Shipment struct {
+	Kind       string
+	Carrier    string
+	TrackingNo string
+	ShippedAt  time.Time
+}
+
+// Shipments lists an order's dispatches, newest first.
+func (s *Store) Shipments(ctx context.Context, orderID string) ([]Shipment, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT kind, carrier, tracking_no, shipped_at FROM shipments
+		WHERE order_id = $1 ORDER BY shipped_at DESC, id`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Shipment
+	for rows.Next() {
+		var sh Shipment
+		if err := rows.Scan(&sh.Kind, &sh.Carrier, &sh.TrackingNo, &sh.ShippedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, sh)
+	}
+	return out, rows.Err()
+}

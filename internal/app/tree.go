@@ -276,6 +276,21 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.checkoutFail})
 		r.Add(Route{Screen: "P-410", Method: "GET", Pattern: "/checkout/complete", Class: SC3,
 			Handler: sh.checkoutComplete})
+
+		// ---- 주문 조회 (SC-3: 소유자는 세션이 정한다) ----------------------
+		r.Add(Route{Screen: "P-501", Method: "GET", Pattern: "/orders", Class: SC3,
+			Handler: sh.orderList})
+		// 비회원 조회 폼·실행이 /orders/{orderNo} 보다 **먼저** 등록되지만,
+		// ServeMux 는 더 구체적인 패턴을 고르므로 순서가 아니라 구체성이
+		// 정한다. `guest` 는 리터럴이라 `{orderNo}` 를 이긴다.
+		r.Add(Route{Screen: "P-503", Method: "GET", Pattern: "/orders/guest", Class: SC2,
+			Handler: sh.guestLookupForm})
+		r.Add(Route{Screen: "P-504", Method: "POST", Pattern: "/orders/guest", Class: SC2,
+			Handler: sh.guestLookup})
+		r.Add(Route{Screen: "P-502", Method: "GET", Pattern: "/orders/{orderNo}", Class: SC3,
+			Handler: sh.orderDetail})
+		r.Add(Route{Screen: "P-505", Method: "GET", Pattern: "/orders/{orderNo}/shipping", Class: SC3,
+			Handler: sh.orderShipping})
 	}
 
 	return r

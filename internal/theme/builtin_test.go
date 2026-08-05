@@ -172,6 +172,29 @@ func payloadFor(name string) any {
 					UnitPrice: 13000, Quantity: 2, LineAmount: 26000}}},
 			"ClientKey": "test_ck_public",
 		}
+	case "order/list.html":
+		return map[string]any{
+			"Orders": []orderLike{{OrderNo: "20260805-ABCDEFGHJK", Status: "결제완료", Total: 29000,
+				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
+			"Page": 1,
+		}
+	case "order/view.html":
+		return map[string]any{
+			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "배송중", Total: 29000,
+				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
+				ReceiverName: "받는이", ReceiverPhone: "010-0000-0000",
+				Postcode: "12345", Address1: "서울시 어딘가",
+				Items: []orderItemLike{{ProductName: "티셔츠", OptionLabel: "크기: L",
+					UnitPrice: 13000, Quantity: 2, LineAmount: 26000}}},
+		}
+	case "order/shipping.html":
+		return map[string]any{
+			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "배송중"},
+			"Shipments": []shipmentLike{{Kind: "최초발송", Carrier: "cj",
+				TrackingNo: "T-1", ShippedAt: "2026-08-05"}},
+		}
+	case "order/guest-form.html":
+		return map[string]any{"Error": "주문 정보를 찾을 수 없습니다."}
 	case "shop/fail.html":
 		return map[string]any{"Message": "결제를 취소하셨습니다."}
 	case "shop/cart.html":
@@ -401,5 +424,8 @@ type orderLike struct {
 	OrderNo, Status                                           string
 	Total                                                     int
 	ReceiverName, ReceiverPhone, Postcode, Address1, Address2 string
+	CreatedAt                                                 time.Time
 	Items                                                     []orderItemLike
 }
+
+type shipmentLike struct{ Kind, Carrier, TrackingNo, ShippedAt string }
