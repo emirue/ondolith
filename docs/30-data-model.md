@@ -793,7 +793,7 @@ CREATE INDEX ON orders (delivered_at) WHERE status = '배송완료';
 시각 기준"인데 그 시각을 담을 곳이 없었다. 없으면 `operation_logs`를 운영 판정에 쓰게 되는데,
 그 표는 A-601이 "수정·삭제하지 않는다"고 못박은 **감사 흔적이지 운영 데이터가 아니다.**
 
-**배송비 컬럼을 두지 않는다** — OPEN-25 미결이고 A-510이 "필드를 미리 두지 않는다"고 명시했다.
+**배송비 컬럼을 두지 않는다** — 배송비 정책은 무료배송 기준액 하나뿐이고 부분 취소로 환불하지 않는다 ([D50](50-commerce.md)). 주문 시점의 배송비는 `orders` 가 이미 갖는다.
 
 **`order_items`**
 
@@ -936,7 +936,7 @@ CREATE INDEX ON webhook_events (status, created_at DESC) WHERE status <> '처리
 
 UNIQUE가 `(pg, event_id)` **복합**인 이유: 어댑터가 여럿이라는 것이 FR-605의 전제이고,
 두 PG가 같은 ID 문자열을 발급하면 단일 컬럼 UNIQUE는 **정상 이벤트를 중복으로 버린다.**
-`수신`은 "미처리"를 뜻한다 — 고루틴 처리 중 프로세스가 죽으면 반드시 남는 상태이고(OPEN-19),
+`수신`은 "미처리"를 뜻한다 — 고루틴 처리 중 프로세스가 죽으면 반드시 남는 상태이고 ([D50](50-commerce.md) 「Phase 3 정책값」이 자동 재처리를 두지 않기로 했다),
 부분 인덱스가 A-603 상단에 그 행들을 올린다.
 
 **`terms` · `order_agreements`**
