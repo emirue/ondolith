@@ -263,7 +263,7 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 | W3-03 | 상품 스키마 **(완료 — `00011_product.sql`)** | W3-02 | `00011_product.sql`, `D30`·`D16` 갱신 | `products`·`product_options`·`product_variants`·`categories`·`product_categories` 생성. 가격은 **정수 minor unit**. `categories.slug` UNIQUE. **커머스 테이블은 `site_mode`와 무관하게 항상 만든다** (D20 모듈 게이팅) |
 | W3-04 | 장바구니·주문·약관 스키마 **(완료 — `00012_order.sql`)** | W3-03 | `00012_order.sql`, `D30`·`D16` 갱신 | `carts`·`cart_items`·`orders`·`order_items`·`terms`·`order_agreements` 생성. `order_items`는 상품명·가격 스냅샷 컬럼을 갖는다(FK 조인으로 대체하지 않음). 주문번호가 순번이 아님을 생성 함수 테스트가 확인한다 (SC-3 3항) |
 | W3-05 | 결제·환불·웹훅 제약 스키마 **(완료 — `00013_payment.sql`)** | W3-04 | `00013_payment.sql`, `D30`·`D16` 갱신 | **DB 제약이 다음을 막는다**: ① 주문당 승인 2건(유니크) ② 환불누적액 > 승인금액(`CHECK`) ③ 같은 웹훅 이벤트 ID 2건(유니크). 각 제약에 **위반 INSERT가 실패하는 통합 테스트**를 남긴다. 애플리케이션 검사로 대체하지 않는다 (FR-608, FR-611, FR-610) |
-| W3-06 | 배송·반품 스키마 | W3-05 | `00014_fulfillment.sql`, `D30`·`D16` 갱신 | `shipments`·`returns`·`return_items` 생성. **같은 품목에 처리 중인 반품·교환이 둘 이상 생기지 않도록 부분 유니크 인덱스**를 걸고, 동시 INSERT 두 건 중 하나만 성공하는 테스트를 남긴다 |
+| W3-06 | 배송·반품 스키마 **(완료 — `00014_fulfillment.sql`)** | W3-05 | `00014_fulfillment.sql`, `D30`·`D16` 갱신 | `shipments`·`returns`·`return_items` 생성. **같은 품목에 처리 중인 반품·교환이 둘 이상 생기지 않도록 부분 유니크 인덱스**를 걸고, 동시 INSERT 두 건 중 하나만 성공하는 테스트를 남긴다 |
 
 #### 순수 로직
 

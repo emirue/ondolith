@@ -170,9 +170,9 @@ func TestAllMigrationsApply(t *testing.T) {
 		"menus", "operation_logs", "order_agreements", "order_items", "orders",
 		"pages", "password_reset_tokens", "payments", "permissions", "posts",
 		"product_categories", "product_options", "product_variants", "products",
-		"refund_items", "refunds", "role_permissions", "roles", "sessions",
-		"settings", "social_accounts", "terms", "user_roles", "users",
-		"webhook_events",
+		"refund_items", "refunds", "return_items", "returns", "role_permissions",
+		"roles", "sessions", "settings", "shipments", "social_accounts", "terms",
+		"user_roles", "users", "webhook_events",
 	}
 	got := tableNames(t, pool)
 	if len(got) != len(want) {
@@ -1551,5 +1551,259 @@ func TestWebhookEventIsIdempotentPerPG(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `UPDATE webhook_events SET status = '알수없음'`); err == nil {
 		t.Error("정의되지 않은 웹훅 상태가 들어갔다")
+	}
+}
+
+// 같은 품목에 처리 중인 반품·교환이 둘 이상 생기지 않는다. 생기면 같은 물건을
+// 두 번 환불받는다.
+//
+// is_open 이 비정규화인 이유는 하나뿐이다: 부분 인덱스의 술어는 같은 테이블의
+// 컬럼만 볼 수 있어 returns.status 를 참조할 수 없다.
+func TestOneOpenReturnPerOrderItem(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, itemID := seedPayable(t, pool)
+
+	mkReturn := func(no string) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO returns (return_no,order_id,kind,status)
+			VALUES ($1,$2,'반품','반품접수') RETURNING id`, no, orderID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	r1, r2 := mkReturn("R-0001"), mkReturn("R-0002")
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO return_items (return_id,order_item_id,quantity) VALUES ($1,$2,1)`,
+		r1, itemID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO return_items (return_id,order_item_id,quantity) VALUES ($1,$2,1)`,
+		r2, itemID); err == nil {
+		t.Fatal("같은 품목에 처리 중인 건이 둘 생겼다")
+	}
+
+	// 앞 건이 종결되면 다시 받을 수 있다 — 인덱스가 "처리 중" 만 겨냥한다.
+	if _, err := pool.Exec(ctx,
+		`UPDATE return_items SET is_open = false WHERE return_id = $1`, r1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO return_items (return_id,order_item_id,quantity) VALUES ($1,$2,1)`,
+		r2, itemID); err != nil {
+		t.Errorf("종결된 건이 새 반품을 막았다: %v", err)
+	}
+}
+
+// 동시 INSERT 두 건 중 하나만 성공한다. 애플리케이션이 먼저 SELECT 로 확인하는
+// 방식은 두 트랜잭션이 같은 빈 결과를 보고 둘 다 통과한다.
+func TestConcurrentReturnItemInsertsLeaveOneWinner(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, itemID := seedPayable(t, pool)
+
+	ids := make([]string, 2)
+	for i, no := range []string{"R-1001", "R-1002"} {
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO returns (return_no,order_id,kind,status)
+			VALUES ($1,$2,'반품','반품접수') RETURNING id`, no, orderID).Scan(&ids[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, rid := range ids {
+		go func(rid string) {
+			<-start
+			_, err := pool.Exec(ctx,
+				`INSERT INTO return_items (return_id,order_item_id,quantity) VALUES ($1,$2,1)`,
+				rid, itemID)
+			errs <- err
+		}(rid)
+	}
+	close(start)
+
+	ok := 0
+	for i := 0; i < 2; i++ {
+		if <-errs == nil {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Errorf("동시 두 건 중 %d 건이 성공했다, want 1", ok)
+	}
+}
+
+// 수거 확인 시점을 넘겼는데 배송비 스냅샷이 없으면, 나중에 A-512 를 바꾸는 것만으로
+// 과거 환불액이 달라진다.
+func TestReturnRequiresShippingSnapshotAfterPickup(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, _ := seedPayable(t, pool)
+
+	var id string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO returns (return_no,order_id,kind,status)
+		VALUES ('R-2001',$1,'반품','반품접수') RETURNING id`, orderID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	// 접수 단계에서는 아직 모르는 값이라 비어 있어도 된다.
+	if _, err := pool.Exec(ctx, `UPDATE returns SET status = '반품수거' WHERE id = $1`, id); err == nil {
+		t.Error("스냅샷 없이 수거로 넘어갔다")
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE returns SET status = '반품수거', fault = '구매자',
+		       shipping_fee_policy = '차감', shipping_fee_amount = 3000
+		WHERE id = $1`, id); err != nil {
+		t.Errorf("스냅샷을 채웠는데 막혔다: %v", err)
+	}
+	// 하자 상품의 반품비를 구매자가 물지 않는다.
+	if _, err := pool.Exec(ctx,
+		`UPDATE returns SET fault = '판매자' WHERE id = $1`, id); err == nil {
+		t.Error("판매자 귀책인데 배송비가 남아 있다")
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE returns SET fault = '판매자', shipping_fee_amount = 0 WHERE id = $1`, id); err != nil {
+		t.Errorf("판매자 귀책 + 배송비 0 이 막혔다: %v", err)
+	}
+}
+
+// 종류와 상태가 짝이 맞는다. 교환 전용 컬럼이 반품 건에 실리면 P-514 가 존재하지
+// 않는 교환 건의 차액을 결제하려 든다.
+func TestReturnKindAndStatusMustAgree(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	productID, variantID, orderID := seedOrderable(t, pool)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO order_items (order_id,product_id,variant_id,product_name,option_label,
+		                         unit_price,quantity)
+		VALUES ($1,$2,$3,'티셔츠','크기: L',13000,2)`, orderID, productID, variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	ins := func(no, kind, status string, extra string, args ...any) error {
+		q := `INSERT INTO returns (return_no,order_id,kind,status` + extra
+		_, err := pool.Exec(ctx, q, append([]any{no, orderID, kind, status}, args...)...)
+		return err
+	}
+	// 교환 상태를 단 반품 건.
+	if err := ins("R-3001", "반품", "교환접수", `) VALUES ($1,$2,$3,$4)`); err == nil {
+		t.Error("반품 건이 교환 상태를 달았다")
+	}
+	// 교환인데 새 조합이 없다.
+	if err := ins("R-3002", "교환", "교환접수", `) VALUES ($1,$2,$3,$4)`); err == nil {
+		t.Error("새 조합 없는 교환이 들어갔다")
+	}
+	// 반품인데 교환 전용 컬럼이 실렸다.
+	if err := ins("R-3003", "반품", "반품접수",
+		`,new_variant_id) VALUES ($1,$2,$3,$4,$5)`, variantID); err == nil {
+		t.Error("반품 건에 교환 전용 컬럼이 실렸다")
+	}
+	// 차액을 받으러 가는데 받을 차액이 없다 — 0원 결제가 만들어진다.
+	if err := ins("R-3004", "교환", "차액결제대기",
+		`,new_variant_id,price_difference) VALUES ($1,$2,$3,$4,$5,0)`, variantID); err == nil {
+		t.Error("차액 0 인데 차액결제대기로 들어갔다")
+	}
+	if err := ins("R-3005", "교환", "차액결제대기",
+		`,new_variant_id,price_difference) VALUES ($1,$2,$3,$4,$5,3000)`, variantID); err != nil {
+		t.Errorf("정상 교환 건이 막혔다: %v", err)
+	}
+}
+
+// order_id 에 UNIQUE 를 걸면 D14 의 `교환발송 → 배송완료` 복귀 흐름이 성립하지
+// 않는다. 부분 유니크 둘이 실제로 지키려던 불변식이다.
+func TestShipmentUniquenessIsPerKindNotPerOrder(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	productID, variantID, orderID := seedOrderable(t, pool)
+	_ = productID
+	var retID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO returns (return_no,order_id,kind,status,new_variant_id)
+		VALUES ('R-4001',$1,'교환','교환접수',$2) RETURNING id`, orderID, variantID).
+		Scan(&retID); err != nil {
+		t.Fatal(err)
+	}
+
+	ins := func(kind, tracking string, ret any) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO shipments (order_id,return_id,kind,carrier,tracking_no,shipped_at)
+			VALUES ($1,$2,$3,'cj',$4,now())`, orderID, ret, kind, tracking)
+		return err
+	}
+	if err := ins("최초발송", "T-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ins("최초발송", "T-2", nil); err == nil {
+		t.Error("최초발송이 두 건 생겼다")
+	}
+	// 같은 주문에 교환 재발송이 붙는 것은 정상이다 — 여기서 막히면 복귀 흐름이 죽는다.
+	if err := ins("교환재발송", "T-3", retID); err != nil {
+		t.Fatalf("교환 재발송이 막혔다: %v", err)
+	}
+	if err := ins("교환재발송", "T-4", retID); err == nil {
+		t.Error("교환 건당 재발송이 두 건 생겼다")
+	}
+	// 종류와 return_id 가 짝이 맞는다.
+	if err := ins("교환재발송", "T-5", nil); err == nil {
+		t.Error("교환 건을 가리키지 않는 재발송이 들어갔다")
+	}
+	if err := ins("최초발송", "T-6", retID); err == nil {
+		t.Error("최초발송이 교환 건을 가리켰다")
+	}
+}
+
+// 돈 기록이 가리키는 반품 건은 지워지지 않는다. W3-05 에서 컬럼만 만들어 둔
+// return_id 의 FK 가 여기서 걸린다.
+func TestReturnIsRestrictedWhileMoneyPointsAtIt(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	productID, variantID, orderID := seedOrderable(t, pool)
+	_ = productID
+	var retID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO returns (return_no,order_id,kind,status,new_variant_id,price_difference)
+		VALUES ('R-5001',$1,'교환','차액결제대기',$2,3000) RETURNING id`, orderID, variantID).
+		Scan(&retID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 없는 반품 건을 가리키는 결제는 들어가지 못한다 — FK 가 걸리기 전에는
+	// 아무 UUID 나 통과했다.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payments (order_id,return_id,kind,status,pg,payment_key,approved_amount)
+		VALUES ($1,gen_random_uuid(),'교환차액','대기','toss','k-ghost',3000)`, orderID); err == nil {
+		t.Error("존재하지 않는 반품 건을 가리키는 교환차액이 들어갔다")
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payments (order_id,return_id,kind,status,pg,payment_key,approved_amount)
+		VALUES ($1,$2,'교환차액','대기','toss','k-diff',3000)`, orderID, retID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM returns WHERE id = $1`, retID); err == nil {
+		t.Error("결제가 가리키는 반품 건이 지워졌다")
 	}
 }

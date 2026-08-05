@@ -985,17 +985,23 @@ PCI DSS). 정기결제가 필요해지면 빌링키 컬럼을 그때 더한다.
 
 **`returns` · `return_items`**
 
-| 컬럼 | 타입 · 제약 |
-|---|---|
-| `id` · `return_no` text NOT NULL UNIQUE · `order_id` → `orders` | |
-| `kind` | text NOT NULL `CHECK (kind IN ('반품','교환'))` |
-| `status` | text NOT NULL, `CHECK` 아래 |
-| `reason` · `reject_reason` | text |
-| `fault` | text NULL `CHECK (fault IN ('구매자','판매자'))` — **수거 확인 시 확정** |
-| `shipping_fee_policy` | text NULL `CHECK IN ('차감','별도청구')` — **A-512 스냅샷** |
-| `shipping_fee_amount` | integer NULL `CHECK (>= 0)` — **A-512 스냅샷** |
-| `new_variant_id` | uuid NULL → `product_variants` |
-| `price_difference` | integer NULL — 부호 있음 |
+**`returns`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `return_no` | text | NOT NULL UNIQUE — 순번이 아니다 |
+| `order_id` | uuid | NOT NULL REFERENCES `orders(id)` ON DELETE RESTRICT |
+| `kind` | text | NOT NULL `CHECK (kind IN ('반품','교환'))` |
+| `status` | text | NOT NULL, `CHECK` 아래 |
+| `reason` | text | NOT NULL DEFAULT '' |
+| `reject_reason` | text | NOT NULL DEFAULT '' |
+| `fault` | text | NULL `CHECK (fault IN ('구매자','판매자'))` — **수거 확인 시 확정** |
+| `shipping_fee_policy` | text | NULL `CHECK IN ('차감','별도청구')` — **A-512 스냅샷** |
+| `shipping_fee_amount` | integer | NULL `CHECK (>= 0)` — **A-512 스냅샷** |
+| `new_variant_id` | uuid | NULL REFERENCES `product_variants(id)` ON DELETE RESTRICT |
+| `price_difference` | integer | NULL — 부호 있음 |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 ```sql
 CHECK ((kind='반품' AND status IN ('반품접수','반품수거','환불','거부'))
@@ -1009,8 +1015,16 @@ CHECK (kind <> '반품' OR status NOT IN ('반품수거','환불')
 CHECK (fault <> '판매자' OR shipping_fee_amount = 0)
 ```
 
-`return_items`: `id` · `return_id` → `returns` · `order_item_id` → `order_items` ·
-`quantity` integer `CHECK (>= 1)` · `is_open` boolean NOT NULL DEFAULT true · 감사
+**`return_items`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `return_id` | uuid | NOT NULL REFERENCES `returns(id)` ON DELETE CASCADE |
+| `order_item_id` | uuid | NOT NULL REFERENCES `order_items(id)` ON DELETE RESTRICT |
+| `quantity` | integer | NOT NULL `CHECK (>= 1)` |
+| `is_open` | boolean | NOT NULL DEFAULT true |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 ```sql
 UNIQUE (return_id, order_item_id)
@@ -1028,9 +1042,16 @@ CREATE UNIQUE INDEX ON return_items (order_item_id) WHERE is_open;   -- 품목�
 
 **`shipments`**
 
-`id` · `order_id` → `orders` (**UNIQUE를 걸지 않는다**) · `return_id` uuid NULL → `returns` ·
-`kind` text `CHECK IN ('최초발송','교환재발송')` · `carrier` · `tracking_no` text NOT NULL ·
-`shipped_at` timestamptz NOT NULL · 감사
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `order_id` | uuid | NOT NULL REFERENCES `orders(id)` ON DELETE RESTRICT — **UNIQUE를 걸지 않는다** |
+| `return_id` | uuid | NULL REFERENCES `returns(id)` ON DELETE RESTRICT |
+| `kind` | text | NOT NULL `CHECK IN ('최초발송','교환재발송')` |
+| `carrier` | text | NOT NULL |
+| `tracking_no` | text | NOT NULL |
+| `shipped_at` | timestamptz | NOT NULL |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 ```sql
 CHECK ((kind = '교환재발송') = (return_id IS NOT NULL))
