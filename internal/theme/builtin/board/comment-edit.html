@@ -1,0 +1,14 @@
+{{define "body"}}
+{{with .Data}}
+<section class="page">
+  <h1>댓글 수정</h1>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  <form class="form" method="post" action="/comments/{{.Comment.ID}}/edit">
+    <label for="body">내용</label>
+    <textarea id="body" name="body" required>{{.Comment.Body}}</textarea>
+    <button>수정</button>
+  </form>
+  <p><a href="/board/{{.Board.Slug}}/{{.Comment.PostID}}">돌아가기</a></p>
+</section>
+{{end}}
+{{end}}

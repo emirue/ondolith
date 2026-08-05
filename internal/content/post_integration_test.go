@@ -345,3 +345,34 @@ func TestHiddenPostsAreNotListed(t *testing.T) {
 		t.Errorf("숨긴 글이 목록에 있다: %d행", len(got))
 	}
 }
+
+// 툼스톤은 저장소에서도 못 고친다. 핸들러가 유일한 방어면 다음 호출자가
+// 뚫는다 — 작성자가 이미 지운 본문을 되살리는 것은 어떤 경로로도 안 된다.
+func TestUpdateCommentRefusesATombstone(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	boardID := seedBoard(t, s)
+	postID := mkPost(t, s, boardID, "글")
+
+	parent, err := s.CreateComment(ctx, Comment{PostID: postID, Body: "부모"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateComment(ctx, Comment{PostID: postID, ParentID: parent, Body: "자식"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteComment(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.UpdateComment(ctx, parent, "되살리기"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("툼스톤이 수정됐다: %v", err)
+	}
+	got, err := s.CommentByID(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Body != "" {
+		t.Errorf("본문이 되살아났다: %q", got.Body)
+	}
+}

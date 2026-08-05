@@ -63,6 +63,20 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-206", Method: "POST", Pattern: "/board/{slug}/{id}/edit", Class: SC3,
 		Handler: bd.postUpdate})
 
+	r.Add(Route{Screen: "P-207", Method: "POST", Pattern: "/board/{slug}/{id}/delete", Class: SC3,
+		Handler: bd.postDelete})
+	r.Add(Route{Screen: "P-208", Method: "POST", Pattern: "/board/{slug}/{id}/comments", Class: SC2,
+		Handler: bd.commentCreate})
+	// P-209·P-210 은 경로에 slug 가 없다 (D11). 게시판은 댓글의 글을 거쳐
+	// 찾고, 그 게시판의 post.read 가 여전히 판정한다 — 그러지 않으면 댓글
+	// id 가 못 여는 게시판으로 들어가는 문이 된다.
+	r.Add(Route{Screen: "P-209", Method: "GET", Pattern: "/comments/{id}/edit", Class: SC3,
+		Handler: bd.commentEditForm})
+	r.Add(Route{Screen: "P-209", Method: "POST", Pattern: "/comments/{id}/edit", Class: SC3,
+		Handler: bd.commentUpdate})
+	r.Add(Route{Screen: "P-210", Method: "POST", Pattern: "/comments/{id}/delete", Class: SC3,
+		Handler: bd.commentDelete})
+
 	// ---- 관리자 -------------------------------------------------------------
 	// admin.access is the tree gate's key; every screen below also names the
 	// permission its own handler checks. The two are not redundant: the gate

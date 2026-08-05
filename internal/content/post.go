@@ -367,3 +367,58 @@ func isWordRune(r rune) bool {
 	}
 	return false
 }
+
+// CommentByID reads one comment.
+func (s *Store) CommentByID(ctx context.Context, id string) (*Comment, error) {
+	const q = `
+		SELECT id, post_id, coalesce(parent_id::text, ''), coalesce(author_id::text, ''),
+		       body, coalesce(deleted_at, 'epoch'::timestamptz), created_at
+		FROM comments WHERE id = $1`
+	var c Comment
+	var del time.Time
+	err := s.pool.QueryRow(ctx, q, id).Scan(&c.ID, &c.PostID, &c.ParentID,
+		&c.AuthorID, &c.Body, &del, &c.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !del.Equal(time.Unix(0, 0).UTC()) {
+		c.DeletedAt = del
+	}
+	return &c, nil
+}
+
+// UpdateComment changes the body and nothing else. A tombstone is excluded in
+// the WHERE clause: bringing back a body the author removed is the one edit
+// that must not be possible.
+func (s *Store) UpdateComment(ctx context.Context, id, body string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE comments SET body = $2, updated_at = now()
+		 WHERE id = $1 AND deleted_at IS NULL`, id, body)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// BoardByPost finds the board a post belongs to. P-209 and P-210 have no slug
+// in their path, so the board — and its permission — is reached this way.
+func (s *Store) BoardByPost(ctx context.Context, postID string) (*Board, error) {
+	const q = `
+		SELECT b.id, b.slug, b.name, b.skin, b.allow_attachments, b.allow_comments,
+		       b.allow_secret, b.per_page
+		FROM boards b JOIN posts p ON p.board_id = b.id
+		WHERE p.id = $1`
+	var b Board
+	err := s.pool.QueryRow(ctx, q, postID).Scan(&b.ID, &b.Slug, &b.Name, &b.Skin,
+		&b.AllowAttachments, &b.AllowComments, &b.AllowSecret, &b.PerPage)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &b, err
+}
