@@ -57,7 +57,7 @@ func TestListIsAConstantNumberOfQueries(t *testing.T) {
 
 	q := ParseListQuery(url.Values{}, 20)
 	tr.n.Store(0)
-	posts, err := s.ListPosts(ctx, boardID, q, "", false)
+	posts, err := s.ListPosts(ctx, boardID, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,18 +83,15 @@ func TestListIsAConstantNumberOfQueries(t *testing.T) {
 	}
 }
 
-// 비밀글은 SQL 에서 걸러진다. 가져온 뒤 Go 에서 거르면 그 행은 이미 DB 를
-// 떠났고, 다음 호출자가 그 검사를 빠뜨린다 (SC-1 4항).
-func TestSecretPostsAreFilteredInSQL(t *testing.T) {
+// FR-512 / W2-24: 비밀글은 **목록에 제목이 나오고 본문은 404** 다.
+//
+// 목록에서까지 숨기면 비밀글이 존재하는 이유(자기 질문이 접수됐는지 보는 것)를
+// 없앤다. 지키는 것은 본문이고, 그것은 PostByID 가 한다.
+func TestSecretPostsAreListedButTheirBodyIsNot(t *testing.T) {
 	s, _ := testStore(t)
 	ctx := context.Background()
 	boardID := seedBoard(t, s)
 
-	author, err := s.pool.Exec(ctx, `SELECT 1`)
-	_ = author
-	if err != nil {
-		t.Fatal(err)
-	}
 	var authorID, otherID string
 	if err := s.pool.QueryRow(ctx,
 		`INSERT INTO users (email, password_hash, display_name)
@@ -107,38 +104,47 @@ func TestSecretPostsAreFilteredInSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := s.CreatePost(ctx, Post{BoardID: boardID, AuthorID: authorID,
-		Title: "비밀글", Body: "본문", IsSecret: true}); err != nil {
+	secret, err := s.CreatePost(ctx, Post{BoardID: boardID, AuthorID: authorID,
+		Title: "비밀 제목", Body: "비밀 본문", IsSecret: true})
+	if err != nil {
 		t.Fatal(err)
 	}
 	mkPost(t, s, boardID, "공개글")
 
 	q := ParseListQuery(url.Values{}, 20)
-	cases := map[string]struct {
-		viewer    string
-		canSecret bool
-		want      int
-	}{
-		"익명":               {"", false, 1},
-		"남":                {otherID, false, 1},
-		"작성자 본인":           {authorID, false, 2},
-		"post.read_secret": {otherID, true, 2},
+	got, err := s.ListPosts(ctx, boardID, q)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for name, tc := range cases {
-		got, err := s.ListPosts(ctx, boardID, q, tc.viewer, tc.canSecret)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
+	if len(got) != 2 {
+		t.Fatalf("%d행, want 2행 — 비밀글도 목록에 나온다", len(got))
+	}
+	n, err := s.CountPosts(ctx, boardID, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("합계 %d, want 2 — 목록과 합계가 다르면 페이저가 거짓말한다", n)
+	}
+	var marked bool
+	for _, p := range got {
+		if p.ID == secret {
+			marked = p.IsSecret
 		}
-		if len(got) != tc.want {
-			t.Errorf("%s: %d행, want %d행", name, len(got), tc.want)
-		}
-		n, err := s.CountPosts(ctx, boardID, q, tc.viewer, tc.canSecret)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n != int64(tc.want) {
-			t.Errorf("%s: count %d, want %d — 목록과 합계가 다르면 페이저가 거짓말한다", name, n, tc.want)
-		}
+	}
+	if !marked {
+		t.Error("비밀글이 목록에서 비밀글로 표시되지 않는다")
+	}
+
+	// 본문은 남에게 404 다.
+	if _, err := s.PostByID(ctx, secret, otherID, false); !errors.Is(err, ErrNotFound) {
+		t.Errorf("남이 비밀글 본문을 읽었다: %v", err)
+	}
+	if _, err := s.PostByID(ctx, secret, authorID, false); err != nil {
+		t.Errorf("작성자가 자기 비밀글을 못 읽는다: %v", err)
+	}
+	if _, err := s.PostByID(ctx, secret, otherID, true); err != nil {
+		t.Errorf("post.read_secret 보유자가 못 읽는다: %v", err)
 	}
 }
 
@@ -188,13 +194,13 @@ func TestSearchTermsCannotComposeTsquery(t *testing.T) {
 		"(((", ":*", "게시판:*:*", "!!!",
 	} {
 		q := ParseListQuery(url.Values{"q": {term}}, 20)
-		if _, err := s.ListPosts(ctx, boardID, q, "", false); err != nil {
+		if _, err := s.ListPosts(ctx, boardID, q); err != nil {
 			t.Errorf("검색어 %q 가 오류를 냈다: %v", term, err)
 		}
 	}
 	// ...그리고 실제로 찾는다.
 	q := ParseListQuery(url.Values{"q": {"게시판"}}, 20)
-	got, err := s.ListPosts(ctx, boardID, q, "", false)
+	got, err := s.ListPosts(ctx, boardID, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +343,7 @@ func TestHiddenPostsAreNotListed(t *testing.T) {
 	if err := s.SetPostFlags(ctx, id, false, "hidden"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListPosts(ctx, boardID, ParseListQuery(url.Values{}, 20), "", true)
+	got, err := s.ListPosts(ctx, boardID, ParseListQuery(url.Values{}, 20))
 	if err != nil {
 		t.Fatal(err)
 	}

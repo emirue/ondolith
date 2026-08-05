@@ -327,12 +327,12 @@ func mkBoardID(t *testing.T, pool *pgxpool.Pool, slug string) string {
 	return b.ID
 }
 
-// 비밀글은 남에게 목록에도 상세에도 나오지 않는다. 저장소가 거르는 것을
-// 핸들러가 제대로 물어봐야 실제로 걸린다 — canSecret 을 항상 참으로 넘기면
-// 저장소는 시키는 대로 다 보여준다.
-func TestSecretPostsAreHiddenOverHTTP(t *testing.T) {
+// FR-512 / W2-24: 비밀글은 **목록에 제목이 나오고 본문은 404** 다.
+//
+// 목록에서까지 숨기면 비밀글이 존재하는 이유가 없어진다 — 자기 질문이
+// 접수됐는지 보는 것이 그 기능이다. 지키는 것은 본문이다.
+func TestSecretPostTitlesAreListedButBodiesAreNot(t *testing.T) {
 	srv, pool := liveSite(t)
-	// allow_secret 을 켠 게시판.
 	boardID := mkBoard(t, pool, "free", content.PresetPublic)
 	if _, err := pool.Exec(context.Background(),
 		`UPDATE boards SET allow_secret = true WHERE id = $1`, boardID); err != nil {
@@ -360,32 +360,36 @@ func TestSecretPostsAreHiddenOverHTTP(t *testing.T) {
 		t.Fatal("비밀글로 저장되지 않았다")
 	}
 
-	// 작성자는 보인다.
-	if code, body := mustGet(t, author, srv.URL+"/board/free"); code != http.StatusOK ||
-		!strings.Contains(body, "비밀 제목") {
-		t.Errorf("작성자가 자기 비밀글을 못 본다: HTTP %d", code)
+	// 제목은 누구에게나 목록에 나온다.
+	for name, c := range map[string]*http.Client{"작성자": author, "익명": client()} {
+		code, list := mustGet(t, c, srv.URL+"/board/free")
+		if code != http.StatusOK {
+			t.Fatalf("%s 목록 HTTP %d", name, code)
+		}
+		if !strings.Contains(list, "비밀 제목") {
+			t.Errorf("%s 목록에 비밀글 제목이 없다", name)
+		}
+		// 목록은 본문을 그리지 않는다.
+		if strings.Contains(list, "비밀 본문") {
+			t.Errorf("%s 목록에 본문이 나왔다", name)
+		}
 	}
 
-	// 남은 목록에서도 상세에서도 못 본다.
+	// 본문은 작성자만.
+	if code, body := mustGet(t, author, srv.URL+loc); code != http.StatusOK ||
+		!strings.Contains(body, "비밀 본문") {
+		t.Errorf("작성자가 자기 비밀글 본문을 못 본다: HTTP %d", code)
+	}
 	other := client()
 	login(t, srv.URL, "b@example.com", other)
-	code, list := mustGet(t, other, srv.URL+"/board/free")
-	if code != http.StatusOK {
-		t.Fatalf("목록 HTTP %d", code)
-	}
-	if strings.Contains(list, "비밀 제목") {
-		t.Error("남의 목록에 비밀글 제목이 나온다")
-	}
 	if code, body := mustGet(t, other, srv.URL+loc); code != http.StatusNotFound {
-		t.Errorf("남이 비밀글 상세를 HTTP %d 로 열었다", code)
+		t.Errorf("남이 비밀글 본문을 HTTP %d 로 열었다", code)
 		if strings.Contains(body, "비밀 본문") {
 			t.Error("본문이 새어 나왔다")
 		}
 	}
-	// 익명도 마찬가지.
-	if code, anonList := mustGet(t, client(), srv.URL+"/board/free"); code == http.StatusOK &&
-		strings.Contains(anonList, "비밀 제목") {
-		t.Error("익명 목록에 비밀글이 나온다")
+	if code, _ := mustGet(t, client(), srv.URL+loc); code != http.StatusNotFound {
+		t.Error("익명이 비밀글 본문을 열었다")
 	}
 }
 

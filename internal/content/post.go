@@ -52,12 +52,15 @@ func (c Comment) IsTombstone() bool { return !c.DeletedAt.IsZero() }
 // row — that is the N+1 the requirement names, and it only shows up once a
 // board has enough posts that nobody is testing on it any more.
 //
-// canSecret decides whether other people's secret posts are visible. It is a
-// parameter and not a filter the caller bolts on afterwards: a WHERE clause
-// that is not in the statement cannot be forgotten by the next caller.
-func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery,
-	viewerID string, canSecret bool,
-) ([]Post, error) {
+// Secret posts ARE listed (FR-512, W2-24): the title, author and date show, and
+// the body is what post.read_secret protects — PostByID refuses that. A board
+// that hid them entirely would be unusable for the case they exist for, a Q&A
+// board where you need to see your question is in the queue.
+//
+// So there is no viewer here and no canSecret: this query has no permission
+// decision left to make. Search is the one that keeps the filter, because its
+// results carry an excerpt of the body.
+func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]Post, error) {
 	// The ORDER BY comes from the allow list (listquery.go). Everything else is
 	// a bind parameter.
 	sql := `
@@ -70,10 +73,9 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery,
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.board_id = $1
 		  AND p.status = 'published'
-		  AND ($2 OR NOT p.is_secret OR p.author_id = $3)
-		  AND ($4 = '' OR p.search_vector @@ to_tsquery('simple', $5))
+		  AND ($2 = '' OR p.search_vector @@ to_tsquery('simple', $3))
 		ORDER BY ` + q.OrderBy() + `
-		LIMIT $6 OFFSET $7`
+		LIMIT $4 OFFSET $5`
 
 	// A prefix query is what actually matches Korean text: the stored token
 	// carries the particle, so the exact term misses (D30 measured this).
@@ -82,8 +84,7 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery,
 		tsq = toPrefixQuery(q.Search)
 	}
 
-	rows, err := s.pool.Query(ctx, sql, boardID, canSecret, nullIfEmpty(viewerID),
-		q.Search, tsq, q.PerPage, q.Offset())
+	rows, err := s.pool.Query(ctx, sql, boardID, q.Search, tsq, q.PerPage, q.Offset())
 	if err != nil {
 		return nil, err
 	}
@@ -109,11 +110,10 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery,
 	return out, rows.Err()
 }
 
-// CountPosts is the total for the pager. It is a second query, and the only
-// one: a count cannot ride along with a LIMIT.
-func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery,
-	viewerID string, canSecret bool,
-) (int64, error) {
+// CountPosts is the total for the pager. It counts exactly what ListPosts
+// returns — a pager whose total disagrees with its pages tells the visitor
+// there is a page that is not there.
+func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (int64, error) {
 	tsq := ""
 	if q.Search != "" {
 		tsq = toPrefixQuery(q.Search)
@@ -122,9 +122,8 @@ func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery,
 	err := s.pool.QueryRow(ctx, `
 		SELECT count(*) FROM posts p
 		WHERE p.board_id = $1 AND p.status = 'published'
-		  AND ($2 OR NOT p.is_secret OR p.author_id = $3)
-		  AND ($4 = '' OR p.search_vector @@ to_tsquery('simple', $5))`,
-		boardID, canSecret, nullIfEmpty(viewerID), q.Search, tsq).Scan(&n)
+		  AND ($2 = '' OR p.search_vector @@ to_tsquery('simple', $3))`,
+		boardID, q.Search, tsq).Scan(&n)
 	return n, err
 }
 

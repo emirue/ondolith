@@ -60,17 +60,19 @@ func (d *boardDeps) sitemap(w http.ResponseWriter, r *http.Request) {
 		}
 		set.URLs = append(set.URLs, urlEntry{Loc: base + "/board/" + b.Slug})
 
-		// Anonymous never holds post.read_secret here: the sitemap asks with
-		// the anonymous permission set, so a secret post cannot be listed even
-		// if some role could read it.
 		posts, err := d.content.ListPosts(ctx, b.ID,
-			content.ListQuery{Sort: "created", Desc: true, PerPage: sitemapPostsPerBoard},
-			"", anon.CanOn("post.read_secret", auth.BoardID(b.ID)))
+			content.ListQuery{Sort: "created", Desc: true, PerPage: sitemapPostsPerBoard})
 		if err != nil {
 			d.serverError(w, r, err)
 			return
 		}
 		for _, p := range posts {
+			// 비밀글은 목록에는 나오지만 사이트맵에는 넣지 않는다. 크롤러가
+			// 여는 것은 본문이고, 익명에게 그 본문은 404 다 — 404 로 가는
+			// URL 을 색인시키는 것은 사이트맵의 목적과 반대다.
+			if p.IsSecret {
+				continue
+			}
 			set.URLs = append(set.URLs, urlEntry{
 				Loc:     base + "/board/" + b.Slug + "/" + p.ID,
 				LastMod: p.UpdatedAt.UTC().Format(time.RFC3339),

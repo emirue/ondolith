@@ -80,14 +80,14 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	q := content.ParseListQuery(r.URL.Query(), b.PerPage)
-	canSecret := a.CanOn("post.read_secret", auth.BoardID(b.ID))
 
-	posts, err := d.content.ListPosts(ctx, b.ID, q, actorID(a), canSecret)
+	// 비밀글도 목록에는 나온다 (FR-512). 본문은 P-204 가 지킨다.
+	posts, err := d.content.ListPosts(ctx, b.ID, q)
 	if err != nil {
 		d.serverError(w, r, err)
 		return
 	}
-	total, err := d.content.CountPosts(ctx, b.ID, q, actorID(a), canSecret)
+	total, err := d.content.CountPosts(ctx, b.ID, q)
 	if err != nil {
 		d.serverError(w, r, err)
 		return
