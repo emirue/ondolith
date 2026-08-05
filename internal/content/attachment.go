@@ -152,3 +152,32 @@ func (a *Attachments) removeFile(rel string) error {
 	}
 	return err
 }
+
+// BoardAttachments is A-309's list: every attachment on one board, newest
+// first. The board scopes it because post.moderate does (D15 2.4) — "every
+// attachment on the site" is a list nobody has permission for as a whole.
+func (s *Store) BoardAttachments(ctx context.Context, boardID string, limit int) ([]Attachment, error) {
+	const q = `
+		SELECT a.id, a.post_id, a.stored_path, a.original_name, a.mime_type,
+		       a.byte_size, a.created_at
+		FROM attachments a
+		JOIN posts p ON p.id = a.post_id
+		WHERE p.board_id = $1
+		ORDER BY a.created_at DESC, a.id DESC
+		LIMIT $2`
+	rows, err := s.pool.Query(ctx, q, boardID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Attachment
+	for rows.Next() {
+		var at Attachment
+		if err := rows.Scan(&at.ID, &at.PostID, &at.StoredPath, &at.OriginalName,
+			&at.MIMEType, &at.ByteSize, &at.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, at)
+	}
+	return out, rows.Err()
+}

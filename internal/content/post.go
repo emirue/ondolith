@@ -494,3 +494,76 @@ func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []strin
 		readable, secretIn, nullIfEmpty(viewerID), toPrefixQuery(q.Search)).Scan(&n)
 	return n, err
 }
+
+// ModeratePosts is A-307's list: everything on one board, hidden and secret
+// included. That is what moderating means — a moderator who cannot see the
+// hidden post cannot un-hide it.
+func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit int) ([]Post, error) {
+	const q = `
+		SELECT p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
+		       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+		       p.view_count, p.created_at, p.updated_at,
+		       (SELECT count(*) FROM comments c WHERE c.post_id = p.id),
+		       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)
+		FROM posts p
+		LEFT JOIN users u ON u.id = p.author_id
+		WHERE p.board_id = $1
+		ORDER BY p.is_pinned DESC, p.created_at DESC, p.id DESC
+		LIMIT $2`
+	rows, err := s.pool.Query(ctx, q, boardID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Post
+	for rows.Next() {
+		var p Post
+		var raw []byte
+		if err := rows.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
+			&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
+			&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
+			&p.CommentCount, &p.HasAttachment); err != nil {
+			return nil, err
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ModerateComments is A-308's list, newest first across one board.
+func (s *Store) ModerateComments(ctx context.Context, boardID string, limit int) ([]Comment, error) {
+	const q = `
+		SELECT c.id, c.post_id, coalesce(c.parent_id::text, ''),
+		       coalesce(c.author_id::text, ''), coalesce(u.display_name, ''),
+		       c.body, coalesce(c.deleted_at, 'epoch'::timestamptz), c.created_at
+		FROM comments c
+		JOIN posts p ON p.id = c.post_id
+		LEFT JOIN users u ON u.id = c.author_id
+		WHERE p.board_id = $1
+		ORDER BY c.created_at DESC, c.id DESC
+		LIMIT $2`
+	rows, err := s.pool.Query(ctx, q, boardID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Comment
+	for rows.Next() {
+		var c Comment
+		var del time.Time
+		if err := rows.Scan(&c.ID, &c.PostID, &c.ParentID, &c.AuthorID, &c.AuthorName,
+			&c.Body, &del, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		if !del.Equal(time.Unix(0, 0).UTC()) {
+			c.DeletedAt = del
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

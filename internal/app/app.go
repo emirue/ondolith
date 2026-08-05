@@ -198,9 +198,12 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Caller: func(r *http.Request) admin.Caller {
 			return adminCaller{a: ActorFrom(r.Context()), now: time.Now}
 		},
-		Render:     adminUI.Render,
-		Version:    version,
-		Migrations: func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
+		Render:      adminUI.Render,
+		Attachments: contentStore.AttachmentsIn(cfg.Uploads()),
+		OpLog:       contentStore.OpLog(),
+		Logger:      log,
+		Version:     version,
+		Migrations:  func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
 		ValidateTheme: func(name string) (string, error) {
 			return theme.ValidateThemeDir(name, version)
 		},

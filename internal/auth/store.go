@@ -439,3 +439,26 @@ func (s *Store) AssignRole(ctx context.Context, userID, roleKey string) error {
 		ON CONFLICT ON CONSTRAINT user_roles_uniq DO NOTHING`, userID, roleKey)
 	return err
 }
+
+// BoardsWithGrants reports which boards have at least one scoped grant.
+//
+// A board with none is invisible to everyone including the person who just
+// made it (D14 4.2), and A-304 marks those rows — without the mark the operator
+// sees a normal-looking board and goes looking for the bug somewhere else.
+func (s *Store) BoardsWithGrants(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT board_id::text FROM role_permissions WHERE board_id IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}

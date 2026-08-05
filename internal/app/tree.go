@@ -161,6 +161,38 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "A-405", Method: "POST", Pattern: "/admin/users/{id}/roles", Class: SC5,
 		Permission: "role.assign", Handler: ad.RoleAssign})
 
+	r.Add(Route{Screen: "A-304", Method: "GET", Pattern: "/admin/boards", Class: SC4,
+		Permission: "board.view", Handler: ad.BoardList})
+	r.Add(Route{Screen: "A-305", Method: "GET", Pattern: "/admin/boards/{id}", Class: SC4,
+		Permission: "board.manage", Handler: ad.BoardForm})
+	r.Add(Route{Screen: "A-305", Method: "POST", Pattern: "/admin/boards/{id}", Class: SC5,
+		Permission: "board.manage", Handler: ad.BoardSave})
+	r.Add(Route{Screen: "A-305", Method: "POST", Pattern: "/admin/boards/{id}/delete", Class: SC5,
+		Permission: "board.manage", Handler: ad.BoardDelete})
+	r.Add(Route{Screen: "A-306", Method: "GET", Pattern: "/admin/boards/{id}/fields", Class: SC4,
+		Permission: "board.manage", Handler: ad.BoardFields})
+	r.Add(Route{Screen: "A-306", Method: "POST", Pattern: "/admin/boards/{id}/fields", Class: SC5,
+		Permission: "board.manage", Handler: ad.BoardFieldSave})
+
+	// A-307·A-308 의 Permission 은 admin.access 다. 실제 판정은 post.moderate ·
+	// comment.moderate 를 **그 게시판에** 물어 핸들러가 한다 — 스코프 권한은
+	// 경로만으로 판정할 수 없다 (D15 2.4).
+	r.Add(Route{Screen: "A-307", Method: "GET", Pattern: "/admin/posts", Class: SC4,
+		Permission: "admin.access", Handler: ad.PostList})
+	r.Add(Route{Screen: "A-307", Method: "POST", Pattern: "/admin/posts", Class: SC5,
+		Permission: "admin.access", Handler: ad.PostModerate})
+	r.Add(Route{Screen: "A-308", Method: "GET", Pattern: "/admin/comments", Class: SC4,
+		Permission: "admin.access", Handler: ad.CommentList})
+	r.Add(Route{Screen: "A-308", Method: "POST", Pattern: "/admin/comments", Class: SC5,
+		Permission: "admin.access", Handler: ad.CommentModerate})
+
+	// A-309 는 SC-7 이다. 판정은 첨부 id 가 아니라 부모 글의 게시판에 건다 —
+	// id 는 그 파일이 어디 있는지 말하지 않는다 (D15 8절 1번과 같은 이유).
+	r.Add(Route{Screen: "A-309", Method: "GET", Pattern: "/admin/attachments", Class: SC7,
+		Permission: "admin.access", Handler: ad.AttachmentList})
+	r.Add(Route{Screen: "A-309", Method: "POST", Pattern: "/admin/attachments", Class: SC7,
+		Permission: "admin.access", Handler: ad.AttachmentDelete})
+
 	r.Add(Route{Screen: "A-602", Method: "GET", Pattern: "/admin/system", Class: SC4,
 		Permission: "settings.view", Handler: ad.System})
 

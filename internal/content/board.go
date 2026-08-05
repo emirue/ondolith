@@ -225,3 +225,17 @@ func (s *Store) DeleteBoardField(ctx context.Context, boardID, key string) error
 	}
 	return nil
 }
+
+// BoardByID is A-305's read.
+func (s *Store) BoardByID(ctx context.Context, id string) (*Board, error) {
+	const q = `
+		SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page
+		FROM boards WHERE id = $1`
+	var b Board
+	err := s.pool.QueryRow(ctx, q, id).Scan(&b.ID, &b.Slug, &b.Name, &b.Skin,
+		&b.AllowAttachments, &b.AllowComments, &b.AllowSecret, &b.PerPage)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &b, err
+}

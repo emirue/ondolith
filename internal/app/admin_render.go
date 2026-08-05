@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/emirue/ondolith/internal/admin"
+	"github.com/emirue/ondolith/internal/auth"
 )
 
 //go:embed templates/admin/*.html templates/admin/admin.css
@@ -75,17 +76,23 @@ func (a *adminRenderer) lookup(name string) (*template.Template, error) {
 
 // adminScreenTitles names each screen for the heading and the tab.
 var adminScreenTitles = map[string]string{
-	"admin/dashboard.html":   "대시보드",
-	"admin/settings.html":    "사이트 설정",
-	"admin/mail.html":        "메일 설정",
-	"admin/pages.html":       "페이지",
-	"admin/page-edit.html":   "페이지 편집",
-	"admin/menus.html":       "메뉴",
-	"admin/users.html":       "사용자",
-	"admin/user-detail.html": "사용자 상세",
-	"admin/roles.html":       "역할·권한",
-	"admin/themes.html":      "테마",
-	"admin/system.html":      "시스템 정보",
+	"admin/dashboard.html":    "대시보드",
+	"admin/settings.html":     "사이트 설정",
+	"admin/mail.html":         "메일 설정",
+	"admin/pages.html":        "페이지",
+	"admin/page-edit.html":    "페이지 편집",
+	"admin/menus.html":        "메뉴",
+	"admin/users.html":        "사용자",
+	"admin/user-detail.html":  "사용자 상세",
+	"admin/roles.html":        "역할·권한",
+	"admin/themes.html":       "테마",
+	"admin/system.html":       "시스템 정보",
+	"admin/boards.html":       "게시판",
+	"admin/board-edit.html":   "게시판 설정",
+	"admin/board-fields.html": "커스텀 필드",
+	"admin/posts.html":        "글 관리",
+	"admin/comments.html":     "댓글 관리",
+	"admin/attachments.html":  "첨부 관리",
 }
 
 // Render writes one administrator screen.
@@ -151,6 +158,15 @@ type adminCaller struct {
 }
 
 func (c adminCaller) Can(perm string) bool { return c.a.Can(perm) }
+func (c adminCaller) CanOn(perm string, board auth.BoardID) bool {
+	return c.a.CanOn(perm, board)
+}
+func (c adminCaller) Email() string {
+	if c.a == nil || c.a.User == nil {
+		return ""
+	}
+	return c.a.User.Email
+}
 func (c adminCaller) UserID() string {
 	if c.a == nil || c.a.User == nil {
 		return ""

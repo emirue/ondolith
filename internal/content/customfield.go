@@ -226,3 +226,12 @@ func FieldInputs(schema []FieldSchema, values map[string]any) []FieldInput {
 	}
 	return out
 }
+
+// FieldTypes is the closed vocabulary A-306's dropdown offers, in one place so
+// that the screen and the validator cannot list different sets.
+func FieldTypes() []FieldType {
+	return []FieldType{
+		FieldText, FieldTextarea, FieldNumber, FieldSelect,
+		FieldCheckbox, FieldMultiselect, FieldDate, FieldURL,
+	}
+}

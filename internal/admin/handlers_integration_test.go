@@ -21,13 +21,23 @@ import (
 const dsnEnv = "ONDOLITH_TEST_DSN"
 
 type fakeCaller struct {
-	perms     map[string]bool
+	perms map[string]bool
+	// scoped[board][perm] — 스코프 권한은 게시판마다 답이 다르다 (D15 2.4).
+	scoped    map[string]map[string]bool
 	id        string
+	email     string
 	superuser bool
 	reauth    bool
 }
 
 func (f fakeCaller) Can(p string) bool { return f.superuser || f.perms[p] }
+func (f fakeCaller) CanOn(p string, board auth.BoardID) bool {
+	if f.superuser || f.perms[p] {
+		return true
+	}
+	return f.scoped[string(board)][p]
+}
+func (f fakeCaller) Email() string     { return f.email }
 func (f fakeCaller) UserID() string    { return f.id }
 func (f fakeCaller) IsSuperuser() bool { return f.superuser }
 func (f fakeCaller) NeedsReauth() bool { return f.reauth }

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,7 +17,13 @@ import (
 // app and the two can be tested apart.
 type Caller interface {
 	Can(perm string) bool
+	// CanOn answers for a board-scoped permission (D15 2.4). A moderator of one
+	// board is not a moderator of the next.
+	CanOn(perm string, board auth.BoardID) bool
 	UserID() string
+	// Email is the audit snapshot: the log keeps it even after the account is
+	// deleted (D30 operation_logs).
+	Email() string
 	IsSuperuser() bool
 	NeedsReauth() bool
 }
@@ -40,6 +47,16 @@ type Deps struct {
 	// renderer can pick it up without a restart (FR-303). Injected because admin
 	// does not import theme.
 	OnThemeChange func(name string)
+	// Attachments is A-309's store. Injected because the upload directory is
+	// configuration (NFR-304) and admin must not resolve it.
+	Attachments *content.Attachments
+	// OpLog records D15 7절's audit entries. Injected so admin does not decide
+	// where the trail lives.
+	OpLog *content.OpLog
+	// Logger surfaces a failed audit write. An audit trail that silently stops
+	// recording is worse than one that is missing — the gap reads as "nothing
+	// happened".
+	Logger *slog.Logger
 	// SendReset delivers a forced-reset link (A-402). Injected and fire-and-
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.
@@ -536,4 +553,23 @@ func (d *Deps) System(w http.ResponseWriter, r *http.Request) {
 		"DBReadable": err == nil,
 	}
 	d.Render(w, r, "admin/system.html", http.StatusOK, data)
+}
+
+// log writes one audit entry (D15 7절).
+//
+// A failure is logged and swallowed rather than failing the operation: the
+// change already happened, and refusing to report success would tell the
+// operator to do it again. The Logger is what makes the gap visible.
+func (d *Deps) log(r *http.Request, c Caller, action, targetType, targetID, summary string) {
+	if d.OpLog == nil {
+		return
+	}
+	err := d.OpLog.Record(r.Context(), content.Entry{
+		ActorID: c.UserID(), ActorEmail: c.Email(),
+		Action: action, TargetType: targetType, TargetID: targetID,
+		Summary: summary, IP: r.RemoteAddr,
+	})
+	if err != nil && d.Logger != nil {
+		d.Logger.Error("작업 로그 기록 실패", "action", action, "target", targetID, "err", err)
+	}
 }

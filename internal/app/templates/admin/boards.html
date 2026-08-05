@@ -1,0 +1,41 @@
+{{define "pageactions"}}
+<div class="adm-actions"><a class="adm-btn adm-btn--primary" href="/admin/boards/new">새 게시판</a></div>
+{{end}}
+{{define "content"}}
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>이름</th><th>주소</th><th>설정</th><th>동작</th></tr></thead>
+      <tbody>
+      {{range .Boards}}
+        <tr>
+          <td>
+            <a href="/admin/boards/{{.ID}}">{{.Name}}</a>
+            {{if .Unreachable}}
+              {{/* D14 4.2: 부여 행이 없는 게시판은 만든 사람에게도 안 보인다.
+                   표시하지 않으면 운영자가 테마에서 버그를 찾는다. */}}
+              <span class="adm-badge" style="background:var(--warn-bg);color:var(--warn)">아무도 못 봄 — 권한 부여 없음</span>
+            {{end}}
+          </td>
+          <td class="muted">/board/{{.Slug}}</td>
+          <td class="muted">
+            {{if .AllowComments}}댓글 {{end}}{{if .AllowAttachments}}첨부 {{end}}{{if .AllowSecret}}비밀글 {{end}}· {{.PerPage}}개씩
+          </td>
+          <td>
+            <div class="adm-actions">
+              <a class="adm-btn adm-btn--sm" href="/admin/boards/{{.ID}}/fields">필드</a>
+              <form method="post" action="/admin/boards/{{.ID}}/delete">
+                <input type="hidden" name="confirm" value="1">
+                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="4" class="adm-empty">게시판이 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

@@ -1,0 +1,32 @@
+{{define "content"}}
+<div class="adm-card" style="padding:0">
+  <form class="adm-filterbar" method="get" action="/admin/attachments">
+    <h2>첨부 관리</h2>
+    <input type="text" name="board" value="{{.BoardSlug}}" placeholder="게시판 주소">
+    <button class="adm-btn adm-btn--sm adm-btn--primary">보기</button>
+  </form>
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>파일명</th><th>형식</th><th>크기</th><th>올린 날짜</th><th>동작</th></tr></thead>
+      <tbody>
+      {{range .Attachments}}
+        <tr>
+          <td><a href="/attachments/{{.ID}}">{{.OriginalName}}</a></td>
+          <td class="muted">{{.MIMEType}}</td>
+          <td class="muted">{{.ByteSize}}</td>
+          <td class="muted">{{.CreatedAt.Format "2006-01-02"}}</td>
+          <td>
+            <form method="post" action="/admin/attachments">
+              <input type="hidden" name="attachment_id" value="{{.ID}}">
+              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+            </form>
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="5" class="adm-empty">게시판 주소를 입력하세요.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

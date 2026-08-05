@@ -1,0 +1,28 @@
+{{define "content"}}
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>내용</th><th>작성자</th><th>작성일</th><th>동작</th></tr></thead>
+      <tbody>
+      {{range .Comments}}
+        <tr>
+          <td>{{if .DeletedAt.IsZero}}{{.Body}}{{else}}<span class="muted">삭제됨</span>{{end}}</td>
+          <td class="muted">{{if .AuthorName}}{{.AuthorName}}{{else}}(탈퇴){{end}}</td>
+          <td class="muted">{{.CreatedAt.Format "2006-01-02"}}</td>
+          <td>
+            {{if .DeletedAt.IsZero}}
+            <form method="post" action="/admin/comments">
+              <input type="hidden" name="comment_id" value="{{.ID}}">
+              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+            </form>
+            {{end}}
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="4" class="adm-empty">댓글이 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

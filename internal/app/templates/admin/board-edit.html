@@ -1,0 +1,60 @@
+{{define "content"}}
+<div class="adm-card">
+  <form method="post" action="/admin/boards/{{if .Board}}{{.Board.ID}}{{else}}new{{end}}">
+    <div class="adm-field-row">
+      <label class="adm-field"><span>이름</span>
+        <input type="text" name="name" value="{{with .Board}}{{.Name}}{{end}}" required></label>
+      {{if .Board}}
+        <label class="adm-field"><span>주소</span>
+          <input type="text" value="{{.Board.Slug}}" disabled></label>
+      {{else}}
+        <label class="adm-field"><span>주소</span>
+          <input type="text" name="slug" placeholder="free" required></label>
+      {{end}}
+    </div>
+    {{if .Board}}<p class="adm-hint">주소는 저장된 모든 링크에 들어 있어 바꾸지 않습니다.</p>{{end}}
+
+    <div class="adm-field-row">
+      <label class="adm-field"><span>스킨</span>
+        <input type="text" name="skin" value="{{with .Board}}{{.Skin}}{{end}}" placeholder="(기본)"></label>
+      <label class="adm-field"><span>한 쪽에 표시할 글 수</span>
+        <input type="number" name="per_page" min="1" max="100" value="{{if .Board}}{{.Board.PerPage}}{{else}}20{{end}}"></label>
+    </div>
+
+    <div class="adm-field-row">
+      <label class="adm-field"><span>댓글</span>
+        <select name="allow_comments">
+          <option value="1"{{if or (not .Board) .Board.AllowComments}} selected{{end}}>허용</option>
+          <option value="">금지</option>
+        </select></label>
+      <label class="adm-field"><span>첨부</span>
+        <select name="allow_attachments">
+          <option value="">금지</option>
+          <option value="1"{{if and .Board .Board.AllowAttachments}} selected{{end}}>허용</option>
+        </select></label>
+      <label class="adm-field"><span>비밀글</span>
+        <select name="allow_secret">
+          <option value="">금지</option>
+          <option value="1"{{if and .Board .Board.AllowSecret}} selected{{end}}>허용</option>
+        </select></label>
+    </div>
+
+    {{if not .Board}}
+    <label class="adm-field"><span>권한 프리셋</span>
+      <select name="preset" required>
+        <option value=""></option>
+        {{range .Presets}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select></label>
+    <p class="adm-hint">
+      게시판과 권한 부여 행이 한 트랜잭션에 들어갑니다. 프리셋은 출발점이고,
+      이후에는 역할·권한 화면에서 바꿉니다.
+    </p>
+    {{end}}
+
+    <div class="adm-actions" style="justify-content:flex-end">
+      <a class="adm-btn" href="/admin/boards">취소</a>
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+</div>
+{{end}}
