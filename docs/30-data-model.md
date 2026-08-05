@@ -792,10 +792,28 @@ delta 두 건은 순서와 무관하게 둘 다 맞다.
 
 **`carts` · `cart_items`**
 
-| 테이블 | 컬럼 · 제약 |
-|---|---|
-| `carts` | `id` · `user_id` uuid NULL → `users` · `guest_key` text NULL · 감사. `CHECK ((user_id IS NULL) <> (guest_key IS NULL))` |
-| `cart_items` | `id` · `cart_id` → `carts` · `variant_id` → `product_variants` · `quantity` integer NOT NULL `CHECK (>= 1)` · 감사 |
+**`carts`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `user_id` | uuid | NULL REFERENCES `users(id)` ON DELETE CASCADE |
+| `guest_key` | text | NULL. 16~128자 |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+`CHECK ((user_id IS NULL) <> (guest_key IS NULL))` — 주인은 정확히 하나다.
+
+**`cart_items`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `cart_id` | uuid | NOT NULL REFERENCES `carts(id)` ON DELETE CASCADE |
+| `variant_id` | uuid | NOT NULL REFERENCES `product_variants(id)` ON DELETE CASCADE |
+| `quantity` | integer | NOT NULL `CHECK (>= 1)` |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+`UNIQUE (cart_id, variant_id)` — 같은 조합은 한 행이고 수량이 는다.
 
 ```sql
 CREATE UNIQUE INDEX ON carts (user_id)    WHERE user_id IS NOT NULL;
@@ -812,20 +830,24 @@ CREATE UNIQUE INDEX ON cart_items (cart_id, variant_id);
 
 **`orders`**
 
-| 컬럼 | 타입 · 제약 |
-|---|---|
-| `id` | uuid PK |
-| `order_no` | text NOT NULL UNIQUE — `crypto/rand` 기반 |
-| `user_id` | uuid NULL → `users` (비회원은 NULL) |
-| `status` | text NOT NULL, `CHECK` 아래 |
-| `total_amount` | integer NOT NULL `CHECK (>= 0)` — P-408 금액 대조의 단일 출처 |
-| `receiver_name` · `receiver_phone` · `postcode` · `address1` | text NOT NULL |
-| `address2` · `delivery_memo` | text NOT NULL DEFAULT '' |
-| `orderer_email` | text NOT NULL (회원도 세션 이메일을 복사) |
-| `orderer_phone` | text NULL — 비회원 조회 대조 키 |
-| `delivered_at` | timestamptz NULL — **`배송완료` 전이 시각** |
-| `confirmed_at` | timestamptz NULL |
-| 감사 | `created_at` / `updated_at` |
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `order_no` | text | NOT NULL UNIQUE — `crypto/rand` 기반, **순번이 아니다** |
+| `user_id` | uuid | NULL REFERENCES `users(id)` ON DELETE SET NULL |
+| `status` | text | NOT NULL DEFAULT '결제대기', `CHECK` 아래 |
+| `total_amount` | integer | NOT NULL `CHECK (>= 0)` — P-408 금액 대조의 단일 출처 |
+| `receiver_name` | text | NOT NULL |
+| `receiver_phone` | text | NOT NULL |
+| `postcode` | text | NOT NULL |
+| `address1` | text | NOT NULL |
+| `address2` | text | NOT NULL DEFAULT '' |
+| `delivery_memo` | text | NOT NULL DEFAULT '' |
+| `orderer_email` | text | NOT NULL (회원도 세션 이메일을 복사) |
+| `orderer_phone` | text | **NOT NULL** — 비회원 조회 대조 키. 회원도 받는다 (아래 참조) |
+| `delivered_at` | timestamptz | NULL — **`배송완료` 전이 시각** |
+| `confirmed_at` | timestamptz | NULL |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 ```sql
 CHECK (status IN (
@@ -834,13 +856,23 @@ CHECK (status IN (
   '취소','환불',
   '반품접수','반품수거',
   '교환접수','교환수거','차액결제대기','교환발송'))     -- 16개. D14 5절이 단일 출처
-CHECK (user_id IS NOT NULL OR orderer_phone IS NOT NULL)
+CHECK (orderer_email <> '')
 
 CREATE UNIQUE INDEX ON orders (order_no);
 CREATE INDEX ON orders (user_id, created_at DESC);
 CREATE INDEX ON orders (status, created_at DESC);
 CREATE INDEX ON orders (delivered_at) WHERE status = '배송완료';
 ```
+
+**`orderer_phone`을 회원에게도 받는 이유.** 처음에는 "비회원만 필수"로 두고
+`CHECK (user_id IS NOT NULL OR orderer_phone IS NOT NULL)`을 걸었는데, `user_id`가
+`ON DELETE SET NULL`이라 **회원 계정을 지우는 순간 둘 다 NULL이 되어 CHECK가 깨지고 사용자
+삭제 자체가 막혔다** (2026-08-05, 통합 테스트가 잡았다). `operation_logs` 트리거가 같은 이유로
+사용자 삭제를 막았던 것과 같은 형태다.
+
+고치는 방향은 CHECK를 푸는 것이 아니라 연락처를 항상 받는 것이다 — 배송이 있는 주문에
+전화번호가 없는 경우는 없고, 그 값이 계정과 무관하게 남아야 주문이 계속 열린다.
+`orderer_email`을 회원에게도 복사하는 것과 같은 판단이다.
 
 **`delivered_at`이 필요한 이유.** A-512의 반품 기간(7일)·자동 확정(8일)이 전부 "`배송완료` 전이
 시각 기준"인데 그 시각을 담을 곳이 없었다. 없으면 `operation_logs`를 운영 판정에 쓰게 되는데,
@@ -850,15 +882,19 @@ CREATE INDEX ON orders (delivered_at) WHERE status = '배송완료';
 
 **`order_items`**
 
-| 컬럼 | 타입 · 제약 |
-|---|---|
-| `id` · `order_id` → `orders` · `product_id` → `products` · `variant_id` → `product_variants` | |
-| `product_name` | text NOT NULL — **스냅샷** |
-| `option_label` | text NOT NULL DEFAULT '' — **스냅샷** ("색상: 검정 / 사이즈: L") |
-| `unit_price` | integer NOT NULL `CHECK (>= 0)` — **스냅샷** = `base_price + price_delta` |
-| `quantity` | integer NOT NULL `CHECK (>= 1)` |
-| `line_amount` | integer GENERATED ALWAYS AS (`unit_price * quantity`) STORED |
-| `settled_quantity` | integer NOT NULL DEFAULT 0, `CHECK (BETWEEN 0 AND quantity)` |
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `order_id` | uuid | NOT NULL REFERENCES `orders(id)` ON DELETE RESTRICT |
+| `product_id` | uuid | NOT NULL REFERENCES `products(id)` ON DELETE RESTRICT |
+| `variant_id` | uuid | NOT NULL REFERENCES `product_variants(id)` ON DELETE RESTRICT |
+| `product_name` | text | NOT NULL — **스냅샷** |
+| `option_label` | text | NOT NULL DEFAULT '' — **스냅샷** ("색상: 검정 / 사이즈: L") |
+| `unit_price` | integer | NOT NULL `CHECK (>= 0)` — **스냅샷** = `base_price + price_delta` |
+| `quantity` | integer | NOT NULL `CHECK (>= 1)` |
+| `line_amount` | integer | GENERATED ALWAYS AS (`unit_price * quantity`) STORED |
+| `settled_quantity` | integer | NOT NULL DEFAULT 0, `CHECK (BETWEEN 0 AND quantity)` |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 FR-612("스냅샷만으로 주문서 재발행")를 만족하려면 **상품명 + 옵션 표기 + 단가 + 수량**이 전부
 복사돼야 한다 — `option_label`이 없으면 조합이 은퇴·변경된 뒤 주문서가 옵션을 재현하지 못한다.
@@ -994,10 +1030,27 @@ UNIQUE가 `(pg, event_id)` **복합**인 이유: 어댑터가 여럿이라는 �
 
 **`terms` · `order_agreements`**
 
-| 테이블 | 컬럼 · 제약 |
-|---|---|
-| `terms` | `id` · `kind` text NOT NULL (**허용목록 없음**) · `version` text NOT NULL · `body` text NOT NULL (**평문**) · `effective_at` timestamptz NOT NULL · `is_required` boolean NOT NULL · `created_at`. **`updated_at` 없음** |
-| `order_agreements` | `order_id` → `orders` · `terms_id` → `terms` · `agreed_at` timestamptz NOT NULL. **PK (order_id, terms_id)** |
+**`terms`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `kind` | text | NOT NULL (**허용목록 없음**) |
+| `version` | text | NOT NULL |
+| `body` | text | NOT NULL — **평문** |
+| `effective_at` | timestamptz | NOT NULL |
+| `is_required` | boolean | NOT NULL DEFAULT true |
+| `created_at` | timestamptz | NOT NULL DEFAULT now(). **`updated_at` 없음** |
+
+**`order_agreements`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `order_id` | uuid | NOT NULL REFERENCES `orders(id)` ON DELETE RESTRICT |
+| `terms_id` | uuid | NOT NULL REFERENCES `terms(id)` ON DELETE RESTRICT |
+| `agreed_at` | timestamptz | NOT NULL DEFAULT now() |
+
+**PK (order_id, terms_id)**.
 
 ```sql
 ALTER TABLE terms ADD CONSTRAINT terms_kind_version_uniq UNIQUE (kind, version);

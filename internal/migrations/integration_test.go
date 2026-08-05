@@ -165,12 +165,13 @@ func TestAllMigrationsApply(t *testing.T) {
 	// D30 §3-3 Phase 0 + Phase 1 + Phase 2 게시판.
 	// goose_db_version is goose's own bookkeeping.
 	want := []string{
-		"attachments", "board_fields", "boards", "categories", "comments",
-		"email_verification_tokens", "goose_db_version", "menus", "operation_logs",
+		"attachments", "board_fields", "boards", "cart_items", "carts",
+		"categories", "comments", "email_verification_tokens", "goose_db_version",
+		"menus", "operation_logs", "order_agreements", "order_items", "orders",
 		"pages", "password_reset_tokens", "permissions", "posts",
 		"product_categories", "product_options", "product_variants", "products",
 		"role_permissions", "roles", "sessions", "settings", "social_accounts",
-		"user_roles", "users",
+		"terms", "user_roles", "users",
 	}
 	got := tableNames(t, pool)
 	if len(got) != len(want) {
@@ -1043,5 +1044,266 @@ func TestProductCategoryIsUniquePair(t *testing.T) {
 		`INSERT INTO product_categories (product_id,category_id) VALUES ($1,$2)`,
 		productID, categoryID); err == nil {
 		t.Error("같은 (상품, 카테고리) 가 두 번 들어갔다")
+	}
+}
+
+// seedOrderable makes a product, a variant and an order, returning their ids.
+func seedOrderable(t *testing.T, pool *pgxpool.Pool) (productID, variantID, orderID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price) VALUES ('tee','티셔츠',12000) RETURNING id`).
+		Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		 VALUES ($1,'{"크기":"L"}',1000,5) RETURNING id`, productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO orders (order_no,total_amount,receiver_name,receiver_phone,postcode,
+		                    address1,orderer_email,orderer_phone)
+		VALUES ('20260805-ABCDEFGHJK',13000,'받는이','010-0000-0000','12345',
+		        '서울시 어딘가','a@example.com','010-0000-0000') RETURNING id`).
+		Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	return productID, variantID, orderID
+}
+
+// FR-612: 스냅샷만으로 주문서를 재발행한다. 이름이 바뀌거나 조합이 은퇴한 뒤에도
+// 그때 산 것이 그대로 재현돼야 하므로, order_items 는 FK 조인으로 대체하지 않고
+// 상품명·옵션 표기·단가를 복사한다.
+func TestOrderItemsKeepSnapshotsAfterTheProductChanges(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	productID, variantID, orderID := seedOrderable(t, pool)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO order_items (order_id,product_id,variant_id,product_name,option_label,
+		                         unit_price,quantity)
+		VALUES ($1,$2,$3,'티셔츠','크기: L',13000,2)`, orderID, productID, variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 상품과 조합이 바뀌어도 주문서는 그대로다.
+	if _, err := pool.Exec(ctx,
+		`UPDATE products SET name = '이름이 바뀐 티셔츠', base_price = 99000 WHERE id = $1`,
+		productID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE product_variants SET price_delta = 50000, is_visible = false WHERE id = $1`,
+		variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	var name, label string
+	var unit, line int
+	if err := pool.QueryRow(ctx,
+		`SELECT product_name, option_label, unit_price, line_amount FROM order_items`).
+		Scan(&name, &label, &unit, &line); err != nil {
+		t.Fatal(err)
+	}
+	if name != "티셔츠" || label != "크기: L" || unit != 13000 {
+		t.Errorf("스냅샷이 현재 값으로 바뀌었다: %q / %q / %d", name, label, unit)
+	}
+	// 생성 컬럼이라 품목 금액이 단가·수량과 어긋날 수 없다.
+	if line != 26000 {
+		t.Errorf("line_amount = %d, want 26000", line)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE order_items SET line_amount = 1`); err == nil {
+		t.Error("생성 컬럼에 값을 써 넣을 수 있다")
+	}
+}
+
+// D30 3-1: 주문 행과 주문된 상품·조합은 지워지지 않는다.
+func TestOrderedRowsCannotBeDeleted(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	productID, variantID, orderID := seedOrderable(t, pool)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO order_items (order_id,product_id,variant_id,product_name,unit_price,quantity)
+		VALUES ($1,$2,$3,'티셔츠',13000,1)`, orderID, productID, variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, q := range map[string]string{
+		"주문": `DELETE FROM orders WHERE id = '` + orderID + `'`,
+		"상품": `DELETE FROM products WHERE id = '` + productID + `'`,
+		"조합": `DELETE FROM product_variants WHERE id = '` + variantID + `'`,
+	} {
+		if _, err := pool.Exec(ctx, q); err == nil {
+			t.Errorf("주문된 %s 가 지워졌다", name)
+		}
+	}
+}
+
+// 사용자를 지워도 주문은 남는다. 이메일 스냅샷이 남아 주문서를 보낼 곳이 있다.
+func TestDeletingAUserKeepsTheOrder(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var uid string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email,password_hash,display_name)
+		 VALUES ('a@example.com','h','구매자') RETURNING id`).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO orders (order_no,user_id,total_amount,receiver_name,receiver_phone,
+		                    postcode,address1,orderer_email,orderer_phone)
+		VALUES ('20260805-ABCDEFGHJK',$1,1000,'받는이','010','12345','주소','a@example.com','010')`,
+		uid); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, uid); err != nil {
+		t.Fatalf("사용자 삭제가 주문 FK 에 막혔다: %v", err)
+	}
+	var email string
+	var userID *string
+	if err := pool.QueryRow(ctx,
+		`SELECT orderer_email, user_id::text FROM orders`).Scan(&email, &userID); err != nil {
+		t.Fatal(err)
+	}
+	if userID != nil {
+		t.Error("user_id 가 NULL 이 되지 않았다")
+	}
+	if email != "a@example.com" {
+		t.Errorf("이메일 스냅샷이 사라졌다: %q", email)
+	}
+}
+
+func TestOrderAndCartConstraintsBite(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	productID, variantID, orderID := seedOrderable(t, pool)
+	_ = productID
+
+	refused := map[string]string{
+		"알 수 없는 주문 상태": `UPDATE orders SET status = '알수없음' WHERE id = '` + orderID + `'`,
+		"음수 주문 금액":     `UPDATE orders SET total_amount = -1 WHERE id = '` + orderID + `'`,
+		"연락처 없는 주문": `INSERT INTO orders (order_no,total_amount,receiver_name,receiver_phone,
+		                      postcode,address1,orderer_email)
+		               VALUES ('20260805-KKKKKKKKKK',1,'받는이','010','12345','주소','a@example.com')`,
+		"주문번호 중복": `INSERT INTO orders (order_no,total_amount,receiver_name,receiver_phone,
+		                    postcode,address1,orderer_email,orderer_phone)
+		             VALUES ('20260805-ABCDEFGHJK',1,'받는이','010','12345','주소','a@example.com','010')`,
+		"수량 0 인 장바구니 항목": `INSERT INTO carts (guest_key) VALUES ('` + strings.Repeat("g", 20) + `')
+		                    ; INSERT INTO cart_items (cart_id,variant_id,quantity)
+		                      SELECT id,'` + variantID + `',0 FROM carts`,
+	}
+	for name, q := range refused {
+		if _, err := pool.Exec(ctx, q); err == nil {
+			t.Errorf("%s: DB 가 통과시켰다", name)
+		}
+	}
+
+	// 장바구니 주인은 정확히 하나다.
+	// 주인이 둘인 장바구니를 시험하려면 실제 사용자가 있어야 한다 — 없으면
+	// SELECT 가 0행이라 INSERT 가 아무것도 넣지 않고 오류도 나지 않는다.
+	var ownerID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email,password_hash,display_name)
+		 VALUES ('owner@example.com','h','주인') RETURNING id`).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	for name, q := range map[string]string{
+		"주인 없음": `INSERT INTO carts (user_id,guest_key) VALUES (NULL,NULL)`,
+		"주인 둘":  `INSERT INTO carts (user_id,guest_key) VALUES ('` + ownerID + `','` + strings.Repeat("g", 20) + `')`,
+	} {
+		if _, err := pool.Exec(ctx, q); err == nil {
+			t.Errorf("%s 인 장바구니가 만들어졌다", name)
+		}
+	}
+
+	// 같은 조합은 한 행이다 (수량 합산).
+	var cartID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO carts (guest_key) VALUES ($1) RETURNING id`, strings.Repeat("k", 20)).
+		Scan(&cartID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO cart_items (cart_id,variant_id,quantity) VALUES ($1,$2,1)`,
+		cartID, variantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO cart_items (cart_id,variant_id,quantity) VALUES ($1,$2,1)`,
+		cartID, variantID); err == nil {
+		t.Error("같은 조합이 장바구니에 두 행으로 들어갔다")
+	}
+
+	// 조합이 사라지면 장바구니 항목도 간다 — 장바구니는 이력이 아니다.
+	if _, err := pool.Exec(ctx, `DELETE FROM product_variants WHERE id = $1`, variantID); err != nil {
+		t.Fatalf("주문 없는 조합이 안 지워진다: %v", err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM cart_items`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("조합을 지웠는데 장바구니 항목 %d행이 남았다", n)
+	}
+}
+
+// FR-619: 약관은 버전을 갖고, 배포된 버전은 수정하지 않는다. 소급 시행일은
+// 거부한다 — 소급이 되면 "주문 시점에 유효했던 약관"이 나중에 바뀔 수 있다.
+func TestTermsAreVersionedAndCannotBeBackdated(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	var termsID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO terms (kind,version,body,effective_at)
+		VALUES ('이용약관','1.0','본문', now() + interval '1 day') RETURNING id`).
+		Scan(&termsID); err != nil {
+		t.Fatal(err)
+	}
+	// 같은 종류·버전은 한 번만 — 없으면 "어느 본문에 동의했는지"를 특정할 수 없다.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO terms (kind,version,body,effective_at)
+		 VALUES ('이용약관','1.0','다른 본문', now())`); err == nil {
+		t.Error("같은 종류·버전이 두 번 들어갔다")
+	}
+	// 소급 시행일은 거부.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO terms (kind,version,body,effective_at)
+		 VALUES ('이용약관','2.0','본문', now() - interval '1 day')`); err == nil {
+		t.Error("소급 시행일이 통과했다")
+	}
+
+	// 동의 이력이 가리키는 약관은 지워지지 않는다.
+	_, _, orderID := seedOrderable(t, pool)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO order_agreements (order_id,terms_id) VALUES ($1,$2)`,
+		orderID, termsID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM terms WHERE id = $1`, termsID); err == nil {
+		t.Error("동의 이력이 있는 약관이 지워졌다")
+	}
+	// 같은 주문이 같은 약관에 두 번 동의할 수 없다.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO order_agreements (order_id,terms_id) VALUES ($1,$2)`,
+		orderID, termsID); err == nil {
+		t.Error("같은 (주문, 약관) 동의가 두 번 들어갔다")
 	}
 }
