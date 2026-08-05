@@ -694,11 +694,46 @@ CREATE TRIGGER operation_logs_no_update BEFORE UPDATE ON operation_logs
 
 **`products` · `product_options` · `product_variants`**
 
-| 테이블 | 컬럼 | 제약 |
+**`products`**
+
+| 컬럼 | 타입 | 제약 |
 |---|---|---|
-| `products` | `id` uuid PK · `slug` text NOT NULL UNIQUE · `name` text NOT NULL · `description` text · `base_price` integer NOT NULL `CHECK (>= 0)` · `is_visible` boolean NOT NULL **DEFAULT false** · `search_tsv` tsvector GENERATED STORED · 감사 | |
-| `product_options` | `id` · `product_id` → `products` · `name` text NOT NULL · `values` jsonb NOT NULL · `sort_order` integer · 감사 | `CHECK (jsonb_typeof(values)='array' AND jsonb_array_length(values) BETWEEN 1 AND 50)` |
-| `product_variants` | `id` · `product_id` → `products` · `option_values` jsonb NOT NULL · `sku` text NULL · `price_delta` integer NOT NULL DEFAULT 0 (**음수 허용**) · `stock` integer NOT NULL DEFAULT 0 `CHECK (>= 0)` · `is_visible` boolean NOT NULL DEFAULT true · 감사 | |
+| `id` | uuid | PK |
+| `slug` | text | NOT NULL UNIQUE, `CHECK (slug ~ '^[a-z0-9][a-z0-9-]*$')` |
+| `name` | text | NOT NULL |
+| `description` | text | NOT NULL DEFAULT '' |
+| `base_price` | integer | NOT NULL `CHECK (>= 0)` — 정수 minor unit |
+| `is_visible` | boolean | NOT NULL **DEFAULT false** |
+| `search_tsv` | tsvector | GENERATED STORED, `to_tsvector('simple', name \|\| ' ' \|\| description)` |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+**`product_options`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `product_id` | uuid | NOT NULL REFERENCES `products(id)` ON DELETE CASCADE |
+| `name` | text | NOT NULL |
+| `values` | jsonb | NOT NULL, `CHECK (jsonb_typeof='array' AND length BETWEEN 1 AND 50)` |
+| `sort_order` | integer | NOT NULL DEFAULT 0 |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+`UNIQUE (product_id, name)`.
+
+**`product_variants`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `product_id` | uuid | NOT NULL REFERENCES `products(id)` ON DELETE CASCADE |
+| `option_values` | jsonb | NOT NULL, `CHECK (jsonb_typeof='object' AND ≤4096바이트)` |
+| `sku` | text | NULL. 있을 때만 UNIQUE |
+| `price_delta` | integer | NOT NULL DEFAULT 0 — **음수 허용** |
+| `stock` | integer | NOT NULL DEFAULT 0 `CHECK (>= 0)` |
+| `is_visible` | boolean | NOT NULL DEFAULT true |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+`UNIQUE (product_id, option_values)`.
 
 ```sql
 CREATE UNIQUE INDEX ON products (slug);
@@ -726,10 +761,28 @@ delta 두 건은 순서와 무관하게 둘 다 맞다.
 
 **`categories` · `product_categories`**
 
-| 테이블 | 컬럼 |
-|---|---|
-| `categories` | `id` uuid PK · `parent_id` uuid NULL → `categories` · `name` text NOT NULL · `slug` text NOT NULL **UNIQUE 전역** · `sort_order` integer · 감사 |
-| `product_categories` | `product_id` → `products` · `category_id` → `categories` · `created_at`. **PK (product_id, category_id)** |
+**`categories`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `parent_id` | uuid | NULL REFERENCES `categories(id)` ON DELETE RESTRICT |
+| `name` | text | NOT NULL |
+| `slug` | text | NOT NULL **UNIQUE 전역** |
+| `sort_order` | integer | NOT NULL DEFAULT 0 |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+`CHECK (parent_id IS NULL OR parent_id <> id)`.
+
+**`product_categories`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `product_id` | uuid | NOT NULL REFERENCES `products(id)` ON DELETE CASCADE |
+| `category_id` | uuid | NOT NULL REFERENCES `categories(id)` ON DELETE RESTRICT |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() |
+
+**PK (product_id, category_id)**.
 
 **깊이 컬럼을 두지 않는다.** 안전 상한 10은 "설계 제약이 아니라 폭주 방지턱"이고(A-509),
 `depth`를 물리화하면 서브트리 이동마다 갱신 코드가 붙는다. 순환·깊이는 3절대로 재귀 CTE 검사 +

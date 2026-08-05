@@ -165,10 +165,12 @@ func TestAllMigrationsApply(t *testing.T) {
 	// D30 §3-3 Phase 0 + Phase 1 + Phase 2 게시판.
 	// goose_db_version is goose's own bookkeeping.
 	want := []string{
-		"attachments", "board_fields", "boards", "comments",
-		"email_verification_tokens", "goose_db_version", "menus", "operation_logs", "pages",
-		"password_reset_tokens", "permissions", "posts", "role_permissions",
-		"roles", "sessions", "settings", "social_accounts", "user_roles", "users",
+		"attachments", "board_fields", "boards", "categories", "comments",
+		"email_verification_tokens", "goose_db_version", "menus", "operation_logs",
+		"pages", "password_reset_tokens", "permissions", "posts",
+		"product_categories", "product_options", "product_variants", "products",
+		"role_permissions", "roles", "sessions", "settings", "social_accounts",
+		"user_roles", "users",
 	}
 	got := tableNames(t, pool)
 	if len(got) != len(want) {
@@ -823,5 +825,223 @@ func TestKoreanSearchUsesTheIndex(t *testing.T) {
 	}
 	if strings.Contains(plan, "Seq Scan on posts") {
 		t.Errorf("순차 스캔으로 떨어졌다:\n%s", plan)
+	}
+}
+
+// D30 Phase 3 상품 스키마의 제약. 각각 핸들러 버그가 나쁜 행으로 굳는 자리다.
+func TestProductSchemaConstraintsBite(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	var productID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug, name, base_price) VALUES ('tee','티셔츠',12000) RETURNING id`).
+		Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+
+	refused := map[string]string{
+		"음수 가격":       `INSERT INTO products (slug,name,base_price) VALUES ('p1','x',-1)`,
+		"대문자 슬러그":     `INSERT INTO products (slug,name,base_price) VALUES ('Tee','x',100)`,
+		"슬러그 중복":      `INSERT INTO products (slug,name,base_price) VALUES ('tee','다른 이름',100)`,
+		"빈 이름":        `INSERT INTO products (slug,name,base_price) VALUES ('p2','',100)`,
+		"옵션 값이 배열 아님": `INSERT INTO product_options (product_id,name,values) VALUES ('` + productID + `','색상','"빨강"')`,
+		"옵션 값이 비었음":   `INSERT INTO product_options (product_id,name,values) VALUES ('` + productID + `','색상','[]')`,
+		"조합이 객체 아님":   `INSERT INTO product_variants (product_id,option_values) VALUES ('` + productID + `','[]')`,
+		"음수 재고":       `INSERT INTO product_variants (product_id,option_values,stock) VALUES ('` + productID + `','{"색상":"빨강"}',-1)`,
+		"자기 자신이 부모": `INSERT INTO categories (id,name,slug) VALUES ('00000000-0000-4000-8000-000000000001','x','c1')
+		                   ; UPDATE categories SET parent_id = id WHERE slug='c1'`,
+	}
+	for name, q := range refused {
+		if _, err := pool.Exec(ctx, q); err == nil {
+			t.Errorf("%s: DB 가 통과시켰다", name)
+		}
+	}
+
+	// 기본값이 fail-closed 다 — 옵션·재고를 넣기 전에 팔리지 않는다.
+	var visible bool
+	if err := pool.QueryRow(ctx,
+		`SELECT is_visible FROM products WHERE id = $1`, productID).Scan(&visible); err != nil {
+		t.Fatal(err)
+	}
+	if visible {
+		t.Error("상품이 기본으로 노출된다 — 옵션·재고 전에 팔린다")
+	}
+
+	// 음수 price_delta 는 허용된다. 낮은 등급 옵션이 기본가보다 싼 것이 정상이고,
+	// 금지하면 기본가를 최저 조합에 맞추는 우회가 생겨 표시 가격이 거짓이 된다.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta)
+		 VALUES ($1,'{"크기":"S"}',-2000)`, productID); err != nil {
+		t.Errorf("음수 price_delta 가 거부됐다: %v", err)
+	}
+
+	// 같은 조합은 한 번만.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO product_variants (product_id,option_values) VALUES ($1,'{"크기":"S"}')`,
+		productID); err == nil {
+		t.Error("같은 옵션 조합이 두 번 들어갔다")
+	}
+
+	// SKU 는 있을 때만 유일하다 — 없는 조합이 여럿이어도 된다.
+	for range 2 {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO product_variants (product_id,option_values)
+			 VALUES ($1, jsonb_build_object('크기', md5(random()::text)))`, productID); err != nil {
+			t.Errorf("SKU 없는 조합이 거부됐다: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO product_variants (product_id,option_values,sku) VALUES ($1,'{"크기":"L"}','SKU-1')`,
+		productID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO product_variants (product_id,option_values,sku) VALUES ($1,'{"크기":"XL"}','SKU-1')`,
+		productID); err == nil {
+		t.Error("같은 SKU 가 두 조합에 들어갔다")
+	}
+}
+
+// D30 3-1: 주문된 상품·조합은 물리 삭제되지 않는다. 그것이 소프트 삭제 컬럼을
+// 두지 않는 근거이므로, RESTRICT 가 실제로 걸리는지 확인한다.
+func TestOrderedProductsCannotBeDeleted(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	var productID, variantID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price) VALUES ('tee','티셔츠',12000) RETURNING id`).
+		Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values) VALUES ($1,'{"크기":"S"}') RETURNING id`,
+		productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 주문이 없으면 지워진다 — 상품 CASCADE 로 옵션·조합도 함께.
+	if _, err := pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, productID); err != nil {
+		t.Errorf("주문 없는 상품이 안 지워진다: %v", err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM product_variants`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("상품을 지웠는데 조합 %d행이 남았다", n)
+	}
+	// order_items 가 걸리는 쪽은 W3-04 에서 그 테이블이 생긴 뒤 확인한다.
+}
+
+// 소속 상품이 있는 카테고리와 하위가 있는 카테고리는 삭제를 거부한다.
+func TestCategoryDeletionIsRestricted(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	var parent, child, productID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO categories (name,slug) VALUES ('의류','clothes') RETURNING id`).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO categories (parent_id,name,slug) VALUES ($1,'상의','tops') RETURNING id`,
+		parent).Scan(&child); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price) VALUES ('tee','티셔츠',12000) RETURNING id`).
+		Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO product_categories (product_id,category_id) VALUES ($1,$2)`,
+		productID, child); err != nil {
+		t.Fatal(err)
+	}
+
+	// 하위가 있는 카테고리는 지워지지 않는다.
+	//
+	// 상품이 붙지 않은 별도의 부모-자식 쌍으로 확인한다 — 아래 child 에는
+	// 상품이 걸려 있어서, parent 를 CASCADE 로 바꿔도 product_categories 의
+	// RESTRICT 가 대신 막는다. 그러면 이 단언은 부모 FK 를 검사하지 않는다.
+	var p2, c2 string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO categories (name,slug) VALUES ('가전','appliance') RETURNING id`).Scan(&p2); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO categories (parent_id,name,slug) VALUES ($1,'주방','kitchen') RETURNING id`,
+		p2).Scan(&c2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, p2); err == nil {
+		t.Error("하위가 있는 카테고리가 지워졌다")
+	}
+	var left int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM categories WHERE id = $1`, c2).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 1 {
+		t.Error("부모를 지우려다 하위가 함께 사라졌다")
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, parent); err == nil {
+		t.Error("하위가 있는 카테고리가 지워졌다 (상품이 붙은 경로)")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, child); err == nil {
+		t.Error("소속 상품이 있는 카테고리가 지워졌다")
+	}
+
+	// 상품을 지우면 분류는 함께 간다 — 분류는 이력이 아니다.
+	if _, err := pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, productID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM product_categories`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("상품을 지웠는데 분류 %d행이 남았다", n)
+	}
+	// 그러고 나면 카테고리는 지워진다.
+	if _, err := pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, child); err != nil {
+		t.Errorf("빈 카테고리가 안 지워진다: %v", err)
+	}
+}
+
+// 같은 상품에 같은 카테고리를 두 번 붙일 수 없다 (PK).
+func TestProductCategoryIsUniquePair(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var productID, categoryID string
+	_ = pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price) VALUES ('tee','티셔츠',1) RETURNING id`).Scan(&productID)
+	_ = pool.QueryRow(ctx,
+		`INSERT INTO categories (name,slug) VALUES ('의류','clothes') RETURNING id`).Scan(&categoryID)
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO product_categories (product_id,category_id) VALUES ($1,$2)`,
+		productID, categoryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO product_categories (product_id,category_id) VALUES ($1,$2)`,
+		productID, categoryID); err == nil {
+		t.Error("같은 (상품, 카테고리) 가 두 번 들어갔다")
 	}
 }
