@@ -1,0 +1,31 @@
+{{define "body"}}
+<h1>장바구니</h1>
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+<ul class="cart">
+  {{range .Items}}
+  <li>
+    <a href="/shop/p/{{.ProductID}}">{{.Name}}</a>
+    <span class="option">{{range $k, $v := .Option}}{{$k}}: {{$v}} {{end}}</span>
+    <span class="price">{{.UnitPrice}}원 × {{.Quantity}}</span>
+    {{if not .Sellable}}<span class="badge">구매 불가</span>{{end}}
+    <form method="post" action="/cart/items/{{.ID}}" class="inline">
+      <input type="hidden" name="_method" value="PATCH">
+      <input name="quantity" type="number" min="0" max="{{.Stock}}" value="{{.Quantity}}">
+      <button type="submit">변경</button>
+    </form>
+  </li>
+  {{else}}
+  <li class="empty">장바구니가 비었습니다.</li>
+  {{end}}
+</ul>
+{{if .Items}}
+<dl class="totals">
+  <dt>상품 합계</dt><dd>{{.Goods}}원</dd>
+  <dt>배송비</dt><dd>{{.Fee}}원</dd>
+  <dt>결제 예정</dt><dd>{{.Total}}원</dd>
+</dl>
+<p><a href="/checkout">주문하기</a></p>
+{{end}}
+{{end}}
+{{end}}

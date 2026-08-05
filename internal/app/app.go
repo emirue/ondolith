@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
+	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/migrations"
@@ -218,9 +220,25 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
 		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore}
-	registry := buildTree(pub, lg, acc, bd, ad, func(w http.ResponseWriter, r *http.Request) {
+
+	commerceStore := commerce.NewStore(pool)
+	sh := &shopDeps{publicDeps: pub, sm: sessions, store: commerceStore, log: log,
+		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
+		// 부팅 때 붙잡아 두면 재시작 전까지 옛 값으로 계산한다.
+		shipping: func() commerce.Shipping {
+			kv := setting("shipping.flat_fee", "shipping.free_threshold")
+			return commerce.Shipping{
+				FlatFee:       atoiOr(kv["shipping.flat_fee"], 0),
+				FreeThreshold: atoiOr(kv["shipping.free_threshold"], 0),
+			}
+		}}
+
+	static := func(w http.ResponseWriter, r *http.Request) {
 		loader().StaticHandler("/static/").ServeHTTP(w, r)
-	})
+	}
+	// FR-710: 조립 시점에 정한다. site.type 이 shop 이 아니면 커머스 라우트는
+	// 등록되지 않고, 등록되지 않은 것은 404 다.
+	registry := buildTree(pub, lg, acc, bd, ad, sh, site().Type == "shop", static)
 
 	perms, err := authStore.PermissionKeys(ctx)
 	if err != nil {
@@ -274,4 +292,17 @@ func themePath(cfg *config.Config, name string) string {
 		return ""
 	}
 	return filepath.Join(cfg.Themes(), filepath.Base(name))
+}
+
+// atoiOr parses a setting that must be a number, falling back when it is not.
+//
+// 설정 값은 사람이 A-512 에서 입력한다. 숫자가 아니면 0 으로 두고 넘어가는
+// 이유는, 여기서 오류를 내면 배송비 설정 오타 하나가 상점 전체를 500 으로
+// 만들기 때문이다. 검증은 저장하는 화면의 몫이다.
+func atoiOr(s string, fallback int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

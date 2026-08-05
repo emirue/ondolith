@@ -122,6 +122,46 @@ func payloadFor(name string) any {
 	switch name {
 	case "page.html":
 		return &pageLike{Title: "회사 소개", Body: "본문입니다.\n둘째 줄"}
+	case "shop/list.html":
+		return map[string]any{
+			"Products": []productLike{
+				{ID: "p1", Slug: "tee", Name: "티셔츠", BasePrice: 12000, MinDelta: 1000, InStock: true},
+				{ID: "p2", Slug: "cap", Name: "모자", BasePrice: 9000, InStock: false},
+			},
+			"Categories": []categoryLike{{ID: "c1", Slug: "top", Name: "상의"}},
+			"Sort":       "price",
+			"Page":       1,
+		}
+	case "shop/search.html":
+		return map[string]any{
+			"Query":    "티",
+			"Products": []productLike{{ID: "p1", Slug: "tee", Name: "티셔츠", BasePrice: 12000}},
+		}
+	case "shop/product.html":
+		return map[string]any{
+			"Product": productLike{ID: "p1", Slug: "tee", Name: "티셔츠",
+				Description: "설명", BasePrice: 12000},
+			"Variants": []variantLike{
+				{ID: "v1", OptionValues: map[string]string{"크기": "L"}, PriceDelta: 1000, Stock: 3},
+				{ID: "v2", OptionValues: map[string]string{"크기": "M"}, Stock: 0},
+			},
+			"Options": []optionGroupLike{{Name: "크기", Values: []string{"L", "M"}}},
+			"Error":   "담을 수 없습니다",
+		}
+	case "shop/variant.html":
+		return map[string]any{
+			"Variant": &variantLike{ID: "v1", OptionValues: map[string]string{"크기": "L"},
+				PriceDelta: 1000, Stock: 3},
+			"Picked": map[string]string{"크기": "L"},
+		}
+	case "shop/cart.html":
+		return map[string]any{
+			"Items": []cartItemLike{{ID: "ci1", VariantID: "v1", ProductID: "p1",
+				Name: "티셔츠", Option: map[string]string{"크기": "L"},
+				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true}},
+			"Goods": 26000, "Fee": 3000, "Total": 29000,
+			"Error": "수량이 재고를 넘습니다",
+		}
 	case "error.html":
 		return map[string]any{"Detail": "자세한 내용"}
 	case "board/list.html":
@@ -295,4 +335,34 @@ type fieldLike struct {
 type inputLike struct {
 	Field fieldLike
 	Value any
+}
+
+// 커머스 화면이 받는 모양. 실물 타입을 쓰지 않는 이유는 이 패키지가
+// internal/commerce 를 import 하지 않기 위해서다 — 테마는 데이터 모양만 알면
+// 되고, 그 반대 방향 의존은 테마를 커머스에 묶는다.
+type productLike struct {
+	ID, Slug, Name, Description string
+	BasePrice, MinDelta         int
+	InStock                     bool
+}
+
+type categoryLike struct{ ID, Slug, Name string }
+
+type variantLike struct {
+	ID           string
+	OptionValues map[string]string
+	PriceDelta   int
+	Stock        int
+}
+
+type optionGroupLike struct {
+	Name   string
+	Values []string
+}
+
+type cartItemLike struct {
+	ID, VariantID, ProductID, Name string
+	Option                         map[string]string
+	UnitPrice, Quantity, Stock     int
+	Sellable                       bool
 }

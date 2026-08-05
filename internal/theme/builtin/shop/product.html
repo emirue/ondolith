@@ -1,0 +1,33 @@
+{{define "body"}}
+{{with .Data}}{{with .Product}}
+<h1>{{.Name}}</h1>
+<p class="price">{{.BasePrice}}원</p>
+<div class="description">{{.Description}}</div>
+{{end}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+<form method="post" action="/cart/items" class="form">
+  {{range .Options}}
+  <label for="opt-{{.Name}}">{{.Name}}</label>
+  <select id="opt-{{.Name}}" name="opt_{{.Name}}">
+    <option value="">선택하세요</option>
+    {{range .Values}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  {{end}}
+  {{/* 조합 ID 는 서버가 고른 것만 보낸다. 사용자가 임의 ID 를 적어 넣으면
+       다른 상품의 조합 가격이 이 상품에 붙는다. */}}
+  <label for="variant">조합</label>
+  <select id="variant" name="variant_id" required>
+    {{range .Variants}}
+    <option value="{{.ID}}"{{if not .Stock}} disabled{{end}}>
+      {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
+      {{if .PriceDelta}}({{.PriceDelta}}원){{end}}
+      {{if not .Stock}}— 품절{{end}}
+    </option>
+    {{end}}
+  </select>
+  <label for="quantity">수량</label>
+  <input id="quantity" name="quantity" type="number" min="1" value="1">
+  <button type="submit">장바구니에 담기</button>
+</form>
+{{end}}
+{{end}}

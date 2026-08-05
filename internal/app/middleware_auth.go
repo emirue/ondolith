@@ -16,6 +16,10 @@ const (
 	sessUserID = "user_id"
 	sessAuthAt = "auth_at"
 	sessReauth = "reauth_at"
+	// sessCartKey 는 비회원 장바구니의 열쇠다. 쿠키에 직접 두면 값이
+	// 클라이언트 것이 되고, 남의 키를 적어 넣는 것만으로 남의 장바구니를
+	// 연다 (SC-3).
+	sessCartKey = "cart_key"
 )
 
 // Actor is who the request is. Assembled once, in the middleware, and read from

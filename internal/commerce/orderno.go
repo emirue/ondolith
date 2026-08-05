@@ -2,6 +2,7 @@ package commerce
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"time"
 )
 
@@ -36,4 +37,14 @@ func NewOrderNo(now time.Time) string {
 		out = append(out, orderNoAlphabet[int(v)%len(orderNoAlphabet)])
 	}
 	return string(out)
+}
+
+// newRandomKey is 32 bytes of crypto/rand, URL-safe. 장바구니 키처럼 "추측되면
+// 곧 접근" 인 값에 쓴다.
+func newRandomKey() (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

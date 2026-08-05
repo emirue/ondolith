@@ -1,0 +1,30 @@
+{{define "body"}}
+<h1>{{.Meta.Title}}</h1>
+{{with .Data}}
+{{with .Categories}}
+<nav class="categories"><a href="/shop">전체</a>
+  {{range .}} · <a href="/shop/c/{{.Slug}}">{{.Name}}</a>{{end}}
+</nav>
+{{end}}
+<form method="get" class="sort">
+  <label for="sort">정렬</label>
+  <select id="sort" name="sort" onchange="this.form.submit()">
+    <option value="new"{{if eq .Sort "new"}} selected{{end}}>최신순</option>
+    <option value="price"{{if eq .Sort "price"}} selected{{end}}>낮은 가격순</option>
+    <option value="price_desc"{{if eq .Sort "price_desc"}} selected{{end}}>높은 가격순</option>
+    <option value="name"{{if eq .Sort "name"}} selected{{end}}>이름순</option>
+  </select>
+</form>
+<ul class="product-list">
+  {{range .Products}}
+  <li>
+    <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
+    <span class="price">{{.BasePrice}}원{{if .MinDelta}}~{{end}}</span>
+    {{if not .InStock}}<span class="badge">품절</span>{{end}}
+  </li>
+  {{else}}
+  <li class="empty">등록된 상품이 없습니다.</li>
+  {{end}}
+</ul>
+{{end}}
+{{end}}

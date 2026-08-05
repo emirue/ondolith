@@ -74,7 +74,7 @@ func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handl
 	// The static handler must not be nil — ServeMux.HandleFunc panics on one,
 	// and the panic made every route in the tree unreachable.
 	mux := http.NewServeMux()
-	buildTree(nil, &d.loginDeps, d, nil, nil,
+	buildTree(nil, &d.loginDeps, d, nil, nil, nil, false,
 		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }).Mount(mux)
 	return d, sm.LoadAndSave(withActor(sm, store)(mux)), store, sender
 }

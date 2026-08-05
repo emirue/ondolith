@@ -72,7 +72,7 @@ var productSortColumns = map[string]string{
 func (s *Store) ListProducts(ctx context.Context, opt ProductQuery) ([]Product, error) {
 	order, ok := productSortColumns[opt.Sort]
 	if !ok {
-		return nil, fmt.Errorf("commerce: 알 수 없는 정렬: %q", opt.Sort)
+		return nil, fmt.Errorf("%w: %q", ErrUnknownSort, opt.Sort)
 	}
 	limit, offset := opt.clamp()
 
@@ -350,3 +350,204 @@ const categoryLockKey = 0x0C47_0001
 func unmarshalOptions(raw []byte, into *map[string]string) error {
 	return json.Unmarshal(raw, into)
 }
+
+// ErrUnknownSort is a sort key that is not in the allow-list. 400 이지 500 이
+// 아니다 — 사용자가 URL 을 고친 것이고 서버가 고장난 것이 아니다.
+var ErrUnknownSort = errors.New("commerce: 알 수 없는 정렬")
+
+// Category is one row of categories.
+type Category struct {
+	ID       string
+	ParentID string
+	Name     string
+	Slug     string
+}
+
+// Categories lists them all, in display order. 수십 행이라 전부 읽는다.
+func (s *Store) Categories(ctx context.Context) ([]Category, error) {
+	const q = `
+		SELECT id, COALESCE(parent_id::text, ''), name, slug
+		FROM categories ORDER BY sort_order, name, id`
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Category
+	for rows.Next() {
+		var c Category
+		if err := rows.Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CategoryBySlug is P-302's read.
+func (s *Store) CategoryBySlug(ctx context.Context, slug string) (*Category, error) {
+	var c Category
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, COALESCE(parent_id::text, ''), name, slug FROM categories WHERE slug = $1`,
+		slug).Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &c, err
+}
+
+// SearchProducts is P-305 (FR-614).
+//
+// 게시판 검색과 같은 이유로 `simple` config + 접두 질의다 (D30 Phase 2 측정):
+// 한국어에 형태소 사전이 없으면 `english` 는 어간 추출로 오히려 덜 맞는다.
+// 미노출 상품은 여기서도 나오지 않는다.
+func (s *Store) SearchProducts(ctx context.Context, term string, page int) ([]Product, error) {
+	q := ProductQuery{VisibleOnly: true, Page: page}
+	limit, offset := q.clamp()
+	const stmt = `
+		SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
+		       COALESCE(v.min_delta, 0), COALESCE(v.in_stock, false)
+		FROM products p
+		LEFT JOIN LATERAL (
+			SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
+			FROM product_variants WHERE product_id = p.id AND is_visible
+		) v ON true
+		WHERE p.is_visible AND p.search_tsv @@ to_tsquery('simple', $1)
+		ORDER BY ts_rank(p.search_tsv, to_tsquery('simple', $1)) DESC, p.id
+		LIMIT $2 OFFSET $3`
+	rows, err := s.pool.Query(ctx, stmt, ToPrefixQuery(term), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Product
+	for rows.Next() {
+		var p Product
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
+			&p.BasePrice, &p.Visible, &p.MinDelta, &p.InStock); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ToPrefixQuery turns user text into a tsquery.
+//
+// 사용자 입력이 tsquery 문법에 닿지 않는다. `&`·`|`·`!`·`(` 를 그대로 넘기면
+// 구문 오류가 500 이 되고, 운이 나쁘면 의도하지 않은 질의가 된다.
+func ToPrefixQuery(term string) string {
+	var words []string
+	cur := make([]rune, 0, 32)
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, string(cur)+":*")
+			cur = cur[:0]
+		}
+	}
+	for _, r := range term {
+		switch {
+		case r == ' ' || r == '\t' || r == '\n':
+			flush()
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r > 127:
+			cur = append(cur, r)
+		default:
+			// 나머지는 버린다. 이스케이프가 아니라 제거다 — 무엇이 안전한지
+			// 목록으로 정하는 쪽이 무엇이 위험한지 목록으로 정하는 쪽보다 짧다.
+			flush()
+		}
+	}
+	flush()
+	if len(words) == 0 {
+		return ""
+	}
+	out := words[0]
+	for _, w := range words[1:] {
+		out += " & " + w
+	}
+	return out
+}
+
+// OptionGroup is one option name and the values that exist for it.
+type OptionGroup struct {
+	Name   string
+	Values []string
+}
+
+// OptionGroups derives the selector from the variants themselves.
+//
+// product_options 를 따로 읽지 않는다. 그 표는 관리자가 편집하는 정의이고,
+// 화면이 물어야 하는 것은 "실제로 존재하는 조합" 이다 — 둘이 어긋나면
+// 선택할 수 있는데 담을 수 없는 조합이 나온다.
+func OptionGroups(variants []Variant) []OptionGroup {
+	order := []string{}
+	seen := map[string]map[string]bool{}
+	for _, v := range variants {
+		for _, k := range sortedKeys(v.OptionValues) {
+			if seen[k] == nil {
+				seen[k] = map[string]bool{}
+				order = append(order, k)
+			}
+			seen[k][v.OptionValues[k]] = true
+		}
+	}
+	out := make([]OptionGroup, 0, len(order))
+	for _, name := range order {
+		vals := make([]string, 0, len(seen[name]))
+		for v := range seen[name] {
+			vals = append(vals, v)
+		}
+		insertionSort(vals)
+		out = append(out, OptionGroup{Name: name, Values: vals})
+	}
+	return out
+}
+
+// MatchVariant finds the combination matching every picked value.
+//
+// 부분 선택이면 nil 이다. "아직 다 안 골랐다" 와 "그런 조합이 없다" 를 화면이
+// 구분해야 하는데, 여기서 아무거나 돌려주면 그 구분이 사라진다.
+func MatchVariant(variants []Variant, picked map[string]string) *Variant {
+	if len(picked) == 0 {
+		return nil
+	}
+	for i := range variants {
+		if len(variants[i].OptionValues) != len(picked) {
+			continue
+		}
+		ok := true
+		for k, want := range picked {
+			if variants[i].OptionValues[k] != want {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return &variants[i]
+		}
+	}
+	return nil
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	insertionSort(out)
+	return out
+}
+
+func insertionSort(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
+}
+
+// NewGuestKey makes a cart key for a visitor who is not logged in.
+//
+// 세션에 담기는 값이고 추측 가능해서는 안 된다 — carts.guest_key 하나가 곧
+// 그 장바구니의 열쇠다.
+func NewGuestKey() (string, error) { return newRandomKey() }

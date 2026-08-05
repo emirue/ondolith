@@ -1,0 +1,17 @@
+{{define "body"}}
+<h1>상품 검색</h1>
+<form method="get" action="/shop/search" class="form">
+  <label for="q">검색어</label>
+  <input id="q" name="q" type="search" value="{{with .Data}}{{.Query}}{{end}}">
+  <button type="submit">검색</button>
+</form>
+{{with .Data}}{{if .Query}}
+<ul class="product-list">
+  {{range .Products}}
+  <li><a href="/shop/p/{{.Slug}}">{{.Name}}</a> <span class="price">{{.BasePrice}}원</span></li>
+  {{else}}
+  <li class="empty">검색 결과가 없습니다.</li>
+  {{end}}
+</ul>
+{{end}}{{end}}
+{{end}}

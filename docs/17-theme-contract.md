@@ -119,7 +119,8 @@ themes/{이름}/
 
 | 템플릿 | 화면 | 구분 |
 |---|---|---|
-| `shop/list.html` | P-301, P-302, P-305 | 폴백 |
+| `shop/list.html` | P-301, P-302 | 폴백 |
+| `shop/search.html` | P-305 | 폴백 |
 | `shop/product.html` | P-303 | 폴백 |
 | `shop/variant.html` | P-304 | 폴백 |
 | `shop/cart.html` | P-402 | 폴백 |

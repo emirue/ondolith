@@ -22,7 +22,7 @@ import (
 // the boot check: a key that does not exist stops the server, and a permission
 // no route names is reported as dead weight in the role editor.
 func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
-	ad *admin.Deps, static http.HandlerFunc,
+	ad *admin.Deps, sh *shopDeps, shop bool, static http.HandlerFunc,
 ) *Registry {
 	r := NewRegistry()
 
@@ -222,6 +222,37 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	// order — but reading it here in the order a person would guess is worth the
 	// line.
 	r.Add(Route{Screen: "P-202", Method: "GET", Pattern: "/{slug}", Class: SC1, Handler: pub.page})
+
+	// ---- 커머스 (FR-710 모듈 게이팅) --------------------------------------
+	//
+	// **조립 시점에 정한다.** 핸들러 안에서 `if 커머스켜짐` 을 검사하지 않는다
+	// (D20 「모듈 게이팅」) — 분기를 핸들러에 넣으면 새 라우트를 추가할 때마다
+	// 검사를 빠뜨릴 수 있고, 빠뜨리면 커머스를 끈 사이트에 결제 경로가 열린다.
+	//
+	// 등록하지 않은 라우트는 404 다. 숨김이 아니다.
+	if shop {
+		r.Add(Route{Screen: "P-301", Method: "GET", Pattern: "/shop", Class: SC1,
+			Handler: sh.productList})
+		r.Add(Route{Screen: "P-305", Method: "GET", Pattern: "/shop/search", Class: SC1,
+			Handler: sh.productSearch})
+		r.Add(Route{Screen: "P-302", Method: "GET", Pattern: "/shop/c/{slug}", Class: SC1,
+			Handler: sh.categoryList})
+		r.Add(Route{Screen: "P-303", Method: "GET", Pattern: "/shop/p/{slug}", Class: SC1,
+			Handler: sh.productDetail})
+		r.Add(Route{Screen: "P-304", Method: "GET", Pattern: "/shop/p/{slug}/variant", Class: SC1,
+			Handler: sh.variantPick})
+
+		r.Add(Route{Screen: "P-402", Method: "GET", Pattern: "/cart", Class: SC1,
+			Handler: sh.cartView})
+		r.Add(Route{Screen: "P-401", Method: "POST", Pattern: "/cart/items", Class: SC2,
+			Handler: sh.cartAdd})
+		// SC-3: 소유자는 세션이 정한다. 경로의 id 는 항목을 가리킬 뿐 주인을
+		// 가리키지 않으며, 저장소의 WHERE 절이 그것을 잠근다.
+		r.Add(Route{Screen: "P-403", Method: "PATCH", Pattern: "/cart/items/{id}", Class: SC3,
+			Handler: sh.cartUpdate})
+		r.Add(Route{Screen: "P-404", Method: "DELETE", Pattern: "/cart/items/{id}", Class: SC3,
+			Handler: sh.cartUpdate})
+	}
 
 	return r
 }

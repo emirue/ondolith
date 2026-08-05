@@ -1,0 +1,10 @@
+{{define "body"}}
+{{/* P-304 는 조각이다. 전체 페이지를 다시 그리면 선택할 때마다 설명과
+     이미지가 다시 내려간다. */}}
+{{with .Data}}{{with .Variant}}
+<p class="price">{{.PriceDelta}}</p>
+<p class="stock">{{if gt .Stock 0}}재고 {{.Stock}}개{{else}}품절{{end}}</p>
+{{else}}
+<p class="stock">옵션을 모두 선택하세요.</p>
+{{end}}{{end}}
+{{end}}
