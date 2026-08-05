@@ -421,3 +421,119 @@ func TestBoardWithoutSecretPostsRefusesTheFlag(t *testing.T) {
 		t.Error("비밀글을 끈 게시판에 비밀글이 만들어졌다")
 	}
 }
+
+// FR-503 / W2-19: 관리자에서 필드를 추가하면 **코드 수정 없이** 폼과 목록에
+// 나타난다. 타입별 분기는 partials/field.html 한 곳에만 있다 — 폼마다 분기하면
+// 타입을 추가할 때 빠뜨린 폼이 그 필드를 조용히 텍스트로 그린다.
+func TestAddingAFieldShowsUpInFormAndListWithoutCodeChanges(t *testing.T) {
+	srv, pool := liveSite(t)
+	boardID := mkBoard(t, pool, "free", content.PresetPublic)
+	mkUser(t, pool, "m@example.com")
+	store := content.NewStore(pool)
+	ctx := context.Background()
+
+	c := client()
+	login(t, srv.URL, "m@example.com", c)
+
+	// 8가지 타입을 전부 추가한다. 하나라도 분기가 빠지면 그 입력이 text 로
+	// 그려지고, 아래 단언이 잡는다.
+	fields := []content.FieldSchema{
+		{Key: "memo", Label: "메모", Type: content.FieldText, Sort: 1},
+		{Key: "detail", Label: "상세", Type: content.FieldTextarea, Sort: 2},
+		{Key: "qty", Label: "수량", Type: content.FieldNumber, Sort: 3},
+		{Key: "color", Label: "색상", Type: content.FieldSelect,
+			Options: []string{"빨강", "파랑"}, ShowInList: true, Sort: 4},
+		{Key: "agree", Label: "동의", Type: content.FieldCheckbox, Sort: 5},
+		{Key: "tags", Label: "태그", Type: content.FieldMultiselect,
+			Options: []string{"A", "B"}, Sort: 6},
+		{Key: "due", Label: "기한", Type: content.FieldDate, Sort: 7},
+		{Key: "site", Label: "링크", Type: content.FieldURL, Sort: 8},
+	}
+	for _, f := range fields {
+		if err := store.SaveBoardField(ctx, boardID, f); err != nil {
+			t.Fatalf("%s: %v", f.Key, err)
+		}
+	}
+
+	_, form := mustGet(t, c, srv.URL+"/board/free/write")
+	// 타입마다 다른 입력이 나와야 한다.
+	wants := map[string]string{
+		"memo":   `<input type="text" id="f-memo"`,
+		"detail": `<textarea id="f-detail"`,
+		"qty":    `<input type="number" step="any" id="f-qty"`,
+		"color":  `<select id="f-color"`,
+		"agree":  `<input type="checkbox" id="f-agree"`,
+		"tags":   `<select id="f-tags" name="tags" multiple`,
+		"due":    `<input type="date" id="f-due"`,
+		"site":   `<input type="url" id="f-site"`,
+	}
+	for key, want := range wants {
+		if !strings.Contains(form, want) {
+			t.Errorf("%s 필드가 타입에 맞는 입력으로 그려지지 않았다 (%q 없음)", key, want)
+		}
+		if !strings.Contains(form, ">"+labelOf(fields, key)+"<") {
+			t.Errorf("%s 의 라벨이 폼에 없다", key)
+		}
+	}
+
+	// 값을 채워 저장하고, show_in_list 인 필드가 목록 열에 나타난다.
+	resp := httpPost(t, c, srv.URL+"/board/free/write", url.Values{
+		"title": {"글"}, "body": {"본문"}, "color": {"파랑"}, "memo": {"메모값"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("작성 HTTP %d", resp.StatusCode)
+	}
+	_, list := mustGet(t, c, srv.URL+"/board/free")
+	if !strings.Contains(list, "<th>색상</th>") {
+		t.Error("show_in_list 필드가 목록 열에 없다")
+	}
+	if !strings.Contains(list, "파랑") {
+		t.Error("목록 열에 값이 안 나온다")
+	}
+	if strings.Contains(list, "<th>메모</th>") {
+		t.Error("show_in_list 가 아닌 필드가 목록 열에 나왔다")
+	}
+}
+
+func labelOf(fields []content.FieldSchema, key string) string {
+	for _, f := range fields {
+		if f.Key == key {
+			return f.Label
+		}
+	}
+	return ""
+}
+
+// 페이지 이동 링크가 실제 상태를 반영한다. "다음"이 마지막 페이지에도 있으면
+// 방문자는 빈 페이지로 간다.
+func TestPaginationLinksReflectWhereYouAre(t *testing.T) {
+	srv, pool := liveSite(t)
+	boardID := mkBoard(t, pool, "free", content.PresetPublic)
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO posts (board_id, title, body)
+		SELECT $1, '글 ' || g, '본문' FROM generate_series(1, 25) g`, boardID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1쪽: 이전 없음, 다음 있음.
+	_, first := mustGet(t, client(), srv.URL+"/board/free?per_page=20")
+	if strings.Contains(first, ">이전<") {
+		t.Error("첫 페이지에 '이전'이 있다")
+	}
+	if !strings.Contains(first, ">다음<") {
+		t.Error("첫 페이지에 '다음'이 없다")
+	}
+	if !strings.Contains(first, "전체 25건") {
+		t.Errorf("합계가 안 나온다: %.200s", first)
+	}
+
+	// 2쪽: 이전 있음, 다음 없음 (25건 = 20 + 5).
+	_, second := mustGet(t, client(), srv.URL+"/board/free?per_page=20&page=2")
+	if !strings.Contains(second, ">이전<") {
+		t.Error("둘째 페이지에 '이전'이 없다")
+	}
+	if strings.Contains(second, ">다음<") {
+		t.Error("마지막 페이지에 '다음'이 있다 — 빈 페이지로 간다")
+	}
+}

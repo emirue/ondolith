@@ -43,7 +43,7 @@
   </table>
   </div>
 
-  <p class="pager">전체 {{number .Total}}건</p>
+  {{template "partials/pagination.html" .Pager}}
 </section>
 {{end}}
 {{end}}

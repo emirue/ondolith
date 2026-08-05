@@ -1,0 +1,28 @@
+{{/* 커스텀 필드 입력 하나. 타입별 분기가 **여기 한 곳에** 모여 있다 (D17).
+     각 폼이 제 나름대로 분기하면 타입을 추가할 때마다 고칠 곳이 늘고,
+     빠뜨린 폼은 그 필드를 조용히 텍스트로 그린다.
+
+     기대하는 데이터: content.FieldInput ({Field, Value}) */}}
+{{$f := .Field}}{{$v := .Value}}
+{{if eq $f.Type "textarea"}}
+  <textarea id="f-{{$f.Key}}" name="{{$f.Key}}"{{if $f.Required}} required{{end}}>{{$v}}</textarea>
+{{else if eq $f.Type "select"}}
+  <select id="f-{{$f.Key}}" name="{{$f.Key}}"{{if $f.Required}} required{{end}}>
+    <option value=""></option>
+    {{range $f.Options}}<option value="{{.}}"{{if eq $v .}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+{{else if eq $f.Type "multiselect"}}
+  <select id="f-{{$f.Key}}" name="{{$f.Key}}" multiple{{if $f.Required}} required{{end}}>
+    {{range $f.Options}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+{{else if eq $f.Type "checkbox"}}
+  <input type="checkbox" id="f-{{$f.Key}}" name="{{$f.Key}}" value="1"{{if $v}} checked{{end}}>
+{{else if eq $f.Type "number"}}
+  <input type="number" step="any" id="f-{{$f.Key}}" name="{{$f.Key}}" value="{{$v}}"{{if $f.Required}} required{{end}}>
+{{else if eq $f.Type "date"}}
+  <input type="date" id="f-{{$f.Key}}" name="{{$f.Key}}" value="{{$v}}"{{if $f.Required}} required{{end}}>
+{{else if eq $f.Type "url"}}
+  <input type="url" id="f-{{$f.Key}}" name="{{$f.Key}}" value="{{$v}}"{{if $f.Required}} required{{end}}>
+{{else}}
+  <input type="text" id="f-{{$f.Key}}" name="{{$f.Key}}" value="{{$v}}"{{if $f.Required}} required{{end}}>
+{{end}}

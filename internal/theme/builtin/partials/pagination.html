@@ -1,0 +1,17 @@
+{{/* 페이지 이동.
+     페이지 번호는 Go 가 계산해 넘긴다 — html/template 에 산술이 없고,
+     D17 함수맵에 없는 이름은 템플릿에서 쓸 수 없다. 여기서 더하기를 하려고
+     함수를 늘리면 다음 화면이 또 하나를 늘린다.
+
+     기대하는 데이터: {Base, Query, Total, PageNo, PrevPage, NextPage, HasPrev, HasNext} */}}
+{{$q := .Query}}{{$base := .Base}}
+<nav class="pager">
+  <span class="meta">전체 {{number .Total}}건</span>
+  {{if .HasPrev}}
+    <a class="btn btn--sm" href="{{$base}}?page={{.PrevPage}}{{if $q.Search}}&q={{$q.Search}}{{end}}">이전</a>
+  {{end}}
+  <span class="page-current">{{.PageNo}}</span>
+  {{if .HasNext}}
+    <a class="btn btn--sm" href="{{$base}}?page={{.NextPage}}{{if $q.Search}}&q={{$q.Search}}{{end}}">다음</a>
+  {{end}}
+</nav>

@@ -9,33 +9,11 @@
     <label for="title">제목</label>
     <input type="text" id="title" name="title" value="{{.Post.Title}}" required>
 
-    {{/* 폼은 스키마에서 생성된다. 필드 목록이 코드에 없다 (D14 3절 규칙 1) */}}
-    {{$p := .Post}}
-    {{range .Fields}}
-      <label for="f-{{.Key}}">{{.Label}}{{if .Required}} *{{end}}</label>
-      {{$v := field $p.CustomFields .Key}}
-      {{if eq .Type "textarea"}}
-        <textarea id="f-{{.Key}}" name="{{.Key}}"{{if .Required}} required{{end}}>{{$v}}</textarea>
-      {{else if eq .Type "select"}}
-        <select id="f-{{.Key}}" name="{{.Key}}"{{if .Required}} required{{end}}>
-          <option value=""></option>
-          {{range .Options}}<option value="{{.}}"{{if eq $v .}} selected{{end}}>{{.}}</option>{{end}}
-        </select>
-      {{else if eq .Type "multiselect"}}
-        <select id="f-{{.Key}}" name="{{.Key}}" multiple{{if .Required}} required{{end}}>
-          {{range .Options}}<option value="{{.}}">{{.}}</option>{{end}}
-        </select>
-      {{else if eq .Type "checkbox"}}
-        <input type="checkbox" id="f-{{.Key}}" name="{{.Key}}" value="1"{{if $v}} checked{{end}}>
-      {{else if eq .Type "number"}}
-        <input type="number" step="any" id="f-{{.Key}}" name="{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}>
-      {{else if eq .Type "date"}}
-        <input type="date" id="f-{{.Key}}" name="{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}>
-      {{else if eq .Type "url"}}
-        <input type="url" id="f-{{.Key}}" name="{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}>
-      {{else}}
-        <input type="text" id="f-{{.Key}}" name="{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}>
-      {{end}}
+    {{/* 폼은 스키마에서 생성된다. 필드 목록이 코드에 없다 (D14 3절 규칙 1).
+         타입별 분기는 partials/field.html 한 곳에만 있다 (D17). */}}
+    {{range .Inputs}}
+      <label for="f-{{.Field.Key}}">{{.Field.Label}}{{if .Field.Required}} *{{end}}</label>
+      {{template "partials/field.html" .}}
     {{end}}
 
     <label for="body">본문</label>

@@ -200,7 +200,7 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W2-19 | 내장 테마 게시판 템플릿 6종 | W2-13, W2-14, W2-18 | `board/list·view·form`, `comment/form`, `partials/field`, `partials/pagination` | **`partials/field.html` 하나에 타입별 분기가 모여 있다** (D17). 관리자에서 필드를 추가하면 **코드 수정 없이** 폼과 목록에 나타나는 것을 통합 테스트가 확인한다 (FR-503) |
+| W2-19 | 내장 테마 게시판 템플릿 6종 **(완료 — `builtin/board/`, `builtin/partials/field·pagination·comment-form`)** | W2-13, W2-14, W2-18 | `board/list·view·form`, `comment/form`, `partials/field`, `partials/pagination` | **`partials/field.html` 하나에 타입별 분기가 모여 있다** (D17). 관리자에서 필드를 추가하면 **코드 수정 없이** 폼과 목록에 나타나는 것을 통합 테스트가 확인한다 (FR-503) |
 
 #### 관리자 화면
 

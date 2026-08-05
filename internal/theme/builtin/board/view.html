@@ -45,11 +45,7 @@
   </ul>
 
   {{if .CanComment}}
-  <form class="form" method="post" action="/board/{{.Board.Slug}}/{{.Post.ID}}/comments">
-    <label for="comment-body">댓글</label>
-    <textarea id="comment-body" name="body" required></textarea>
-    <button>등록</button>
-  </form>
+    {{template "partials/comment-form.html" .CommentForm}}
   {{end}}
 </section>
 {{end}}

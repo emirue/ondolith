@@ -110,6 +110,7 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	v.Data = map[string]any{
 		"Board": b, "Posts": posts, "Total": total, "Query": q, "Columns": columns,
 		"CanWrite": a.CanOn("post.write", auth.BoardID(b.ID)),
+		"Pager":    pagerFor("/board/"+b.Slug, q, total),
 	}
 	d.renderPage(w, r, d.boardTemplate(b, "board/list.html"), http.StatusOK, v)
 }
@@ -160,6 +161,7 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	v.Data = map[string]any{
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
 		"CanComment":  b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID)),
+		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments"},
 		"CanEdit":     p.AuthorID != "" && p.AuthorID == actorID(a),
 		"CanModerate": a.CanOn("post.moderate", auth.BoardID(b.ID)),
 	}
@@ -181,6 +183,7 @@ func (d *boardDeps) postForm(w http.ResponseWriter, r *http.Request) {
 	// No field list in the code: the form is generated from the schema, which is
 	// what makes A-306 mean anything (D14 3절 규칙 1).
 	v.Data = map[string]any{"Board": b, "Fields": fields,
+		"Inputs":    content.FieldInputs(fields, nil),
 		"CanSecret": b.AllowSecret, "Post": &content.Post{}}
 	_ = a
 	d.renderPage(w, r, d.boardTemplate(b, "board/write.html"), http.StatusOK, v)
@@ -238,7 +241,8 @@ func (d *boardDeps) postEditForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := d.view(r, p.Title+" 수정", "")
-	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": p, "CanSecret": b.AllowSecret}
+	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": p,
+		"Inputs": content.FieldInputs(fields, p.CustomFields), "CanSecret": b.AllowSecret}
 	d.renderPage(w, r, d.boardTemplate(b, "board/write.html"), http.StatusOK, v)
 }
 
@@ -326,6 +330,7 @@ func (d *boardDeps) renderFormError(w http.ResponseWriter, r *http.Request,
 ) {
 	v := d.view(r, b.Name+" 글쓰기", "")
 	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": &p,
+		"Inputs":    content.FieldInputs(fields, p.CustomFields),
 		"CanSecret": b.AllowSecret, "Error": err.Error()}
 	d.renderPage(w, r, d.boardTemplate(b, "board/write.html"), http.StatusUnprocessableEntity, v)
 }
@@ -374,4 +379,21 @@ func firstLine(s string) string {
 		s = string([]rune(s)[:160])
 	}
 	return s
+}
+
+// pagerFor pre-computes what partials/pagination.html draws.
+//
+// The arithmetic is here because html/template has none, and D17 closes the
+// function map — adding `add` for this would be the first of several, and the
+// screen after next would want `mul`.
+func pagerFor(base string, q content.ListQuery, total int64) map[string]any {
+	prev := q.Page // URLs are 1-based, so the previous page's number IS q.Page
+	return map[string]any{
+		"Base": base, "Query": q, "Total": total,
+		"PageNo":   q.Page + 1,
+		"PrevPage": prev,
+		"NextPage": q.Page + 2,
+		"HasPrev":  q.Page > 0,
+		"HasNext":  int64((q.Page+1)*q.PerPage) < total,
+	}
 }

@@ -133,8 +133,13 @@ func payloadFor(name string) any {
 				CustomFields: map[string]any{"color": "빨강"},
 				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
 			}},
-			"Total":    int64(1),
-			"Query":    struct{ Search string }{Search: "검색어"},
+			"Total": int64(1),
+			"Query": struct{ Search string }{Search: "검색어"},
+			"Pager": map[string]any{
+				"Base": "/board/free", "Query": struct{ Search string }{Search: "검색어"},
+				"Total": int64(1), "PageNo": 1, "PrevPage": 0, "NextPage": 2,
+				"HasPrev": false, "HasNext": true,
+			},
 			"Columns":  []fieldLike{{Key: "color", Label: "색상"}},
 			"CanWrite": true,
 		}
@@ -154,6 +159,7 @@ func payloadFor(name string) any {
 			},
 			"Fields":     []fieldLike{{Key: "color", Label: "색상"}},
 			"CanComment": true, "CanEdit": true, "CanModerate": true,
+			"CommentForm": map[string]any{"Action": "/board/free/p1/comments"},
 		}
 	case "search.html":
 		return map[string]any{
@@ -174,6 +180,18 @@ func payloadFor(name string) any {
 			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
 			"Post": &postLike{Title: "고칠 글", Body: "본문",
 				CustomFields: map[string]any{"color": "빨강"}},
+			"Inputs": []inputLike{
+				{Field: fieldLike{Key: "memo", Label: "메모", Type: "text"}, Value: "적어둔 값"},
+				{Field: fieldLike{Key: "color", Label: "색상", Type: "select",
+					Options: []string{"빨강", "파랑"}, Required: true}, Value: "빨강"},
+				{Field: fieldLike{Key: "agree", Label: "동의", Type: "checkbox"}, Value: true},
+				{Field: fieldLike{Key: "due", Label: "기한", Type: "date"}, Value: "2026-08-05"},
+				{Field: fieldLike{Key: "site", Label: "링크", Type: "url"}, Value: "https://example.com"},
+				{Field: fieldLike{Key: "qty", Label: "수량", Type: "number"}, Value: 3},
+				{Field: fieldLike{Key: "tags", Label: "태그", Type: "multiselect",
+					Options: []string{"A", "B"}}, Value: nil},
+				{Field: fieldLike{Key: "detail", Label: "상세", Type: "textarea"}, Value: "여러 줄"},
+			},
 			"Fields": []fieldLike{
 				{Key: "memo", Label: "메모", Type: "text"},
 				{Key: "detail", Label: "상세", Type: "textarea"},
@@ -272,4 +290,9 @@ type fieldLike struct {
 	Key, Label, Type string
 	Options          []string
 	Required         bool
+}
+
+type inputLike struct {
+	Field fieldLike
+	Value any
 }

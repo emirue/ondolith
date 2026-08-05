@@ -1,0 +1,8 @@
+{{/* 댓글 입력. 상세 화면과 수정 화면이 같은 것을 쓴다. */}}
+{{$c := .}}
+<form class="form" method="post" action="{{$c.Action}}">
+  {{if $c.ParentID}}<input type="hidden" name="parent_id" value="{{$c.ParentID}}">{{end}}
+  <label for="comment-body">댓글</label>
+  <textarea id="comment-body" name="body" required>{{$c.Body}}</textarea>
+  <button>{{if $c.Body}}수정{{else}}등록{{end}}</button>
+</form>

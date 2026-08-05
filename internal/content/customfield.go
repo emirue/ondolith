@@ -204,3 +204,25 @@ func contains(list []string, v string) bool {
 	}
 	return false
 }
+
+// FieldInput pairs a field definition with the value a form should show.
+//
+// The pairing is built in Go because html/template has no way to make one:
+// there is no `dict`, and D17 closes the function map (adding one function for
+// this would be the first of several). It also keeps the type branching in a
+// single partial, which is what W2-19 asks for.
+type FieldInput struct {
+	Field FieldSchema
+	Value any
+}
+
+// FieldInputs zips a board's schema with a post's stored values, in schema
+// order. A value whose field was deleted is not returned — it is preserved in
+// the database (D14 3절 규칙 4) but there is no input to draw for it.
+func FieldInputs(schema []FieldSchema, values map[string]any) []FieldInput {
+	out := make([]FieldInput, 0, len(schema))
+	for _, f := range schema {
+		out = append(out, FieldInput{Field: f, Value: values[f.Key]})
+	}
+	return out
+}
