@@ -1,0 +1,275 @@
+package commerce
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+var (
+	ErrCartEmpty      = errors.New("commerce: 장바구니가 비었습니다")
+	ErrTermsRequired  = errors.New("commerce: 필수 약관에 동의해야 합니다")
+	ErrOrdererContact = errors.New("commerce: 주문자 이메일과 연락처가 필요합니다")
+)
+
+// OrderForm is P-406's whole input surface.
+//
+// **금액·할인·합계 필드가 없다.** 있으면 클라이언트가 보낸 값이 계산에 닿을 수
+// 있고, FR-607 의 대조는 그 순간 자기 자신과의 대조가 된다. 서버가 장바구니와
+// 상품 행에서 계산한다 (D19 P-405 「받지 않는 필드」).
+//
+// 품목 목록도 받지 않는다. 무엇을 사는지는 장바구니가 정한다 — 폼에서 받으면
+// 담지 않은 것을 주문할 수 있다.
+type OrderForm struct {
+	ReceiverName  string
+	ReceiverPhone string
+	Postcode      string
+	Address1      string
+	Address2      string
+	DeliveryMemo  string
+	OrdererEmail  string
+	OrdererPhone  string
+	// AgreedTerms 는 동의한 약관 ID 다. 필수 약관이 빠지면 거부한다 (FR-619).
+	AgreedTerms []string
+}
+
+// Order is the created row, as the confirmation screen needs it.
+type Order struct {
+	ID      string
+	OrderNo string
+	Status  Status
+	Goods   int
+	Fee     int
+	Total   int
+}
+
+// CreateOrder is P-406's body: one transaction, and nothing outside it.
+//
+// 순서가 중요하다.
+//
+//  1. 장바구니를 **잠근 채** 읽는다. 잠그지 않으면 금액을 계산한 뒤 항목이
+//     바뀌어, 저장되는 총액이 저장되는 품목과 다른 주문이 생긴다.
+//  2. 재고를 `FOR UPDATE` 로 차감한다. 여기서 실패하면 아무것도 남지 않는다.
+//  3. 금액을 **서버가** 계산한다.
+//  4. orders·order_items 를 스냅샷으로 기록한다 (FR-612).
+//  5. 필수 약관 동의를 기록한다 (FR-619).
+//
+// 어느 단계가 실패해도 재고가 줄지 않는다 — 전부 한 트랜잭션이고, 롤백이
+// 되돌린다. 재고를 먼저 커밋하고 주문을 나중에 쓰는 구조는 "재고는 줄었는데
+// 주문이 없는" 상태를 만들고, 그것을 되돌리는 화면은 없다.
+func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
+	form OrderForm, ship Shipping, now time.Time) (*Order, error) {
+
+	if !o.Valid() {
+		return nil, ErrCartOwner
+	}
+	if form.OrdererEmail == "" || form.OrdererPhone == "" {
+		// 둘 다 NOT NULL 이다 (D30 orders). 회원 계정이 지워져도 주문서를
+		// 보낼 곳과 비회원 조회의 대조 키가 남아야 한다.
+		//
+		// DB 도 막지만 거기서 나오는 것은 제약 위반이고, 화면은 그것을 500 으로
+		// 그린다. 폼 오류로 말하려면 여기서 잡아야 한다.
+		return nil, ErrOrdererContact
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	// (1) 장바구니를 잠근 채 읽는다. FOR UPDATE OF ci 는 장바구니 항목 행만
+	// 잠근다 — 상품 행까지 잠그면 같은 상품을 보는 모든 주문이 줄을 선다.
+	rows, err := tx.Query(ctx, `
+		SELECT ci.variant_id, ci.quantity, p.id, p.name, v.option_values,
+		       p.base_price, v.price_delta, p.is_visible, v.is_visible, v.stock
+		FROM cart_items ci
+		JOIN carts c            ON c.id = ci.cart_id
+		JOIN product_variants v ON v.id = ci.variant_id
+		JOIN products p         ON p.id = v.product_id
+		WHERE ($1::uuid IS NOT NULL AND c.user_id = $1)
+		   OR ($2::text IS NOT NULL AND c.guest_key = $2)
+		ORDER BY ci.created_at, ci.id
+		FOR UPDATE OF ci`, nullable(o.UserID), nullable(o.GuestKey))
+	if err != nil {
+		return nil, err
+	}
+
+	type line struct {
+		variantID, productID, name string
+		optionLabel                string
+		unitPrice, quantity        int
+	}
+	var lines []line
+	var amounts []Line
+	var deltas []StockDelta
+	for rows.Next() {
+		var l line
+		var raw []byte
+		var basePrice, priceDelta, stock int
+		var productVisible, variantVisible bool
+		if err := rows.Scan(&l.variantID, &l.quantity, &l.productID, &l.name, &raw,
+			&basePrice, &priceDelta, &productVisible, &variantVisible, &stock); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		var opts map[string]string
+		if err := unmarshalOptions(raw, &opts); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		l.optionLabel = OptionLabel(opts)
+
+		sell := Sellable{ProductVisible: productVisible, VariantVisible: variantVisible, Stock: stock}
+		if err := sell.CheckAvailable(l.quantity); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("%s: %w", l.name, err)
+		}
+		l.unitPrice = basePrice + priceDelta
+
+		lines = append(lines, l)
+		amounts = append(amounts, Line{BasePrice: basePrice, PriceDelta: priceDelta, Quantity: l.quantity})
+		deltas = append(deltas, StockDelta{VariantID: l.variantID, Delta: -l.quantity})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(lines) == 0 {
+		return nil, ErrCartEmpty
+	}
+
+	// (2) 재고 차감. 잠금 순서가 정해져 있어 교착이 생기지 않는다.
+	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
+		return nil, err
+	}
+
+	// (3) 금액은 서버가 계산한다. 폼에는 금액 필드가 없다.
+	goods, fee, total, err := Total(amounts, ship)
+	if err != nil {
+		return nil, err
+	}
+
+	// (5-a) 필수 약관을 먼저 확인한다. 주문 행을 쓴 뒤에 거부하면 롤백으로
+	// 사라지지만, 주문번호는 이미 소비된 뒤다.
+	required, err := requiredTermIDs(ctx, tx, now)
+	if err != nil {
+		return nil, err
+	}
+	agreed := map[string]bool{}
+	for _, id := range form.AgreedTerms {
+		agreed[id] = true
+	}
+	for _, id := range required {
+		if !agreed[id] {
+			return nil, ErrTermsRequired
+		}
+	}
+
+	// (4) 주문 기록. 상태는 상태머신의 시작점이다.
+	order := &Order{OrderNo: NewOrderNo(now), Status: StatusPaymentPending,
+		Goods: goods, Fee: fee, Total: total}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO orders (order_no, user_id, status, total_amount,
+		                    receiver_name, receiver_phone, postcode, address1, address2,
+		                    delivery_memo, orderer_email, orderer_phone)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		order.OrderNo, nullable(userID), string(order.Status), total,
+		form.ReceiverName, form.ReceiverPhone, form.Postcode, form.Address1, form.Address2,
+		form.DeliveryMemo, form.OrdererEmail, form.OrdererPhone).Scan(&order.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, l := range lines {
+		// 상품명·옵션 표기·단가는 스냅샷이다 (FR-612). FK 조인으로 대체하지
+		// 않는다 — 조합이 은퇴한 뒤에도 그때 산 것이 재현돼야 한다.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO order_items (order_id, product_id, variant_id, product_name,
+			                         option_label, unit_price, quantity)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			order.ID, l.productID, l.variantID, l.name, l.optionLabel,
+			l.unitPrice, l.quantity); err != nil {
+			return nil, err
+		}
+	}
+
+	// (5-b) 동의 이력. 본문을 복사하지 않는다 — terms 행이 불변이고 RESTRICT 가
+	// 삭제를 막으므로 참조만으로 재현된다 (D30).
+	for _, id := range form.AgreedTerms {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO order_agreements (order_id, terms_id) VALUES ($1, $2)
+			 ON CONFLICT DO NOTHING`, order.ID, id); err != nil {
+			return nil, err
+		}
+	}
+
+	// 장바구니를 비운다. 남겨 두면 뒤로 가기 한 번이 같은 것을 또 주문한다.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM cart_items ci
+		WHERE ci.cart_id IN (SELECT id FROM carts
+		                     WHERE ($1::uuid IS NOT NULL AND user_id = $1)
+		                        OR ($2::text IS NOT NULL AND guest_key = $2))`,
+		nullable(o.UserID), nullable(o.GuestKey)); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return order, nil
+}
+
+// requiredTermIDs lists the terms in force at `now` that must be agreed to.
+//
+// 종류마다 가장 최근 시행본 하나다. 여러 버전을 다 요구하면 개정할 때마다
+// 과거 버전에도 동의해야 한다.
+func requiredTermIDs(ctx context.Context, tx pgx.Tx, now time.Time) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT ON (kind) id FROM terms
+		WHERE is_required AND effective_at <= $1
+		ORDER BY kind, effective_at DESC`, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// OptionLabel renders "색상: 검정 / 사이즈: L" for the order-item snapshot.
+//
+// 키 순서를 정렬한다. map 의 순회 순서는 Go 가 매번 섞으므로, 정렬하지 않으면
+// 같은 조합의 주문 두 건이 서로 다른 표기를 갖는다.
+func OptionLabel(opts map[string]string) string {
+	if len(opts) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(opts))
+	for k := range opts {
+		keys = append(keys, k)
+	}
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
+			keys[j], keys[j-1] = keys[j-1], keys[j]
+		}
+	}
+	out := ""
+	for i, k := range keys {
+		if i > 0 {
+			out += " / "
+		}
+		out += k + ": " + opts[k]
+	}
+	return out
+}
