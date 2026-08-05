@@ -1,0 +1,51 @@
+{{define "content"}}
+<h1>취소·환불 처리</h1>
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}{{if .Discount}} · 할인 {{.Discount}}{{end}}</p>{{end}}
+<dl>
+  <dt>결제 금액</dt><dd>{{.Approved}}</dd>
+  <dt>환불 접수·완료</dt><dd>{{.Refunded}}</dd>
+  <dt>남은 금액</dt><dd>{{.Remaining}}</dd>
+</dl>
+<table>
+  <thead><tr><th>시각</th><th>요청자</th><th>금액</th><th>상태</th><th>사유</th></tr></thead>
+  <tbody>
+    {{range .Refunds}}
+    <tr><td>{{.CreatedAt}}</td><td>{{.Requester}}</td><td>{{.Amount}}</td>
+        <td>{{.Status}}</td><td>{{.Reason}}</td></tr>
+    {{else}}
+    <tr><td colspan="5">접수된 요청이 없습니다.</td></tr>
+    {{end}}
+  </tbody>
+</table>
+
+{{/* **금액 입력란이 없다.** 관리자 화면이라고 예외를 두면 그 경로만 위변조
+     가능해진다 (FR-625). 품목·수량만 받고 서버가 스냅샷에서 계산한다. */}}
+<form method="post" class="form">
+  <fieldset>
+    <legend>환불할 품목</legend>
+    {{range .Order.Items}}
+    <div>
+      <label>
+        <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .Remaining}} disabled{{end}}>
+        {{.ProductName}} {{.OptionLabel}} — 주문 {{.Quantity}} · 남은 {{.Remaining}}
+        {{if .Discount}}(할인 {{.Discount}} 적용){{end}}
+      </label>
+      <input name="qty_{{.ID}}" type="number" min="1" max="{{.Remaining}}" value="1"
+             {{if not .Remaining}}disabled{{end}}>
+    </div>
+    {{end}}
+  </fieldset>
+  <label for="reason">사유</label>
+  <input id="reason" name="reason" maxlength="500">
+  {{/* D15 5.3-1: 최근 15분 내 확인이 있으면 이 필드가 없다. 매 클릭마다
+       물으면 관리자가 비밀번호를 브라우저에 저장하게 되어 역효과다. */}}
+  {{if .NeedsReauth}}
+  <label for="password">비밀번호 확인</label>
+  <input id="password" name="password" type="password" required autocomplete="current-password">
+  {{end}}
+  <button type="submit">환불 접수</button>
+</form>
+{{end}}
+{{end}}

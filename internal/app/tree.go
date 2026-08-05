@@ -321,6 +321,11 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "order.update", Handler: ad.ShippingForm})
 		r.Add(Route{Screen: "A-510", Method: "POST", Pattern: "/admin/orders/{no}/shipping", Class: SC5,
 			Permission: "order.update", Handler: ad.ShippingSave})
+		// SC-6: 돈이 나간다. 읽기 라우트는 SC-4 다 (D15 4.4).
+		r.Add(Route{Screen: "A-507", Method: "GET", Pattern: "/admin/orders/{no}/refund", Class: SC4,
+			Permission: "order.refund", Handler: ad.RefundForm})
+		r.Add(Route{Screen: "A-507", Method: "POST", Pattern: "/admin/orders/{no}/refund", Class: SC6,
+			Permission: "order.refund", Handler: ad.RefundSave})
 	}
 
 	return r

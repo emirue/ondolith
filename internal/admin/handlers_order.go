@@ -226,3 +226,126 @@ func pageOf(r *http.Request) int {
 	}
 	return n
 }
+
+// RefundForm is A-507 GET — cancel / partial refund.
+func (d *Deps) RefundForm(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "order.refund")
+	if !ok {
+		return
+	}
+	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
+	if errors.Is(err, commerce.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.renderRefund(w, r, c, order, http.StatusOK, "")
+}
+
+func (d *Deps) renderRefund(w http.ResponseWriter, r *http.Request, c Caller,
+	order *commerce.OrderDetail, code int, msg string) {
+
+	refunds, err := d.Commerce.Refunds(r.Context(), order.ID)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	approved, refunded, perr := d.Commerce.RefundedTotal(r.Context(), order.OrderNo)
+	if perr != nil && !errors.Is(perr, commerce.ErrNoPayment) {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/refund.html", code, map[string]any{
+		"Order": order, "Refunds": refunds,
+		"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
+		// D15 5.3-1: 최근 15분 내 확인이 있으면 비밀번호 필드를 그리지 않는다.
+		// 매 클릭마다 물으면 관리자가 비밀번호를 브라우저에 저장하게 된다.
+		"NeedsReauth": c.NeedsReauth(),
+		"Error":       msg,
+	})
+}
+
+// RefundSave is A-507 POST.
+//
+// **돈이 나간다** — D15 5.3-1 의 재인증 대상이다. 미충족이면 403 과 함께 그
+// 화면의 폼을 다시 그린다 (리다이렉트하지 않는다, D19 C7).
+func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "order.refund")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
+	if errors.Is(err, commerce.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	if c.NeedsReauth() {
+		d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		return
+	}
+
+	// 금액을 받지 않는다 (FR-625). 품목과 수량만 받고 서버가 스냅샷에서 계산
+	// 한다 — 관리자 화면이라고 예외를 두면 그 경로만 위변조 가능해진다.
+	lines := readAdminRefundLines(r)
+	if len(lines) == 0 {
+		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity,
+			"환불할 품목과 수량을 고르세요.")
+		return
+	}
+	key, err := commerce.NewRequestKey()
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+
+	_, amount, err := d.Commerce.RequestRefund(r.Context(), order.OrderNo, lines,
+		"관리자", r.PostFormValue("reason"), key)
+	switch {
+	case errors.Is(err, commerce.ErrNoPayment):
+		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "환불할 결제가 없습니다.")
+		return
+	case errors.Is(err, commerce.ErrRefundQuantity), errors.Is(err, commerce.ErrQuantityRange):
+		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity,
+			"환불 수량이 남은 수량을 넘습니다.")
+		return
+	case errors.Is(err, commerce.ErrRefundExceeds):
+		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "환불 가능 금액을 넘었습니다.")
+		return
+	case errors.Is(err, commerce.ErrNotFound):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+
+	// 돈이 움직인 일은 반드시 로그에 남는다 (D15 7절).
+	d.log(r, c, "order.refund", "order", order.OrderNo,
+		"환불 "+itoa(amount)+"원 접수 ("+itoa(len(lines))+"개 품목)")
+	http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+}
+
+func readAdminRefundLines(r *http.Request) []commerce.RefundLine {
+	var out []commerce.RefundLine
+	for _, id := range r.PostForm["item_id"] {
+		qty, err := strconv.Atoi(r.PostFormValue("qty_" + id))
+		if err != nil || qty < 1 {
+			continue
+		}
+		out = append(out, commerce.RefundLine{OrderItemID: id, Quantity: qty})
+	}
+	return out
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }

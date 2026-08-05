@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/emirue/ondolith/internal/auth"
+	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/migrations"
 )
@@ -66,9 +67,10 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	d := &Deps{
-		Content: content.NewStore(pool),
-		Auth:    auth.NewStore(pool),
-		Caller:  func(*http.Request) Caller { return c },
+		Content:  content.NewStore(pool),
+		Auth:     auth.NewStore(pool),
+		Commerce: commerce.NewStore(pool),
+		Caller:   func(*http.Request) Caller { return c },
 		Render: func(w http.ResponseWriter, _ *http.Request, name string, code int, data any) {
 			w.WriteHeader(code)
 			_, _ = w.Write([]byte(name))
