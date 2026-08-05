@@ -166,7 +166,7 @@ func TestAllMigrationsApply(t *testing.T) {
 	// goose_db_version is goose's own bookkeeping.
 	want := []string{
 		"attachments", "board_fields", "boards", "comments",
-		"email_verification_tokens", "goose_db_version", "menus", "pages",
+		"email_verification_tokens", "goose_db_version", "menus", "operation_logs", "pages",
 		"password_reset_tokens", "permissions", "posts", "role_permissions",
 		"roles", "sessions", "settings", "social_accounts", "user_roles", "users",
 	}
