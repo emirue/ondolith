@@ -1,15 +1,21 @@
 package app
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
 )
 
@@ -413,5 +419,218 @@ func TestOpLogScreenNeedsLogViewAndShowsEntries(t *testing.T) {
 	login(t, srv.URL, "ed@example.com", c)
 	if code, _ := mustGet(t, c, srv.URL+"/admin/oplog"); code != http.StatusForbidden {
 		t.Errorf("log.view 없이 작업 로그가 HTTP %d 로 열렸다", code)
+	}
+}
+
+// zipBody builds a multipart body carrying a theme zip.
+func zipBody(t *testing.T, name string, entries map[string]string) (string, *bytes.Buffer) {
+	t.Helper()
+	var zbuf bytes.Buffer
+	zw := zip.NewWriter(&zbuf)
+	for n, body := range entries {
+		w, err := zw.Create(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("name", name); err != nil {
+		t.Fatal(err)
+	}
+	fw, err := mw.CreateFormFile("theme", name+".zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(zbuf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return mw.FormDataContentType(), &body
+}
+
+// A-203: 업로드가 실제로 테마를 설치하고, 그 즉시 활성화할 수 있다.
+// Zip Slip 은 거부되고 아무것도 남지 않는다.
+func TestThemeUploadInstallsAndRefusesZipSlip(t *testing.T) {
+	themeRoot := t.TempDir()
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.ThemeDir = themeRoot })
+	c, _ := adminSession(t, srv, pool)
+
+	post := func(name string, entries map[string]string) *http.Response {
+		t.Helper()
+		ct, body := zipBody(t, name, entries)
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/admin/themes/upload", body)
+		req.Header.Set("Content-Type", ct)
+		req.Header.Set("Origin", srv.URL)
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	// Zip Slip 은 거부된다.
+	resp := post("evil", map[string]string{
+		"base.html":       "<html></html>",
+		"../escaped.html": "탈출",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("Zip Slip 이 HTTP %d 로 통과했다", resp.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(themeRoot), "escaped.html")); err == nil {
+		t.Error("테마 루트 밖에 파일이 생겼다")
+	}
+	if entries, _ := os.ReadDir(themeRoot); len(entries) != 0 {
+		t.Errorf("실패했는데 %d개가 남았다", len(entries))
+	}
+
+	// base.html 이 없으면 거부.
+	resp = post("nobase", map[string]string{"page.html": `{{define "body"}}쪽{{end}}`})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("base.html 없는 테마가 HTTP %d 로 통과했다", resp.StatusCode)
+	}
+
+	// 정상 테마는 설치되고, 곧바로 활성화된다.
+	resp = post("mytheme", map[string]string{
+		"base.html": `<html><body>업로드한 테마{{block "body" .}}{{end}}</body></html>`,
+		"home.html": `{{define "body"}}홈{{end}}`,
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("정상 테마 업로드 HTTP %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(themeRoot, "mytheme", "base.html")); err != nil {
+		t.Fatalf("설치되지 않았다: %v", err)
+	}
+
+	act := httpPost(t, c, srv.URL+"/admin/themes", url.Values{"theme": {"mytheme"}})
+	act.Body.Close()
+	if act.StatusCode != http.StatusSeeOther && act.StatusCode != http.StatusOK {
+		t.Fatalf("활성화 HTTP %d", act.StatusCode)
+	}
+	if _, home := mustGet(t, client(), srv.URL+"/"); !strings.Contains(home, "업로드한 테마") {
+		t.Error("업로드한 테마가 다음 요청에 적용되지 않았다")
+	}
+
+	// D15 7절: 테마 변경은 작업 로그에 남는다.
+	logs, err := content.NewStore(pool).OpLog().Recent(context.Background(), 20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saw bool
+	for _, e := range logs {
+		if e.Action == "theme.upload" && e.TargetID == "mytheme" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("테마 업로드가 작업 로그에 없다")
+	}
+}
+
+// theme.upload 은 어떤 내장 역할에도 없다 = admin 만 갖는다 (D15 2.5).
+// operator 는 관리자 화면에 들어오지만 테마를 올리지 못한다.
+func TestThemeUploadNeedsItsOwnPermission(t *testing.T) {
+	themeRoot := t.TempDir()
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.ThemeDir = themeRoot })
+	uid := mkUser(t, pool, "op@example.com")
+	assignRole(t, pool, uid, "operator")
+
+	c := client()
+	login(t, srv.URL, "op@example.com", c)
+	if code, _ := mustGet(t, c, srv.URL+"/admin/themes/upload"); code != http.StatusForbidden {
+		t.Errorf("operator 가 업로드 화면을 HTTP %d 로 열었다", code)
+	}
+	ct, body := zipBody(t, "x", map[string]string{"base.html": "<html></html>"})
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/admin/themes/upload", body)
+	req.Header.Set("Content-Type", ct)
+	req.Header.Set("Origin", srv.URL)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("operator 가 테마를 HTTP %d 로 올렸다", resp.StatusCode)
+	}
+	if entries, _ := os.ReadDir(themeRoot); len(entries) != 0 {
+		t.Error("권한 없는 업로드가 파일을 남겼다")
+	}
+}
+
+// 요청 본문에 상한이 걸린다. 없으면 multipart 파서가 도착하는 만큼 버퍼링하고,
+// 그것은 zip 상한에 닿기도 전에 일어나는 서비스 거부다.
+func TestThemeUploadBodyIsCapped(t *testing.T) {
+	themeRoot := t.TempDir()
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.ThemeDir = themeRoot })
+	c, _ := adminSession(t, srv, pool)
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("name", "big")
+	fw, err := mw.CreateFormFile("theme", "big.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 상한을 넘는 본문. 내용은 zip 이 아니어도 된다 — 파서에 닿기 전에 잘린다.
+	// 핸들러 상한(24 MiB)을 넘긴다.
+	if _, err := fw.Write(bytes.Repeat([]byte("a"), 25<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/admin/themes/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Origin", srv.URL)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("상한 초과 본문이 HTTP %d", resp.StatusCode)
+	}
+	if entries, _ := os.ReadDir(themeRoot); len(entries) != 0 {
+		t.Error("거부됐는데 파일이 남았다")
+	}
+}
+
+// A-202 의 테마 이름은 디렉터리 이름이지 경로가 아니다. `../` 를 넣어도 로더가
+// 테마 루트 밖을 겨누지 못한다.
+func TestThemeNameCannotEscapeTheThemeRoot(t *testing.T) {
+	themeRoot := t.TempDir()
+	// 루트 밖에 진짜 테마를 하나 놓는다 — 탈출에 성공하면 이것이 그려진다.
+	outside := filepath.Join(filepath.Dir(themeRoot), "outside-theme")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(outside) })
+	if err := os.WriteFile(filepath.Join(outside, "base.html"),
+		[]byte(`<html>바깥 테마</html>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.ThemeDir = themeRoot })
+	_, post := adminSession(t, srv, pool)
+
+	resp := post("/admin/themes", url.Values{"theme": {"../outside-theme"}})
+	resp.Body.Close()
+
+	_, home := mustGet(t, client(), srv.URL+"/")
+	if strings.Contains(home, "바깥 테마") {
+		t.Error("테마 이름으로 루트 밖 디렉터리를 활성화했다")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -142,13 +143,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// A theme name is a directory under the theme root, never a path: the
 	// setting comes from A-202 and an operator typing `../..` must not aim the
 	// loader at the filesystem.
-	themeDir := func() string {
-		name := setting("theme.active")["theme.active"]
-		if name == "" {
-			return ""
-		}
-		return filepath.Join(cfg.Themes(), filepath.Base(name))
-	}
+	themeDir := func() string { return themePath(cfg, setting("theme.active")["theme.active"]) }
 
 	// The loader is swapped, not mutated: A-202 activates a theme on a running
 	// server and FR-303 says the next request uses it. A pointer swap means a
@@ -205,9 +200,17 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Version:     version,
 		Migrations:  func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
 		ValidateTheme: func(name string) (string, error) {
-			return theme.ValidateThemeDir(name, version)
+			// 이름을 테마 루트 아래 디렉터리로 푼다 — 로더가 쓰는 것과 같은
+			// 방식이어야, 검증에 통과한 것과 실제로 그려지는 것이 같아진다.
+			return theme.ValidateThemeDir(themePath(cfg, name), version)
 		},
-		OnThemeChange: func(name string) { loaderRef.Store(newLoader(name)) },
+		// themePath 를 여기서도 거친다. 이름과 경로를 섞으면 세 곳(로더 초기화·
+		// 검증·교체)이 서로 다른 것을 가리키고, 검증에 통과한 테마가 그려지지
+		// 않는다 — 그 셋이 어긋난 상태를 통합 테스트가 잡았다.
+		OnThemeChange: func(name string) { loaderRef.Store(newLoader(themePath(cfg, name))) },
+		InstallTheme: func(name string, rd io.ReaderAt, size int64) error {
+			return theme.Install(cfg.Themes(), name, rd, size)
+		},
 		SendReset: func(email, token string) {
 			mailer.SendAsync(email, "비밀번호 재설정", "아래 링크로 재설정하세요:\n/password/reset/"+token)
 		},
@@ -259,4 +262,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		pool.Close()
 	}
 	return h, cleanup, nil
+}
+
+// themePath resolves a theme NAME to its directory.
+//
+// A name is a directory under the theme root, never a path: the value comes
+// from A-202 and an operator typing `../..` must not aim the loader at the
+// filesystem. Empty means the built-in theme.
+func themePath(cfg *config.Config, name string) string {
+	if name == "" {
+		return ""
+	}
+	return filepath.Join(cfg.Themes(), filepath.Base(name))
 }

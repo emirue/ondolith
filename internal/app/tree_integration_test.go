@@ -436,7 +436,8 @@ func mustGet(t *testing.T, c *http.Client, url string) (int, string) {
 // is the failure this pins: it passes every unit test and means "restart to
 // change theme".
 func TestDiskThemeOverridesOnlyThatTemplateWithoutRestart(t *testing.T) {
-	srv, pool := liveSite(t)
+	themeRoot := t.TempDir()
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.ThemeDir = themeRoot })
 	c, post := adminSession(t, srv, pool)
 
 	// A page to look at, published, so the public URL renders the theme.
@@ -463,9 +464,14 @@ func TestDiskThemeOverridesOnlyThatTemplateWithoutRestart(t *testing.T) {
 		t.Fatal("아직 놓지도 않은 디스크 템플릿이 이미 쓰이고 있다")
 	}
 
-	// Place ONE template on disk. base.html is required for the directory to be
-	// a theme at all (D17); page.html is the override under test.
-	dir := t.TempDir()
+	// Place ONE template on disk, inside the theme root and under a NAME —
+	// that is what A-202 stores, and a path there would be an operator aiming
+	// the loader at the filesystem. base.html is required for the directory to
+	// be a theme at all (D17); page.html is the override under test.
+	dir := filepath.Join(themeRoot, "disk")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "base.html"),
 		[]byte(`<html><body>{{block "content" .}}{{end}}</body></html>`), 0o600); err != nil {
 		t.Fatal(err)
@@ -476,7 +482,7 @@ func TestDiskThemeOverridesOnlyThatTemplateWithoutRestart(t *testing.T) {
 	}
 
 	// Activate it through A-202, with no restart in between.
-	resp := post("/admin/themes", url.Values{"theme": {dir}})
+	resp := post("/admin/themes", url.Values{"theme": {"disk"}})
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther && resp.StatusCode != http.StatusOK {

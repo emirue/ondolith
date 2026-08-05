@@ -1,0 +1,22 @@
+{{define "content"}}
+<div class="adm-card">
+  <form method="post" action="/admin/themes/upload" enctype="multipart/form-data">
+    <label class="adm-field">
+      <span>테마 이름 (영문 소문자·숫자·하이픈)</span>
+      <input type="text" name="name" pattern="[a-z0-9-]+" maxlength="64" required>
+    </label>
+    <label class="adm-field">
+      <span>zip 파일</span>
+      <input type="file" name="theme" accept=".zip,application/zip" required>
+    </label>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">업로드</button>
+    </div>
+  </form>
+  <p class="adm-hint">
+    base.html 이 없으면 거부합니다. 압축 해제는 20 MiB · 2,000개 · 10단계 상한이
+    걸리고, 경로가 테마 밖을 가리키거나 심볼릭 링크가 있으면 전체가 취소됩니다.
+    실패하면 아무것도 남지 않습니다.
+  </p>
+</div>
+{{end}}

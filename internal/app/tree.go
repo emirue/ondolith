@@ -113,6 +113,13 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "A-202", Method: "POST", Pattern: "/admin/themes", Class: SC5,
 		Permission: "theme.activate", Handler: ad.ThemeActivate})
 
+	// A-203 은 SC-7 이고 제품에서 가장 위험한 화면이다 — 업로드가 곧 임의 파일
+	// 쓰기이고 쓰인 파일이 템플릿으로 실행된다 (D60).
+	r.Add(Route{Screen: "A-203", Method: "GET", Pattern: "/admin/themes/upload", Class: SC7,
+		Permission: "theme.upload", Handler: ad.ThemeUploadForm})
+	r.Add(Route{Screen: "A-203", Method: "POST", Pattern: "/admin/themes/upload", Class: SC7,
+		Permission: "theme.upload", Handler: ad.ThemeUpload})
+
 	r.Add(Route{Screen: "A-204", Method: "GET", Pattern: "/admin/menus", Class: SC4,
 		Permission: "menu.manage", Handler: ad.MenuList})
 	r.Add(Route{Screen: "A-204", Method: "POST", Pattern: "/admin/menus", Class: SC5,

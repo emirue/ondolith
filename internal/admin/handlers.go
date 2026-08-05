@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -57,6 +58,9 @@ type Deps struct {
 	// recording is worse than one that is missing — the gap reads as "nothing
 	// happened".
 	Logger *slog.Logger
+	// InstallTheme unpacks an uploaded theme zip (A-203). Injected so admin does
+	// not import theme, and so the upload root stays configuration (NFR-304).
+	InstallTheme func(name string, r io.ReaderAt, size int64) error
 	// SendReset delivers a forced-reset link (A-402). Injected and fire-and-
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.

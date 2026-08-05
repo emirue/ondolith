@@ -1,8 +1,12 @@
 package admin
 
 import (
+	"bytes"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"strings"
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/content"
@@ -327,4 +331,98 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)
+}
+
+// ---- A-203 테마 업로드 ---------------------------------------------------------
+
+// ThemeUploadForm is A-203's GET.
+func (d *Deps) ThemeUploadForm(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "theme.upload"); !ok {
+		return
+	}
+	d.Render(w, r, "admin/theme-upload.html", http.StatusOK, nil)
+}
+
+// ThemeUpload is A-203's POST.
+//
+// This is the highest-risk screen in the product: an upload here is arbitrary
+// file write and a written file is executed as a template (D60). Two gates sit
+// in front of the unpacker — re-authentication (D15 5.3-1) and a request body
+// cap — and the unpacker itself applies the five defences.
+func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "theme.upload")
+	if !ok {
+		return
+	}
+	// D15 5.3-1: uploading executable-ish content is the last step of a takeover.
+	if c.NeedsReauth() {
+		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
+		return
+	}
+	if d.InstallTheme == nil {
+		http.Error(w, "테마를 설치할 수 없습니다.", http.StatusInternalServerError)
+		return
+	}
+
+	// The body is capped before anything reads it. Without this the multipart
+	// parser buffers whatever arrives, which is a denial of service that never
+	// reaches the zip limits at all.
+	r.Body = http.MaxBytesReader(w, r.Body, maxThemeUploadBytes)
+	if err := r.ParseMultipartForm(maxThemeMemoryBytes); err != nil {
+		d.Render(w, r, "admin/theme-upload.html", http.StatusRequestEntityTooLarge,
+			map[string]any{"Error": "파일이 너무 크거나 형식이 올바르지 않습니다."})
+		return
+	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
+
+	file, header, err := r.FormFile("theme")
+	if err != nil {
+		d.Render(w, r, "admin/theme-upload.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": "파일을 고르세요."})
+		return
+	}
+	defer file.Close()
+
+	// zip.NewReader needs an io.ReaderAt with a known size. Multipart gives one
+	// only when the part was spooled to disk; buffer otherwise.
+	ra, size, err := readerAt(file, header.Size)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if err := d.InstallTheme(name, ra, size); err != nil {
+		d.Render(w, r, "admin/theme-upload.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": "설치하지 못했습니다: " + err.Error()})
+		return
+	}
+	// D15 7절: 테마 변경은 사이트 전체에 영향을 준다.
+	d.log(r, c, "theme.upload", "theme", name, "테마 '"+name+"' 업로드")
+	http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)
+}
+
+const (
+	// maxThemeUploadBytes bounds the whole request. It is larger than D60's
+	// 20 MiB archive limit because multipart adds framing — the archive limit
+	// is what actually decides, this only stops the socket.
+	maxThemeUploadBytes = 24 << 20
+	// maxThemeMemoryBytes is what ParseMultipartForm keeps in RAM; the rest
+	// spools to a temp file. NFR-101's tier has 512MB.
+	maxThemeMemoryBytes = 1 << 20
+)
+
+// readerAt adapts the uploaded part. A multipart file that spooled to disk is
+// already an io.ReaderAt; one held in memory is not, so it is copied into a
+// buffer bounded by the same cap the body already enforced.
+func readerAt(f multipart.File, size int64) (io.ReaderAt, int64, error) {
+	if ra, ok := f.(io.ReaderAt); ok && size > 0 {
+		return ra, size, nil
+	}
+	var buf bytes.Buffer
+	n, err := io.Copy(&buf, io.LimitReader(f, maxThemeUploadBytes))
+	if err != nil {
+		return nil, 0, err
+	}
+	return bytes.NewReader(buf.Bytes()), n, nil
 }

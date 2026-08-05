@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -729,5 +730,27 @@ func TestUserDetailNeedsUpdateAndCarriesNoCredentials(t *testing.T) {
 	}
 	if strings.Contains(handed, "$2a$12$distinctivehash") {
 		t.Errorf("상세가 템플릿에 비밀번호 해시를 넘겼다: %s", handed)
+	}
+}
+
+// D15 5.3-1: 테마 업로드는 계정 탈취의 마지막 단계다 — 실행되는 파일을
+// 올리는 일이므로 비밀번호를 다시 확인한다. 세션이 열려 있는 것과 운영자가
+// 그 자리에 있는 것은 다르다.
+func TestThemeUploadRequiresReauth(t *testing.T) {
+	d, _ := fixture(t, fakeCaller{
+		perms: map[string]bool{"theme.upload": true}, id: "me", reauth: true,
+	})
+	var called bool
+	d.InstallTheme = func(string, io.ReaderAt, int64) error {
+		called = true
+		return nil
+	}
+
+	rec := post(d.ThemeUpload, "/admin/themes/upload", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("재인증 없이 업로드가 HTTP %d 로 진행됐다", rec.Code)
+	}
+	if called {
+		t.Error("재인증 전에 설치가 호출됐다")
 	}
 }
