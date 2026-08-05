@@ -27,6 +27,9 @@
         <option value="별도청구">별도청구</option>
       </select>
     </label>
+    {{/* 상한은 서버가 정한다 (환불 몫 미만). 여기 max 를 두지 않는 이유는
+         화면이 그 몫을 모르기 때문이고, 안다 해도 브라우저는 건너뛸 수 있다 —
+         거부하는 것은 ConfirmPickup 이다. */}}
     <label>배송비 <input name="fee_amount" type="number" min="0" value="0"></label>
     <button type="submit">수거 확인</button>
   </form>

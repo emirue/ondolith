@@ -458,6 +458,15 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrRefundExceeds), errors.Is(err, commerce.ErrRefundQuantity):
 		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
 			"환불 가능 금액 또는 수량을 넘었습니다.")
+	case errors.Is(err, commerce.ErrShippingFeeTooLarge):
+		// 500 이 아니다. 운영자가 고칠 수 있는 값이고, 무엇을 고쳐야 하는지
+		// 말해 줘야 한다 — 수거 확인 단계에서 이것을 거부하는 것이 그 반품
+		// 건이 멈추지 않게 하는 유일한 지점이다.
+		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
+			"반품 배송비가 환불 금액 이상입니다. 배송비를 낮추거나 별도청구로 처리하세요.")
+	case errors.Is(err, commerce.ErrPriceNegative):
+		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
+			"금액이 올바르지 않습니다.")
 	default:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 	}

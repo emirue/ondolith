@@ -479,6 +479,15 @@ func TestAdminReturnActionsAreLogged(t *testing.T) {
 	d.OpLog = content.NewStore(pool).OpLog()
 	order, returnNo := deliveredAdminOrder(t, d, pool)
 
+	// 거부도 로그에 남아야 한다 — 교환 재고 해제가 걸린 경로다.
+	_, rejectNo := deliveredAdminOrderFor(t, d, pool, order2Slug)
+	if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {rejectNo}, "action": {"reject"},
+			"reason": {"확인 불가"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("거부 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
 	for _, form := range []url.Values{
 		{"return_no": {returnNo}, "action": {"pickup"}, "fault": {"판매자"},
 			"fee_policy": {"차감"}, "fee_amount": {"0"}},
@@ -504,7 +513,7 @@ func TestAdminReturnActionsAreLogged(t *testing.T) {
 		}
 		actions = append(actions, a)
 	}
-	want := map[string]bool{"return.pickup": false, "return.settle": false}
+	want := map[string]bool{"return.pickup": false, "return.settle": false, "return.reject": false}
 	for _, a := range actions {
 		if _, ok := want[a]; ok {
 			want[a] = true
@@ -529,5 +538,182 @@ func TestAdminReturnNeedsThePermission(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("order.return 없이 HTTP %d, want 403", rec.Code)
 		}
+	}
+}
+
+// order2Slug is a second product slug, so one test can hold two orders.
+const order2Slug = "cap"
+
+// deliveredAdminOrderFor is deliveredAdminOrder with a chosen product slug.
+func deliveredAdminOrderFor(t *testing.T, d *Deps, pool *pgxpool.Pool, slug string) (*commerce.OrderDetail, string) {
+	t.Helper()
+	ctx := context.Background()
+	var productID, variantID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ($1,$1,12000,true) RETURNING id`, slug).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		 VALUES ($1,'{"크기":"L"}',1000,10) RETURNING id`, productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+	owner := commerce.CartOwner{GuestKey: "guest-" + slug + "-0123456"}
+	if err := d.Commerce.AddToCart(ctx, owner, variantID, 2); err != nil {
+		t.Fatal(err)
+	}
+	form := commerce.OrderForm{
+		ReceiverName: "받는이", ReceiverPhone: "010-0000-0000",
+		Postcode: "12345", Address1: "서울",
+		OrdererEmail: "b@example.com", OrdererPhone: "010-2222-2222",
+	}
+	order, err := d.Commerce.CreateOrder(ctx, owner, "", form, commerce.Shipping{}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Commerce.ConfirmPayment(ctx, adminFakeGateway{}, "toss",
+		order.OrderNo, "pk-"+slug, order.Total, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []commerce.Status{
+		commerce.StatusPreparing, commerce.StatusShipping, commerce.StatusDelivered,
+	} {
+		if err := d.Commerce.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	detail, err := d.Commerce.OrderByNoUnscoped(ctx, order.OrderNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ret, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
+		Kind:  commerce.KindReturn,
+		Lines: []commerce.RefundLine{{OrderItemID: detail.Items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return detail, ret.ReturnNo
+}
+
+// **거부가 HTTP 배선까지 동작한다** — 교환 재고 해제가 걸린 경로다.
+//
+// 스토어의 RejectReturn 은 따로 검증돼 있지만, 폼 파싱·액션 분기·상태 복귀가
+// 배선에서 어긋나면 그 검증은 아무것도 지키지 못한다.
+func TestAdminRejectReleasesExchangeStockThroughTheHandler(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	order, _ := paidAdminOrder(t, d, pool)
+	for _, to := range []commerce.Status{
+		commerce.StatusPreparing, commerce.StatusShipping, commerce.StatusDelivered,
+	} {
+		if err := d.Commerce.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 같은 상품의 두 번째 조합으로 교환을 건다.
+	var productID string
+	if err := pool.QueryRow(ctx,
+		`SELECT product_id FROM order_items WHERE id = $1`, order.Items[0].ID).
+		Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"M"}',1000,5) RETURNING id`, productID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
+		Kind: commerce.KindExchange, NewVariantID: newVariant,
+		Lines: []commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 2}},
+	}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertVariantStock(t, pool, newVariant, 3) // 예약됨
+
+	rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {ret.ReturnNo}, "action": {"reject"},
+			"reason": {"재고 확인 불가"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("거부 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	// 예약이 풀렸다. 풀지 않으면 재고가 조용히 잠긴다.
+	assertVariantStock(t, pool, newVariant, 5)
+	// 주문이 배송완료로 돌아왔다.
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusDelivered)
+	// 거부 사유가 기록됐다.
+	var reason, status string
+	if err := pool.QueryRow(ctx,
+		`SELECT status, reject_reason FROM returns WHERE return_no = $1`, ret.ReturnNo).
+		Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "거부" || reason != "재고 확인 불가" {
+		t.Errorf("반품 건 = %q / %q", status, reason)
+	}
+	// 처리 중 표시가 내려가 같은 품목에 다시 걸 수 있다.
+	if _, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
+		Kind:  commerce.KindReturn,
+		Lines: []commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now()); err != nil {
+		t.Errorf("거부 뒤 재접수가 막혔다: %v", err)
+	}
+}
+
+// 관리자 화면이 과도한 배송비를 **422 로** 돌려준다.
+//
+// 500 이면 운영자는 무엇을 고쳐야 하는지 모르고, 그 반품 건은 화면상 원인
+// 불명으로 멈춘 것처럼 보인다.
+func TestAdminOversizedShippingFeeIs422(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+
+	rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"pickup"},
+			"fault": {"구매자"}, "fee_policy": {"차감"}, "fee_amount": {"99999999"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("과도한 배송비 = HTTP %d, want 422 (%q)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "admin/returns.html") {
+		t.Errorf("폼을 다시 그리지 않았다: %q", rec.Body.String())
+	}
+
+	// **상태가 그대로라 아직 되돌릴 수 있다.** 이것이 이 검사의 목적이다.
+	var status string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status FROM returns WHERE return_no = $1`, returnNo).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "반품접수" {
+		t.Fatalf("거부된 수거 확인이 상태를 %q 로 옮겼다", status)
+	}
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"reject"}, "reason": {"재산정"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("막다른 길이다 — 거부도 안 된다: HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+}
+
+func assertVariantStock(t *testing.T, pool *pgxpool.Pool, variantID string, want int) {
+	t.Helper()
+	var got int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("재고 %d, want %d", got, want)
 	}
 }

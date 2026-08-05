@@ -424,3 +424,98 @@ func TestReturnRefundUsesTheDiscountSnapshot(t *testing.T) {
 		t.Errorf("선점 누적 %d, want %d", refunded, net)
 	}
 }
+
+// **배송비가 환불 몫 이상이면 수거 확인 자체가 거부된다.**
+//
+// 여기가 막을 수 있는 마지막 지점이다: 수거가 커밋되면 `반품수거 → 환불` 말고
+// 나가는 길이 없어서 (D14 5절) 정산이 실패하는 순간 그 반품 건은 애플리케이션
+// 안에서 영영 멈춘다 — 거부도 되돌리기도 안 되고 DB 를 직접 고쳐야 한다.
+func TestOversizedShippingFeeIsRefusedAtPickup(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, goods := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := goods / 2 // 한 개 몫
+
+	// 몫보다 큰 배송비 — 거부된다.
+	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "차감", share+1, "A-511"); !errors.Is(err, ErrShippingFeeTooLarge) {
+		t.Fatalf("몫 초과 배송비 = %v, want ErrShippingFeeTooLarge", err)
+	}
+	// 몫과 같아도 거부된다 — 0원 환불 행은 만들 수 없다.
+	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "차감", share, "A-511"); !errors.Is(err, ErrShippingFeeTooLarge) {
+		t.Fatalf("몫과 같은 배송비 = %v, want ErrShippingFeeTooLarge", err)
+	}
+
+	// 상태가 그대로라 **아직 되돌릴 수 있다.** 이것이 이 검사의 목적이다.
+	got, err := s.ReturnByNo(ctx, ret.ReturnNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusReturnOpen {
+		t.Fatalf("거부된 수거 확인이 상태를 %s 로 옮겼다", got.Status)
+	}
+	if err := s.RejectReturn(ctx, ret.ReturnNo, "배송비 재산정", "A-511"); err != nil {
+		t.Errorf("막다른 길이다 — 거부도 안 된다: %v", err)
+	}
+
+	// 몫보다 1원 작으면 통과하고 정산까지 간다 — 경계가 상수로 굳어 있지
+	// 않다는 것.
+	ret2, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmPickup(ctx, ret2.ReturnNo, "구매자", "차감", share-1, "A-511"); err != nil {
+		t.Fatalf("몫보다 작은 배송비가 막혔다: %v", err)
+	}
+	amount, err := s.SettleReturn(ctx, ret2.ReturnNo, "A-511", "k1")
+	if err != nil {
+		t.Fatalf("정산이 막혔다: %v", err)
+	}
+	if amount != 1 {
+		t.Errorf("환불액 %d, want 1 (몫 %d − 배송비 %d)", amount, share, share-1)
+	}
+}
+
+// 교환은 배송비 상한의 대상이 아니다. 차액은 P-514 가 정산하고, 이 배송비는
+// 환불에서 빼는 값이라 뺄 환불 자체가 없다.
+func TestExchangePickupIsNotBlockedByTheFeeCheck(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+
+	var productID string
+	if err := pool.QueryRow(ctx,
+		`SELECT product_id FROM order_items WHERE id = $1`, items[0].ID).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"M"}',1000,5) RETURNING id`, productID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind: KindExchange, NewVariantID: newVariant,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 큰 배송비라도 교환 수거는 통과한다.
+	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "별도청구", 999999, "A-511"); err != nil {
+		t.Errorf("교환 수거 확인이 배송비 검사에 막혔다: %v", err)
+	}
+}

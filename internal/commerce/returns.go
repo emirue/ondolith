@@ -21,6 +21,11 @@ var (
 	ErrPickupRequired = errors.New("commerce: 수거 확인 전에는 환불할 수 없습니다")
 	// ErrReturnKind 는 반품에 교환 전용 인자를, 교환에 반품 인자를 준 경우다.
 	ErrReturnKind = errors.New("commerce: 반품·교환 종류에 맞지 않는 요청입니다")
+	// ErrShippingFeeTooLarge 는 반품 배송비가 환불 몫 이상이라는 뜻이다.
+	//
+	// **수거 확인 전에 막아야 하는 값이다.** 수거가 커밋된 뒤에는 정산 말고
+	// 나가는 길이 없어서 (D14 5절) 그 반품 건이 애플리케이션 안에서 멈춘다.
+	ErrShippingFeeTooLarge = errors.New("commerce: 반품 배송비가 환불 금액 이상입니다")
 )
 
 // ReturnKind is 반품 or 교환.
@@ -255,6 +260,50 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	return ret, nil
 }
 
+// returnLine is one open line of a return, with the quantity being settled.
+type returnLine struct {
+	itemID string
+	qty    int
+}
+
+// returnGross is what a return's open items are worth, from snapshots.
+//
+// **수거 확인과 정산이 같은 함수를 쓴다.** 두 곳에서 따로 계산하면 수거 때
+// 통과한 배송비가 정산 때 초과가 되는 일이 생기고, 그때는 되돌릴 방법이 없다 —
+// `반품수거` 에서 나가는 화살표는 `환불` 하나뿐이라(D14 5절) 그 주문은
+// 애플리케이션 안에서 영영 멈춘다.
+func returnGross(ctx context.Context, tx pgx.Tx, returnID string) (int, []returnLine, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT ri.order_item_id, ri.quantity,
+		       oi.line_amount, oi.discount_amount, oi.quantity, oi.settled_quantity
+		FROM return_items ri
+		JOIN order_items oi ON oi.id = ri.order_item_id
+		WHERE ri.return_id = $1 AND ri.is_open
+		ORDER BY ri.order_item_id
+		FOR UPDATE OF oi`, returnID)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+
+	gross := 0
+	var lines []returnLine
+	for rows.Next() {
+		var itemID string
+		var retQty, lineAmount, discount, quantity, settled int
+		if err := rows.Scan(&itemID, &retQty, &lineAmount, &discount, &quantity, &settled); err != nil {
+			return 0, nil, err
+		}
+		part, err := RefundableAmount(lineAmount, discount, quantity, settled, retQty)
+		if err != nil {
+			return 0, nil, err
+		}
+		gross += part
+		lines = append(lines, returnLine{itemID, retQty})
+	}
+	return gross, lines, rows.Err()
+}
+
 // ConfirmPickup is A-511's 수거 확인.
 //
 // **여기서 배송비 스냅샷이 찍힌다** (D30 returns_snapshot_after_pickup). A-512
@@ -298,6 +347,24 @@ func (s *Store) ConfirmPickup(ctx context.Context, returnNo, fault, feePolicy st
 	}
 	if err := CanTransition(Status(status), target, actor); err != nil {
 		return err
+	}
+
+	// **배송비는 환불 몫보다 작아야 한다.** 여기가 막을 수 있는 마지막 지점
+	// 이다: 수거 확인이 커밋되면 `반품수거 → 환불` 말고 나가는 길이 없어서
+	// (D14 5절) 정산이 실패하는 순간 그 반품 건은 애플리케이션 안에서 영영
+	// 멈춘다 — 거부도 되돌리기도 안 된다.
+	//
+	// 교환은 대상이 아니다. 차액은 P-514 가 정산하고, 이 배송비는 환불에서
+	// 빼는 값이라 뺄 환불 자체가 없다.
+	if ReturnKind(kind) == KindReturn {
+		gross, _, err := returnGross(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if feeAmount >= gross {
+			return fmt.Errorf("%w: 배송비 %d, 환불 몫 %d",
+				ErrShippingFeeTooLarge, feeAmount, gross)
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -370,51 +437,26 @@ func (s *Store) SettleReturn(ctx context.Context, returnNo string, actor Actor,
 		return 0, err
 	}
 
-	// 품목별 몫을 스냅샷에서 계산한다.
-	rows, err := tx.Query(ctx, `
-		SELECT ri.order_item_id, ri.quantity,
-		       oi.line_amount, oi.discount_amount, oi.quantity, oi.settled_quantity
-		FROM return_items ri
-		JOIN order_items oi ON oi.id = ri.order_item_id
-		WHERE ri.return_id = $1 AND ri.is_open
-		ORDER BY ri.order_item_id
-		FOR UPDATE OF oi`, id)
+	// 품목별 몫을 스냅샷에서 계산한다 — 수거 확인이 배송비를 검증할 때 쓴
+	// 것과 **같은 함수**다.
+	gross, toSettle, err := returnGross(ctx, tx, id)
 	if err != nil {
-		return 0, err
-	}
-	type settle struct {
-		itemID string
-		qty    int
-	}
-	var toSettle []settle
-	for rows.Next() {
-		var itemID string
-		var retQty, lineAmount, discount, quantity, settled int
-		if err := rows.Scan(&itemID, &retQty, &lineAmount, &discount, &quantity, &settled); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		part, perr := RefundableAmount(lineAmount, discount, quantity, settled, retQty)
-		if perr != nil {
-			rows.Close()
-			return 0, perr
-		}
-		amount += part
-		toSettle = append(toSettle, settle{itemID, retQty})
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	if len(toSettle) == 0 {
 		return 0, fmt.Errorf("%w: 정산할 품목이 없습니다", ErrNotFound)
 	}
+	amount = gross
 
 	// 반품 배송비를 뺀다 (A-512 스냅샷). 정책이 `별도청구` 면 환불에서 빼지
 	// 않고 따로 청구하므로 0 을 뺀 것과 같다 — 그 청구 경로는 아직 없다.
 	amount -= feeAmount
 	if amount <= 0 {
-		return 0, fmt.Errorf("%w: 배송비를 빼면 환불할 금액이 없습니다", ErrPriceNegative)
+		// 수거 확인이 이미 막았어야 하는 경우다. 여기 오면 스냅샷이 그 사이
+		// 바뀐 것이고(예: 같은 품목이 부분 환불로 소진됨), 그때도 500 이
+		// 아니라 설명이 있는 오류를 낸다.
+		return 0, fmt.Errorf("%w: 배송비 %d 가 환불 몫 %d 이상입니다",
+			ErrShippingFeeTooLarge, feeAmount, gross)
 	}
 
 	for _, st := range toSettle {
