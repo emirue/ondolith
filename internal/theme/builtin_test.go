@@ -155,6 +155,14 @@ func payloadFor(name string) any {
 			"Fields":     []fieldLike{{Key: "color", Label: "색상"}},
 			"CanComment": true, "CanEdit": true, "CanModerate": true,
 		}
+	case "search.html":
+		return map[string]any{
+			"Query":  struct{ Search string }{Search: "검색어"},
+			"Total":  int64(1),
+			"Boards": map[string]boardLike{"b1": {ID: "b1", Slug: "free", Name: "자유게시판"}},
+			"Results": []postLike{{ID: "p1", BoardID: "b1", Title: "찾은 글", Body: "본문",
+				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
+		}
 	case "board/comment-edit.html":
 		return map[string]any{
 			"Board":   boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
@@ -247,12 +255,12 @@ type boardLike struct {
 }
 
 type postLike struct {
-	ID, Title, Body, AuthorName string
-	CustomFields                map[string]any
-	IsPinned, IsSecret          bool
-	ViewCount, CommentCount     int64
-	HasAttachment               bool
-	CreatedAt                   time.Time
+	ID, BoardID, Title, Body, AuthorName string
+	CustomFields                         map[string]any
+	IsPinned, IsSecret                   bool
+	ViewCount, CommentCount              int64
+	HasAttachment                        bool
+	CreatedAt                            time.Time
 }
 
 type commentLike struct {

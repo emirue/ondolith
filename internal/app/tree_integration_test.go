@@ -27,6 +27,11 @@ import (
 // the wiring in New() is wrong, which is exactly the gap this file exists for.
 func liveSite(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	t.Helper()
+	return liveSiteWith(t)
+}
+
+func liveSiteWith(t *testing.T, tweak ...func(*config.Config)) (*httptest.Server, *pgxpool.Pool) {
+	t.Helper()
 	dsn := os.Getenv(dsnEnv)
 	if dsn == "" {
 		t.Skipf("%s 미설정 — 통합 테스트를 건너뜁니다 (make test-integration)", dsnEnv)
@@ -45,6 +50,9 @@ func liveSite(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	}
 
 	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트"}
+	for _, f := range tweak {
+		f(cfg)
+	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h, cleanup, err := New(ctx, cfg, "1.0.0", log)
 	if err != nil {
@@ -55,6 +63,22 @@ func liveSite(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return srv, pool
+}
+
+// liveSiteWithUploads is liveSite plus a temporary upload directory, for the
+// screens that move files. The directory is configuration (NFR-304), so the
+// test sets it the way an operator would rather than reaching past it.
+func liveSiteWithUploads(t *testing.T) (*httptest.Server, *pgxpool.Pool, string) {
+	t.Helper()
+	root := t.TempDir()
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.UploadDir = root })
+	return srv, pool, root
+}
+
+// removeUnder deletes one stored file, for the "row without a file" case
+// A-309 allows.
+func removeUnder(root, rel string) error {
+	return os.Remove(filepath.Join(root, filepath.FromSlash(rel)))
 }
 
 // client keeps cookies so a login survives to the next request, and stops at

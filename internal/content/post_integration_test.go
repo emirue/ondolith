@@ -376,3 +376,38 @@ func TestUpdateCommentRefusesATombstone(t *testing.T) {
 		t.Errorf("본문이 되살아났다: %q", got.Body)
 	}
 }
+
+// 빈 검색어와 빈 게시판 목록은 아무것도 돌려주지 않는다.
+//
+// 저장소의 이른 반환을 지워도 이 테스트는 통과한다 — 빈 tsquery 와 `ANY('{}')`
+// 가 어차피 0행이기 때문이다. 그래서 그 두 줄은 검사가 아니라 왕복 절약이라고
+// 코드에 적어 뒀고, 이 테스트가 지키는 것은 **SQL 이 그렇게 동작한다**는
+// 사실이다. PostgreSQL 이 빈 tsquery 를 다르게 다루기 시작하면 여기서 터진다.
+func TestSearchWithNoTermReturnsNothing(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	boardID := seedBoard(t, s)
+	mkPost(t, s, boardID, "어떤 글")
+
+	q := ParseListQuery(url.Values{}, 20)
+	got, err := s.SearchPosts(ctx, []string{boardID}, nil, q, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("빈 검색어가 %d행을 돌려줬다", len(got))
+	}
+	n, err := s.CountSearchPosts(ctx, []string{boardID}, nil, q, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("빈 검색어 합계 = %d", n)
+	}
+
+	// 읽을 수 있는 게시판이 없어도 마찬가지다.
+	q2 := ParseListQuery(url.Values{"q": {"어떤"}}, 20)
+	if got, err := s.SearchPosts(ctx, nil, nil, q2, ""); err != nil || len(got) != 0 {
+		t.Errorf("읽을 게시판이 없는데 %d행 (err=%v)", len(got), err)
+	}
+}

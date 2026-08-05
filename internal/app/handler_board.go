@@ -14,8 +14,9 @@ import (
 
 type boardDeps struct {
 	*publicDeps
-	sm  *scs.SessionManager
-	log *slog.Logger
+	sm          *scs.SessionManager
+	attachments *content.Attachments
+	log         *slog.Logger
 }
 
 // countView bumps the counter once per session per post.

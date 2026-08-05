@@ -77,6 +77,14 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-210", Method: "POST", Pattern: "/comments/{id}/delete", Class: SC3,
 		Handler: bd.commentDelete})
 
+	// P-211 은 SC-7 이다. 경로에 게시판이 없으므로 핸들러가 첨부 → 글 → 게시판
+	// 순으로 거슬러 올라가 post.read 를 **다시** 검사한다 (D15 8절 1번).
+	r.Add(Route{Screen: "P-211", Method: "GET", Pattern: "/attachments/{id}", Class: SC7,
+		Handler: bd.attachmentDownload})
+
+	r.Add(Route{Screen: "P-212", Method: "GET", Pattern: "/search", Class: SC1,
+		Handler: bd.search})
+
 	// ---- 관리자 -------------------------------------------------------------
 	// admin.access is the tree gate's key; every screen below also names the
 	// permission its own handler checks. The two are not redundant: the gate

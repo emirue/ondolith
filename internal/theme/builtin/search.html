@@ -1,0 +1,28 @@
+{{define "body"}}
+{{with .Data}}
+<section class="page">
+  <h1>검색</h1>
+  <form class="board-filter" method="get" action="/search">
+    <input type="search" name="q" value="{{.Query.Search}}" placeholder="제목 · 내용 검색" autofocus>
+    <button class="btn btn--primary">검색</button>
+  </form>
+
+  {{if .Query.Search}}
+    <p class="meta">{{number .Total}}건</p>
+    <ul class="search-results">
+      {{$boards := .Boards}}
+      {{range .Results}}
+        {{$b := index $boards .BoardID}}
+        <li>
+          <a href="/board/{{$b.Slug}}/{{.ID}}">{{.Title}}</a>
+          <span class="meta">{{$b.Name}} · {{date .CreatedAt "2006-01-02"}}</span>
+          <p class="excerpt">{{truncate .Body 120}}</p>
+        </li>
+      {{else}}
+        <li class="empty">결과가 없습니다.</li>
+      {{end}}
+    </ul>
+  {{end}}
+</section>
+{{end}}
+{{end}}

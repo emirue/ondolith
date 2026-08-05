@@ -422,3 +422,75 @@ func (s *Store) BoardByPost(ctx context.Context, postID string) (*Board, error) 
 	}
 	return &b, err
 }
+
+// SearchPosts is P-212. The readable board ids come from the caller; a board
+// that is not in that list contributes nothing, because it is not in the WHERE
+// clause (FR-510).
+//
+// Two lists rather than one flag: `post.read` and `post.read_secret` are
+// granted per board, so "may I see secret posts here" has a different answer on
+// each board a caller can read.
+func (s *Store) SearchPosts(ctx context.Context, readable, secretIn []string,
+	q ListQuery, viewerID string,
+) ([]Post, error) {
+	// 검사가 아니라 왕복 절약이다. 빈 목록은 `ANY('{}')` 로, 빈 검색어는
+	// 빈 tsquery 로 어차피 0행이 된다 — 이 두 줄을 지워도 결과는 같고,
+	// 그래서 여기에 규칙이 있는 척하지 않는다.
+	if len(readable) == 0 || q.Search == "" {
+		return nil, nil
+	}
+	sql := `
+		SELECT p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
+		       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+		       p.view_count, p.created_at, p.updated_at,
+		       (SELECT count(*) FROM comments c WHERE c.post_id = p.id),
+		       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)
+		FROM posts p
+		LEFT JOIN users u ON u.id = p.author_id
+		WHERE p.board_id = ANY($1)
+		  AND p.status = 'published'
+		  AND (NOT p.is_secret OR p.board_id = ANY($2) OR p.author_id = $3)
+		  AND p.search_vector @@ to_tsquery('simple', $4)
+		ORDER BY ` + q.OrderBy() + `
+		LIMIT $5 OFFSET $6`
+	rows, err := s.pool.Query(ctx, sql, readable, secretIn,
+		nullIfEmpty(viewerID), toPrefixQuery(q.Search), q.PerPage, q.Offset())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Post
+	for rows.Next() {
+		var p Post
+		var raw []byte
+		if err := rows.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
+			&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
+			&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
+			&p.CommentCount, &p.HasAttachment); err != nil {
+			return nil, err
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []string,
+	q ListQuery, viewerID string,
+) (int64, error) {
+	if len(readable) == 0 || q.Search == "" {
+		return 0, nil // 위와 같은 이유 — 절약이지 검사가 아니다
+	}
+	var n int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM posts p
+		WHERE p.board_id = ANY($1) AND p.status = 'published'
+		  AND (NOT p.is_secret OR p.board_id = ANY($2) OR p.author_id = $3)
+		  AND p.search_vector @@ to_tsquery('simple', $4)`,
+		readable, secretIn, nullIfEmpty(viewerID), toPrefixQuery(q.Search)).Scan(&n)
+	return n, err
+}

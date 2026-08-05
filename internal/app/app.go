@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -138,7 +139,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		return s
 	}
 	dev := setting("site.dev_mode")["site.dev_mode"] != ""
-	themeDir := func() string { return setting("theme.active")["theme.active"] }
+	// A theme name is a directory under the theme root, never a path: the
+	// setting comes from A-202 and an operator typing `../..` must not aim the
+	// loader at the filesystem.
+	themeDir := func() string {
+		name := setting("theme.active")["theme.active"]
+		if name == "" {
+			return ""
+		}
+		return filepath.Join(cfg.Themes(), filepath.Base(name))
+	}
 
 	// The loader is swapped, not mutated: A-202 activates a theme on a running
 	// server and FR-303 says the next request uses it. A pointer swap means a
@@ -200,7 +210,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		},
 	}
 
-	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log}
+	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
+		attachments: contentStore.AttachmentsIn(cfg.Uploads())}
 	registry := buildTree(pub, lg, acc, bd, ad, func(w http.ResponseWriter, r *http.Request) {
 		loader().StaticHandler("/static/").ServeHTTP(w, r)
 	})

@@ -40,18 +40,23 @@ type Config struct {
 
 	// ThemeDir is where disk themes live, for the same reason.
 	ThemeDir string `json:"theme_dir"`
+
+	// Path is where this config was read from. It is not serialised — it is
+	// where the file IS, not something the file says — and it is what relative
+	// UploadDir/ThemeDir resolve against.
+	Path string `json:"-"`
 }
 
 // Uploads resolves the upload directory, relative to the config file's own
 // directory when the setting is a relative path. An operator who moves the
 // installation moves both together.
-func (c *Config) Uploads(configPath string) string {
-	return resolveDir(configPath, c.UploadDir, "uploads")
+func (c *Config) Uploads() string {
+	return resolveDir(c.Path, c.UploadDir, "uploads")
 }
 
 // Themes resolves the theme directory the same way.
-func (c *Config) Themes(configPath string) string {
-	return resolveDir(configPath, c.ThemeDir, "themes")
+func (c *Config) Themes() string {
+	return resolveDir(c.Path, c.ThemeDir, "themes")
 }
 
 func resolveDir(configPath, set, fallback string) string {
@@ -83,6 +88,9 @@ func Load(path string) (*Config, error) {
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: %s has no database_url", path)
 	}
+	// Remember where this came from. Uploads() and Themes() resolve relative
+	// paths against it, so that moving the whole installation moves them too.
+	c.Path = path
 	return &c, nil
 }
 
