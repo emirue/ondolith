@@ -110,7 +110,7 @@ func (d *boardDeps) commentEditForm(w http.ResponseWriter, r *http.Request) {
 	}
 	v := d.view(r, "댓글 수정", "")
 	v.Data = map[string]any{"Comment": c, "Board": b}
-	d.renderPage(w, r, "board/comment-edit.html", http.StatusOK, v)
+	d.renderPage(w, r, "comment/form.html", http.StatusOK, v)
 }
 
 // P-209 POST — update one's own comment.
@@ -127,7 +127,7 @@ func (d *boardDeps) commentUpdate(w http.ResponseWriter, r *http.Request) {
 	if body == "" {
 		v := d.view(r, "댓글 수정", "")
 		v.Data = map[string]any{"Comment": c, "Board": b, "Error": "내용을 입력하세요."}
-		d.renderPage(w, r, "board/comment-edit.html", http.StatusUnprocessableEntity, v)
+		d.renderPage(w, r, "comment/form.html", http.StatusUnprocessableEntity, v)
 		return
 	}
 	if err := d.content.UpdateComment(r.Context(), c.ID, body); err != nil {

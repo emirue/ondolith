@@ -186,7 +186,7 @@ func (d *boardDeps) postForm(w http.ResponseWriter, r *http.Request) {
 		"Inputs":    content.FieldInputs(fields, nil),
 		"CanSecret": b.AllowSecret, "Post": &content.Post{}}
 	_ = a
-	d.renderPage(w, r, d.boardTemplate(b, "board/write.html"), http.StatusOK, v)
+	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), http.StatusOK, v)
 }
 
 // P-205 POST — create.
@@ -243,7 +243,7 @@ func (d *boardDeps) postEditForm(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, p.Title+" 수정", "")
 	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": p,
 		"Inputs": content.FieldInputs(fields, p.CustomFields), "CanSecret": b.AllowSecret}
-	d.renderPage(w, r, d.boardTemplate(b, "board/write.html"), http.StatusOK, v)
+	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), http.StatusOK, v)
 }
 
 // P-206 POST — update.
@@ -332,7 +332,7 @@ func (d *boardDeps) renderFormError(w http.ResponseWriter, r *http.Request,
 	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": &p,
 		"Inputs":    content.FieldInputs(fields, p.CustomFields),
 		"CanSecret": b.AllowSecret, "Error": err.Error()}
-	d.renderPage(w, r, d.boardTemplate(b, "board/write.html"), http.StatusUnprocessableEntity, v)
+	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), http.StatusUnprocessableEntity, v)
 }
 
 // customValues is the form minus the post's own fields, so a custom field can

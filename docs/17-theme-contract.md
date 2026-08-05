@@ -60,6 +60,12 @@ themes/{이름}/
 ## 템플릿 목록
 
 `필수` = 없으면 사이트가 뜨지 않는다. `폴백` = 없으면 내장 테마가 대신 그린다.
+`코어 생성` = 테마가 갈아끼울 수 없다.
+
+`sitemap.xml`·`robots.txt` 가 코어 생성인 이유: FR-510 이 "발행된 페이지·글만"
+을 요구하는데, 그 집합은 **익명 권한으로 질의한 결과**여야 한다 (크롤러는 로그인
+하지 않는다). 템플릿에 넘기면 무엇을 넘길지가 곧 무엇이 새는지가 되고, 비공개
+게시판·비밀글·초안이 테마 실수 하나로 색인된다.
 
 ### 레이아웃·조각
 
@@ -81,8 +87,8 @@ themes/{이름}/
 | `page.html` | P-202 | 폴백 |
 | `search.html` | P-212 | 폴백 |
 | `error.html` | P-903, P-904 | 폴백 |
-| `sitemap.xml` | P-901 | 폴백 |
-| `robots.txt` | P-902 | 폴백 |
+| `sitemap.xml` | P-901 | **코어 생성** |
+| `robots.txt` | P-902 | **코어 생성** |
 
 ### 인증·계정
 
@@ -90,8 +96,10 @@ themes/{이름}/
 |---|---|---|
 | `auth/login.html` | P-101 | 폴백 |
 | `auth/signup.html` | P-103 | 폴백 |
+| `auth/signup-sent.html` | P-103 | 폴백 |
 | `auth/password-reset-request.html` | P-104 | 폴백 |
 | `auth/password-reset.html` | P-105 | 폴백 |
+| `auth/password-reset-sent.html` | P-104 | 폴백 |
 | `auth/verify.html` | P-112 | 폴백 |
 | `account/profile.html` | P-108 | 폴백 |
 | `account/password.html` | P-109 | 폴백 |

@@ -169,13 +169,13 @@ func payloadFor(name string) any {
 			"Results": []postLike{{ID: "p1", BoardID: "b1", Title: "찾은 글", Body: "본문",
 				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
 		}
-	case "board/comment-edit.html":
+	case "comment/form.html":
 		return map[string]any{
 			"Board":   boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
 			"Comment": commentLike{ID: "c1", PostID: "p1", Body: "고칠 댓글"},
 			"Error":   "오류 메시지",
 		}
-	case "board/write.html":
+	case "board/form.html":
 		return map[string]any{
 			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
 			"Post": &postLike{Title: "고칠 글", Body: "본문",

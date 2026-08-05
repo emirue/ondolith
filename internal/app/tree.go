@@ -37,6 +37,17 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-103", Method: "GET", Pattern: "/signup", Class: SC2, Handler: acc.signupForm})
 	r.Add(Route{Screen: "P-103", Method: "POST", Pattern: "/signup", Class: SC2, Handler: acc.signup})
 	r.Add(Route{Screen: "P-112", Method: "GET", Pattern: "/verify/{token}", Class: SC2, Handler: acc.verify})
+	r.Add(Route{Screen: "P-104", Method: "GET", Pattern: "/password/reset", Class: SC2,
+		Handler: acc.resetRequestForm})
+	r.Add(Route{Screen: "P-104", Method: "POST", Pattern: "/password/reset", Class: SC2,
+		Handler: acc.resetRequest})
+	// The token is in the path, so it lands in the access log and in Referer.
+	// That is the trade D11 already made for P-112, and it is bounded by the
+	// same two properties: 30 minutes, one use.
+	r.Add(Route{Screen: "P-105", Method: "GET", Pattern: "/password/reset/{token}", Class: SC2,
+		Handler: acc.resetForm})
+	r.Add(Route{Screen: "P-105", Method: "POST", Pattern: "/password/reset/{token}", Class: SC2,
+		Handler: acc.resetPassword})
 
 	// ---- 내 계정 (SC-3: 소유자는 세션이 정한다) --------------------------------
 	r.Add(Route{Screen: "P-108", Method: "GET", Pattern: "/me", Class: SC3, Handler: acc.profileForm})

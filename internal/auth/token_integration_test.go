@@ -93,7 +93,9 @@ func TestRawTokenIsNotStored(t *testing.T) {
 	ctx := context.Background()
 	u := mkUser(t, s, "a@example.com")
 
-	raw, err := s.IssueToken(ctx, KindPasswordReset, u)
+	// IssueResetToken is the path P-104 uses; IssueToken is the generic one.
+	// Both have to hash, and testing only one leaves the other free to drift.
+	raw, err := s.IssueResetToken(ctx, u)
 	if err != nil {
 		t.Fatal(err)
 	}

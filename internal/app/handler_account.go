@@ -118,8 +118,14 @@ func (d *accountDeps) sendVerification(ctx contextLike, userID, email string) {
 	if err != nil {
 		return // logged by the caller's error path; the user can request again
 	}
+	// The token is a path segment, not a query parameter. D11 registers P-112
+	// at /verify/{token}, and the two forms disagreed for a while: this mail
+	// sent /verify?t=…, which the route does not match, so every verification
+	// link in production answered 404. The integration test did not catch it
+	// because it built its own registry with /verify — a fixture that differed
+	// from the tree (.ai/MISTAKES.md M14).
 	d.mailer.SendAsync(email, "이메일 인증",
-		"아래 링크로 인증을 완료하세요:\n"+d.baseURL+"/verify?t="+raw)
+		"아래 링크로 인증을 완료하세요:\n"+d.baseURL+"/verify/"+raw)
 }
 
 // contextLike keeps the signature honest without importing context here twice.
@@ -130,14 +136,22 @@ type contextLike = interface {
 	Value(any) any
 }
 
-// P-112 GET /verify — consume the token.
+// P-112 GET /verify/{token} — consume the token.
 func (d *accountDeps) verify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID, err := d.store.ConsumeToken(ctx, auth.KindEmailVerify, r.URL.Query().Get("t"))
-	if err != nil {
-		// Expired, used and never-existed are one answer: distinguishing them
-		// tells a guesser which attempt was close.
-		d.render(w, r, "auth/verify-failed.html", http.StatusBadRequest,
+	userID, already, err := d.store.ConsumeVerifyToken(ctx, r.PathValue("token"))
+	switch {
+	case already:
+		// D19 P-112: a second visit to a spent token succeeds quietly. Mail
+		// clients prefetch links, so the token is often burned before the
+		// person clicks it, and 400 would show them a failure for a
+		// verification that had in fact worked.
+		d.render(w, r, "auth/verify.html", http.StatusOK, nil)
+		return
+	case err != nil:
+		// Wrong and expired are one answer. This screen tells "spent" apart
+		// on purpose (above) and nothing else.
+		d.render(w, r, "auth/verify.html", http.StatusBadRequest,
 			map[string]any{"Error": "링크가 올바르지 않거나 만료되었습니다."})
 		return
 	}
@@ -145,7 +159,7 @@ func (d *accountDeps) verify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.render(w, r, "auth/verify-done.html", http.StatusOK, nil)
+	d.render(w, r, "auth/verify.html", http.StatusOK, nil)
 }
 
 // signupForm's GET. Already-authenticated callers are sent on rather than shown

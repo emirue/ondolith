@@ -58,19 +58,29 @@ func hashToken(raw string) []byte {
 	return sum[:]
 }
 
+// newRawToken is 256 bits of crypto/rand in RawURLEncoding — no padding, and
+// the alphabet is already path-safe, which is what lets the value sit in
+// `/verify/{token}` and `/password/reset/{token}` without escaping (D11).
+func newRawToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
 // IssueToken creates a single-use token and returns the RAW value.
 //
 // The raw value exists only in this return and in the email. The database
 // stores the hash, so a database dump cannot be replayed into account
 // takeovers, and the raw value must never be logged (C5).
 func (s *Store) IssueToken(ctx context.Context, kind TokenKind, userID string) (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	raw, err := newRawToken()
+	if err != nil {
 		return "", err
 	}
-	raw := base64.RawURLEncoding.EncodeToString(b)
 
-	_, err := s.pool.Exec(ctx,
+	_, err = s.pool.Exec(ctx,
 		`INSERT INTO `+kind.table()+` (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
 		userID, hashToken(raw), time.Now().Add(kind.ttl()))
 	if err != nil {

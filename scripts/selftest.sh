@@ -217,6 +217,17 @@ inject "D17 이 존재하지 않는 화면에 템플릿 배정" docs/17-theme-co
 inject "템플릿 표 형식이 깨져 이름을 못 읽음" docs/17-theme-contract.md \
 	'perl -pi -e "s/^\| \`([a-z][a-z0-9\/._-]*\.(html|xml|txt))\` \|/| \$1 |/" docs/17-theme-contract.md' \
 	'템플릿 이름을 하나도 읽지 못했다'
+# The contract must cover what the core actually renders, and the fallback
+# theme must hold every name it promises. D17 said `auth/verify.html` while the
+# code rendered verify-done.html — the checks above compare screen IDs and
+# never look at a file name.
+inject "코어가 그리는 템플릿이 D17 에 없음" docs/17-theme-contract.md \
+	'perl -ni -e "print unless /^\| \`auth\/verify\.html\` \|/" docs/17-theme-contract.md' \
+	'docs/17-theme-contract.md 에 없다: auth/verify.html'
+inject_new "D17 이 약속한 템플릿이 폴백 테마에 없음" internal/theme/builtin/auth/verify.html \
+	'mv internal/theme/builtin/auth/verify.html "$TMP/verify.html"' \
+	'폴백 테마에 없다: internal/theme/builtin/auth/verify.html'
+cp "$TMP/verify.html" "$REPO/internal/theme/builtin/auth/verify.html"
 
 # Module gating (FR-710): a plain site must not register commerce routes, which
 # only holds if D11 actually declares the split.

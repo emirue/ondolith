@@ -322,6 +322,41 @@ else
 	n_tpl=$(perl -nle 'print $1 if /^\|\s*`([a-z][a-z0-9\/._-]*\.(?:html|xml|txt))`\s*\|/' "$THEME" |
 		sort -u | wc -l | tr -d ' ')
 	[ "$n_tpl" -gt 0 ] || err "$THEME 에서 템플릿 이름을 하나도 읽지 못했다 (표 형식 확인)"
+
+	# ...and every template the core actually renders is one of them, and is a
+	# file the fallback theme ships.
+	#
+	# The contract is a promise to theme authors: override this name and your
+	# markup renders. A name the core renders but D17 never listed is a screen
+	# an author cannot restyle without reading the source; a listed name with no
+	# builtin behind it is a file they write that is never looked at. D17 said
+	# `auth/verify.html` while the code rendered verify-done.html and
+	# verify-failed.html, and nothing caught it — the check above compares
+	# screen IDs, not file names.
+	#
+	# Only the direction "code → document" is checked. The other way round
+	# would fail until Phase 4, because D17 describes the finished product and
+	# 25 of its templates belong to screens not yet built.
+	#
+	# base.html (layout, prose not table), install.html (설치 트리 — 테마가
+	# 아니다), admin/ (관리자 UI, 내장 전용) and builtin/ (embed 경로) are out
+	# of scope by construction. sitemap.xml·robots.txt too: D17 marks them
+	# 코어 생성 and the literals that match here are URL paths, not templates.
+	BUILTIN=internal/theme/builtin
+	perl -nle 'print $1 if /^\|\s*`([a-z][a-z0-9\/._-]*\.(?:html|xml|txt))`\s*\|/' "$THEME" |
+		sort -u >/tmp/cd_tpl_names
+	drift=0
+	for t in $(find internal -name '*.go' ! -name '*_test.go' -print0 |
+			xargs -0 grep -hoE '"[a-z][a-z0-9_-]*(/[a-z0-9._-]+)*\.(html|xml|txt)"' |
+			tr -d '"' | sort -u |
+			grep -Ev '^(admin|templates|builtin)/|^(base|install)\.html$' |
+			grep -Ev '^(sitemap\.xml|robots\.txt)$'); do
+		grep -qxF "$t" /tmp/cd_tpl_names ||
+			{ err "코어가 그리는 템플릿이 $THEME 에 없다: $t (테마가 갈아끼울 수 없다)"; drift=1; }
+		[ -f "$BUILTIN/$t" ] ||
+			{ err "코어가 그리는 템플릿이 폴백 테마에 없다: $BUILTIN/$t"; drift=1; }
+	done
+	[ "$drift" -eq 0 ] && done_ "코어가 그리는 테마 템플릿이 전부 $THEME 에 있고 $BUILTIN/ 에 존재한다 (FR-308)"
 	done_ "테마 템플릿 $n_tpl 종 · GET 공개 화면 $(wc -l </tmp/cd_tpl_get | tr -d ' ') 개 전부 배정 또는 예외 (FR-308)"
 fi
 

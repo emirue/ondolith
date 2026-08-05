@@ -63,14 +63,19 @@ func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handl
 		verifyRequired: func() bool { return verifyRequired },
 		baseURL:        "https://example.com",
 	}
+	// The production tree, not a hand-written one.
+	//
+	// This fixture used to list its own patterns, and one of them — /verify
+	// against the tree's /verify/{token} — did not exist in production. Every
+	// test here passed while every verification mail in production 404ed
+	// (.ai/MISTAKES.md M14). The other dependencies are nil because buildTree
+	// only takes method values; the routes they own are never requested from
+	// this fixture.
+	// The static handler must not be nil — ServeMux.HandleFunc panics on one,
+	// and the panic made every route in the tree unreachable.
 	mux := http.NewServeMux()
-	NewRegistry().
-		Add(Route{Screen: "P-103", Method: "POST", Pattern: "/signup", Class: SC2, Handler: d.signup}).
-		Add(Route{Screen: "P-112", Method: "GET", Pattern: "/verify", Class: SC2, Handler: d.verify}).
-		Add(Route{Screen: "P-108", Method: "POST", Pattern: "/me", Class: SC3, Handler: d.updateProfile}).
-		Add(Route{Screen: "P-109", Method: "POST", Pattern: "/me/password", Class: SC3, Handler: d.changePassword}).
-		Add(Route{Screen: "P-101", Method: "POST", Pattern: "/login", Class: SC2, Handler: d.login}).
-		Mount(mux)
+	buildTree(nil, &d.loginDeps, d, nil, nil,
+		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }).Mount(mux)
 	return d, sm.LoadAndSave(withActor(sm, store)(mux)), store, sender
 }
 
@@ -140,41 +145,70 @@ func TestSignupWithoutVerificationLogsInImmediately(t *testing.T) {
 	}
 }
 
-// The verification link is single-use and the token never appears in storage.
-func TestVerificationLinkWorksOnceAndExpiresLogically(t *testing.T) {
-	d, h, store, sender := accountFixture(t, true)
+// mailedPath waits for a message to `to` and returns the path of the first URL
+// in it, taken from the body verbatim.
+//
+// Verbatim is the point. The earlier version of this test built the request
+// itself ("/verify?t="+token), so it exercised a URL the mail never sent and
+// the tree never served (.ai/MISTAKES.md M14). Whatever the mail says is what
+// the person clicks.
+func mailedPath(t *testing.T, sender *recordingSender, to, prefix string) string {
+	t.Helper()
+	for i := 0; i < 500; i++ {
+		for _, m := range sender.snapshot() {
+			if m.to != to {
+				continue
+			}
+			for _, f := range strings.Fields(m.body) {
+				if !strings.HasPrefix(f, prefix) {
+					continue
+				}
+				// url.Parse, not TrimPrefix: trimming the prefix would eat the
+				// last path segment along with it and hand back "/{token}",
+				// which the mux then routes to the catch-all page handler.
+				u, err := url.Parse(f)
+				if err != nil {
+					t.Fatalf("메일의 링크를 해석하지 못했다: %q", f)
+				}
+				return u.Path
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%s 로 %s 링크가 담긴 메일이 오지 않았다", to, prefix)
+	return ""
+}
+
+// The link in the verification mail is one the route table actually serves.
+func TestVerificationLinkFromMailResolves(t *testing.T) {
+	_, h, store, sender := accountFixture(t, true)
 
 	postForm(h, "/signup", url.Values{
 		"email": {"v@example.com"}, "password": {"correct-horse-battery"},
 	}, nil)
+	path := mailedPath(t, sender, "v@example.com", "https://example.com/verify/")
 
-	var link string
-	for i := 0; i < 200 && link == ""; i++ {
-		for _, m := range sender.snapshot() {
-			if m.to == "v@example.com" && strings.Contains(m.body, "/verify?t=") {
-				link = m.body
-			}
-		}
-		if link == "" {
-			time.Sleep(time.Millisecond)
-		}
-	}
-	if link == "" {
-		t.Fatal("인증 메일이 발송되지 않았다")
-	}
-	tok := link[strings.Index(link, "?t=")+3:]
-	tok = strings.TrimSpace(tok)
-
-	first := doGet(h, "/verify?t="+url.QueryEscape(tok))
+	first := doGet(h, path)
 	if first.Code != http.StatusOK {
-		t.Fatalf("첫 인증 HTTP %d (%q)", first.Code, first.Body.String())
+		t.Fatalf("메일이 보낸 %s 가 HTTP %d (%q)", path, first.Code, first.Body.String())
 	}
-	second := doGet(h, "/verify?t="+url.QueryEscape(tok))
-	if second.Code == http.StatusOK {
-		t.Error("인증 링크가 두 번 쓰였다")
+	u, _, err := store.FindActiveUserByEmail(t.Context(), "v@example.com")
+	if err != nil || u == nil {
+		t.Fatalf("가입한 계정을 읽지 못했다: %v", err)
 	}
-	_ = d
-	_ = store
+	if u.EmailVerifiedAt == nil {
+		t.Fatal("200 을 받았는데 email_verified_at 이 비어 있다 — 화면만 성공했다")
+	}
+
+	// D19 P-112: a second visit succeeds quietly. Mail clients prefetch, so
+	// the token is usually spent before the human clicks.
+	second := doGet(h, path)
+	if second.Code != http.StatusOK {
+		t.Errorf("재방문 HTTP %d — 프리페치가 사용자에게 실패로 보인다", second.Code)
+	}
+	if strings.Contains(second.Body.String(), "|") {
+		t.Errorf("재방문에 오류 문구가 붙었다: %q", second.Body.String())
+	}
 }
 
 func doGet(h http.Handler, target string) *httptest.ResponseRecorder {
