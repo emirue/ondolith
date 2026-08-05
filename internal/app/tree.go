@@ -85,6 +85,13 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-212", Method: "GET", Pattern: "/search", Class: SC1,
 		Handler: bd.search})
 
+	// P-901·P-902 는 크롤러가 읽는다. 로그인하지 않은 방문자가 열 수 있는
+	// 것과 정확히 같은 집합이어야 하므로, 사이트맵은 익명 권한으로 묻는다.
+	r.Add(Route{Screen: "P-901", Method: "GET", Pattern: "/sitemap.xml", Class: SC1,
+		Handler: bd.sitemap})
+	r.Add(Route{Screen: "P-902", Method: "GET", Pattern: "/robots.txt", Class: SC1,
+		Handler: bd.robots})
+
 	// ---- 관리자 -------------------------------------------------------------
 	// admin.access is the tree gate's key; every screen below also names the
 	// permission its own handler checks. The two are not redundant: the gate

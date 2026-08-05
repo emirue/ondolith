@@ -193,8 +193,8 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 | W2-14 | 글 삭제 + 댓글 3화면 (P-207~P-210) **(완료 — `internal/app/handler_comment.go`)** | W2-13 | `internal/content` | 삭제는 POST만(GET 거부, P5). 남의 글·댓글은 404이지 403이 아니다. 댓글은 게시판 설정 `allow_comments`가 꺼져 있으면 등록되지 않는다 |
 | W2-15 | 첨부 다운로드 (P-211) **(완료 — `internal/app/handler_attachment.go`)** | W2-11, W2-12 | `internal/content` | **다운로드 핸들러가 부모 글의 `post.read`를 다시 검사한다.** 비공개 게시판의 첨부 ID를 직접 요청하면 404가 되는 테스트가 있다 (D15 8절 1번). SVG는 `Content-Disposition: attachment`로만 나간다 |
 | W2-16 | 검색 (P-212) **(완료 — `internal/app/handler_search.go`)** | W2-03, W2-08 | `internal/content` | 제목·본문 전문검색. **권한 없는 게시판의 글이 결과에 섞이지 않는다**(권한을 `WHERE`에서 거른다). 페이지네이션이 큰 오프셋에서도 무너지지 않는다 (FR-508) |
-| W2-17 | sitemap.xml·robots.txt (P-901, P-902) | W2-13, Phase 1 W1-40 | `internal/content` | 발행된 페이지·글만 들어간다. 초안·비밀글·비공개 게시판 글이 없음을 단언한다 (FR-510) |
-| W2-18 | 메타·OG 태그 (FR-511) | W2-13 | `internal/theme` | `.Meta`가 화면별로 채워지고 테마가 오버라이드할 수 있다. 제목·설명·이미지가 P-202·P-203·P-204에서 각각 다른 값이 나온다 |
+| W2-17 | sitemap.xml·robots.txt (P-901, P-902) **(완료 — `internal/app/handler_seo.go`)** | W2-13, Phase 1 W1-40 | `internal/content` | 발행된 페이지·글만 들어간다. 초안·비밀글·비공개 게시판 글이 없음을 단언한다 (FR-510) |
+| W2-18 | 메타·OG 태그 (FR-511) **(완료 — `handler_public.go` view(), `builtin/base.html`)** | W2-13 | `internal/theme` | `.Meta`가 화면별로 채워지고 테마가 오버라이드할 수 있다. 제목·설명·이미지가 P-202·P-203·P-204에서 각각 다른 값이 나온다 |
 
 #### 템플릿
 

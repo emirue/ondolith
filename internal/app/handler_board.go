@@ -16,6 +16,7 @@ type boardDeps struct {
 	*publicDeps
 	sm          *scs.SessionManager
 	attachments *content.Attachments
+	authStore   *auth.Store
 	log         *slog.Logger
 }
 
@@ -105,7 +106,7 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	v := d.view(r, b.Name, "")
+	v := d.view(r, b.Name, b.Name+" 목록")
 	v.Data = map[string]any{
 		"Board": b, "Posts": posts, "Total": total, "Query": q, "Columns": columns,
 		"CanWrite": a.CanOn("post.write", auth.BoardID(b.ID)),

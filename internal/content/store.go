@@ -272,3 +272,26 @@ func (s *Store) DeleteMenuItem(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// PublishedPages is the sitemap's page list (FR-510). The status filter is in
+// the WHERE clause for the same reason PublishedPageBySlug has it: a draft must
+// not leave the database.
+func (s *Store) PublishedPages(ctx context.Context) ([]Page, error) {
+	const q = `
+		SELECT id, slug, title, body, status, coalesce(template, '')
+		FROM pages WHERE status = 'published' ORDER BY slug`
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Page
+	for rows.Next() {
+		var p Page
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Title, &p.Body, &p.Status, &p.Template); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

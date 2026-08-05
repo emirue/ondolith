@@ -211,7 +211,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
-		attachments: contentStore.AttachmentsIn(cfg.Uploads())}
+		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore}
 	registry := buildTree(pub, lg, acc, bd, ad, func(w http.ResponseWriter, r *http.Request) {
 		loader().StaticHandler("/static/").ServeHTTP(w, r)
 	})

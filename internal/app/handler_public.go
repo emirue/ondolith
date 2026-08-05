@@ -46,7 +46,9 @@ func (d *publicDeps) page(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
-	v := d.view(r, p.Title, "")
+	// 본문 첫 줄이 설명이다. 페이지마다 다른 값이 나와야 검색 결과에서
+	// 구분된다 (FR-511).
+	v := d.view(r, p.Title, firstLine(p.Body))
 	v.Data = p
 	name := "page.html"
 	if p.Template != "" {
@@ -64,7 +66,17 @@ func (d *publicDeps) page(w http.ResponseWriter, r *http.Request) {
 func (d *publicDeps) view(r *http.Request, title, desc string) theme.View {
 	a := ActorFrom(r.Context())
 	v := theme.NewView(d.site(), r.URL.Path)
+	// FR-511: the screen fills what it knows, the site fills the rest. The
+	// fallback is resolved HERE and not in the template — D17 규약 1 keeps
+	// branching out of themes, and a theme that forgets the `if` would ship a
+	// page with no description at all.
 	v.Meta = theme.Meta{Title: title, Description: desc}
+	if v.Meta.Description == "" {
+		v.Meta.Description = v.Site.MetaDescription
+	}
+	if v.Meta.OGImage == "" {
+		v.Meta.OGImage = v.Site.OGImage
+	}
 	if a.IsAuthenticated() {
 		// Only what a template draws. Roles and permission rows stay out
 		// (D17): a theme is third-party and a copied one would carry
