@@ -168,10 +168,11 @@ func TestAllMigrationsApply(t *testing.T) {
 		"attachments", "board_fields", "boards", "cart_items", "carts",
 		"categories", "comments", "email_verification_tokens", "goose_db_version",
 		"menus", "operation_logs", "order_agreements", "order_items", "orders",
-		"pages", "password_reset_tokens", "permissions", "posts",
+		"pages", "password_reset_tokens", "payments", "permissions", "posts",
 		"product_categories", "product_options", "product_variants", "products",
-		"role_permissions", "roles", "sessions", "settings", "social_accounts",
-		"terms", "user_roles", "users",
+		"refund_items", "refunds", "role_permissions", "roles", "sessions",
+		"settings", "social_accounts", "terms", "user_roles", "users",
+		"webhook_events",
 	}
 	got := tableNames(t, pool)
 	if len(got) != len(want) {
@@ -1305,5 +1306,250 @@ func TestTermsAreVersionedAndCannotBeBackdated(t *testing.T) {
 		`INSERT INTO order_agreements (order_id,terms_id) VALUES ($1,$2)`,
 		orderID, termsID); err == nil {
 		t.Error("같은 (주문, 약관) 동의가 두 번 들어갔다")
+	}
+}
+
+// seedPayable makes an order with one item and returns (orderID, orderItemID).
+func seedPayable(t *testing.T, pool *pgxpool.Pool) (orderID, itemID string) {
+	t.Helper()
+	ctx := context.Background()
+	productID, variantID, orderID := seedOrderable(t, pool)
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO order_items (order_id,product_id,variant_id,product_name,option_label,
+		                         unit_price,quantity)
+		VALUES ($1,$2,$3,'티셔츠','크기: L',13000,2) RETURNING id`,
+		orderID, productID, variantID).Scan(&itemID); err != nil {
+		t.Fatal(err)
+	}
+	return orderID, itemID
+}
+
+// FR-608: 주문당 승인 1건. 동시 콜백 두 건이 이중 승인이 되지 않는 것을 DB 가 막는다.
+//
+// 부분 인덱스의 `AND status <> '실패'` 가 재결제 경로를 남긴다 — 그것 없이는 승인 API
+// 가 한 번 실패한 주문이 영영 결제 불가가 되고, P-409 가 못박은 "주문은 결제대기에
+// 머문다" 가 성립하지 않는다.
+func TestOnePaymentPerOrderButFailedOnesDoNotBlockRetry(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, _ := seedPayable(t, pool)
+
+	ins := func(status, key string) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO payments (order_id,kind,status,pg,payment_key,approved_amount)
+			VALUES ($1,'주문결제',$2,'toss',$3,26000)`, orderID, status, key)
+		return err
+	}
+
+	if err := ins("실패", "k-fail-1"); err != nil {
+		t.Fatal(err)
+	}
+	// 실패가 쌓여도 재시도를 막지 않는다.
+	if err := ins("실패", "k-fail-2"); err != nil {
+		t.Errorf("실패 행이 재결제를 막았다: %v", err)
+	}
+	if err := ins("대기", "k-live-1"); err != nil {
+		t.Fatalf("재결제가 막혔다: %v", err)
+	}
+	// 살아 있는 건이 있으면 두 번째는 들어가지 못한다 — 동시 콜백 두 건 중 하나만
+	// 산다.
+	if err := ins("대기", "k-live-2"); err == nil {
+		t.Error("주문 하나에 살아 있는 결제가 둘 생겼다 (FR-608)")
+	}
+	if err := ins("승인", "k-live-3"); err == nil {
+		t.Error("대기 건이 있는데 승인 건이 또 들어갔다")
+	}
+}
+
+// FR-611: 환불 누적이 승인금액을 넘지 못한다. 넘으면 결제액보다 많은 돈이 나간다.
+func TestRefundedAmountCannotExceedApproved(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, _ := seedPayable(t, pool)
+
+	var payID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO payments (order_id,kind,status,pg,payment_key,approved_amount,approved_at)
+		VALUES ($1,'주문결제','승인','toss','k1',26000,now()) RETURNING id`, orderID).
+		Scan(&payID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE payments SET refunded_amount = 26000 WHERE id = $1`, payID); err != nil {
+		t.Errorf("전액 환불이 막혔다: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE payments SET refunded_amount = 26001 WHERE id = $1`, payID); err == nil {
+		t.Error("승인금액보다 많은 환불이 기록됐다 (FR-611)")
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE payments SET refunded_amount = -1 WHERE id = $1`, payID); err == nil {
+		t.Error("음수 환불누적이 기록됐다")
+	}
+}
+
+// 교환차액 행은 반드시 교환 건을 가리킨다. return_id 가 NULL 이면 "교환 건당 차액
+// 1건" 부분 유니크가 통째로 우회된다 — 차액이 두 번 결제된다.
+func TestExchangePaymentMustPointAtAReturn(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, _ := seedPayable(t, pool)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payments (order_id,kind,status,pg,payment_key,approved_amount)
+		VALUES ($1,'교환차액','대기','toss','k-x',3000)`, orderID); err == nil {
+		t.Error("교환 건을 가리키지 않는 교환차액이 들어갔다")
+	}
+	// 반대 방향도 막힌다: 주문결제가 교환 건을 가리키면 위 유니크의 대상이 흐려진다.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payments (order_id,return_id,kind,status,pg,payment_key,approved_amount)
+		VALUES ($1,gen_random_uuid(),'주문결제','대기','toss','k-y',26000)`, orderID); err == nil {
+		t.Error("주문결제가 교환 건을 가리켰다")
+	}
+}
+
+// 같은 승인이 두 행으로 기록되면 A-508 대사가 무엇이 진짜인지 판정하지 못한다.
+// 복합인 이유: 두 PG 가 같은 문자열을 발급해도 정상 이벤트여야 한다.
+func TestPaymentKeyIsUniquePerPG(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	o1, _ := seedPayable(t, pool)
+	var o2 string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO orders (order_no,total_amount,receiver_name,receiver_phone,postcode,
+		                    address1,orderer_email,orderer_phone)
+		VALUES ('20260805-QQQQQQQQQQ',13000,'받는이','010-0000-0000','12345',
+		        '서울시 어딘가','b@example.com','010-0000-0000') RETURNING id`).
+		Scan(&o2); err != nil {
+		t.Fatal(err)
+	}
+
+	ins := func(order, pg, key string) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO payments (order_id,kind,status,pg,payment_key,approved_amount)
+			VALUES ($1,'주문결제','실패',$2,$3,26000)`, order, pg, key)
+		return err
+	}
+	if err := ins(o1, "toss", "same-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ins(o2, "toss", "same-key"); err == nil {
+		t.Error("같은 PG 의 같은 승인 키가 두 행으로 들어갔다")
+	}
+	// 다른 PG 의 같은 문자열은 다른 승인이다.
+	if err := ins(o2, "kakao", "same-key"); err != nil {
+		t.Errorf("다른 PG 의 같은 문자열이 중복으로 버려졌다: %v", err)
+	}
+}
+
+// 새로고침 한 번이 이중 환불이 되지 않는다. 요청 키는 A-507 전용이 아니라 모든
+// 경로에 NOT NULL 이다 — 화면마다 멱등 수단이 다르면 한쪽만 고쳐진다.
+func TestRefundRequestKeyIsIdempotent(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, itemID := seedPayable(t, pool)
+	var payID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO payments (order_id,kind,status,pg,payment_key,approved_amount,approved_at)
+		VALUES ($1,'주문결제','승인','toss','k1',26000,now()) RETURNING id`, orderID).
+		Scan(&payID); err != nil {
+		t.Fatal(err)
+	}
+
+	ins := func(key string, amount int) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO refunds (order_id,payment_id,status,requester,amount,request_key)
+			VALUES ($1,$2,'요청','구매자',$3,$4)`, orderID, payID, amount, key)
+		return err
+	}
+	if err := ins("req-1", 13000); err != nil {
+		t.Fatal(err)
+	}
+	if err := ins("req-1", 13000); err == nil {
+		t.Error("같은 요청 키로 환불이 두 번 들어갔다")
+	}
+	if err := ins("req-2", 13000); err != nil {
+		t.Errorf("다른 요청이 막혔다: %v", err)
+	}
+	// 0원·음수 환불은 없다.
+	if err := ins("req-3", 0); err == nil {
+		t.Error("0원 환불이 들어갔다")
+	}
+
+	var refID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM refunds WHERE request_key = 'req-1'`).Scan(&refID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO refund_items (refund_id,order_item_id,quantity) VALUES ($1,$2,1)`,
+		refID, itemID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO refund_items (refund_id,order_item_id,quantity) VALUES ($1,$2,1)`,
+		refID, itemID); err == nil {
+		t.Error("한 환불 건에 같은 품목이 두 행으로 들어갔다")
+	}
+
+	// 돈 기록은 지워지지 않는다 (D30 3-1 RESTRICT).
+	if _, err := pool.Exec(ctx, `DELETE FROM payments WHERE id = $1`, payID); err == nil {
+		t.Error("환불이 가리키는 결제 행이 지워졌다")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM orders WHERE id = $1`, orderID); err == nil {
+		t.Error("결제가 달린 주문 행이 지워졌다")
+	}
+}
+
+// FR-610: 같은 웹훅 이벤트가 두 번 반영되지 않는다. 없으면 같은 입금이 두 번 잡힌다.
+func TestWebhookEventIsIdempotentPerPG(t *testing.T) {
+	db, pool := testDB(t)
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orderID, _ := seedPayable(t, pool)
+
+	ins := func(pg, event string) error {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO webhook_events (pg,event_id,order_id,payload) VALUES ($1,$2,$3,'{}')`,
+			pg, event, orderID)
+		return err
+	}
+	if err := ins("toss", "evt-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ins("toss", "evt-1"); err == nil {
+		t.Error("같은 이벤트가 두 번 들어갔다 (FR-610)")
+	}
+	// 어댑터가 여럿이라는 것이 FR-605 의 전제다. 단일 컬럼 UNIQUE 였다면 여기서
+	// 정상 이벤트가 중복으로 버려진다.
+	if err := ins("kakao", "evt-1"); err != nil {
+		t.Errorf("다른 PG 의 같은 이벤트 ID 가 버려졌다: %v", err)
+	}
+	// order_id 는 NULL 을 허용한다 — 주문을 특정하지 못한 이벤트도 받아 두고
+	// A-603 이 사람에게 보인다.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO webhook_events (pg,event_id,payload) VALUES ('toss','evt-orphan','{}')`); err != nil {
+		t.Errorf("주문 미상 이벤트가 거부됐다: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE webhook_events SET status = '알수없음'`); err == nil {
+		t.Error("정의되지 않은 웹훅 상태가 들어갔다")
 	}
 }

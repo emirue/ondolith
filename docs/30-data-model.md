@@ -907,16 +907,23 @@ FR-612("스냅샷만으로 주문서 재발행")를 만족하려면 **상품명 
 
 **`payments`**
 
-| 컬럼 | 타입 · 제약 |
-|---|---|
-| `id` · `order_id` → `orders` · `return_id` uuid NULL → `returns` | |
-| `kind` | text NOT NULL `CHECK (kind IN ('주문결제','교환차액'))` |
-| `status` | text NOT NULL DEFAULT '대기' `CHECK (status IN ('대기','승인','실패'))` |
-| `pg` · `payment_key` | text NOT NULL |
-| `approved_amount` | integer NOT NULL `CHECK (>= 0)` |
-| `refunded_amount` | integer NOT NULL DEFAULT 0, `CHECK (>= 0 AND <= approved_amount)` |
-| `raw_response` | jsonb NULL — 카드 필드 마스킹 후 |
-| `approved_at` | timestamptz NULL |
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `order_id` | uuid | NOT NULL REFERENCES `orders(id)` ON DELETE RESTRICT |
+| `return_id` | uuid | NULL REFERENCES `returns(id)` ON DELETE RESTRICT |
+| `kind` | text | NOT NULL `CHECK (kind IN ('주문결제','교환차액'))` |
+| `status` | text | NOT NULL DEFAULT '대기' `CHECK (status IN ('대기','승인','실패'))` |
+| `pg` | text | NOT NULL |
+| `payment_key` | text | NOT NULL |
+| `approved_amount` | integer | NOT NULL `CHECK (>= 0)` |
+| `refunded_amount` | integer | NOT NULL DEFAULT 0, `CHECK (>= 0 AND <= approved_amount)` |
+| `raw_response` | jsonb | NULL — 카드 필드 마스킹 후 |
+| `approved_at` | timestamptz | NULL |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+`returns` 는 다음 마이그레이션(W3-06)에서 생긴다. `return_id` 의 FK 는 거기서
+`ALTER TABLE` 로 건다 — 최종 스키마는 이 표와 같다.
 
 ```sql
 CHECK ((kind = '교환차액') = (return_id IS NOT NULL))
@@ -940,10 +947,32 @@ PCI DSS). 정기결제가 필요해지면 빌링키 컬럼을 그때 더한다.
 
 **`refunds` · `refund_items`**
 
-| 테이블 | 컬럼 · 제약 |
-|---|---|
-| `refunds` | `id` · `order_id` → `orders` · `payment_id` → `payments` · `return_id` uuid NULL → `returns` · `status` text `CHECK IN ('요청','승인','거부','완료')` · `requester` text `CHECK IN ('구매자','관리자')` · `amount` integer `CHECK (> 0)` · `reason` text NOT NULL DEFAULT '' · `request_key` text NOT NULL **UNIQUE** · 감사 |
-| `refund_items` | `id` · `refund_id` → `refunds` · `order_item_id` → `order_items` · `quantity` integer `CHECK (>= 1)` · `created_at`. `UNIQUE (refund_id, order_item_id)` |
+**`refunds`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `order_id` | uuid | NOT NULL REFERENCES `orders(id)` ON DELETE RESTRICT |
+| `payment_id` | uuid | NOT NULL REFERENCES `payments(id)` ON DELETE RESTRICT |
+| `return_id` | uuid | NULL REFERENCES `returns(id)` ON DELETE RESTRICT |
+| `status` | text | NOT NULL DEFAULT '요청' `CHECK IN ('요청','승인','거부','완료')` |
+| `requester` | text | NOT NULL `CHECK IN ('구매자','관리자')` |
+| `amount` | integer | NOT NULL `CHECK (> 0)` |
+| `reason` | text | NOT NULL DEFAULT '' |
+| `request_key` | text | NOT NULL **UNIQUE** |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+**`refund_items`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `refund_id` | uuid | NOT NULL REFERENCES `refunds(id)` ON DELETE CASCADE |
+| `order_item_id` | uuid | NOT NULL REFERENCES `order_items(id)` ON DELETE RESTRICT |
+| `quantity` | integer | NOT NULL `CHECK (>= 1)` |
+| `created_at` | timestamptz | NOT NULL DEFAULT now(). **`updated_at` 없음** |
+
+`UNIQUE (refund_id, order_item_id)`.
 
 요청 키를 A-507 전용이 아니라 **모든 경로에 NOT NULL로** 둔다 — P-506·P-507의 중복 제출도 같은
 사고(이중 환불)를 내는데 화면마다 멱등 수단이 다르면 한쪽만 고쳐진다.
@@ -1014,9 +1043,16 @@ CREATE UNIQUE INDEX ON shipments (return_id) WHERE return_id IS NOT NULL;
 
 **`webhook_events`**
 
-`id` · `pg` · `event_id` text NOT NULL · `order_id` uuid NULL → `orders` ·
-`status` text NOT NULL DEFAULT '수신' `CHECK IN ('수신','처리완료','실패')` ·
-`payload` jsonb NOT NULL (마스킹 후) · `error` text NULL · 감사
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `pg` | text | NOT NULL |
+| `event_id` | text | NOT NULL |
+| `order_id` | uuid | NULL REFERENCES `orders(id)` ON DELETE RESTRICT |
+| `status` | text | NOT NULL DEFAULT '수신' `CHECK IN ('수신','처리완료','실패')` |
+| `payload` | jsonb | NOT NULL — 마스킹 후 |
+| `error` | text | NULL |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 ```sql
 CREATE UNIQUE INDEX ON webhook_events (pg, event_id);
