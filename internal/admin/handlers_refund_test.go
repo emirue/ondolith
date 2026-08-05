@@ -382,7 +382,10 @@ func deliveredAdminOrder(t *testing.T, d *Deps, pool *pgxpool.Pool) (*commerce.O
 //
 // 화면에 버튼이 보이든 말든 서버가 막는다 — 숨기는 것은 보안이 아니다.
 func TestAdminSettleIsRefusedBeforePickup(t *testing.T) {
-	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+	// order.refund 를 함께 준다 — 이 테스트가 보는 것은 권한이 아니라
+	// "수거 확인 없이 환불이 안 나간다" 이고, 권한이 먼저 막으면 그 규칙이
+	// 검증되지 않는다.
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
 		id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
 	order, returnNo := deliveredAdminOrder(t, d, pool)
@@ -432,8 +435,10 @@ func TestAdminSettleIsRefusedBeforePickup(t *testing.T) {
 // 환불 확정에만 재인증이 걸린다 (D15 5.3-1). 수거 확인·거부는 돈이 나가지
 // 않으므로 매번 비밀번호를 묻지 않는다 — 물으면 관리자가 저장하게 된다.
 func TestAdminReturnReauthOnlyGuardsTheMoneyStep(t *testing.T) {
-	caller := &fakeCaller{perms: map[string]bool{"order.return": true}, reauth: true,
-		id: "", email: "op@example.com"}
+	// 권한은 갖춘 상태로 둔다 — 이 테스트가 보는 것은 재인증이 **어느
+	// 단계에만** 걸리는가이고, 권한이 먼저 막으면 그 구분이 안 보인다.
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
+		reauth: true, id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
 	order, returnNo := deliveredAdminOrder(t, d, pool)
 
@@ -473,16 +478,19 @@ func TestAdminReturnReauthOnlyGuardsTheMoneyStep(t *testing.T) {
 
 // 반품 처리가 작업 로그에 남는다 (D15 7절).
 func TestAdminReturnActionsAreLogged(t *testing.T) {
-	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
 		id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
 	d.OpLog = content.NewStore(pool).OpLog()
 	order, returnNo := deliveredAdminOrder(t, d, pool)
 
 	// 거부도 로그에 남아야 한다 — 교환 재고 해제가 걸린 경로다.
-	_, rejectNo := deliveredAdminOrderFor(t, d, pool, order2Slug)
-	if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
-		map[string]string{"no": order.OrderNo},
+	//
+	// **그 반품 건이 속한 주문 경로로 보낸다.** 다른 주문 경로로 보내면
+	// 404 이고, 그것이 소속 대조가 작동한다는 뜻이다 (별도 테스트가 본다).
+	rejectOrder, rejectNo := deliveredAdminOrderFor(t, d, pool, order2Slug)
+	if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+rejectOrder.OrderNo+"/returns",
+		map[string]string{"no": rejectOrder.OrderNo},
 		url.Values{"return_no": {rejectNo}, "action": {"reject"},
 			"reason": {"확인 불가"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("거부 = HTTP %d (%q)", rec.Code, rec.Body.String())
@@ -715,5 +723,138 @@ func assertVariantStock(t *testing.T, pool *pgxpool.Pool, variantID string, want
 	}
 	if got != want {
 		t.Errorf("재고 %d, want %d", got, want)
+	}
+}
+
+// **환불 확정은 `order.refund` 를 요구한다** (D15 2.2: "A-507, A-511 (환불
+// 확정 단계만)").
+//
+// 화면 권한(order.return)만으로 통과시키면, 반품 접수·수거만 맡기려고
+// order.return 을 준 계정이 실제 환불까지 확정할 수 있다 — A-507 이
+// order.refund 로 게이팅되는 것과 어긋난다.
+func TestSettleNeedsRefundPermissionNotJustReturn(t *testing.T) {
+	// 물류·CS 담당자: 반품 접수·수거는 하되 돈은 못 만진다.
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+		id: "", email: "cs@example.com"}
+	d, pool := fixture(t, caller)
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+	ctx := context.Background()
+
+	// 수거 확인은 된다 — 돈이 나가지 않는다.
+	if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"pickup"},
+			"fault": {"판매자"}, "fee_policy": {"차감"}, "fee_amount": {"0"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	// 환불 확정은 막힌다.
+	rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"settle"}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("order.refund 없이 환불 확정 = HTTP %d, want 403 (%q)", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refunds`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("권한 없이 환불 %d건이 확정됐다", n)
+	}
+
+	// order.refund 를 주면 통과한다.
+	caller.perms["order.refund"] = true
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"settle"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("order.refund 로 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refunds`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("환불 %d건, want 1", n)
+	}
+}
+
+// 다른 주문의 반품 건은 관리자 화면에서도 조작할 수 없다.
+func TestAdminReturnActionIsScopedToTheOrderInThePath(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	mine, _ := paidAdminOrder(t, d, pool)
+	other, victimReturn := deliveredAdminOrderFor(t, d, pool, order2Slug)
+	_ = other
+	ctx := context.Background()
+
+	// 내 주문 경로 + 남의 반품번호.
+	rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+mine.OrderNo+"/returns",
+		map[string]string{"no": mine.OrderNo},
+		url.Values{"return_no": {victimReturn}, "action": {"pickup"},
+			"fault": {"판매자"}, "fee_policy": {"차감"}, "fee_amount": {"0"}})
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("남의 반품 수거 확인 = HTTP %d, want 404 (%q)", rec.Code, rec.Body.String())
+	}
+	var status string
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM returns WHERE return_no = $1`, victimReturn).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "반품접수" {
+		t.Errorf("남의 반품 상태가 %q 로 바뀌었다", status)
+	}
+}
+
+// 배송비를 숫자가 아닌 값으로 보내면 422 다. 예전에는 Atoi 실패를 0 으로
+// 삼켜서, 오타 하나가 조용히 "배송비 0" 으로 굳었다.
+func TestAdminNonNumericShippingFeeIs422(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+
+	for _, bad := range []string{"", "삼천원", "3,000"} {
+		rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+			map[string]string{"no": order.OrderNo},
+			url.Values{"return_no": {returnNo}, "action": {"pickup"},
+				"fault": {"구매자"}, "fee_policy": {"차감"}, "fee_amount": {bad}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("배송비 %q = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	var status string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status FROM returns WHERE return_no = $1`, returnNo).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "반품접수" {
+		t.Errorf("거부된 입력이 상태를 %q 로 옮겼다", status)
+	}
+}
+
+// 음수 배송비도 422 다 — 환불액을 부풀리는 값이고, 수거 확인은 재인증이
+// 걸리지 않는 단계다.
+func TestAdminNegativeShippingFeeIs422(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+
+	rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"pickup"},
+			"fault": {"구매자"}, "fee_policy": {"차감"}, "fee_amount": {"-5000"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("음수 배송비 = HTTP %d, want 422 (%q)", rec.Code, rec.Body.String())
+	}
+	var fee int
+	var status string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status, COALESCE(shipping_fee_amount, 0) FROM returns WHERE return_no = $1`,
+		returnNo).Scan(&status, &fee); err != nil {
+		t.Fatal(err)
+	}
+	if status != "반품접수" || fee != 0 {
+		t.Errorf("상태 %q · 배송비 %d — 거부된 값이 남았다", status, fee)
 	}
 }

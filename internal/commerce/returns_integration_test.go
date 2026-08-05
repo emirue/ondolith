@@ -3,6 +3,7 @@ package commerce
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestRefundNeedsPickupConfirmation(t *testing.T) {
 	}
 
 	// 수거 전이다. 환불이 거부된다.
-	if _, err := s.SettleReturn(ctx, ret.ReturnNo, "A-511", "k1"); !errors.Is(err, ErrPickupRequired) {
+	if _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1"); !errors.Is(err, ErrPickupRequired) {
 		t.Fatalf("수거 전 환불 = %v, want ErrPickupRequired", err)
 	}
 	// 돈도 수량도 움직이지 않았다.
@@ -57,10 +58,10 @@ func TestRefundNeedsPickupConfirmation(t *testing.T) {
 	}
 
 	// 수거를 확인하면 나간다.
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "차감", 3000, "A-511"); err != nil {
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "차감", 3000, "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, ret.ReturnNo, "A-511", "k2")
+	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k2")
 	if err != nil {
 		t.Fatalf("수거 확인 뒤 환불이 막혔다: %v", err)
 	}
@@ -85,11 +86,11 @@ func TestReturnRefundIsComputedFromSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	const fee = 3000
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "차감", fee, "A-511"); err != nil {
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "차감", fee, "A-511"); err != nil {
 		t.Fatal(err)
 	}
 
-	amount, err := s.SettleReturn(ctx, ret.ReturnNo, "A-511", "k1")
+	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,10 +131,10 @@ func TestSellerFaultMeansNoShippingFee(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 화면이 배송비를 실어 보내도 판매자 귀책이면 0 이 된다.
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "판매자", "차감", 3000, "A-511"); err != nil {
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "판매자", "차감", 3000, "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, ret.ReturnNo, "A-511", "k1")
+	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestRejectingReturnReleasesEverything(t *testing.T) {
 	// 재고가 예약됐다 (D14 「교환 재고」).
 	assertStock(t, pool, newVariant, 3)
 
-	if err := s.RejectReturn(ctx, ret.ReturnNo, "재고 확인 불가", "A-511"); err != nil {
+	if err := s.RejectReturn(ctx, orderNo, ret.ReturnNo, "재고 확인 불가", "A-511"); err != nil {
 		t.Fatal(err)
 	}
 	// 예약이 풀렸다. 풀지 않으면 재고가 조용히 잠긴다.
@@ -307,10 +308,10 @@ func TestReturnAndPartialRefundShareTheSameCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "판매자", "차감", 0, "A-511"); err != nil {
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "판매자", "차감", 0, "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SettleReturn(ctx, ret.ReturnNo, "A-511", "k2"); err != nil {
+	if _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,10 +381,10 @@ func TestReturnRefundUsesTheDiscountSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "판매자", "차감", 0, "A-511"); err != nil {
+	if err := s.ConfirmPickup(ctx, order.OrderNo, ret.ReturnNo, "판매자", "차감", 0, "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, ret.ReturnNo, "A-511", "k1")
+	amount, err := s.SettleReturn(ctx, order.OrderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,11 +447,11 @@ func TestOversizedShippingFeeIsRefusedAtPickup(t *testing.T) {
 	share := goods / 2 // 한 개 몫
 
 	// 몫보다 큰 배송비 — 거부된다.
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "차감", share+1, "A-511"); !errors.Is(err, ErrShippingFeeTooLarge) {
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "차감", share+1, "A-511"); !errors.Is(err, ErrShippingFeeTooLarge) {
 		t.Fatalf("몫 초과 배송비 = %v, want ErrShippingFeeTooLarge", err)
 	}
 	// 몫과 같아도 거부된다 — 0원 환불 행은 만들 수 없다.
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "차감", share, "A-511"); !errors.Is(err, ErrShippingFeeTooLarge) {
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "차감", share, "A-511"); !errors.Is(err, ErrShippingFeeTooLarge) {
 		t.Fatalf("몫과 같은 배송비 = %v, want ErrShippingFeeTooLarge", err)
 	}
 
@@ -462,7 +463,7 @@ func TestOversizedShippingFeeIsRefusedAtPickup(t *testing.T) {
 	if got.Status != StatusReturnOpen {
 		t.Fatalf("거부된 수거 확인이 상태를 %s 로 옮겼다", got.Status)
 	}
-	if err := s.RejectReturn(ctx, ret.ReturnNo, "배송비 재산정", "A-511"); err != nil {
+	if err := s.RejectReturn(ctx, orderNo, ret.ReturnNo, "배송비 재산정", "A-511"); err != nil {
 		t.Errorf("막다른 길이다 — 거부도 안 된다: %v", err)
 	}
 
@@ -475,10 +476,10 @@ func TestOversizedShippingFeeIsRefusedAtPickup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfirmPickup(ctx, ret2.ReturnNo, "구매자", "차감", share-1, "A-511"); err != nil {
+	if err := s.ConfirmPickup(ctx, orderNo, ret2.ReturnNo, "구매자", "차감", share-1, "A-511"); err != nil {
 		t.Fatalf("몫보다 작은 배송비가 막혔다: %v", err)
 	}
-	amount, err := s.SettleReturn(ctx, ret2.ReturnNo, "A-511", "k1")
+	amount, err := s.SettleReturn(ctx, orderNo, ret2.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatalf("정산이 막혔다: %v", err)
 	}
@@ -515,7 +516,188 @@ func TestExchangePickupIsNotBlockedByTheFeeCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 큰 배송비라도 교환 수거는 통과한다.
-	if err := s.ConfirmPickup(ctx, ret.ReturnNo, "구매자", "별도청구", 999999, "A-511"); err != nil {
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "별도청구", 999999, "A-511"); err != nil {
 		t.Errorf("교환 수거 확인이 배송비 검사에 막혔다: %v", err)
+	}
+}
+
+// **음수 배송비는 환불액을 부풀린다** (`amount -= feeAmount`).
+//
+// DB CHECK 도 막지만 거기서 나오는 것은 제약 위반이라 화면이 500 을 그린다.
+// 무엇보다 이 값은 **재인증이 걸리지 않는** 수거 확인 단계에서 심어진다 —
+// 돈이 움직이는 것은 정산뿐이라고 보고 재인증을 뺀 자리다.
+func TestNegativeShippingFeeIsRefused(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, goods := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "차감", -5000, "A-511"); !errors.Is(err, ErrPriceNegative) {
+		t.Fatalf("음수 배송비 = %v, want ErrPriceNegative", err)
+	}
+	// 스냅샷도 상태도 그대로다.
+	got, err := s.ReturnByNo(ctx, ret.ReturnNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusReturnOpen || got.FeeAmount != 0 {
+		t.Fatalf("상태 %s · 배송비 %d — 거부된 값이 남았다", got.Status, got.FeeAmount)
+	}
+
+	// 정상 값으로는 통과하고, 환불액이 부풀지 않는다.
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "차감", 0, "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if amount != goods/2 {
+		t.Errorf("환불액 %d, want %d", amount, goods/2)
+	}
+}
+
+// **다른 주문의 반품 건은 조작할 수 없다.**
+//
+// 폼의 return_no 를 그대로 조회 키로 쓰면, 다른 주문 화면에서 보낸 번호로
+// 엉뚱한 건을 확정하고 원래 주문으로 리다이렉트된다 — 무슨 일이 있었는지
+// 아무도 모른다. 소유 관계가 SQL 술어에 있다.
+func TestReturnActionsAreScopedToTheirOrder(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	mineNo, _ := deliveredOrder(t, s, pool, "mine", 2)
+	otherNo, _ := deliveredOrder(t, s, pool, "other", 2)
+
+	otherItems := itemsOf(t, s, otherNo)
+	victim, err := s.OpenReturn(ctx, otherNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: otherItems[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 내 주문번호 + 남의 반품번호.
+	if err := s.ConfirmPickup(ctx, mineNo, victim.ReturnNo, "구매자", "차감", 0, "A-511"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("남의 반품 수거 확인 = %v, want ErrNotFound", err)
+	}
+	if _, err := s.SettleReturn(ctx, mineNo, victim.ReturnNo, "A-511", "k1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("남의 반품 정산 = %v, want ErrNotFound", err)
+	}
+	if err := s.RejectReturn(ctx, mineNo, victim.ReturnNo, "x", "A-511"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("남의 반품 거부 = %v, want ErrNotFound", err)
+	}
+
+	// 피해 건은 그대로다.
+	got, err := s.ReturnByNo(ctx, victim.ReturnNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusReturnOpen {
+		t.Errorf("남의 반품 상태가 %s 로 바뀌었다", got.Status)
+	}
+	// 자기 주문으로는 된다 — 위 단언이 "무엇이든 막힌다" 를 본 것이 아니라는 것.
+	if err := s.ConfirmPickup(ctx, otherNo, victim.ReturnNo, "구매자", "차감", 0, "A-511"); err != nil {
+		t.Errorf("자기 주문의 반품이 막혔다: %v", err)
+	}
+}
+
+// **교환 차액은 품목마다 자기 조합의 차액으로 센다.**
+//
+// 첫 품목의 값을 전부에 쓰면 같은 상품의 서로 다른 옵션을 함께 교환할 때
+// 차액이 틀리고, 요청 순서를 바꾸는 것만으로 유리한 기준을 고를 수 있다.
+func TestExchangePriceDiffUsesEachLinesOwnVariant(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+
+	// 같은 상품의 두 조합: 차액 0 과 4000.
+	var productID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ('tee','티셔츠',10000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(label string, delta int) string {
+		var id string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+			VALUES ($1,$2,$3,10) RETURNING id`,
+			productID, `{"크기":"`+label+`"}`, delta).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	small, large, target := mk("S", 0), mk("L", 4000), mk("XL", 6000)
+
+	owner := CartOwner{GuestKey: "guest-exch-0123456"}
+	if err := s.AddToCart(ctx, owner, small, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddToCart(ctx, owner, large, 1); err != nil {
+		t.Fatal(err)
+	}
+	order, err := s.CreateOrder(ctx, owner, "", testForm(), Shipping{}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConfirmPayment(ctx, okGateway(), "toss",
+		order.OrderNo, "pk-exch", order.Total, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []Status{StatusPreparing, StatusShipping, StatusDelivered} {
+		if err := s.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	items := itemsOf(t, s, order.OrderNo)
+	if len(items) != 2 {
+		t.Fatalf("품목 %d개", len(items))
+	}
+	// XL(6000) 로 교환: S 는 +6000, L 은 +2000 → 합계 8000.
+	// 첫 품목 기준으로만 계산하면 순서에 따라 12000 또는 4000 이 나온다.
+	const want = 8000
+
+	for _, order2 := range [][]int{{0, 1}, {1, 0}} {
+		// 요청 순서를 바꿔도 결과가 같아야 한다 — 순서로 기준을 고를 수
+		// 없다는 것이 이 테스트의 요점이다.
+		for _, stmt := range []string{
+			`DELETE FROM return_items`,
+			`DELETE FROM returns`,
+			`UPDATE orders SET status = '배송완료' WHERE order_no = $1`,
+		} {
+			var args []any
+			if strings.Contains(stmt, "$1") {
+				args = []any{order.OrderNo}
+			}
+			if _, err := pool.Exec(ctx, stmt, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		lines := []RefundLine{
+			{OrderItemID: items[order2[0]].ID, Quantity: 1},
+			{OrderItemID: items[order2[1]].ID, Quantity: 1},
+		}
+		ret, err := s.OpenReturn(ctx, order.OrderNo, ReturnRequest{
+			Kind: KindExchange, NewVariantID: target, Lines: lines,
+		}, "P-512", time.Now())
+		if err != nil {
+			t.Fatalf("순서 %v: %v", order2, err)
+		}
+		if ret.PriceDiff != want {
+			t.Errorf("순서 %v: 차액 %d, want %d — 첫 품목 기준으로 셌다",
+				order2, ret.PriceDiff, want)
+		}
+		// 예약한 재고를 되돌려 다음 라운드를 깨끗하게 시작한다.
+		if err := s.RejectReturn(ctx, order.OrderNo, ret.ReturnNo, "정리", "A-511"); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

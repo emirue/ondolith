@@ -139,6 +139,11 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		id                     string
 		productID              string
 		quantity, settled, qty int
+		// oldDelta 는 **그 품목이 실제로 산 조합**의 차액이다. 한 주문에
+		// 같은 상품의 서로 다른 옵션이 각각 품목으로 있을 수 있고, 그때
+		// 첫 품목의 값을 전부에 쓰면 차액이 틀린다 — 요청 순서를 바꾸는
+		// 것만으로 유리한 기준을 고를 수 있게 된다.
+		oldDelta int
 	}
 	var lines []line
 	for _, l := range req.Lines {
@@ -148,9 +153,10 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		var got line
 		got.id, got.qty = l.OrderItemID, l.Quantity
 		err := tx.QueryRow(ctx, `
-			SELECT product_id, quantity, settled_quantity FROM order_items
-			WHERE id = $1 AND order_id = $2 FOR UPDATE`,
-			l.OrderItemID, orderID).Scan(&got.productID, &got.quantity, &got.settled)
+			SELECT oi.product_id, oi.quantity, oi.settled_quantity, v.price_delta
+			FROM order_items oi JOIN product_variants v ON v.id = oi.variant_id
+			WHERE oi.id = $1 AND oi.order_id = $2 FOR UPDATE OF oi`,
+			l.OrderItemID, orderID).Scan(&got.productID, &got.quantity, &got.settled, &got.oldDelta)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -187,15 +193,12 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		// 차액은 조합 차액의 수량 배다. 스냅샷 단가와 새 조합 단가의 차이를
 		// 쓰지 않는 이유: 기본가가 그 사이 바뀌었을 수 있고, 교환은 상품을
 		// 다시 사는 것이 아니라 조합만 바꾸는 것이다.
-		var oldDelta int
-		if err := tx.QueryRow(ctx, `
-			SELECT v.price_delta FROM order_items oi
-			JOIN product_variants v ON v.id = oi.variant_id
-			WHERE oi.id = $1`, lines[0].id).Scan(&oldDelta); err != nil {
-			return nil, err
-		}
+		//
+		// **품목마다 자기 조합의 차액을 쓴다.** 첫 품목의 값을 전부에 쓰면
+		// 같은 상품의 서로 다른 옵션을 함께 교환할 때 차액이 틀리고,
+		// 요청 순서를 바꾸는 것만으로 유리한 기준을 고를 수 있다.
 		for _, l := range lines {
-			priceDiff += (newDelta - oldDelta) * l.qty
+			priceDiff += (newDelta - l.oldDelta) * l.qty
 		}
 
 		// 재고 예약 (D14 「교환 재고」). 잡아 두지 않으면 수거하는 동안 그
@@ -312,11 +315,18 @@ func returnGross(ctx context.Context, tx pgx.Tx, returnID string) (int, []return
 //
 // 귀책이 판매자면 배송비는 0 이다 — 하자 상품의 반품비를 구매자가 물지 않는다
 // (DB CHECK 도 같은 것을 막는다).
-func (s *Store) ConfirmPickup(ctx context.Context, returnNo, fault, feePolicy string,
+func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault, feePolicy string,
 	feeAmount int, actor Actor) error {
 
 	if fault != "구매자" && fault != "판매자" {
 		return fmt.Errorf("commerce: 귀책은 구매자 또는 판매자입니다: %q", fault)
+	}
+	// **음수 배송비는 환불액을 부풀린다** (`amount -= feeAmount`). DB CHECK 도
+	// 막지만 거기서 나오는 것은 제약 위반이라 화면이 500 을 그리고, 무엇보다
+	// 이 값은 재인증이 걸리지 않는 수거 확인 단계에서 심어진다 — 돈이 움직이는
+	// 것은 정산뿐이라고 보고 재인증을 뺀 자리라, 여기서 걸러야 한다.
+	if feeAmount < 0 {
+		return fmt.Errorf("%w: 배송비 %d", ErrPriceNegative, feeAmount)
 	}
 	if fault == "판매자" {
 		// 화면이 무엇을 보냈든 0 으로 만든다. DB CHECK 가 잡기도 하지만
@@ -331,9 +341,14 @@ func (s *Store) ConfirmPickup(ctx context.Context, returnNo, fault, feePolicy st
 	defer tx.Rollback(ctx)
 
 	var id, kind, status, orderID string
+	// **그 주문의 반품 건인지 SQL 술어로 대조한다.** 폼의 return_no 를 그대로
+	// 조회 키로 쓰면, 다른 주문 화면에서 보낸 번호로 엉뚱한 건을 조작하고
+	// 원래 주문으로 리다이렉트된다 — 무슨 일이 있었는지 아무도 모른다.
 	err = tx.QueryRow(ctx, `
 		SELECT r.id, r.kind, r.status, r.order_id FROM returns r
-		WHERE r.return_no = $1 FOR UPDATE`, returnNo).Scan(&id, &kind, &status, &orderID)
+		JOIN orders o ON o.id = r.order_id
+		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`,
+		returnNo, orderNo).Scan(&id, &kind, &status, &orderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -390,7 +405,7 @@ func (s *Store) ConfirmPickup(ctx context.Context, returnNo, fault, feePolicy st
 //
 // 환불액은 **스냅샷에서 서버가 계산**한다 (FR-617): 품목별 할인후 금액의 몫에서
 // 수거 시점에 찍은 배송비 스냅샷을 뺀다. 요청 금액은 받지 않는다.
-func (s *Store) SettleReturn(ctx context.Context, returnNo string, actor Actor,
+func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, actor Actor,
 	requestKey string) (amount int, err error) {
 
 	if requestKey == "" {
@@ -406,8 +421,9 @@ func (s *Store) SettleReturn(ctx context.Context, returnNo string, actor Actor,
 	var id, kind, status, orderID string
 	var feeAmount int
 	err = tx.QueryRow(ctx, `
-		SELECT id, kind, status, order_id, COALESCE(shipping_fee_amount, 0)
-		FROM returns WHERE return_no = $1 FOR UPDATE`, returnNo).
+		SELECT r.id, r.kind, r.status, r.order_id, COALESCE(r.shipping_fee_amount, 0)
+		FROM returns r JOIN orders o ON o.id = r.order_id
+		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`, returnNo, orderNo).
 		Scan(&id, &kind, &status, &orderID, &feeAmount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotFound
@@ -528,7 +544,7 @@ func (s *Store) SettleReturn(ctx context.Context, returnNo string, actor Actor,
 //
 // 교환이면 예약한 재고를 **반드시** 푼다 (D14 「교환 재고」). 풀지 않으면 재고가
 // 조용히 잠기고, 잠긴 재고는 오류를 내지 않으므로 사람이 숫자를 보고서야 안다.
-func (s *Store) RejectReturn(ctx context.Context, returnNo, reason string, actor Actor) error {
+func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason string, actor Actor) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -537,8 +553,9 @@ func (s *Store) RejectReturn(ctx context.Context, returnNo, reason string, actor
 
 	var id, kind, status, orderID, newVariant string
 	err = tx.QueryRow(ctx, `
-		SELECT id, kind, status, order_id, COALESCE(new_variant_id::text, '')
-		FROM returns WHERE return_no = $1 FOR UPDATE`, returnNo).
+		SELECT r.id, r.kind, r.status, r.order_id, COALESCE(r.new_variant_id::text, '')
+		FROM returns r JOIN orders o ON o.id = r.order_id
+		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`, returnNo, orderNo).
 		Scan(&id, &kind, &status, &orderID, &newVariant)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound

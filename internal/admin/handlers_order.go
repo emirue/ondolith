@@ -411,18 +411,33 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "pickup":
-		fee, _ := strconv.Atoi(r.PostFormValue("fee_amount"))
-		err = d.Commerce.ConfirmPickup(r.Context(), returnNo,
+		fee, ferr := strconv.Atoi(r.PostFormValue("fee_amount"))
+		if ferr != nil {
+			d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
+				"배송비를 숫자로 입력하세요.")
+			return
+		}
+		err = d.Commerce.ConfirmPickup(r.Context(), order.OrderNo, returnNo,
 			r.PostFormValue("fault"), r.PostFormValue("fee_policy"), fee, "A-511")
 		if err == nil {
 			d.log(r, c, "return.pickup", "return", returnNo, "수거 확인")
 		}
 	case "reject":
-		err = d.Commerce.RejectReturn(r.Context(), returnNo, r.PostFormValue("reason"), "A-511")
+		err = d.Commerce.RejectReturn(r.Context(), order.OrderNo, returnNo,
+			r.PostFormValue("reason"), "A-511")
 		if err == nil {
 			d.log(r, c, "return.reject", "return", returnNo, "반품·교환 거부")
 		}
 	case "settle":
+		// **환불 확정 단계는 `order.refund` 다** (D15 2.2: "A-507, A-511
+		// (환불 확정 단계만)"). 화면 권한(order.return)만으로 통과시키면,
+		// 반품 접수·수거만 맡기려고 order.return 을 준 계정이 실제 환불까지
+		// 확정할 수 있다 — A-507 이 order.refund 로 게이팅되는 것과 어긋난다.
+		if !c.Can("order.refund") {
+			d.renderReturns(w, r, c, order, http.StatusForbidden,
+				"환불 확정 권한이 없습니다.")
+			return
+		}
 		// **돈이 나간다** — 여기만 재인증을 요구한다 (D15 5.3-1).
 		if c.NeedsReauth() {
 			d.renderReturns(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
@@ -432,7 +447,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		key, err = commerce.NewRequestKey()
 		if err == nil {
 			var amount int
-			amount, err = d.Commerce.SettleReturn(r.Context(), returnNo, "A-511", key)
+			amount, err = d.Commerce.SettleReturn(r.Context(), order.OrderNo, returnNo, "A-511", key)
 			if err == nil {
 				d.log(r, c, "return.settle", "return", returnNo,
 					"반품 환불 "+itoa(amount)+"원 확정")
