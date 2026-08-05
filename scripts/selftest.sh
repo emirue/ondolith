@@ -229,6 +229,19 @@ inject_new "D17 이 약속한 템플릿이 폴백 테마에 없음" internal/the
 	'폴백 테마에 없다: internal/theme/builtin/auth/verify.html'
 cp "$TMP/verify.html" "$REPO/internal/theme/builtin/auth/verify.html"
 
+# 주문 상태머신 (FR-604): D14 5절 다이어그램과 Go 표가 어긋나면, 문서에만 있는
+# 전이는 관리자가 못 하는 조작이고 코드에만 있는 전이는 아무도 합의하지 않은
+# 조작이다. 양쪽 방향을 다 주입한다.
+inject "다이어그램에 있는 전이가 코드에 없음" internal/commerce/state.go \
+	'perl -ni -e "print unless /재배송 도착/" internal/commerce/state.go' \
+	'internal/commerce/state.go 에 없는 전이: 교환발송 배송완료'
+inject "코드에만 있는 전이" internal/commerce/state.go \
+	'perl -pi -e "s/^\tStatusReturnOpen: \{$/\tStatusReturnOpen: {\n\t\tStatusRefunded: {\"A-511\"},/" internal/commerce/state.go' \
+	'다이어그램에 없는 전이: 반품접수 환불'
+inject "5절 다이어그램이 사라짐" docs/14-screen-flows.md \
+	'perl -pi -e "s/^## 5\. 주문 상태머신 \(FR-604\)/## 5. 주문 상태/" docs/14-screen-flows.md' \
+	'전이를 하나도 읽지 못했다'
+
 # Module gating (FR-710): a plain site must not register commerce routes, which
 # only holds if D11 actually declares the split.
 inject "모듈 구성 절이 사라짐" docs/11-screens.md \

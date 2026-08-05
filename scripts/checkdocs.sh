@@ -1036,6 +1036,49 @@ else
 	done_ "$INV 화면 $(wc -l </tmp/cd_inv_doc | tr -d ' ') 개가 $SCR 과 일치"
 fi
 
+# --- 19f. internal/commerce/state.go matches D14's order state diagram ------
+# D14 5절 opens by naming the commonest mistake: a dropdown listing every status
+# with no server check. The defence is that the Go table IS the diagram — so the
+# two are compared rather than hand-copied (.ai/MISTAKES.md M9). An arrow the
+# document adds and the code misses is a transition an operator cannot make; one
+# the code has and the document does not is a transition nobody agreed to.
+begin
+SM=internal/commerce/state.go
+FLOW=docs/14-screen-flows.md
+if [ ! -f "$SM" ] || [ ! -f "$FLOW" ]; then
+	err "상태머신 또는 흐름 문서가 없다: $SM / $FLOW"
+else
+	# The mermaid arrows, minus the [*] endpoints — those are "이 상태가
+	# 최종이다" markers and D14 says they have no screen.
+	# Scoped to 5절: D14 holds several diagrams and the others use arrows of the
+	# same shape — an unscoped read pulled a login-flow edge in as a transition.
+	perl -nle 'if (/^## 5\. 주문 상태머신/) { $in = 1; next } if ($in && /^## /) { $in = 0 }
+		next unless $in;
+		print "$1>$2" if /^\s*(\S+)\s*-->\s*(\S+):/ && $1 ne "[*]" && $2 ne "[*]"' \
+		"$FLOW" | sort -u >/tmp/cd_sm_doc
+	# The Go map: `StatusX: {` opens a source state, `StatusY: {...}` inside it
+	# is one arrow. Both sides are printed as the Korean labels the constants
+	# hold, so the comparison does not depend on the Go identifier names.
+	perl -nle '
+		if (/^\tStatus(\w+)\s+Status = "([^"]+)"/) { $label{$1} = $2; next }
+		if (/^\tStatus(\w+): \{$/)  { $from = $label{$1} // "?$1"; next }
+		if (/^\t\},?$/)              { $from = undef; next }
+		if ($from && /^\t\tStatus(\w+):\s*\{/) {
+			print "$from>" . ($label{$1} // "?$1");
+		}' "$SM" | sort -u >/tmp/cd_sm_go
+
+	if [ ! -s /tmp/cd_sm_doc ] || [ ! -s /tmp/cd_sm_go ]; then
+		err "$FLOW 또는 $SM 에서 전이를 하나도 읽지 못했다 (검사가 헛돌았다)"
+	fi
+	for l in $(comm -23 /tmp/cd_sm_go /tmp/cd_sm_doc); do
+		err "$SM 에 있는데 $FLOW 다이어그램에 없는 전이: $(echo "$l" | tr '>' ' ')"
+	done
+	for l in $(comm -13 /tmp/cd_sm_go /tmp/cd_sm_doc); do
+		err "$FLOW 다이어그램에 있는데 $SM 에 없는 전이: $(echo "$l" | tr '>' ' ')"
+	done
+	done_ "주문 상태 전이 $(wc -l </tmp/cd_sm_doc | tr -d ' ') 건이 $FLOW 와 $SM 에서 일치 (FR-604)"
+fi
+
 # --- 20. D80's planning-completeness table counts match the documents -------
 # That table is what anyone asking "얼마나 됐나" reads first, and every number in
 # it is copied by hand from another document. The 2026-08-02 version was stale
