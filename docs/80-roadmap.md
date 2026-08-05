@@ -129,12 +129,19 @@
 | sitemap.xml, 메타·OG 태그 | FR-510, FR-511 |
 | 업로드 4중 검증 | NFR-206 |
 
-**완료 기준**
+**완료 기준** — PostgreSQL 18로 전 항목 실측 검증 (2026-08-05)
 
-- 관리자에서 게시판을 만들고 커스텀 필드를 추가하면 **코드 수정 없이** 폼과 목록에 나타난다
-- 첨부 업로드가 [D60](60-security.md)의 4중 검증을 전부 지난다
-- 목록 1페이지 조회에 N+1 쿼리가 없다 (NFR-105)
-- `sitemap.xml`에 발행된 것만 들어간다
+- [x] 관리자에서 게시판을 만들고 커스텀 필드를 추가하면 **코드 수정 없이** 폼과 목록에 나타난다
+      (`TestBoardCreationToPublicFormIsScreensOnly` — A-305 → A-306 → P-205 를 HTTP 로 걷는다)
+- [x] 첨부 업로드가 [D60](60-security.md)의 4중 검증을 전부 지난다
+      (`internal/content/upload_test.go` — 네 검사에 각각 독립 테스트. **확장자를 위조하고
+      매직바이트가 다른 파일**이 거부되는 케이스 포함)
+- [x] 목록 1페이지 조회에 N+1 쿼리가 없다 (NFR-105)
+      (`TestListIsAConstantNumberOfQueries` — 쿼리 수를 세는 트레이서로 1회임을 단언)
+- [x] `sitemap.xml`에 발행된 것만 들어간다
+      (`TestSitemapContainsOnlyWhatAnonymousCanOpen` — 초안·비밀글·숨긴 글·비공개 게시판이
+      없음을 단언. 사이트맵은 **익명 권한으로 질의**하므로 요청자가 누구든 내용이 같다)
+- [x] 위 항목이 `make test-integration`으로 저장소에 남아 재현 가능하다
 
 **선택:** FR-509 정렬·필터, FR-512 비밀글, FR-307 테마 업로드, FR-707 작업 로그
 (회원 레벨은 FR-206 폐기 후 **얹지 않기로 결론** — [D15](15-access-control.md) 7-1절)
