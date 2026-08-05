@@ -1,0 +1,58 @@
+{{define "content"}}
+<h1>반품·교환 처리</h1>
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+{{range .Returns}}
+<section class="return">
+  <h2>{{.ReturnNo}} · {{.Kind}} · {{.Status}}</h2>
+  <ul>{{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}</ul>
+  {{with .Reason}}<p>사유: {{.}}</p>{{end}}
+  {{if .Fault}}<p>귀책 {{.Fault}} · 배송비 {{.FeeAmount}} ({{.FeePolicy}})</p>{{end}}
+
+  {{/* 수거 확인이 배송비 스냅샷을 찍는다. 판매자 귀책이면 서버가 0 으로
+       만든다 — 하자 상품의 반품비를 구매자가 물지 않는다. */}}
+  <form method="post" class="form">
+    <input type="hidden" name="return_no" value="{{.ReturnNo}}">
+    <input type="hidden" name="action" value="pickup">
+    <label>귀책
+      <select name="fault">
+        <option value="구매자">구매자</option>
+        <option value="판매자">판매자</option>
+      </select>
+    </label>
+    <label>배송비 정책
+      <select name="fee_policy">
+        <option value="차감">차감</option>
+        <option value="별도청구">별도청구</option>
+      </select>
+    </label>
+    <label>배송비 <input name="fee_amount" type="number" min="0" value="0"></label>
+    <button type="submit">수거 확인</button>
+  </form>
+
+  {{/* **환불 확정에만 재인증이 걸린다** (D15 5.3-1) — 돈이 나가는 것은
+       이 단계뿐이다. 수거 확인 전에는 서버가 거부한다 (D14 「수거 우선」). */}}
+  <form method="post" class="form">
+    <input type="hidden" name="return_no" value="{{.ReturnNo}}">
+    <input type="hidden" name="action" value="settle">
+    {{if $.Data.NeedsReauth}}
+    <label>비밀번호 확인
+      <input name="password" type="password" required autocomplete="current-password">
+    </label>
+    {{end}}
+    <button type="submit">환불 확정</button>
+  </form>
+
+  <form method="post" class="form">
+    <input type="hidden" name="return_no" value="{{.ReturnNo}}">
+    <input type="hidden" name="action" value="reject">
+    <label>거부 사유 <input name="reason" maxlength="500"></label>
+    <button type="submit">거부</button>
+  </form>
+</section>
+{{else}}
+<p>접수된 반품·교환이 없습니다.</p>
+{{end}}
+{{end}}
+{{end}}

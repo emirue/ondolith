@@ -303,6 +303,18 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.orderReceipt})
 		r.Add(Route{Screen: "P-510", Method: "POST", Pattern: "/orders/{orderNo}/confirm", Class: SC3,
 			Handler: sh.orderConfirm})
+		// 반품·교환. 경로가 종류를 정한다 — 폼이 hidden 으로 실으면 반품 URL
+		// 로 교환을 접수하는 요청이 성립한다. 읽기 라우트는 SC-4 다 (D15 4.4).
+		r.Add(Route{Screen: "P-511", Method: "GET", Pattern: "/orders/{orderNo}/return", Class: SC4,
+			Handler: sh.returnForm})
+		r.Add(Route{Screen: "P-511", Method: "POST", Pattern: "/orders/{orderNo}/return", Class: SC6,
+			Handler: sh.returnCreate})
+		r.Add(Route{Screen: "P-512", Method: "GET", Pattern: "/orders/{orderNo}/exchange", Class: SC4,
+			Handler: sh.returnFormExchange})
+		r.Add(Route{Screen: "P-512", Method: "POST", Pattern: "/orders/{orderNo}/exchange", Class: SC6,
+			Handler: sh.returnCreateExchange})
+		r.Add(Route{Screen: "P-513", Method: "GET", Pattern: "/orders/{orderNo}/returns", Class: SC3,
+			Handler: sh.returnList})
 
 		// ---- 관리자 커머스 (A-5xx) -----------------------------------------
 		r.Add(Route{Screen: "A-501", Method: "GET", Pattern: "/admin/products", Class: SC4,
@@ -326,6 +338,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "order.refund", Handler: ad.RefundForm})
 		r.Add(Route{Screen: "A-507", Method: "POST", Pattern: "/admin/orders/{no}/refund", Class: SC6,
 			Permission: "order.refund", Handler: ad.RefundSave})
+		r.Add(Route{Screen: "A-511", Method: "GET", Pattern: "/admin/orders/{no}/returns", Class: SC4,
+			Permission: "order.return", Handler: ad.ReturnList})
+		r.Add(Route{Screen: "A-511", Method: "POST", Pattern: "/admin/orders/{no}/returns", Class: SC6,
+			Permission: "order.return", Handler: ad.ReturnAction})
 	}
 
 	return r

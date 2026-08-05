@@ -54,3 +54,9 @@ func newRandomKey() (string, error) {
 // 서버가 만든다. 폼에서 받으면 같은 키를 두 번 보내 접수를 막거나, 매번 다른
 // 키를 보내 이중 접수를 만들 수 있다 — 멱등 키의 목적이 뒤집힌다.
 func NewRequestKey() (string, error) { return newRandomKey() }
+
+// NewReturnNo is the same shape as an order number, with an R prefix.
+//
+// 순번이 아닌 이유도 같다 (SC-3 3항): A-511 목록과 P-513 이 이 번호를 쓰고,
+// 순번이면 하나로 남의 반품 건을 훑을 수 있다.
+func NewReturnNo(now time.Time) string { return "R" + NewOrderNo(now) }

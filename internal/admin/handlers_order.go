@@ -349,3 +349,116 @@ func readAdminRefundLines(r *http.Request) []commerce.RefundLine {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// ReturnList is A-511 GET — 반품·교환 처리.
+func (d *Deps) ReturnList(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "order.return")
+	if !ok {
+		return
+	}
+	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
+	if errors.Is(err, commerce.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.renderReturns(w, r, c, order, http.StatusOK, "")
+}
+
+func (d *Deps) renderReturns(w http.ResponseWriter, r *http.Request, c Caller,
+	order *commerce.OrderDetail, code int, msg string) {
+
+	returns, err := d.Commerce.Returns(r.Context(), order.ID)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/returns.html", code, map[string]any{
+		"Order": order, "Returns": returns,
+		// 돈이 나가는 단계(환불 확정)에만 재인증이 걸린다 (D15 5.3-1).
+		"NeedsReauth": c.NeedsReauth(),
+		"Error":       msg,
+	})
+}
+
+// ReturnAction is A-511 POST — 수거 확인 · 환불 확정 · 거부.
+//
+// 세 동작이 한 핸들러인 이유: 셋 다 같은 반품 건을 옮기고, 나누면 소유권과
+// 재인증 검사가 세 벌이 되어 한 벌만 고쳐지는 일이 생긴다.
+func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "order.return")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
+	if errors.Is(err, commerce.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	returnNo := r.PostFormValue("return_no")
+	action := r.PostFormValue("action")
+
+	switch action {
+	case "pickup":
+		fee, _ := strconv.Atoi(r.PostFormValue("fee_amount"))
+		err = d.Commerce.ConfirmPickup(r.Context(), returnNo,
+			r.PostFormValue("fault"), r.PostFormValue("fee_policy"), fee, "A-511")
+		if err == nil {
+			d.log(r, c, "return.pickup", "return", returnNo, "수거 확인")
+		}
+	case "reject":
+		err = d.Commerce.RejectReturn(r.Context(), returnNo, r.PostFormValue("reason"), "A-511")
+		if err == nil {
+			d.log(r, c, "return.reject", "return", returnNo, "반품·교환 거부")
+		}
+	case "settle":
+		// **돈이 나간다** — 여기만 재인증을 요구한다 (D15 5.3-1).
+		if c.NeedsReauth() {
+			d.renderReturns(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+			return
+		}
+		var key string
+		key, err = commerce.NewRequestKey()
+		if err == nil {
+			var amount int
+			amount, err = d.Commerce.SettleReturn(r.Context(), returnNo, "A-511", key)
+			if err == nil {
+				d.log(r, c, "return.settle", "return", returnNo,
+					"반품 환불 "+itoa(amount)+"원 확정")
+			}
+		}
+	default:
+		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity, "알 수 없는 동작입니다.")
+		return
+	}
+
+	switch {
+	case err == nil:
+		http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/returns", http.StatusSeeOther)
+	case errors.Is(err, commerce.ErrNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, commerce.ErrPickupRequired):
+		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
+			"수거를 확인해야 환불할 수 있습니다.")
+	case errors.Is(err, commerce.ErrTransitionNotAllowed), errors.Is(err, commerce.ErrActorNotAllowed),
+		errors.Is(err, commerce.ErrReturnKind):
+		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
+			"지금은 할 수 없는 처리입니다.")
+	case errors.Is(err, commerce.ErrRefundExceeds), errors.Is(err, commerce.ErrRefundQuantity):
+		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
+			"환불 가능 금액 또는 수량을 넘었습니다.")
+	default:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	}
+}

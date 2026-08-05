@@ -355,3 +355,179 @@ func TestAdminRefundIsRecordedInTheOperationLog(t *testing.T) {
 		t.Errorf("요약에 금액이 없다: %q", summary)
 	}
 }
+
+// deliveredAdminOrder walks a paid order to 배송완료 and opens a return.
+func deliveredAdminOrder(t *testing.T, d *Deps, pool *pgxpool.Pool) (*commerce.OrderDetail, string) {
+	t.Helper()
+	ctx := context.Background()
+	order, _ := paidAdminOrder(t, d, pool)
+	for _, to := range []commerce.Status{
+		commerce.StatusPreparing, commerce.StatusShipping, commerce.StatusDelivered,
+	} {
+		if err := d.Commerce.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ret, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
+		Kind:  commerce.KindReturn,
+		Lines: []commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return order, ret.ReturnNo
+}
+
+// **수거 확인 전 환불 버튼이 서버에서 거부된다** (W3-31 기준, D14 「수거 우선」).
+//
+// 화면에 버튼이 보이든 말든 서버가 막는다 — 숨기는 것은 보안이 아니다.
+func TestAdminSettleIsRefusedBeforePickup(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+	ctx := context.Background()
+
+	rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"settle"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("수거 전 환불 = HTTP %d, want 422", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "admin/returns.html") {
+		t.Errorf("폼을 다시 그리지 않았다: %q", rec.Body.String())
+	}
+	// 돈이 움직이지 않았다.
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refunds`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("수거 전인데 환불 %d건이 생겼다", n)
+	}
+
+	// 수거를 확인하면 통과한다 — 위 단언이 "무엇이든 막힌다" 를 본 것이
+	// 아니라는 것.
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"pickup"},
+			"fault": {"판매자"}, "fee_policy": {"차감"}, "fee_amount": {"0"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"settle"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 뒤 환불 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refunds`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("환불 %d건, want 1", n)
+	}
+}
+
+// 환불 확정에만 재인증이 걸린다 (D15 5.3-1). 수거 확인·거부는 돈이 나가지
+// 않으므로 매번 비밀번호를 묻지 않는다 — 물으면 관리자가 저장하게 된다.
+func TestAdminReturnReauthOnlyGuardsTheMoneyStep(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true}, reauth: true,
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+
+	// 수거 확인은 재인증 없이 된다.
+	rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"pickup"},
+			"fault": {"판매자"}, "fee_policy": {"차감"}, "fee_amount": {"0"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인이 재인증에 막혔다: HTTP %d", rec.Code)
+	}
+
+	// 환불 확정은 막힌다.
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"settle"}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("환불 확정 = HTTP %d, want 403", rec.Code)
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM refunds`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("재인증 없이 환불 %d건이 확정됐다", n)
+	}
+
+	// 재인증을 마치면 통과한다.
+	caller.reauth = false
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"settle"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+}
+
+// 반품 처리가 작업 로그에 남는다 (D15 7절).
+func TestAdminReturnActionsAreLogged(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+
+	for _, form := range []url.Values{
+		{"return_no": {returnNo}, "action": {"pickup"}, "fault": {"판매자"},
+			"fee_policy": {"차감"}, "fee_amount": {"0"}},
+		{"return_no": {returnNo}, "action": {"settle"}},
+	} {
+		if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+			map[string]string{"no": order.OrderNo}, form); rec.Code != http.StatusSeeOther {
+			t.Fatalf("%v = HTTP %d (%q)", form["action"], rec.Code, rec.Body.String())
+		}
+	}
+
+	rows, err := pool.Query(context.Background(),
+		`SELECT action FROM operation_logs ORDER BY created_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var actions []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, a)
+	}
+	want := map[string]bool{"return.pickup": false, "return.settle": false}
+	for _, a := range actions {
+		if _, ok := want[a]; ok {
+			want[a] = true
+		}
+	}
+	for a, seen := range want {
+		if !seen {
+			t.Errorf("작업 로그에 %s 가 없다 (기록된 것: %v)", a, actions)
+		}
+	}
+}
+
+// A-511 은 order.return 을 요구한다.
+func TestAdminReturnNeedsThePermission(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, id: "u1"}
+	d, pool := fixture(t, caller)
+	order, _ := paidAdminOrder(t, d, pool)
+
+	for _, h := range []http.HandlerFunc{d.ReturnList, d.ReturnAction} {
+		rec := postAdmin(t, h, "/admin/orders/"+order.OrderNo+"/returns",
+			map[string]string{"no": order.OrderNo}, url.Values{})
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("order.return 없이 HTTP %d, want 403", rec.Code)
+		}
+	}
+}

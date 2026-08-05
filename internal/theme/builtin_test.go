@@ -213,6 +213,25 @@ func payloadFor(name string) any {
 				Items: []orderItemLike{{ProductName: "티셔츠", OptionLabel: "크기: L",
 					UnitPrice: 13000, Quantity: 2, LineAmount: 26000}}},
 		}
+	case "order/return-form.html":
+		return map[string]any{
+			"Kind": "교환",
+			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "배송완료",
+				Items: []orderItemLike{{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L",
+					UnitPrice: 13000, Quantity: 2, LineAmount: 26000, Settled: 1}}},
+			"Variants": []variantLike{{ID: "v2",
+				OptionValues: map[string]string{"크기": "M"}, PriceDelta: 1000, Stock: 3}},
+			"Error": "이미 처리 중인 요청이 있습니다.",
+		}
+	case "order/returns.html":
+		return map[string]any{
+			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "반품수거"},
+			"Returns": []returnLike{{ReturnNo: "R20260805-ABCDEFGHJK", Kind: "반품",
+				Status: "반품수거", Reason: "단순 변심", Fault: "구매자",
+				FeePolicy: "차감", FeeAmount: 3000,
+				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
+				Items:     []returnItemLike{{ProductName: "티셔츠", OptionLabel: "크기: L", Quantity: 1}}}},
+		}
 	case "order/guest-form.html":
 		return map[string]any{"Error": "주문 정보를 찾을 수 없습니다."}
 	case "shop/fail.html":
@@ -462,4 +481,19 @@ type refundLike struct {
 	Status, Requester, Reason string
 	Amount                    int
 	CreatedAt                 time.Time
+}
+
+type returnItemLike struct {
+	ProductName, OptionLabel string
+	Quantity                 int
+	IsOpen                   bool
+}
+
+type returnLike struct {
+	ReturnNo, Kind, Status string
+	Reason, RejectReason   string
+	Fault, FeePolicy       string
+	FeeAmount, PriceDiff   int
+	CreatedAt              time.Time
+	Items                  []returnItemLike
 }
