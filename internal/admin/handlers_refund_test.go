@@ -949,3 +949,108 @@ func TestAdminCanCompleteAnExchange(t *testing.T) {
 			status, commerce.StatusExchangeShipped)
 	}
 }
+
+// **A-512 는 구매확정 기간이 반품 기간보다 길 것을 요구한다** (D19 A-512).
+//
+// 같거나 짧으면 구매확정이 먼저 닫혀서, 반품 기간이 남아 있는데 반품을 걸 수
+// 없는 주문이 생긴다 — 상태머신은 `배송완료` 에서만 반품을 받는다 (FR-604).
+func TestPolicyRejectsConfirmWindowShorterThanReturnWindow(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+
+	for _, tc := range []struct{ ret, confirm string }{{"7", "7"}, {"7", "6"}} {
+		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
+			"order.return_days": {tc.ret}, "order.confirm_days": {tc.confirm},
+			"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"0"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("반품 %s / 확정 %s = HTTP %d, want 422", tc.ret, tc.confirm, rec.Code)
+		}
+	}
+	// 아무것도 저장되지 않았다.
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM settings WHERE key LIKE 'order.%'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("거부된 저장이 %d행 남았다", n)
+	}
+
+	// 길면 저장된다 — 위 단언이 "무엇이든 막힌다" 를 본 것이 아니라는 것.
+	rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
+		"order.return_days": {"7"}, "order.confirm_days": {"8"},
+		"order.return_fee_policy": {"별도청구"}, "order.return_fee_amount": {"3000"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("정상 저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	kv, err := d.Content.Settings(context.Background(),
+		"order.return_days", "order.confirm_days",
+		"order.return_fee_policy", "order.return_fee_amount")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]string{
+		"order.return_days": "7", "order.confirm_days": "8",
+		"order.return_fee_policy": "별도청구", "order.return_fee_amount": "3000",
+	} {
+		if kv[k] != want {
+			t.Errorf("%s = %q, want %q", k, kv[k], want)
+		}
+	}
+}
+
+// 배송비 부담 방식과 금액도 A-512 가 막는다. 여기서 새면 A-511 이 500 을 낸다.
+func TestPolicyRejectsBadShippingFeeValues(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "u1", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+
+	for _, tc := range []struct{ policy, amount string }{
+		{"반반", "0"}, {"차감", "-1"}, {"차감", "삼천원"}, {"", "0"},
+	} {
+		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
+			"order.return_days": {"7"}, "order.confirm_days": {"8"},
+			"order.return_fee_policy": {tc.policy}, "order.return_fee_amount": {tc.amount}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("방식 %q / 금액 %q = HTTP %d, want 422", tc.policy, tc.amount, rec.Code)
+		}
+	}
+}
+
+// **정책을 바꿔도 이미 접수된 반품의 환불액은 달라지지 않는다** (D19 A-512).
+// 수거 확인 시점에 `returns` 로 복사되기 때문이다 — 참조로 뒀다면 정책 변경이
+// 곧 과거 환불액 변경이다.
+func TestPolicyChangeDoesNotApplyRetroactively(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true,
+		"order.return": true, "order.refund": true}, id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+
+	setFeeSetting(t, pool, "차감", 1000)
+	if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"pickup"}, "fault": {"구매자"}},
+	); rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	// 정책을 바꾼다.
+	if rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
+		"order.return_days": {"7"}, "order.confirm_days": {"8"},
+		"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"9000"}},
+	); rec.Code != http.StatusSeeOther {
+		t.Fatalf("정책 저장 = HTTP %d", rec.Code)
+	}
+
+	// 이미 찍힌 스냅샷은 그대로다.
+	var fee int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COALESCE(shipping_fee_amount,0) FROM returns WHERE return_no = $1`,
+		returnNo).Scan(&fee); err != nil {
+		t.Fatal(err)
+	}
+	if fee != 1000 {
+		t.Errorf("스냅샷 배송비 %d, want 1000 — 정책 변경이 소급됐다", fee)
+	}
+}

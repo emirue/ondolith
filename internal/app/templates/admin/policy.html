@@ -1,0 +1,40 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* **소급하지 않는다.** 이미 접수된 반품 건의 환불액은 달라지지 않는다 —
+       부담 방식·금액은 A-511 의 수거 확인 시점에 returns 로 복사된다. */}}
+  <form method="post" action="/admin/commerce/policy">
+    {{with .Policy}}
+    <label class="adm-field">
+      <span>반품·교환 요청 가능 기간 (일)</span>
+      <input type="number" name="order.return_days" min="1" max="365"
+             value="{{index . "order.return_days"}}" required>
+    </label>
+    <label class="adm-field">
+      <span>구매확정 자동 전환 기간 (일) — 반품 기간보다 길어야 합니다</span>
+      <input type="number" name="order.confirm_days" min="1"
+             value="{{index . "order.confirm_days"}}" required>
+    </label>
+    <label class="adm-field">
+      <span>반품 배송비 부담 방식</span>
+      <select name="order.return_fee_policy">
+        <option value="차감" {{if eq (index . "order.return_fee_policy") "차감"}}selected{{end}}>차감 (환불액에서 뺍니다)</option>
+        <option value="별도청구" {{if eq (index . "order.return_fee_policy") "별도청구"}}selected{{end}}>별도청구 (환불액을 건드리지 않습니다)</option>
+      </select>
+    </label>
+    <label class="adm-field">
+      <span>반품 배송비 (원)</span>
+      <input type="number" name="order.return_fee_amount" min="0"
+             value="{{index . "order.return_fee_amount"}}" required>
+    </label>
+    {{end}}
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+  <p class="adm-hint">
+    이 값은 <strong>이후</strong> 반품·교환에만 적용됩니다. 이미 접수된 건의
+    배송비는 수거 확인 시점에 그 건으로 복사되어 있어, 여기서 바꿔도 과거
+    환불액이 달라지지 않습니다.
+  </p>
+</div>
+{{end}}

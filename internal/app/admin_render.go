@@ -108,6 +108,7 @@ var adminScreenTitles = map[string]string{
 	"admin/shipping.html":     "송장 입력",
 	"admin/refund.html":       "취소·환불 처리",
 	"admin/returns.html":      "반품·교환 처리",
+	"admin/policy.html":       "커머스 정책",
 }
 
 // Render writes one administrator screen.

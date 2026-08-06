@@ -342,6 +342,14 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "order.return", Handler: ad.ReturnList})
 		r.Add(Route{Screen: "A-511", Method: "POST", Pattern: "/admin/orders/{no}/returns", Class: SC6,
 			Permission: "order.return", Handler: ad.ReturnAction})
+
+		// A-512 커머스 정책. **정책만 정하고 건별 금액은 받지 않는다** —
+		// 건별을 여기서 받으면 정책과 실행이 섞이고 과거 건이 소급 변경된다
+		// (D19 A-512 받지 않는 필드).
+		r.Add(Route{Screen: "A-512", Method: "GET", Pattern: "/admin/commerce/policy", Class: SC4,
+			Permission: "settings.update", Handler: ad.PolicyForm})
+		r.Add(Route{Screen: "A-512", Method: "POST", Pattern: "/admin/commerce/policy", Class: SC5,
+			Permission: "settings.update", Handler: ad.PolicySave})
 	}
 
 	return r
