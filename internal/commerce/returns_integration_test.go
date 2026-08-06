@@ -778,3 +778,166 @@ func TestSeparateBillingFeeIsNotDeductedFromRefund(t *testing.T) {
 		t.Errorf("스냅샷 %d(%s), want 3000(별도청구)", fee, policy)
 	}
 }
+
+// **수거와 정산 사이에 부분 환불이 끼어들면 그 반품은 영영 멈춘다.**
+//
+// 수거된 반품이 소진할 수량을 부분 환불이 먼저 써 버리면 정산이 수량 초과로
+// 실패하는데, `반품수거` 에서 나가는 화살표는 `환불` 하나뿐이라 (D14 5절)
+// 거부도 되돌리기도 못 한다 — 물건은 받았고 돈은 못 준다. 그래서 처리 중인
+// 반품이 걸린 품목은 부분 환불이 건드리지 못한다.
+func TestPartialRefundCannotStrandAPickedUpReturn(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 2}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 수거 뒤 부분 환불을 시도한다. 막혀야 한다.
+	_, _, err = s.RequestRefund(ctx, orderNo,
+		[]RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}, "관리자", "끼어들기", "k-mid")
+	if !errors.Is(err, ErrReturnInProgress) {
+		t.Fatalf("수거된 반품 품목의 부분 환불 = %v, want ErrReturnInProgress", err)
+	}
+
+	// 정산이 정상적으로 끝난다 — 이것이 막은 이유다.
+	if _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k-settle"); err != nil {
+		t.Fatalf("정산이 막혔다: %v — 반품이 멈췄다", err)
+	}
+}
+
+// 거부된 반품은 처리 중이 아니므로 부분 환불이 다시 가능하다. 위 검사가
+// "반품이 한 번이라도 있으면 영원히 막는다" 가 아니라는 것.
+func TestRejectedReturnDoesNotBlockPartialRefund(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RejectReturn(ctx, orderNo, ret.ReturnNo, "사유 불충분", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.RequestRefund(ctx, orderNo,
+		[]RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}, "관리자", "", "k1"); err != nil {
+		t.Errorf("거부된 반품이 부분 환불을 막았다: %v", err)
+	}
+}
+
+// **`교환수거` 에서 나가는 길이 실제로 있어야 한다.**
+//
+// 상태머신에 화살표가 둘 있어도 그것을 일으키는 코드가 없으면 교환은 수거된
+// 채 멈춘다 — 예약 재고가 조용히 잠기고, `return_items.is_open` 이 내려가지
+// 않아 그 품목은 다시 반품·교환할 수도 없다.
+func TestExchangeCanLeavePickedUp(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+
+	// 차액이 0 인 교환(같은 값의 다른 조합)과 차액이 양수인 교환을 각각 본다.
+	for _, tc := range []struct {
+		name     string
+		slug     string
+		newDelta int
+		want     Status
+	}{
+		{"차액 없음", "tee-same", 1000, StatusExchangeShipped},
+		{"차액 있음", "tee-more", 5000, StatusExchangeDiffDue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orderNo, _ := deliveredOrder(t, s, pool, tc.slug, 1)
+			items := itemsOf(t, s, orderNo)
+			var productID string
+			if err := pool.QueryRow(ctx,
+				`SELECT product_id FROM order_items WHERE id = $1`, items[0].ID).Scan(&productID); err != nil {
+				t.Fatal(err)
+			}
+			var newVariant string
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+				VALUES ($1,'{"크기":"M"}',$2,5) RETURNING id`,
+				productID, tc.newDelta).Scan(&newVariant); err != nil {
+				t.Fatal(err)
+			}
+
+			ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+				Kind: KindExchange, NewVariantID: newVariant,
+				Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+			}, "P-512", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			setReturnFee(t, pool, FeePolicyDeduct, 0)
+			if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511")
+			if err != nil {
+				t.Fatalf("교환 완료가 막혔다: %v — 교환수거에서 나갈 길이 없다", err)
+			}
+			if got != tc.want {
+				t.Errorf("교환 완료 → %s, want %s", got, tc.want)
+			}
+			// 주문 상태도 함께 옮겨야 한다. 반품 행만 옮기면 화면은 끝났다고
+			// 하는데 주문은 교환수거에 남는다.
+			detail, err := s.OrderByNoUnscoped(ctx, orderNo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if detail.Status != tc.want {
+				t.Errorf("주문 상태 %s, want %s", detail.Status, tc.want)
+			}
+
+			// 발송까지 간 건은 처리 중 표시가 내려간다. 차액 대기는 아직이다.
+			var open bool
+			if err := pool.QueryRow(ctx, `
+				SELECT bool_or(is_open) FROM return_items
+				WHERE return_id = (SELECT id FROM returns WHERE return_no = $1)`,
+				ret.ReturnNo).Scan(&open); err != nil {
+				t.Fatal(err)
+			}
+			if want := tc.want == StatusExchangeDiffDue; open != want {
+				t.Errorf("is_open %v, want %v", open, want)
+			}
+		})
+	}
+}
+
+// 반품 건을 교환 완료로 처리하지 않는다 — 종류를 섞으면 환불 없이 끝난다.
+func TestCompleteExchangeRefusesAReturn(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 1)
+	items := itemsOf(t, s, orderNo)
+
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511"); !errors.Is(err, ErrReturnKind) {
+		t.Fatalf("반품의 교환 완료 = %v, want ErrReturnKind", err)
+	}
+}

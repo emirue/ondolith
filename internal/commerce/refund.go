@@ -86,6 +86,17 @@ func (s *Store) RequestRefund(ctx context.Context, orderNo string, lines []Refun
 	// 품목을 잠근 채 읽는다. 소진 수량을 읽고 나서 늘리므로, 잠그지 않으면 두
 	// 요청이 같은 잔량을 보고 각자 통과한다 — DB CHECK 가 그중 하나를 잡지만
 	// 그때 나오는 것은 제약 위반이지 "남은 수량이 없습니다" 가 아니다.
+	//
+	// **잠금 순서는 order_item_id 오름차순이다** (AdjustStock 과 같은 이유).
+	// 폼이 준 순서대로 잠그면 `item_id=A&item_id=B` 와 `item_id=B&item_id=A`
+	// 두 요청이 서로의 행을 기다린다 — 순서를 요청자가 정하는 교착이다.
+	// 롤백되므로 돈은 안전하지만, 운영자에게 가는 것은 원인 없는 500 이다.
+	lines = append([]RefundLine(nil), lines...)
+	for i := 1; i < len(lines); i++ {
+		for j := i; j > 0 && lines[j].OrderItemID < lines[j-1].OrderItemID; j-- {
+			lines[j], lines[j-1] = lines[j-1], lines[j]
+		}
+	}
 	for _, l := range lines {
 		if l.Quantity < 1 {
 			return "", 0, fmt.Errorf("%w: %d", ErrQuantityRange, l.Quantity)
@@ -102,6 +113,26 @@ func (s *Store) RequestRefund(ctx context.Context, orderNo string, lines []Refun
 		if err != nil {
 			return "", 0, err
 		}
+		// **처리 중인 반품·교환이 걸린 품목은 부분 환불로 소진하지 않는다.**
+		//
+		// 소진하면 그 반품의 정산이 수량 초과로 실패하는데, `반품수거` 에서
+		// 나가는 화살표는 `환불` 하나뿐이라 (D14 5절) 그 건은 거부도 되돌리기도
+		// 안 되고 멈춘다 — 물건은 이미 받았는데 돈을 줄 수 없는 상태다.
+		//
+		// 이 검사가 경합에 견디는 근거: 위에서 `order_items` 행을 FOR UPDATE 로
+		// 잡았고, OpenReturn 도 같은 행을 `FOR UPDATE OF oi` 로 잡는다. 둘은
+		// 서로를 기다리므로 "열린 반품 없음" 을 읽고 소진하는 사이에 반품이
+		// 끼어들 수 없다.
+		var open int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM return_items WHERE order_item_id = $1 AND is_open`,
+			l.OrderItemID).Scan(&open); err != nil {
+			return "", 0, err
+		}
+		if open > 0 {
+			return "", 0, ErrReturnInProgress
+		}
+
 		part, err := RefundableAmount(lineAmount, discount, quantity, settled, l.Quantity)
 		if err != nil {
 			return "", 0, err

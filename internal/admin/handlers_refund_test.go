@@ -890,3 +890,62 @@ func setFeeSetting(t *testing.T, pool *pgxpool.Pool, policy string, amount int) 
 		t.Fatal(err)
 	}
 }
+
+// **A-511 에 교환 완료 동작이 실제로 연결돼 있다** (D19 A-511 「동작별 권한」:
+// "교환 완료(재발송 송장) | POST | order.return").
+//
+// 상태머신에 `교환수거 → 교환발송` 화살표가 있어도 그것을 누를 창구가 없으면
+// 교환은 수거된 채 멈춘다 — 예약 재고가 잠기고 그 품목은 다시 반품도 못 한다.
+func TestAdminCanCompleteAnExchange(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+	order, _ := paidAdminOrder(t, d, pool)
+	for _, to := range []commerce.Status{
+		commerce.StatusPreparing, commerce.StatusShipping, commerce.StatusDelivered,
+	} {
+		if err := d.Commerce.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 같은 상품의 다른 조합 — 차액 0.
+	var productID string
+	if err := pool.QueryRow(ctx,
+		`SELECT product_id FROM order_items WHERE id = $1`, order.Items[0].ID).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"M"}',1000,5) RETURNING id`, productID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
+		Kind: commerce.KindExchange, NewVariantID: newVariant,
+		Lines: []commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 1}},
+	}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setFeeSetting(t, pool, "차감", 0)
+
+	for _, action := range []string{"pickup", "exchange"} {
+		rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+			map[string]string{"no": order.OrderNo},
+			url.Values{"return_no": {ret.ReturnNo}, "action": {action}, "fault": {"구매자"}})
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("%s = HTTP %d, want 303 (%q)", action, rec.Code, rec.Body.String())
+		}
+	}
+
+	var status string
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM returns WHERE return_no = $1`, ret.ReturnNo).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(commerce.StatusExchangeShipped) {
+		t.Errorf("교환 완료 뒤 상태 %q, want %q — 교환수거에서 못 나갔다",
+			status, commerce.StatusExchangeShipped)
+	}
+}

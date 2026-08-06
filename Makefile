@@ -26,7 +26,11 @@ selftest: ## 셸 도구가 위반을 실제로 잡는지 실패 주입으로 검
 test: ## 테스트 (경합 탐지 포함). DB 불필요
 	# -p 1: DB 테스트는 ONDOLITH_TEST_DSN 이 없으면 건너뛰지만, 개발자 셸에 그 값이
 	# 떠 있으면 여기서도 돈다. 패키지가 병렬로 돌면 같은 DB의 스키마를 서로 드롭한다.
-	go test -race -p 1 ./...
+	#
+	# 건너뛴 건수를 세어 알린다. DSN 없이 돌면 커머스·인증·설치의 단언이 하나도
+	# 실행되지 않는데, 그때도 "check ok" 만 나오면 게이트가 전부 돌았다고 읽힌다.
+	# 실패로 만들지는 않는다 — 네트워크 없는 환경에서 게이트가 깨지면 안 된다.
+	@sh scripts/report-skips.sh
 
 test-integration: ## 실제 PostgreSQL 대상 통합 테스트. DSN 없으면 Docker 로 띄운다
 	@sh scripts/integration.sh

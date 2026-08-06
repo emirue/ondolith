@@ -785,3 +785,66 @@ func (s *Store) VariantsForExchange(ctx context.Context, orderItemID string) ([]
 	}
 	return out, rows.Err()
 }
+
+// CompleteExchange is A-511's 교환 완료 — 수거한 교환 건을 재발송으로 넘긴다.
+//
+// **이것이 없으면 `교환수거` 는 나갈 길이 없는 상태다.** 상태머신에는 화살표가
+// 둘(`교환발송`·`차액결제대기`) 있는데 그것을 일으키는 코드가 없으면, 교환은
+// 수거된 채 영원히 멈추고 예약 재고도 풀리지 않는다. `return_items.is_open`
+// 도 내려가지 않아 그 품목은 다시 반품·교환할 수 없다.
+//
+// 차액이 양수면 `차액결제대기` 로 간다 — 돈을 더 받아야 하고, 받는 것은
+// P-514 다. 0 이하면 곧바로 발송이다. **차액을 깎아 돌려주지는 않는다**:
+// 더 싼 조합으로 바꿔 생기는 차액 환불은 별도 결정이고 그 화면이 없다.
+func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, actor Actor) (Status, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	var id, kind, status, orderID string
+	var diff int
+	err = tx.QueryRow(ctx, `
+		SELECT r.id, r.kind, r.status, r.order_id, COALESCE(r.price_difference, 0)
+		FROM returns r JOIN orders o ON o.id = r.order_id
+		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`, returnNo, orderNo).
+		Scan(&id, &kind, &status, &orderID, &diff)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if ReturnKind(kind) != KindExchange {
+		return "", fmt.Errorf("%w: 반품 건은 교환 완료로 처리하지 않습니다", ErrReturnKind)
+	}
+
+	target := StatusExchangeShipped
+	if diff > 0 {
+		target = StatusExchangeDiffDue
+	}
+	if err := CanTransition(Status(status), target, actor); err != nil {
+		return "", err
+	}
+
+	// 발송으로 바로 가는 경우에만 처리 중 표시를 내린다. 차액 대기는 아직
+	// 끝나지 않았고, 내리면 같은 품목에 새 반품이 걸려 예약 재고와 어긋난다.
+	if target == StatusExchangeShipped {
+		if _, err := tx.Exec(ctx,
+			`UPDATE return_items SET is_open = false WHERE return_id = $1`, id); err != nil {
+			return "", err
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE returns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
+		id, string(target), status); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`,
+		orderID, string(target)); err != nil {
+		return "", err
+	}
+	return target, tx.Commit(ctx)
+}

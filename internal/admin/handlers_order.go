@@ -425,6 +425,15 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			d.log(r, c, "return.reject", "return", returnNo, "반품·교환 거부")
 		}
+	case "exchange":
+		// 교환 완료 (재발송). D19 A-511 「동작별 권한」은 order.return 만
+		// 요구한다 — 돈이 나가지 않는다. 차액이 양수면 여기서 끝나지 않고
+		// 차액결제대기로 가고, 받는 것은 P-514 다.
+		var to commerce.Status
+		to, err = d.Commerce.CompleteExchange(r.Context(), order.OrderNo, returnNo, "A-511")
+		if err == nil {
+			d.log(r, c, "return.exchange", "return", returnNo, "교환 "+string(to))
+		}
 	case "settle":
 		// **환불 확정 단계는 `order.refund` 다** (D15 2.2: "A-507, A-511
 		// (환불 확정 단계만)"). 화면 권한(order.return)만으로 통과시키면,

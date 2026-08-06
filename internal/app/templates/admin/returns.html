@@ -40,6 +40,18 @@
     <button type="submit">환불 확정</button>
   </form>
 
+  {{/* 교환은 환불로 끝나지 않는다. 수거한 교환 건을 재발송으로 넘기는 동작이
+       없으면 `교환수거` 는 나갈 길이 없는 상태가 되고, 예약 재고가 조용히
+       잠긴다. 차액이 양수면 여기서 `차액결제대기` 로 가고 P-514 가 받는다. */}}
+  {{if eq .Kind "교환"}}
+  <form method="post" class="form">
+    <input type="hidden" name="return_no" value="{{.ReturnNo}}">
+    <input type="hidden" name="action" value="exchange">
+    {{if gt .PriceDiff 0}}<p>차액 {{.PriceDiff}}원 — 구매자 결제 후 발송됩니다.</p>{{end}}
+    <button type="submit">교환 완료</button>
+  </form>
+  {{end}}
+
   <form method="post" class="form">
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="reject">

@@ -3,10 +3,12 @@ package commerce
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -600,5 +602,72 @@ func TestCancelAfterPartialRefundOnlyReturnsWhatIsLeft(t *testing.T) {
 	}
 	if goods >= approved {
 		t.Fatalf("전제가 틀렸다: 상품합 %d, 승인 %d — 배송비가 없으면 이 회귀를 못 본다", goods, approved)
+	}
+}
+
+// twoItemPaidOrder 는 서로 다른 품목 둘이 든 결제완료 주문이다. 잠금 순서를
+// 보려면 잠글 행이 둘 이상이어야 한다.
+func twoItemPaidOrder(t *testing.T, s *Store, pool *pgxpool.Pool, tag string) string {
+	t.Helper()
+	ctx := context.Background()
+	_, v1 := seedProduct(t, pool, tag+"a", 12000, 1000, 10)
+	_, v2 := seedProduct(t, pool, tag+"b", 9000, 0, 10)
+	owner := CartOwner{GuestKey: "guest-" + tag + "-0123456789"}
+	for _, v := range []string{v1, v2} {
+		if err := s.AddToCart(ctx, owner, v, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	order, err := s.CreateOrder(ctx, owner, "", testForm(), testShipping, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConfirmPayment(ctx, okGateway(), "toss", order.OrderNo,
+		"pk-"+tag, order.Total, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	return order.OrderNo
+}
+
+// **잠금 순서를 요청자가 정하게 두지 않는다.**
+//
+// 품목을 폼이 준 순서대로 잠그면 `item_id=A&item_id=B` 와 그 역순 두 요청이
+// 서로의 행을 기다린다. 롤백되므로 돈은 안전하지만 운영자에게 가는 것은 원인
+// 없는 500 이고, 그 순서를 정하는 것은 보내는 쪽이다.
+func TestConcurrentRefundsDoNotDeadlockOnLineOrder(t *testing.T) {
+	s, pool := testStore(t)
+	const rounds = 12
+	for i := range rounds {
+		orderNo := twoItemPaidOrder(t, s, pool, fmt.Sprintf("dl%d", i))
+		items := itemsOf(t, s, orderNo)
+		if len(items) != 2 {
+			t.Fatalf("품목 %d개 — 두 개여야 순서가 의미를 갖는다", len(items))
+		}
+		forward := []RefundLine{{OrderItemID: items[0].ID, Quantity: 1},
+			{OrderItemID: items[1].ID, Quantity: 1}}
+		reverse := []RefundLine{{OrderItemID: items[1].ID, Quantity: 1},
+			{OrderItemID: items[0].ID, Quantity: 1}}
+
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for j, lines := range [][]RefundLine{forward, reverse} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _, errs[j] = s.RequestRefund(context.Background(), orderNo, lines,
+					"관리자", "", fmt.Sprintf("k%d-%d", i, j))
+			}()
+		}
+		wg.Wait()
+
+		for j, err := range errs {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "40P01" {
+				t.Fatalf("%d회차 %d번 요청이 교착했다: %v", i, j, err)
+			}
+			if err != nil {
+				t.Fatalf("%d회차 %d번 요청: %v", i, j, err)
+			}
+		}
 	}
 }

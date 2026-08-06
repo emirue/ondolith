@@ -534,6 +534,55 @@ expect_ctr 0 "FAIL 만 있으면 검사기는 통과 (실패 판정은 go test �
 FAIL	github.com/x/a	0.1s
 '
 
+echo "selftest: DB 단언 미실행 경고 (report-skips.sh)"
+
+# report-skips.sh 는 게이트가 아니라 알림이다. 그래서 두 가지를 확인한다:
+# 경고가 실제로 나오는가, 그리고 **go test 의 판정을 가리지 않는가**.
+#
+# go test 를 가짜로 세워 둔다 — 진짜를 돌리면 selftest 가 몇 분짜리가 된다.
+RS_BIN=$TMP/rs-bin
+mkdir -p "$RS_BIN"
+cat > "$RS_BIN/go" <<'FAKEGO'
+#!/bin/sh
+echo "ok  	pkg	0.1s"
+exit ${FAKE_GO_EXIT:-0}
+FAKEGO
+chmod +x "$RS_BIN/go"
+
+# run_rs <dsn-value|-> ; prints output, sets rs_code
+run_rs() {
+	if [ "$1" = "-" ]; then
+		rs_out=$(PATH="$RS_BIN:$PATH" env -u ONDOLITH_TEST_DSN sh "$ROOT/scripts/report-skips.sh" 2>&1) && rs_code=0 || rs_code=$?
+	else
+		rs_out=$(PATH="$RS_BIN:$PATH" ONDOLITH_TEST_DSN="$1" sh "$ROOT/scripts/report-skips.sh" 2>&1) && rs_code=0 || rs_code=$?
+	fi
+}
+
+run_rs -
+if printf '%s' "$rs_out" | grep -q "ONDOLITH_TEST_DSN 없음"; then
+	ok "DSN 이 없으면 경고한다"
+else
+	err "DSN 이 없는데 경고가 없다 — 게이트가 전부 돌았다고 읽힌다"
+fi
+
+run_rs "postgres://x/y"
+if printf '%s' "$rs_out" | grep -q "ONDOLITH_TEST_DSN 없음"; then
+	err "DSN 이 있는데 경고했다"
+else
+	ok "DSN 이 있으면 조용하다"
+fi
+
+# 경고는 알림이지 판정이 아니다. go test 가 실패하면 그대로 실패해야 한다.
+FAKE_GO_EXIT=1
+export FAKE_GO_EXIT
+run_rs -
+if [ "$rs_code" -eq 1 ]; then
+	ok "go test 실패를 그대로 전달한다"
+else
+	err "go test 가 실패했는데 exit $rs_code — 경고 스크립트가 판정을 삼켰다"
+fi
+unset FAKE_GO_EXIT
+
 # integration.sh must never exit 0 without having actually run the DB tests.
 #
 # It used to guarantee that by refusing whenever ONDOLITH_TEST_DSN was unset. It
