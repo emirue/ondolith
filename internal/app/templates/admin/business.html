@@ -1,0 +1,22 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* 여덟 항목 고정이다 (D50). 자유 키/값이면 빠뜨린 항목을 아무도 모르고,
+       shop 모드 미입력 경고(FR-711)를 띄울 대상도 정할 수 없다. */}}
+  <form method="post" action="/admin/business">
+    {{$b := .Business}}{{$l := .Labels}}
+    {{range .Keys}}
+    <label class="adm-field">
+      <span>{{index $l .}}</span>
+      <input type="text" name="{{.}}" maxlength="200" value="{{index $b .}}">
+    </label>
+    {{end}}
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+  <p class="adm-hint">
+    전자상거래법 표시 의무 항목입니다. 비어 있어도 저장은 되지만, shop 모드에서는
+    경고가 뜨고 테마 푸터에 빈 자리가 남습니다.
+  </p>
+</div>
+{{end}}

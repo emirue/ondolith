@@ -1,6 +1,8 @@
 <footer class="site-footer">
   <p>{{.Site.Name}}</p>
+  {{/* 전자상거래법 표시 의무 항목이다 (FR-711). 비어 있는 항목은 아예 오지
+       않는다 — 빈 자리를 그리면 그것이 오류로 보인다. */}}
   {{if .Site.Business}}<dl class="business">
-    {{range $k, $v := .Site.Business}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}
+    {{range $label, $v := .Site.Business}}<dt>{{$label}}</dt><dd>{{$v}}</dd>{{end}}
   </dl>{{end}}
 </footer>

@@ -264,7 +264,21 @@ func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "admin.access"); !ok {
 		return
 	}
-	d.Render(w, r, "admin/dashboard.html", http.StatusOK, nil)
+	data := map[string]any{}
+	// **shop 모드에서 표시 의무 항목이 비어 있으면 알린다** (FR-711).
+	//
+	// 저장을 막지 않기로 했으므로 (설치 직후는 항상 비어 있다) 알리는 자리가
+	// 없으면 그 결정이 "아무도 모르는 채 빠져 있다" 가 된다. 대시보드는
+	// 관리자가 반드시 지나는 화면이다.
+	kv, err := d.Content.Settings(r.Context(), append(
+		[]string{"site.type"}, commerce.BusinessKeys...)...)
+	if err == nil && kv["site.type"] == "shop" {
+		if missing := commerce.MissingBusinessKeys(kv); len(missing) > 0 {
+			data["Warning"] = "사업자 정보가 비어 있습니다: " +
+				strings.Join(missing, ", ") + " — 전자상거래법 표시 의무 항목입니다."
+		}
+	}
+	d.Render(w, r, "admin/dashboard.html", http.StatusOK, data)
 }
 
 func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {

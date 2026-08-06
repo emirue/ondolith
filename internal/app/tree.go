@@ -363,6 +363,17 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		r.Add(Route{Screen: "A-511", Method: "POST", Pattern: "/admin/orders/{no}/returns", Class: SC6,
 			Permission: "order.return", Handler: ad.ReturnAction})
 
+		// A-207 약관 · A-208 사업자 정보. 커머스 전용이다 — cms 모드에는
+		// 결제 화면이 없어 받을 동의도, 표시 의무도 없다.
+		r.Add(Route{Screen: "A-207", Method: "GET", Pattern: "/admin/terms", Class: SC4,
+			Permission: "settings.update", Handler: ad.TermsList})
+		r.Add(Route{Screen: "A-207", Method: "POST", Pattern: "/admin/terms", Class: SC5,
+			Permission: "settings.update", Handler: ad.TermsAdd})
+		r.Add(Route{Screen: "A-208", Method: "GET", Pattern: "/admin/business", Class: SC4,
+			Permission: "settings.update", Handler: ad.BusinessForm})
+		r.Add(Route{Screen: "A-208", Method: "POST", Pattern: "/admin/business", Class: SC5,
+			Permission: "settings.update", Handler: ad.BusinessSave})
+
 		// A-512 커머스 정책. **정책만 정하고 건별 금액은 받지 않는다** —
 		// 건별을 여기서 받으면 정책과 실행이 섞이고 과거 건이 소급 변경된다
 		// (D19 A-512 받지 않는 필드).

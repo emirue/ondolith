@@ -254,3 +254,66 @@ func TestCommerceScreensAreInTheInventory(t *testing.T) {
 		}
 	}
 }
+
+// **사업자 정보가 테마 푸터에 나온다** (FR-711, W3-33).
+//
+// 전자상거래법 표시 의무 항목이다. 항목 **이름**으로 나와야 한다 — 테마가
+// 우리 설정 키를 알아야 한다면 그것은 계약이 새는 것이고, `business.reg_no`
+// 는 방문자가 읽을 말이 아니다.
+func TestBusinessInfoRendersInTheFooter(t *testing.T) {
+	_, pool := liveSite(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settings (key, value) VALUES
+			('site.type','shop'),
+			('business.name','온돌리스 주식회사'),
+			('business.reg_no','123-45-67890')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t)
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+
+	for _, want := range []string{"온돌리스 주식회사", "사업자등록번호", "123-45-67890"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("푸터에 %q 가 없다", want)
+		}
+	}
+	// 설정 키가 그대로 새어 나가면 안 된다.
+	if strings.Contains(body, "business.reg_no") {
+		t.Error("설정 키가 화면에 그대로 나왔다")
+	}
+	// 채우지 않은 항목은 빈 줄로 남지 않는다.
+	if strings.Contains(body, "<dt>통신판매업신고번호</dt>") {
+		t.Error("비어 있는 항목이 그려졌다 — 빈 자리는 오류로 보인다")
+	}
+}
+
+// cms 모드에는 표시 의무가 없다. 여덟 줄을 그리면 그 자체가 오류로 보인다.
+func TestBusinessInfoIsAbsentInCmsMode(t *testing.T) {
+	srv, pool := liveSite(t)
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO settings (key, value) VALUES ('business.name','온돌리스')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(b), "온돌리스") {
+		t.Error("cms 모드인데 사업자 정보가 푸터에 나왔다")
+	}
+}

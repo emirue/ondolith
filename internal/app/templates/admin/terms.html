@@ -1,0 +1,39 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* **배포된 버전을 고치는 폼이 없다.** order_agreements 가 가리키는 본문이
+       바뀌면 동의 이력이 거짓이 되고, FR-619 가 약속한 "나중에 재현된다" 가
+       깨진다. 개정은 새 행이다. */}}
+  <table class="adm-table">
+    <thead><tr><th>종류</th><th>버전</th><th>시행일</th><th>필수</th><th>동의 이력</th></tr></thead>
+    <tbody>
+    {{range .Terms}}
+      <tr>
+        <td>{{.Kind}}</td><td>{{.Version}}</td>
+        <td>{{date .EffectiveAt "2006-01-02"}}</td>
+        <td>{{if .Required}}필수{{else}}선택{{end}}</td>
+        <td>{{if .InUse}}있음 — 수정 불가{{else}}없음{{end}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="5">등록된 약관이 없습니다.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+
+  <h2>새 버전 추가</h2>
+  <form method="post" action="/admin/terms">
+    <label class="adm-field"><span>종류 (예: service, privacy)</span>
+      <input type="text" name="kind" pattern="[a-z0-9-]+" maxlength="50" required></label>
+    <label class="adm-field"><span>버전</span>
+      <input type="text" name="version" maxlength="20" required></label>
+    <label class="adm-field"><span>시행일 — 오늘 이후만 가능합니다</span>
+      <input type="date" name="effective_at" required></label>
+    <label class="adm-field"><span>본문 (평문. HTML 은 받지 않습니다)</span>
+      <textarea name="body" rows="12" maxlength="20000" required></textarea></label>
+    <label class="adm-field adm-field--check">
+      <input type="checkbox" name="is_required" checked><span>필수 동의</span></label>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">버전 추가</button>
+    </div>
+  </form>
+</div>
+{{end}}

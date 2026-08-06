@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -875,4 +876,105 @@ func postThemeZip(t *testing.T, d *Deps, name string) *httptest.ResponseRecorder
 	rec := httptest.NewRecorder()
 	d.ThemeUpload(rec, req)
 	return rec
+}
+
+// **shop 모드에서 사업자 정보가 비면 대시보드가 알린다** (FR-711, W3-33).
+//
+// 저장을 막지 않기로 했으므로 (설치 직후는 항상 비어 있다) 알리는 자리가
+// 없으면 그 결정은 "아무도 모르는 채 빠져 있다" 가 된다.
+func TestDashboardWarnsAboutMissingBusinessInfoInShopMode(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"admin.access": true}, id: "u1"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	var warning string
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		warning = ""
+		if m, ok := data.(map[string]any); ok {
+			if s, ok := m["Warning"].(string); ok {
+				warning = s
+			}
+		}
+	}
+	call := func() {
+		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+		d.Dashboard(httptest.NewRecorder(), req)
+	}
+
+	// cms 모드에는 표시 의무가 없다.
+	call()
+	if warning != "" {
+		t.Errorf("cms 모드인데 경고했다: %q", warning)
+	}
+
+	if err := d.Content.PutSettings(ctx, map[string]string{"site.type": "shop"}); err != nil {
+		t.Fatal(err)
+	}
+	call()
+	if !strings.Contains(warning, "사업자등록번호") {
+		t.Errorf("shop 모드에서 빈 항목을 알리지 않았다: %q", warning)
+	}
+
+	// 여덟 항목을 다 채우면 조용해진다 — 위 단언이 "늘 경고한다" 가 아니다.
+	full := map[string]string{}
+	for _, k := range commerce.BusinessKeys {
+		full[k] = "값"
+	}
+	if err := d.Content.PutSettings(ctx, full); err != nil {
+		t.Fatal(err)
+	}
+	call()
+	if warning != "" {
+		t.Errorf("다 채웠는데 경고한다: %q", warning)
+	}
+}
+
+// **배포된 약관을 고치려는 요청을 조용히 무시하지 않고 거부한다** (D19 A-207).
+//
+// 무시하면 운영자는 본문이 고쳐졌다고 믿는다. `order_agreements` 가 가리키는
+// 본문이 바뀌면 동의 이력이 거짓이 되고, FR-619 의 "나중에 재현된다" 가 깨진다.
+func TestTermsRefusesEditingAPublishedVersion(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	id, err := d.Commerce.AddTerms(ctx, commerce.Terms{Kind: "service", Version: "1.0",
+		Body: "원래 본문", EffectiveAt: time.Now(), Required: true}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, field := range []string{"id", "terms_id"} {
+		rec := postAdmin(t, d.TermsAdd, "/admin/terms", nil, url.Values{
+			field: {id}, "kind": {"service"}, "version": {"1.0"},
+			"body": {"고친 본문"}, "effective_at": {time.Now().Format("2006-01-02")}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 필드 = HTTP %d, want 422", field, rec.Code)
+		}
+	}
+
+	// 본문이 그대로다.
+	var body string
+	if err := pool.QueryRow(ctx, `SELECT body FROM terms WHERE id = $1`, id).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body != "원래 본문" {
+		t.Errorf("본문이 %q 로 바뀌었다", body)
+	}
+
+	// 새 버전은 들어간다 — 위 단언이 "무엇이든 막힌다" 가 아니다.
+	rec := postAdmin(t, d.TermsAdd, "/admin/terms", nil, url.Values{
+		"kind": {"service"}, "version": {"1.1"}, "body": {"개정 본문"},
+		"effective_at": {time.Now().Format("2006-01-02")}, "is_required": {"on"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("새 버전 추가 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM terms`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("약관 %d행, want 2", n)
+	}
 }
