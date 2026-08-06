@@ -44,9 +44,6 @@ Phase 1 착수를 막는 미결은 없다.
 
 | ID | 항목 | 관련 |
 |---|---|---|
-| OPEN-27 | 헬스체크 엔드포인트 | [D70](70-operations.md) |
-| OPEN-28 | 메트릭 노출 방식 | [D70](70-operations.md) |
-| OPEN-29 | Docker 이미지 제공 여부 | [D70](70-operations.md) |
 
 ## 미정 — 요구사항이 없어서 안 정한 것
 

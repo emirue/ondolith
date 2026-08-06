@@ -29,6 +29,9 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	// ---- 공개 ---------------------------------------------------------------
 	r.Add(Route{Screen: "P-201", Method: "GET", Pattern: "/{$}", Class: SC1, Handler: pub.home})
 	r.Add(Route{Screen: "P-906", Method: "GET", Pattern: "/static/{path...}", Class: SC7, Handler: static})
+	// P-907 헬스체크. 공개이고 상태를 바꾸지 않는다 — 로드밸런서가 읽는다.
+	r.Add(Route{Screen: "P-907", Method: "GET", Pattern: "/healthz", Class: SC1,
+		Handler: pub.health})
 
 	// ---- 인증 ---------------------------------------------------------------
 	r.Add(Route{Screen: "P-101", Method: "GET", Pattern: "/login", Class: SC2, Handler: lg.loginForm})

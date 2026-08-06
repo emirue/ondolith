@@ -190,7 +190,12 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	limiter := auth.NewLimiter()
 	limits := auth.DefaultLimits()
 
-	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site, dev: dev}
+	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site, dev: dev,
+		// P-907. 풀을 통째로 넘기지 않는다 — 헬스체크가 필요한 것은
+		// "지금 DB 에 닿는가" 하나이고, 그보다 넓은 접근은 그 화면이 더
+		// 많은 것을 말하게 되는 경로가 된다.
+		ping: func(c context.Context) error { return pool.Ping(c) },
+	}
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
 		render: pub.renderNamed}
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)

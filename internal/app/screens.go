@@ -74,6 +74,7 @@ var screenInventory = map[string]SecurityClass{
 	"P-904": SC1, // 500 오류
 	"P-905": SC8, // 결제 웹훅 수신
 	"P-906": SC7, // 테마 정적 자산
+	"P-907": SC1, // 헬스체크
 	"A-101": SC4, // 대시보드
 	"A-102": SC4, // 관리자 셸 (레이아웃·메뉴)
 	"A-201": SC5, // 사이트 설정

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -315,5 +316,72 @@ func TestBusinessInfoIsAbsentInCmsMode(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	if strings.Contains(string(b), "온돌리스") {
 		t.Error("cms 모드인데 사업자 정보가 푸터에 나왔다")
+	}
+}
+
+// **헬스체크는 내부 구조를 노출하지 않는다** (P-907, NFR-210).
+//
+// 공개 경로이므로 두 글자 말고는 전부 공격자에게 주는 정보다. 그리고 **DB
+// 연결을 실제로 확인해야** 한다 — 프로세스가 살아 있다는 사실만 보고 200 을
+// 내면 DB 가 끊긴 인스턴스가 계속 트래픽을 받는다.
+func TestHealthzSaysNothingButOk(t *testing.T) {
+	srv, _ := liveSite(t)
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP %d, want 200 (%q)", resp.StatusCode, body)
+	}
+	if strings.TrimSpace(body) != "ok" {
+		t.Errorf("본문 %q, want \"ok\"", body)
+	}
+	if resp.Header.Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control %q — 캐시된 ok 는 죽은 인스턴스를 살아 있다고 보고한다",
+			resp.Header.Get("Cache-Control"))
+	}
+	// 버전·DB 이름·호스트가 새어 나가면 안 된다.
+	for _, leak := range []string{"postgres", "ondolith", "1.0.0", "localhost", "5432"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("응답에 %q 가 들어 있다", leak)
+		}
+	}
+}
+
+// DB 가 닿지 않으면 503 이고, 그때도 원인을 말하지 않는다.
+func TestHealthzReportsUnavailableWithoutTheReason(t *testing.T) {
+	d := &publicDeps{
+		ping: func(context.Context) error {
+			return errors.New("dial tcp 10.1.2.3:5432: connection refused")
+		},
+	}
+	rec := httptest.NewRecorder()
+	d.health(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HTTP %d, want 503", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.TrimSpace(body) != "unavailable" {
+		t.Errorf("본문 %q", body)
+	}
+	for _, leak := range []string{"10.1.2.3", "5432", "connection refused", "dial"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("응답이 원인을 말했다: %q", body)
+		}
+	}
+}
+
+// 배선이 빠졌으면 「모르겠다」를 「정상」으로 답하지 않는다.
+func TestHealthzWithoutAProbeIsNotOk(t *testing.T) {
+	rec := httptest.NewRecorder()
+	(&publicDeps{}).health(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("HTTP %d, want 503", rec.Code)
 	}
 }

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/content"
@@ -22,6 +24,9 @@ type publicDeps struct {
 	// dev decides how much an error page says (FR-306). In production it says
 	// nothing; in development it names the cause.
 	dev bool
+	// ping answers P-907. 함수인 이유는 이 타입이 풀을 알 필요가 없기 때문이다
+	// — 헬스체크가 필요한 것은 "지금 DB 에 닿는가" 하나다.
+	ping func(context.Context) error
 }
 
 // P-201 GET / — the home page.
@@ -135,3 +140,39 @@ func (d *publicDeps) serverError(w http.ResponseWriter, r *http.Request, err err
 	}
 	d.renderPage(w, r, "error.html", http.StatusInternalServerError, v)
 }
+
+// health is P-907 `/healthz`.
+//
+// **내부 구조를 노출하지 않는다** (NFR-210). 버전도, DB 이름도, 오류 원문도
+// 나가지 않는다 — 이 경로는 공개이고, 로드밸런서가 읽는 두 글자 말고는 전부
+// 공격자에게 주는 정보다. 자세한 진단은 A-602(관리자 화면)에 있다.
+//
+// **DB 연결을 실제로 확인한다.** 프로세스가 살아 있다는 사실만 보고 200 을
+// 내면, DB 가 끊긴 인스턴스가 계속 트래픽을 받는다 — 헬스체크가 있으나 마나가
+// 되는 정확히 그 상황이다.
+func (d *publicDeps) health(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if d.ping == nil {
+		// 배선이 빠졌다. 「모르겠다」를 「정상」으로 답하지 않는다.
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable\n"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
+	defer cancel()
+	if err := d.ping(ctx); err != nil {
+		// 원인은 로그에만. 응답에 담으면 DSN·호스트명이 새어 나간다.
+		if d.log != nil {
+			d.log.Warn("헬스체크 실패", "err", err)
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable\n"))
+		return
+	}
+	_, _ = w.Write([]byte("ok\n"))
+}
+
+// healthTimeout bounds the probe. 무한정 기다리면 헬스체크 자체가 커넥션을
+// 붙잡고, 로드밸런서는 타임아웃으로 읽어 같은 결론에 더 비싸게 도달한다.
+const healthTimeout = 2 * time.Second

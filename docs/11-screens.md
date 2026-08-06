@@ -164,6 +164,7 @@
 | P-904 | 500 오류 | `(오류 렌더링)` | GET | 공개 | 없음 | SC-1 | NFR-210 |
 | P-905 | 결제 웹훅 수신 | `/webhooks/payment/{pg}` | POST | 공개 | 있음 | SC-8 | FR-610 |
 | P-906 | 테마 정적 자산 | `/static/{path...}` | GET | 공개 | 없음 | SC-7 | FR-301, FR-309, NFR-206 |
+| P-907 | 헬스체크 | `/healthz` | GET | 공개 | 없음 | SC-1 | NFR-101, NFR-210 |
 
 ---
 
