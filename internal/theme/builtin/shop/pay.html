@@ -2,7 +2,7 @@
 <h1>결제</h1>
 {{with .Data}}{{with .Order}}
 <p>주문번호 <strong>{{.OrderNo}}</strong></p>
-<dl class="totals"><dt>결제 금액</dt><dd>{{.Total}}원</dd></dl>
+<dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
 {{end}}
 {{/* 결제창은 브라우저 SDK 가 연다. 서버는 공개 클라이언트 키와 저장된 금액만
      넘긴다 — successUrl·failUrl 은 서버가 구성하고, 시크릿은 어떤 경로로도

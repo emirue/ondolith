@@ -7,7 +7,7 @@
   <li>
     <a href="/shop/p/{{.ProductID}}">{{.Name}}</a>
     <span class="option">{{range $k, $v := .Option}}{{$k}}: {{$v}} {{end}}</span>
-    <span class="price">{{.UnitPrice}}원 × {{.Quantity}}</span>
+    <span class="price">{{money .UnitPrice}} × {{.Quantity}}</span>
     {{if not .Sellable}}<span class="badge">구매 불가</span>{{end}}
     <form method="post" action="/cart/items/{{.ID}}" class="inline">
       <input type="hidden" name="_method" value="PATCH">
@@ -21,9 +21,9 @@
 </ul>
 {{if .Items}}
 <dl class="totals">
-  <dt>상품 합계</dt><dd>{{.Goods}}원</dd>
-  <dt>배송비</dt><dd>{{.Fee}}원</dd>
-  <dt>결제 예정</dt><dd>{{.Total}}원</dd>
+  <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
+  <dt>배송비</dt><dd>{{money .Fee}}</dd>
+  <dt>결제 예정</dt><dd>{{money .Total}}</dd>
 </dl>
 <p><a href="/checkout">주문하기</a></p>
 {{end}}

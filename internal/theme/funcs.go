@@ -74,10 +74,26 @@ func FuncMap(d Deps) template.FuncMap {
 		},
 		"date":    func(t time.Time, layout string) string { return t.Format(layout) },
 		"dateAgo": func(t time.Time) string { return ago(d.Now().Sub(t)) },
-		// money takes an integer minor unit and never a float: D30 keeps money
-		// as integers precisely so that no rounding happens on the way to the
-		// screen.
-		"money":    func(minor int64) string { return formatMoney(minor) },
+		// money takes an integer minor unit and **never a float**: D30 keeps
+		// money as integers precisely so that no rounding happens on the way
+		// to the screen.
+		//
+		// `any` 인 이유는 뷰 모델의 금액이 대부분 `int` 인데 text/template 이
+		// 함수 인자에서 int → int64 를 변환해 주지 않기 때문이다. 정수 종류만
+		// 받고 나머지는 **오류다** — 실수를 조용히 반올림해서 그리면 D30 의
+		// 결정이 표시 단계에서 되살아난다.
+		"money": func(minor any) (string, error) {
+			switch v := minor.(type) {
+			case int:
+				return formatMoney(int64(v)), nil
+			case int32:
+				return formatMoney(int64(v)), nil
+			case int64:
+				return formatMoney(v), nil
+			default:
+				return "", fmt.Errorf("money: 정수 minor unit 이어야 합니다 (%T)", minor)
+			}
+		},
 		"number":   func(n int64) string { return group(n) },
 		"filesize": filesize,
 

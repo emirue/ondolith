@@ -311,8 +311,8 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W3-27 | 내장 테마 `shop/` 8종 | W3-21, W3-22, W3-23 | `shop/list·product·variant·cart·checkout·pay·complete·fail` | D17 「상품」 8종이 전부 존재하고 렌더링 테스트를 통과한다. `money` 함수가 minor unit을 받아 통화 표기로 낸다 |
-| W3-28 | 내장 테마 `order/` 8종 | W3-24, W3-25, W3-26 | `order/list·view·guest-form·shipping·refunds·receipt·return-form·returns` | D17 「주문」 8종. `cms` 모드에서 이 템플릿들이 파싱되어도 오류가 나지 않는다 |
+| W3-27 | 내장 테마 `shop/` 8종 **(완료)** | W3-21, W3-22, W3-23 | `shop/list·product·variant·cart·checkout·pay·complete·fail` | D17 「상품」 8종이 전부 존재하고 렌더링 테스트를 통과한다. `money` 함수가 minor unit을 받아 통화 표기로 낸다 |
+| W3-28 | 내장 테마 `order/` 8종 **(완료)** | W3-24, W3-25, W3-26 | `order/list·view·guest-form·shipping·refunds·receipt·return-form·returns` | D17 「주문」 8종. `cms` 모드에서 이 템플릿들이 파싱되어도 오류가 나지 않는다 |
 
 #### 관리자 화면
 

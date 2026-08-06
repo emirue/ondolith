@@ -1,7 +1,7 @@
 {{define "body"}}
 {{with .Data}}{{with .Product}}
 <h1>{{.Name}}</h1>
-<p class="price">{{.BasePrice}}원</p>
+<p class="price">{{money .BasePrice}}</p>
 <div class="description">{{.Description}}</div>
 {{end}}
 {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
@@ -20,7 +20,7 @@
     {{range .Variants}}
     <option value="{{.ID}}"{{if not .Stock}} disabled{{end}}>
       {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
-      {{if .PriceDelta}}({{.PriceDelta}}원){{end}}
+      {{if .PriceDelta}}({{money .PriceDelta}}){{end}}
       {{if not .Stock}}— 품절{{end}}
     </option>
     {{end}}

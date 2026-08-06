@@ -8,7 +8,7 @@
 {{with .Data}}{{if .Query}}
 <ul class="product-list">
   {{range .Products}}
-  <li><a href="/shop/p/{{.Slug}}">{{.Name}}</a> <span class="price">{{.BasePrice}}원</span></li>
+  <li><a href="/shop/p/{{.Slug}}">{{.Name}}</a> <span class="price">{{money .BasePrice}}</span></li>
   {{else}}
   <li class="empty">검색 결과가 없습니다.</li>
   {{end}}

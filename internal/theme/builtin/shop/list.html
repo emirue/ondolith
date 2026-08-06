@@ -19,7 +19,7 @@
   {{range .Products}}
   <li>
     <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
-    <span class="price">{{.BasePrice}}원{{if .MinDelta}}~{{end}}</span>
+    <span class="price">{{money .BasePrice}}{{if .MinDelta}}~{{end}}</span>
     {{if not .InStock}}<span class="badge">품절</span>{{end}}
   </li>
   {{else}}

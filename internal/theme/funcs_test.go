@@ -79,7 +79,7 @@ func TestNl2brEscapesBeforeConverting(t *testing.T) {
 
 func TestMoneyAndNumber(t *testing.T) {
 	m := FuncMap(Deps{})
-	money := m["money"].(func(int64) string)
+	money := func(v any) string { out, err := m["money"].(func(any) (string, error))(v); _ = err; return out }
 	number := m["number"].(func(int64) string)
 
 	if got := money(1234567); got != "1,234,567원" {
@@ -190,5 +190,30 @@ func TestFuncsUsableFromTemplate(t *testing.T) {
 	}
 	if got := b.String(); got != "1,500원|가나…|N" {
 		t.Errorf("= %q", got)
+	}
+}
+
+// **money 는 실수를 받지 않는다.**
+//
+// D30 이 금액을 정수 minor unit 으로 두는 이유가 반올림이다. 표시 단계에서
+// float 를 받아 조용히 반올림하면 그 결정이 여기서 되살아난다 — 12000.4 와
+// 12000.6 이 같은 화면에서 다른 총합으로 보이는 종류의 사고다.
+func TestMoneyRefusesFloats(t *testing.T) {
+	m := FuncMap(Deps{})
+	money := m["money"].(func(any) (string, error))
+
+	for _, bad := range []any{12000.0, float32(12000), "12000", nil} {
+		if _, err := money(bad); err == nil {
+			t.Errorf("money(%#v) 가 통과했다 — 정수만 받아야 한다", bad)
+		}
+	}
+	for _, ok := range []any{int(12000), int32(12000), int64(12000)} {
+		got, err := money(ok)
+		if err != nil {
+			t.Errorf("money(%#v): %v", ok, err)
+		}
+		if got != "12,000원" {
+			t.Errorf("money(%#v) = %q", ok, got)
+		}
 	}
 }

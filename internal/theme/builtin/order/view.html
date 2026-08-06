@@ -9,11 +9,11 @@
   <tbody>
     {{range .Items}}
     <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-        <td>{{.UnitPrice}}원</td><td>{{.Quantity}}</td><td>{{.LineAmount}}원</td></tr>
+        <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
     {{end}}
   </tbody>
 </table>
-<dl class="totals"><dt>결제 금액</dt><dd>{{.Total}}원</dd></dl>
+<dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
 <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
 <p><a href="/orders/{{.OrderNo}}/shipping">배송 조회</a></p>
 {{end}}{{end}}

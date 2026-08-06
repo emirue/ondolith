@@ -30,7 +30,7 @@
     {{range .Variants}}
     <option value="{{.ID}}">
       {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
-      {{if .PriceDelta}}({{.PriceDelta}}원 차액){{end}}
+      {{if .PriceDelta}}({{money .PriceDelta}} 차액){{end}}
     </option>
     {{end}}
   </select>

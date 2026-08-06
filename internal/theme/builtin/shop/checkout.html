@@ -5,13 +5,13 @@
 <ul class="cart">
   {{range .Items}}
   <li>{{.Name}} <span class="option">{{range $k, $v := .Option}}{{$k}}: {{$v}} {{end}}</span>
-      <span class="price">{{.UnitPrice}}원 × {{.Quantity}}</span></li>
+      <span class="price">{{money .UnitPrice}} × {{.Quantity}}</span></li>
   {{end}}
 </ul>
 <dl class="totals">
-  <dt>상품 합계</dt><dd>{{.Goods}}원</dd>
-  <dt>배송비</dt><dd>{{.Fee}}원</dd>
-  <dt>결제 예정</dt><dd>{{.Total}}원</dd>
+  <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
+  <dt>배송비</dt><dd>{{money .Fee}}</dd>
+  <dt>결제 예정</dt><dd>{{money .Total}}</dd>
 </dl>
 {{/* 금액 필드가 없다. 있으면 클라이언트 값이 계산에 닿고 FR-607 의 대조가
      자기 자신과의 대조가 된다 (D19 P-406 「받지 않는 필드」). */}}

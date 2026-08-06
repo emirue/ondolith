@@ -4,14 +4,14 @@
 {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
 <dl class="totals">
-  {{with .Order}}{{if .Discount}}<dt>주문 할인</dt><dd>−{{.Discount}}원</dd>{{end}}{{end}}
-  <dt>결제 금액</dt><dd>{{.Approved}}원</dd>
-  <dt>환불 접수·완료</dt><dd>{{.Refunded}}원</dd>
-  <dt>남은 금액</dt><dd>{{.Remaining}}원</dd>
+  {{with .Order}}{{if .Discount}}<dt>주문 할인</dt><dd>−{{money .Discount}}</dd>{{end}}{{end}}
+  <dt>결제 금액</dt><dd>{{money .Approved}}</dd>
+  <dt>환불 접수·완료</dt><dd>{{money .Refunded}}</dd>
+  <dt>남은 금액</dt><dd>{{money .Remaining}}</dd>
 </dl>
 <ul class="refunds">
   {{range .Refunds}}
-  <li>{{.CreatedAt}} · {{.Requester}} · {{.Amount}}원 · {{.Status}}
+  <li>{{.CreatedAt}} · {{.Requester}} · {{money .Amount}} · {{.Status}}
       {{with .Reason}}<span class="reason">{{.}}</span>{{end}}</li>
   {{else}}
   <li class="empty">접수된 요청이 없습니다.</li>
@@ -29,7 +29,7 @@
         <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .Remaining}} disabled{{end}}>
         {{.ProductName}} {{.OptionLabel}}
         <span class="qty">주문 {{.Quantity}}개 · 남은 {{.Remaining}}개</span>
-        {{if .Discount}}<span class="discount">할인 {{.Discount}}원 적용</span>{{end}}
+        {{if .Discount}}<span class="discount">할인 {{money .Discount}} 적용</span>{{end}}
       </label>
       <input name="qty_{{.ID}}" type="number" min="1" max="{{.Remaining}}" value="1"
              {{if not .Remaining}}disabled{{end}}>

@@ -3,6 +3,7 @@ package theme
 import (
 	"bytes"
 	"io/fs"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,12 @@ func payloadFor(name string) any {
 				FeePolicy: "차감", FeeAmount: 3000,
 				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
 				Items:     []returnItemLike{{ProductName: "티셔츠", OptionLabel: "크기: L", Quantity: 1}}}},
+		}
+	case "order/exchange-pay.html":
+		// 차액은 확정된 값이다 — 화면이 계산하지 않는다 (FR-607).
+		return map[string]any{
+			"Order":  orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "차액결제대기"},
+			"Return": exchangeDiffLike{ReturnNo: "R20260805-ABCDEFGHJK", Amount: 5000},
 		}
 	case "order/guest-form.html":
 		return map[string]any{"Error": "주문 정보를 찾을 수 없습니다."}
@@ -496,4 +503,47 @@ type returnLike struct {
 	FeeAmount, PriceDiff   int
 	CreatedAt              time.Time
 	Items                  []returnItemLike
+}
+
+// exchangeDiffLike mirrors commerce.ExchangeDiff's shape for P-514.
+type exchangeDiffLike struct {
+	ReturnNo string
+	Amount   int
+}
+
+// **커머스 템플릿은 금액을 `money` 로 낸다** (W3-27 완료 기준).
+//
+// 원시 정수를 그대로 그리면 26000 이 되고, 자릿수를 눈으로 세는 화면이 된다.
+// 더 중요한 것은 형식이 한 곳에 모인다는 점이다 — 템플릿마다 다르게 쓰면
+// 통화 표기를 바꿀 때 빠뜨리는 화면이 생긴다.
+func TestCommerceTemplatesFormatMoney(t *testing.T) {
+	var raw []string
+	for _, name := range builtinTemplates(t) {
+		if !strings.HasPrefix(name, "shop/") && !strings.HasPrefix(name, "order/") {
+			continue
+		}
+		b, err := builtinFS.ReadFile("builtin/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// `{{.Foo}}원` 은 money 를 안 쓴 자리다.
+		if regexp.MustCompile(`\{\{\.[A-Za-z][A-Za-z0-9.]*\}\}원`).Match(b) {
+			raw = append(raw, name)
+		}
+	}
+	if len(raw) > 0 {
+		t.Errorf("금액을 money 없이 그리는 템플릿: %v", raw)
+	}
+
+	// 실제로 통화 표기가 나오는지 — 정규식만 보면 money 를 쓰고도 깨질 수 있다.
+	l := newBuiltinLoader()
+	v := fullView()
+	v.Data = payloadFor("shop/cart.html")
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/cart.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "26,000원") {
+		t.Errorf("장바구니 합계가 통화 표기가 아니다:\n%.400s", b.String())
+	}
 }

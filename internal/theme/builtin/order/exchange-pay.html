@@ -8,7 +8,7 @@
      returns 에 있고, 이 화면은 읽기만 한다 — 폼에 금액 칸이 없는 것이
      그 규칙의 전부다 (FR-607). */}}
 <p>교환 건 {{.ReturnNo}}</p>
-<p class="amount">결제할 차액 <strong>{{.Amount}}원</strong></p>
+<p class="amount">결제할 차액 <strong>{{money .Amount}}</strong></p>
 <form method="post" class="form">
   {{/* paymentKey 는 PG 결제창이 채운다. 금액은 싣지 않는다. */}}
   <input type="hidden" name="paymentKey" value="">
