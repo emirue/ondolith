@@ -63,6 +63,8 @@ var nav = []NavItem{
 	{Screen: "A-512", Title: "커머스 정책", Path: "/admin/commerce/policy", Group: "커머스", Permission: "settings.update", Order: 28, Shop: true},
 	{Screen: "A-207", Title: "약관", Path: "/admin/terms", Group: "커머스", Permission: "settings.update", Order: 30, Shop: true},
 	{Screen: "A-208", Title: "사업자 정보", Path: "/admin/business", Group: "커머스", Permission: "settings.update", Order: 32, Shop: true},
+	{Screen: "A-508", Title: "결제 대사", Path: "/admin/reconcile", Group: "커머스", Permission: "payment.view", Order: 34, Shop: true},
+	{Screen: "A-603", Title: "웹훅 이력", Path: "/admin/webhooks", Group: "커머스", Permission: "payment.view", Order: 36, Shop: true},
 	{Screen: "A-207", Title: "약관", Path: "/admin/terms", Group: "커머스", Permission: "settings.update", Order: 30, Shop: true},
 	{Screen: "A-208", Title: "사업자 정보", Path: "/admin/business", Group: "커머스", Permission: "settings.update", Order: 32, Shop: true},
 	{Screen: "A-602", Title: "시스템 정보", Path: "/admin/system", Group: "설정", Permission: "settings.view", Order: 90},

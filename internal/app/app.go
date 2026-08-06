@@ -261,6 +261,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 				"https://api.tosspayments.com", commerce.AuthWindow)
 		}}
 
+	// A-508 은 PG 에 실제 상태를 묻는다. sh 가 만들어진 뒤라야 하므로 여기서
+	// 붙인다 — 조립 순서를 바꾸는 대신 한 줄을 옮긴다.
+	ad.Gateway = sh.gateway
+
 	static := func(w http.ResponseWriter, r *http.Request) {
 		loader().StaticHandler("/static/").ServeHTTP(w, r)
 	}

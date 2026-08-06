@@ -1,0 +1,26 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* **`수신` 이 목록 상단에 온다** — 처리되지 않은 채 남은 행이 이 화면의
+       목적이다. 자동 재처리 루프를 두지 않기로 했으므로 (D50) 사람이 이것을
+       봐야 한다. 원문은 카드 필드가 마스킹된 뒤 저장된 값이다. */}}
+  <table class="adm-table">
+    <thead><tr>
+      <th>수신</th><th>PG</th><th>이벤트</th><th>주문</th><th>상태</th><th>원문</th>
+    </tr></thead>
+    <tbody>
+    {{range .Rows}}
+      <tr>
+        <td>{{date .CreatedAt "2006-01-02 15:04"}}</td>
+        <td>{{.PG}}</td>
+        <td><code>{{.EventID}}</code></td>
+        <td>{{with .OrderNo}}<a href="/admin/orders/{{.}}">{{.}}</a>{{else}}—{{end}}</td>
+        <td>{{.Status}}{{with .Error}} · {{.}}{{end}}</td>
+        <td><details><summary>보기</summary><pre>{{.Payload}}</pre></details></td>
+      </tr>
+    {{else}}
+      <tr><td colspan="6">수신한 웹훅이 없습니다.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}

@@ -111,6 +111,10 @@ var adminScreenTitles = map[string]string{
 	"admin/policy.html":           "커머스 정책",
 	"admin/product-edit.html":     "상품 편집",
 	"admin/product-variants.html": "옵션·재고",
+	"admin/terms.html":            "약관 관리",
+	"admin/business.html":         "사업자 정보",
+	"admin/reconcile.html":        "결제 대사",
+	"admin/webhooks.html":         "웹훅 수신 이력",
 }
 
 // Render writes one administrator screen.

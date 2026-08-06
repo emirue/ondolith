@@ -1166,3 +1166,150 @@ func TestProductSaveRefusesNonIntegerPrice(t *testing.T) {
 		t.Errorf("가격이 %d 로 바뀌었다", price)
 	}
 }
+
+// reconcileGateway 는 조회 API 가 무엇을 말하든 그대로 돌려준다.
+type reconcileGateway struct {
+	status commerce.PaymentStatus
+	amount int
+	err    error
+}
+
+func (g reconcileGateway) Confirm(context.Context, commerce.ConfirmRequest) (*commerce.Payment, error) {
+	return nil, nil
+}
+func (g reconcileGateway) Cancel(context.Context, commerce.CancelRequest) (*commerce.Payment, error) {
+	return nil, nil
+}
+func (g reconcileGateway) Get(_ context.Context, key string) (*commerce.Payment, error) {
+	if g.err != nil {
+		return nil, g.err
+	}
+	// **PG 는 우리 PK 를 모른다.** 조회 키가 아니면 "기록 없음" 이다 — 진짜
+	// 게이트웨이가 그렇게 답하므로 여기서도 그렇게 답해야, 잘못된 키를
+	// 넘기는 변이가 잡힌다.
+	if !strings.HasPrefix(key, "pk-") {
+		return nil, nil
+	}
+	return &commerce.Payment{PaymentKey: key, Status: g.status, Amount: g.amount}, nil
+}
+func (g reconcileGateway) VerifyWebhook(context.Context, []byte) (*commerce.WebhookEvent, error) {
+	return nil, nil
+}
+
+// **A-508 은 「PG 는 승인, 우리는 대기」를 찾는 유일한 화면이다** (D50).
+//
+// 그 상태는 돈이 나갔는데 주문에 반영되지 않은 것이고, 다른 어떤 화면도
+// 그것을 보여주지 않는다.
+func TestReconcileFindsApprovedButUnrecorded(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"payment.view": true}, id: "u1"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	// 승인 API 는 성공했는데 우리 트랜잭션이 실패한 모습: payments 가 `대기`.
+	var orderID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO orders (order_no, status, receiver_name, receiver_phone,
+		                    postcode, address1, orderer_email, orderer_phone, total_amount)
+		VALUES ('RC0001','결제대기','받는이','010-0000-0000','12345','서울',
+		        'a@example.com','010-1111-1111',15000) RETURNING id`).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payments (order_id, kind, status, pg, payment_key, approved_amount)
+		VALUES ($1,'주문결제','대기','toss','pk-rc',15000)`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	d.Gateway = func() commerce.Gateway {
+		return reconcileGateway{status: commerce.PaymentApproved, amount: 15000}
+	}
+
+	var rows []commerce.ReconcileRow
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		if m, ok := data.(map[string]any); ok {
+			rows, _ = m["Rows"].([]commerce.ReconcileRow)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/admin/reconcile", nil)
+	d.Reconcile(httptest.NewRecorder(), req)
+
+	if len(rows) != 1 {
+		t.Fatalf("대사 행 %d개, want 1", len(rows))
+	}
+	if !strings.Contains(rows[0].Diff, "돈이 나갔는데") {
+		t.Errorf("차이 설명 %q — 가장 위험한 상태를 지목하지 않았다", rows[0].Diff)
+	}
+	// **우리 기록을 고치지 않는다.** 조회 응답 하나가 장부를 바꾸면 안 된다.
+	var status string
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM payments WHERE payment_key = 'pk-rc'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "대기" {
+		t.Errorf("대사가 우리 기록을 %q 로 바꿨다 — 조회는 대조지 수정이 아니다", status)
+	}
+}
+
+// 일치하면 차이가 비어 있다 — 위 검사가 "무엇이든 불일치" 를 본 것이 아니다.
+func TestReconcileReportsNoDiffWhenTheyAgree(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"payment.view": true}, id: "u1"}
+	d, pool := fixture(t, caller)
+	order, total := paidAdminOrder(t, d, pool)
+	_ = order
+	d.Gateway = func() commerce.Gateway {
+		return reconcileGateway{status: commerce.PaymentApproved, amount: total}
+	}
+
+	var rows []commerce.ReconcileRow
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		if m, ok := data.(map[string]any); ok {
+			rows, _ = m["Rows"].([]commerce.ReconcileRow)
+		}
+	}
+	d.Reconcile(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/reconcile", nil))
+	if len(rows) != 1 {
+		t.Fatalf("대사 행 %d개", len(rows))
+	}
+	if rows[0].Diff != "" {
+		t.Errorf("일치인데 차이 %q", rows[0].Diff)
+	}
+}
+
+// A-603 은 **처리되지 않은 웹훅을 상단에** 올린다. 자동 재처리를 두지 않기로
+// 했으므로 (D50) 사람이 그것을 봐야 한다.
+func TestWebhookLogPutsUnprocessedFirst(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"payment.view": true}, id: "u1"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	// 처리완료가 **나중에** 들어간다 — 시각순이면 이것이 위로 온다.
+	for _, tc := range []struct{ id, status string }{
+		{"ev-old-unprocessed", "수신"},
+		{"ev-new-done", "처리완료"},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO webhook_events (pg, event_id, status, payload)
+			VALUES ('toss', $1, $2, '{}'::jsonb)`, tc.id, tc.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var rows []commerce.WebhookRow
+	var warning string
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		if m, ok := data.(map[string]any); ok {
+			rows, _ = m["Rows"].([]commerce.WebhookRow)
+			warning, _ = m["Warning"].(string)
+		}
+	}
+	d.WebhookLog(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/webhooks", nil))
+
+	if len(rows) != 2 {
+		t.Fatalf("이력 %d행, want 2", len(rows))
+	}
+	if rows[0].Status != "수신" {
+		t.Errorf("상단이 %q — 처리되지 않은 행이 먼저 와야 한다", rows[0].Status)
+	}
+	if !strings.Contains(warning, "처리되지 않은") {
+		t.Errorf("경고 %q — 남은 건을 알리지 않았다", warning)
+	}
+}
