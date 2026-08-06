@@ -218,7 +218,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Auth:    authStore,
 		Caller: func(r *http.Request) admin.Caller {
 			return adminCaller{a: ActorFrom(r.Context()), now: time.Now,
-				ctx: r.Context(), auth: authStore, sm: sessions}
+				ctx: r.Context(), auth: authStore, sm: sessions,
+				limiter: limiter, limit: limits.ReauthAccount}
 		},
 		Render:      adminUI.Render,
 		Commerce:    commerceStore,
@@ -258,16 +259,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 				FreeThreshold: atoiOr(kv["shipping.free_threshold"], 0),
 			}
 		},
-		// **A-209 가 정한다.** 하드코딩이면 관리자가 결제사를 골라도 웹훅
-		// 경로와 payments.pg 가 옛 값으로 남는다. 미설정이면 토스다 —
-		// 지금 등록된 어댑터가 그것 하나뿐이고, 빈 문자열은 라우트로도
-		// 컬럼 값으로도 쓸 수 없다.
-		pgName: func() string {
-			if v := setting("pg.provider")["pg.provider"]; v != "" {
-				return v
-			}
-			return "toss"
-		},
+		// **A-209 가 정한다. 기본값을 두지 않는다.**
+		//
+		// 빈 값은 D19 A-209 가 정한 「사용 안 함」이다. 여기서 "toss" 로
+		// 되돌리면 관리자가 사용 안 함을 골라도 웹훅이 계속 열려 있고
+		// `payments.pg` 에 toss 가 찍힌다 — 화면은 껐다고 하는데 실제로는
+		// 켜져 있는 상태가 된다.
+		//
+		// 설정하지 않은 사이트에서 결제 경로가 닫히는 것은 의도다: PG 를
+		// 고르지 않은 상점이 결제를 받아서는 안 된다.
+		pgName: func() string { return setting("pg.provider")["pg.provider"] },
 		// 공개 키다. 시크릿은 어떤 경로로도 화면에 오지 않는다 (D19 P-407).
 		pgClientKey: func() string { return setting("pg.client_key")["pg.client_key"] },
 		gateway: func() commerce.Gateway {

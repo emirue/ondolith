@@ -1237,12 +1237,12 @@ if [ -f "$CL" ]; then
 	if [ "$mig_n" -eq 0 ]; then
 		err "마이그레이션을 하나도 찾지 못했다 (검사가 헛돌았다)"
 	elif [ "$mig_missing" -eq 0 ]; then
-		ok "마이그레이션 $mig_n 개가 전부 $CL 에 있다"
+		printf '  ✓ 마이그레이션 %s 개가 전부 %s 에 있다\n' "$mig_n" "$CL"
 	fi
 	# 다운그레이드 경로가 무엇인지 적혀 있어야 한다. `Down` 이 있다는 것과
 	# 되돌릴 수 있다는 것은 다르다 (NFR-308).
 	if grep -q "백업 복원" "$CL"; then
-		ok "$CL 이 되돌릴 수 없는 변경의 경로를 밝힌다"
+		printf '  ✓ %s 이 되돌릴 수 없는 변경의 경로를 밝힌다\n' "$CL"
 	else
 		err "$CL 에 다운그레이드 경로(백업 복원)가 적혀 있지 않다 (NFR-308)"
 	fi

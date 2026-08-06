@@ -188,6 +188,11 @@ type adminCaller struct {
 	ctx  context.Context
 	auth *auth.Store
 	sm   *scs.SessionManager
+	// limiter·limit 은 D15 4.3-2 의 「재인증 계정당 5회/분」이다. 세션이 이미
+	// 있으므로 IP 가 아니라 계정 기준이다 — IP 로 걸면 훔친 세션 하나로
+	// 관리자 트리 상한(60회/분)까지 비밀번호를 시도하는 오라클이 된다.
+	limiter *auth.Limiter
+	limit   auth.Limit
 }
 
 func (c adminCaller) Can(perm string) bool { return c.a.Can(perm) }
@@ -221,9 +226,17 @@ func (c adminCaller) ConfirmReauth(password string) bool {
 	if password == "" || c.a == nil || c.a.User == nil || c.auth == nil || c.sm == nil {
 		return false
 	}
+	// **계정당 5회/분** (D15 4.3-2). 로그인과 같은 비밀번호 대조이므로 같은
+	// 제한을 받아야 한다 — 없으면 세션 안에서 로그인 제한을 우회한다.
+	if c.limiter == nil || !c.limiter.Allow("reauth:"+c.a.User.ID, c.limit) {
+		return false
+	}
 	if _, err := c.auth.Authenticate(c.ctx, c.a.User.Email, password); err != nil {
 		return false
 	}
+	// 성공하면 버킷을 비운다. 정상 사용자가 한 번 틀린 뒤 맞혔을 때 다음
+	// 재인증까지 남은 횟수가 줄어 있으면, 제한이 공격자가 아니라 그 사람을 문다.
+	c.limiter.Forget("reauth:" + c.a.User.ID)
 	putTime(c.sm, c.ctx, sessReauth, c.now())
 	return true
 }

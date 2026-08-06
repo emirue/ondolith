@@ -582,9 +582,17 @@ fi
 
 # docker 가 없으면 **건너뛰지 않고 실패한다** — "검증했다" 와 "검증할 수
 # 없었다" 를 같은 exit 0 으로 두면 게이트가 아니다.
-# /usr/bin:/bin 은 sh 와 file 은 주고 /usr/local/bin 의 docker 는 뺀다.
-# PATH 를 통째로 비우면 sh 조차 없어서 다른 이유(127)로 실패한다.
-run_vr /usr/bin:/bin
+# **docker 만 가린다.** PATH 에서 특정 디렉터리를 빼는 방식은 배포판마다
+# docker 위치가 달라 안 통한다 (Ubuntu 는 /usr/bin/docker). 앞자리에 shim
+# 디렉터리를 두고 거기서 docker 를 "없는 명령"으로 만든다.
+VR_SHIM=$TMP/vr-shim
+mkdir -p "$VR_SHIM"
+printf '#!/bin/sh\nexit 127\n' > "$VR_SHIM/docker"
+chmod +x "$VR_SHIM/docker"
+# command -v 가 실행 가능 파일을 찾으므로, 그것까지 막으려면 이름을 지운다.
+rm -f "$VR_SHIM/docker"
+: > "$VR_SHIM/docker"   # 실행 권한 없는 빈 파일 → command -v 가 고르지 않는다
+run_vr "$VR_SHIM:$(dirname "$(command -v sh)"):/usr/bin:/bin"
 if [ "$vr_code" -ne 0 ] && printf '%s' "$vr_out" | grep -q "docker"; then
 	ok "docker 가 없으면 건너뛰지 않고 거부한다"
 else

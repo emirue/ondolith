@@ -40,7 +40,8 @@ func TestAdminReauthWindowCanBeReopenedWithThePassword(t *testing.T) {
 	probe := sm.LoadAndSave(withActor(sm, store)(http.HandlerFunc(
 		func(_ http.ResponseWriter, r *http.Request) {
 			c := adminCaller{a: ActorFrom(r.Context()), now: late,
-				ctx: r.Context(), auth: store, sm: sm}
+				ctx: r.Context(), auth: store, sm: sm,
+				limiter: auth.NewLimiter(), limit: auth.DefaultLimits().ReauthAccount}
 			needBefore = c.NeedsReauth()
 			wrongAccepted = c.ConfirmReauth("틀린 비밀번호")
 			rightAccepted = c.ConfirmReauth(password)
@@ -88,5 +89,73 @@ func TestAdminReauthWindowCanBeReopenedWithThePassword(t *testing.T) {
 	after.ServeHTTP(httptest.NewRecorder(), req2)
 	if needAfter {
 		t.Error("재인증에 성공했는데 다음 요청에서 또 요구한다 — 도장이 남지 않았다")
+	}
+}
+
+// **재인증에 계정당 5회/분 제한이 걸린다** (D15 4.3-2).
+//
+// 로그인과 같은 비밀번호 대조다. 없으면 훔친 세션 하나로 관리자 트리 상한
+// (IP당 60회/분)까지 비밀번호를 시도하는 오라클이 된다 — 세션 안에서 로그인
+// 제한을 그대로 우회한다.
+func TestReauthIsRateLimitedPerAccount(t *testing.T) {
+	store, _, sm := authFixture(t)
+	ctx := context.Background()
+	const password = "correct horse battery"
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.CreateUser(ctx, "op@example.com", hash, "운영자")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	late := func() time.Time { return time.Now().Add(2 * reauthWindow) }
+	limiter := auth.NewLimiter()
+	limit := auth.DefaultLimits().ReauthAccount
+
+	var wrongAccepted, blockedAt int
+	var rightAfterBlock bool
+	probe := sm.LoadAndSave(withActor(sm, store)(http.HandlerFunc(
+		func(_ http.ResponseWriter, r *http.Request) {
+			c := adminCaller{a: ActorFrom(r.Context()), now: late, ctx: r.Context(),
+				auth: store, sm: sm, limiter: limiter, limit: limit}
+			// 틀린 비밀번호를 한도 넘게 시도한다.
+			for i := 1; i <= limit.Burst+3; i++ {
+				if c.ConfirmReauth("틀린 비밀번호") {
+					wrongAccepted++
+				}
+			}
+			// **한도를 넘기면 맞는 비밀번호도 통과하지 못한다.** 통과한다면
+			// 제한이 시도 횟수를 세지 않는다는 뜻이다.
+			rightAfterBlock = c.ConfirmReauth(password)
+		})))
+
+	rec := httptest.NewRecorder()
+	sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		sm.Put(r.Context(), sessUserID, id)
+		putTime(sm, r.Context(), sessAuthAt, time.Now())
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, c := range rec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	probe.ServeHTTP(httptest.NewRecorder(), req)
+
+	if wrongAccepted != 0 {
+		t.Errorf("틀린 비밀번호가 %d번 통과했다", wrongAccepted)
+	}
+	if rightAfterBlock {
+		t.Error("한도를 넘긴 뒤에도 맞는 비밀번호가 통과했다 — 제한이 시도를 세지 않는다")
+	}
+	_ = blockedAt
+
+	// **다른 계정은 영향받지 않는다.** IP 기준이면 여기서도 막힌다.
+	other := auth.NewLimiter()
+	c2 := adminCaller{a: nil, now: late, ctx: ctx, auth: store, sm: sm,
+		limiter: other, limit: limit}
+	if c2.ConfirmReauth(password) {
+		t.Error("액터 없이 재인증이 통과했다")
 	}
 }

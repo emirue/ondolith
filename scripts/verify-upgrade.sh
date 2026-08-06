@@ -61,6 +61,10 @@ done
 # 설정 파일은 마법사가 쓴다 (설치 완료의 정의가 그것이다).
 
 start_app() {  # $1=바이너리 경로
+	# **지우기 전에 로그를 모은다.** `docker rm` 하면 그 컨테이너의 로그가
+	# 사라져서, 마지막 기동의 로그만 검사하게 된다 — 설치·업그레이드 때 찍힌
+	# 것을 못 보고 지나간다.
+	docker logs "$APP" >> "$tmp/all.log" 2>&1 || true
 	docker rm -f "$APP" >/dev/null 2>&1 || true
 	docker run -d --name "$APP" --network "$NET" \
 		-v "$1:/ondolith:ro" -v "$tmp:/work" -w /work alpine:3 /ondolith >/dev/null
@@ -124,8 +128,15 @@ applied=$(docker exec "$PG" psql -U u -tAc \
 	"SELECT count(*) FROM goose_db_version WHERE version_id = $(basename "$latest" | cut -d_ -f1 | sed 's/^0*//')" \
 	2>/dev/null | tr -d ' \r')
 
-[ "$after" = "$before" ] && say "✓" "기존 데이터가 남았다 (users=$after)" \
-	|| { say "✗" "users 가 $before → $after 로 바뀌었다"; fail=1; }
+# **두 값이 모두 비어도 같다.** psql 이 실패하면 before 도 after 도 빈
+# 문자열이 되고, 그 비교는 참이라 "데이터가 남았다" 가 나온다 — 아무것도
+# 확인하지 않은 채로. 숫자인지부터 본다.
+case "$after" in
+'' | *[!0-9]* ) say "✗" "업그레이드 뒤 users 를 세지 못했다 (출력: [$after])"; fail=1 ;;
+* )
+	[ "$after" = "$before" ] && say "✓" "기존 데이터가 남았다 (users=$after)" \
+		|| { say "✗" "users 가 $before → $after 로 바뀌었다"; fail=1; } ;;
+esac
 [ "$probe" = "1" ] && say "✓" "업그레이드 전에 넣은 행이 그대로다" \
 	|| { say "✗" "표식 행이 사라졌다"; fail=1; }
 [ "$applied" = "1" ] && say "✓" "대기 마이그레이션이 부팅 때 적용됐다 ($(basename "$latest"))" \
@@ -141,21 +152,38 @@ after_hash=$(hash_of)
 # 그것이 D30 「두 릴리즈 규칙」이 지키려는 성질이고, 여기서 확인한다.
 if start_app "$tmp/old/$BIN"; then
 	down_users=$(docker exec "$PG" psql -U u -tAc "SELECT count(*) FROM users" 2>/dev/null | tr -d ' \r')
-	[ "$down_users" = "$before" ] && say "✓" "이전 바이너리로 되돌려도 뜨고 데이터가 남았다 (users=$down_users)" \
-		|| { say "✗" "다운그레이드 후 users=$down_users (want $before)"; fail=1; }
+	case "$down_users" in
+	'' | *[!0-9]* ) say "✗" "다운그레이드 뒤 users 를 세지 못했다 (출력: [$down_users])"; fail=1 ;;
+	* )
+		[ "$down_users" = "$before" ] && say "✓" "이전 바이너리로 되돌려도 뜨고 데이터가 남았다 (users=$down_users)" \
+			|| { say "✗" "다운그레이드 후 users=$down_users (want $before)"; fail=1; } ;;
+	esac
 else
 	say "✗" "이전 바이너리로 되돌리자 기동하지 못했다"; fail=1
 fi
 
 # ⑤ **로그에 DSN·시크릿이 없다** (W4-12, D22 4절). 실기동 로그로 확인한다 —
 # "안 찍는다" 는 규칙은 로그를 봐야 확인된다.
-logs=$(docker logs "$APP" 2>&1)
-leaked=0
-for needle in "postgres://" "password=" "u:u@"; do
-	printf '%s' "$logs" | grep -q "$needle" && { say "✗" "로그에 [$needle] 이 있다"; leaked=1; }
-done
-[ "$leaked" -eq 0 ] && say "✓" "실기동 로그에 DSN·자격증명이 없다"
-[ "$leaked" -eq 0 ] || fail=1
+docker logs "$APP" >> "$tmp/all.log" 2>&1 || true
+logs=$(cat "$tmp/all.log" 2>/dev/null || true)
+
+# **빈 로그는 "누출 없음" 이 아니다.** 로그를 못 읽었는데 통과시키면, 이
+# 검사는 아무것도 확인하지 않은 채 매번 초록이 된다. 기동 로그가 있어야
+# 읽은 것이다.
+if [ -z "$logs" ]; then
+	say "✗" "로그를 하나도 읽지 못했다 — 누출 검사가 헛돈다"
+	fail=1
+elif ! printf '%s' "$logs" | grep -qE '설치 완료|운영 모드|listening|시작'; then
+	say "✗" "기동 로그가 없다 (읽은 길이 $(printf '%s' "$logs" | wc -c)) — 다른 것을 읽었다"
+	fail=1
+else
+	leaked=0
+	for needle in "postgres://" "password=" "u:u@" "correct-horse-battery"; do
+		printf '%s' "$logs" | grep -q "$needle" && { say "✗" "로그에 [$needle] 이 있다"; leaked=1; }
+	done
+	[ "$leaked" -eq 0 ] && say "✓" "실기동 로그 $(printf '%s' "$logs" | wc -l | tr -d ' ')줄에 DSN·자격증명이 없다"
+	[ "$leaked" -eq 0 ] || fail=1
+fi
 
 # ⑥ 백업 복원이 실제로 되는지 (NFR-308 의 유일한 경로).
 docker rm -f "$APP" >/dev/null 2>&1 || true

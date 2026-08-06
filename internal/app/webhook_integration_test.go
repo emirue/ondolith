@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -262,70 +263,110 @@ func seedPaidOrderForWebhook(t *testing.T, pool *pgxpool.Pool) (string, int) {
 
 // **A-209 가 저장한 결제사가 런타임에 실제로 쓰인다.**
 //
-// 화면만 있고 배선이 없으면 관리자가 결제사를 골라도 웹훅 경로와
-// `payments.pg` 는 옛 값으로 남는다 — 설정 화면이 있다는 사실이 곧 그 설정이
-// 쓰인다는 뜻은 아니다.
+// 기본값과 같은 값(`toss`)으로는 아무것도 증명하지 못한다 — 하드코딩이어도
+// 통과한다. 그래서 **기본값이 될 수 없는 값**을 넣고 라우트가 그것을 따라가는지
+// 본다. `pg.provider` 는 A-209 가 허용목록으로 막지만 설정 행 자체는 임의
+// 문자열을 담을 수 있으므로, 여기서는 DB 에 직접 넣어 런타임 배선만 시험한다.
 func TestConfiguredProviderReachesTheWebhookRoute(t *testing.T) {
 	_, pool := liveSite(t)
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO settings (key, value) VALUES ('site.type','shop'), ('pg.provider','toss')
+		INSERT INTO settings (key, value) VALUES ('site.type','shop'), ('pg.provider','otherpg')
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
 		t.Fatal(err)
 	}
 	srv := restartOnSameSchema(t).URL
 
-	// 설정된 결제사는 받는다.
-	resp := postWebhook(t, srv, "toss", `{"eventType":"X","data":{"orderId":"없는주문","paymentKey":"pk"}}`)
+	body := `{"eventType":"X","data":{"orderId":"없는주문","paymentKey":"pk"}}`
+	// 설정된 결제사가 받는다.
+	resp := postWebhook(t, srv, "otherpg", body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("설정된 결제사 = HTTP %d, want 200", resp.StatusCode)
+		t.Errorf("설정된 결제사(otherpg) = HTTP %d, want 200 — 설정을 읽지 않는다", resp.StatusCode)
 	}
-	// 다른 이름은 404 다.
-	resp = postWebhook(t, srv, "stripe", `{"eventType":"X","data":{"orderId":"a","paymentKey":"pk"}}`)
+	// **기본값이었던 이름은 404 다.** 이것이 하드코딩과 갈리는 지점이다.
+	resp = postWebhook(t, srv, "toss", body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("설정되지 않은 결제사 = HTTP %d, want 404", resp.StatusCode)
+		t.Errorf("설정하지 않은 toss = HTTP %d, want 404 — 옛 하드코딩이 남아 있다", resp.StatusCode)
 	}
 }
 
-// **A-209 가 저장한 클라이언트 키가 결제 화면에 실린다** (P-407).
+// **결제사를 고르지 않으면 웹훅이 전부 404 다** (A-209 「사용 안 함」).
 //
-// 시크릿과 같은 `setting` 을 통해 읽으므로, 이것이 실리면 시크릿도 같은
-// 경로로 어댑터에 닿는다. 공개 키라 화면에서 확인할 수 있는 유일한 절반이다.
-func TestConfiguredClientKeyReachesTheCheckoutScreen(t *testing.T) {
-	srvT, pool, _ := shopSite(t)
-	_ = srvT
-	ctx := context.Background()
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO settings (key, value) VALUES
-			('pg.provider','toss'), ('pg.client_key','test_ck_FROM_ADMIN'),
-			('pg.secret_key','test_sk_NEVER_SHOWN')
+// 화면은 껐다고 하는데 실제로는 켜져 있는 상태를 막는다.
+func TestUnsetProviderClosesTheWebhookRoute(t *testing.T) {
+	_, pool := liveSite(t)
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO settings (key, value) VALUES ('site.type','shop'), ('pg.provider','')
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
 		t.Fatal(err)
 	}
+	srv := restartOnSameSchema(t).URL
+
+	for _, pg := range []string{"toss", "otherpg", "x"} {
+		resp := postWebhook(t, srv, pg, `{"eventType":"X","data":{"orderId":"a","paymentKey":"pk"}}`)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("사용 안 함인데 %s = HTTP %d, want 404", pg, resp.StatusCode)
+		}
+	}
+}
+
+// **A-209 가 저장한 클라이언트 키가 결제 화면(P-407)에 실린다.**
+//
+// 설정값을 DB 에서 다시 읽어 비교하면 PostgreSQL 을 시험하는 것이지 배선을
+// 시험하는 것이 아니다 — 하드코딩으로 되돌려도 통과한다. **화면이 실제로 그
+// 값을 그리는지**를 본다.
+func TestConfiguredClientKeyReachesTheCheckoutScreen(t *testing.T) {
+	srvT, pool, variantID := shopSite(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settings (key, value) VALUES
+			('pg.client_key','test_ck_FROM_ADMIN'), ('pg.secret_key','test_sk_NEVER_SHOWN')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	_ = srvT
 	srv := restartOnSameSchema(t)
 
-	// 결제 화면까지 가려면 주문이 필요하다. 여기서는 화면이 설정을 읽는지만
-	// 보면 되므로, 설정을 읽는 다른 공개 경로인 홈에서 시크릿 누출부터 본다.
-	resp, err := http.Get(srv.URL + "/")
+	c := client()
+	// 장바구니 → 주문서 → 결제 화면. 결제 화면이 클라이언트 키를 싣는다.
+	resp := post(t, c, srv.URL+"/cart/items",
+		url.Values{"variant_id": {variantID}, "quantity": {"1"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("담기 HTTP %d", resp.StatusCode)
+	}
+	resp = post(t, c, srv.URL+"/checkout", url.Values{
+		"receiver_name": {"받는이"}, "receiver_phone": {"010-0000-0000"},
+		"postcode": {"12345"}, "address1": {"서울시 어딘가"},
+		"orderer_email": {"a@example.com"}, "orderer_phone": {"010-1111-1111"},
+	})
+	// 주문서 제출은 결제 화면(P-407)으로 리다이렉트한다. 클라이언트 키는
+	// 거기 실린다 — 결제창을 여는 것이 그 화면이다.
+	loc := resp.Header.Get("Location")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther || loc == "" {
+		t.Fatalf("주문서 제출 = HTTP %d, Location=%q", resp.StatusCode, loc)
+	}
+	pay, err := c.Get(srv.URL + loc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if strings.Contains(string(b), "test_sk_NEVER_SHOWN") {
-		t.Fatal("시크릿 키가 공개 화면에 새어 나왔다")
-	}
-
-	// 클라이언트 키는 shopDeps 를 통해 P-407 이 받는다. 조립이 설정을 읽는지
-	// 확인한다 — 하드코딩이면 이 값이 나오지 않는다.
-	var stored string
-	if err := pool.QueryRow(ctx,
-		`SELECT value FROM settings WHERE key = 'pg.client_key'`).Scan(&stored); err != nil {
+	defer pay.Body.Close()
+	b, err := io.ReadAll(pay.Body)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if stored != "test_ck_FROM_ADMIN" {
-		t.Fatalf("설정이 저장되지 않았다: %q", stored)
+	body := string(b)
+
+	if !strings.Contains(body, "test_ck_FROM_ADMIN") {
+		t.Errorf("결제 화면(%s)에 A-209 의 클라이언트 키가 없다 (HTTP %d)\n%.400s",
+			loc, pay.StatusCode, body)
+	}
+	// **시크릿은 어떤 경로로도 오지 않는다** (D19 P-407).
+	if strings.Contains(body, "test_sk_NEVER_SHOWN") {
+		t.Error("시크릿 키가 결제 화면에 실렸다")
 	}
 }

@@ -17,9 +17,11 @@ func shopSite(t *testing.T) (*httptest.Server, *pgxpool.Pool, string) {
 	t.Helper()
 	_, pool := liveSite(t)
 	ctx := context.Background()
+	// **결제사를 고른다.** A-209 의 빈 값은 「사용 안 함」이라 결제 경로가
+	// 닫힌다 — 결제를 쓰는 헬퍼이므로 여기서 고른다.
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO settings (key, value) VALUES ('site.type','shop')
-		 ON CONFLICT (key) DO UPDATE SET value = 'shop'`); err != nil {
+		`INSERT INTO settings (key, value) VALUES ('site.type','shop'), ('pg.provider','toss')
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
 		t.Fatal(err)
 	}
 	var productID, variantID string

@@ -27,7 +27,10 @@ func liveToss(t *testing.T) *Toss {
 		t.Fatal("ONDOLITH_TOSS_TEST_SECRET 이 없다 — A-209 에 넣은 테스트 시크릿 키를 환경변수로 준다")
 	}
 	if !strings.HasPrefix(secret, "test_") {
-		t.Fatalf("테스트 키가 아니다 (%s…) — 라이브 키로 이 검사를 돌리지 않는다", secret[:5])
+		// **값을 찍지 않는다.** 접두사가 아니라는 사실만으로 충분하고,
+		// 짧은 값에 `secret[:5]` 를 하면 패닉한다 — 거부해야 할 자리에서
+		// 패닉하면 거부 메시지가 나오지 않는다.
+		t.Fatal("ONDOLITH_TOSS_TEST_SECRET 이 test_ 로 시작하지 않는다 — 라이브 키로 이 검사를 돌리지 않는다")
 	}
 	return NewToss(secret, "https://api.tosspayments.com", AuthWindow)
 }
@@ -79,8 +82,17 @@ func TestLiveTossRefusesUnknownPayment(t *testing.T) {
 	if err == nil {
 		t.Fatal("없는 결제 키로 승인이 성공했다")
 	}
+	// **전송·파싱 실패는 통과가 아니다.** 네트워크가 막힌 환경에서 이 검사가
+	// 초록이면, 「승인 경로도 같은 자격증명으로 통한다」를 아무것도 확인하지
+	// 않고 보고하게 된다 — 이 파일이 존재하는 이유가 그 확인 하나다.
+	if errors.Is(err, ErrPaymentUnknown) {
+		t.Fatalf("전송·파싱 단계에서 끝났다 (%v) — API 에 닿지 못했다", err)
+	}
 	if strings.Contains(err.Error(), "HTTP 401") {
 		t.Fatalf("인증이 거부됐다 (%v) — 시크릿 키가 틀렸다", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 4") {
+		t.Fatalf("4xx 가 아니다: %v", err)
 	}
 	t.Logf("승인 거부를 정상적으로 받았다: %v", err)
 }

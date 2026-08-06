@@ -1182,3 +1182,41 @@ func TestPaymentSettingsLogNeverCarriesTheKey(t *testing.T) {
 		t.Errorf("변경 사실이 남지 않았다: %q", summary)
 	}
 }
+
+// **길이 상한을 서버가 건다** (D19 A-209: 200자).
+//
+// `settings.value` 는 무제한 `text` 라, HTML 의 `maxlength` 만으로는 스크립트
+// POST 를 막지 못한다 — 100KB 짜리 키가 저장되고 이후 매 GET 마다 폼 속성으로
+// 다시 나간다.
+func TestPaymentKeysHaveAServerSideLengthLimit(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	long := strings.Repeat("k", 201)
+	for _, field := range []string{"pg.client_key", "pg.secret_key"} {
+		rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil,
+			url.Values{"pg.provider": {"toss"}, field: {long}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 201자 = HTTP %d, want 422", field, rec.Code)
+		}
+	}
+	kv, err := d.Content.Settings(ctx, "pg.client_key", "pg.secret_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range kv {
+		if len(v) > 200 {
+			t.Errorf("%s 가 %d자로 저장됐다", k, len(v))
+		}
+	}
+
+	// 200자는 통과한다 — 위 단언이 "긴 값은 전부 막힌다" 가 아니라는 것.
+	ok := strings.Repeat("k", 200)
+	rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil,
+		url.Values{"pg.provider": {"toss"}, "pg.client_key": {ok}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("200자 = HTTP %d, want 303", rec.Code)
+	}
+}

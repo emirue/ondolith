@@ -46,6 +46,12 @@ func webhookMux(d webhookDeps) http.Handler {
 func (d webhookDeps) receive(w http.ResponseWriter, r *http.Request) {
 	pg := r.PathValue("pg")
 	// 등록된 어댑터만. 목록 밖은 404 다 — 어떤 PG 를 쓰는지 알려주지 않는다.
+	//
+	// **결제사를 고르지 않았으면 전부 404 다** (A-209 의 「사용 안 함」).
+	//
+	// 빈 설정을 따로 검사하지 않는다: 경로 패턴이 빈 세그먼트를 매치하지
+	// 않으므로 `pg` 는 항상 비어 있지 않고, 그러면 `pg != ""` 가 늘 참이라
+	// 이 비교만으로 전부 막힌다. 따로 둔 검사는 무는 것이 없어 지웠다.
 	if pg != d.pgName() {
 		http.NotFound(w, r)
 		return

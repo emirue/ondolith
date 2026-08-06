@@ -192,6 +192,15 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 	kv := map[string]string{}
 	for _, k := range paymentSettingKeys {
 		v := strings.TrimSpace(r.PostFormValue(k))
+		// **길이 상한을 서버가 건다** (D19 A-209: 200자). `settings.value` 는
+		// 무제한 text 라, HTML 의 maxlength 만으로는 스크립트 POST 를 막지
+		// 못한다 — 100KB 짜리 키가 저장되고 이후 매 GET 마다 폼 속성으로
+		// 다시 나간다.
+		if len(v) > 200 {
+			d.renderPayment(w, r, http.StatusUnprocessableEntity,
+				"키가 너무 깁니다 (200자 이내).")
+			return
+		}
 		if secretKeys[k] && v == "" {
 			// 빈 시크릿은 "그대로 두라" 이지 "지우라" 가 아니다. 화면이 현재
 			// 값을 보여줄 수 없으므로 빈 칸이 정상 상태다.

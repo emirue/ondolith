@@ -4,9 +4,21 @@
 <p>주문번호 <strong>{{.OrderNo}}</strong></p>
 <dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
 {{end}}
-{{/* 결제창은 브라우저 SDK 가 연다. 서버는 공개 클라이언트 키와 저장된 금액만
-     넘긴다 — successUrl·failUrl 은 서버가 구성하고, 시크릿은 어떤 경로로도
-     여기 오지 않는다 (D19 P-407). */}}
+{{/* 결제창은 브라우저 SDK 가 연다. 서버는 **공개 클라이언트 키**와 저장된
+     금액만 넘긴다 — successUrl·failUrl 은 서버가 구성하고, 시크릿은 어떤
+     경로로도 여기 오지 않는다 (D19 P-407).
+
+     키를 `data-` 속성으로 낸다: 테마의 JS 가 여기서 읽는다. 이것을 그리지
+     않으면 A-209 에 키를 넣어도 결제창을 열 방법이 없다 — 핸들러가 넘겨도
+     화면이 안 쓰면 넘긴 적 없는 것과 같다. */}}
+{{with .ClientKey}}
+<div id="payment-widget" data-client-key="{{.}}"
+     {{with $.Data.Order}}data-order-no="{{.OrderNo}}" data-amount="{{.Total}}"{{end}}></div>
+{{else}}
+<p class="error" role="alert">
+  결제 수단이 설정되지 않았습니다. 관리자에게 문의하세요.
+</p>
+{{end}}
 <p class="hint">결제창이 열리지 않으면 아래 버튼을 눌러 주세요.</p>
 <form method="get" action="/checkout/success" class="form">
   <button type="submit">결제 진행</button>
