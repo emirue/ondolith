@@ -3,7 +3,7 @@ PKG     := ./cmd/ondolith
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help build run check test test-integration test-db-down vet fmt docs selftest vuln release verify-release measure verify-upgrade clean
+.PHONY: help build run check test test-integration test-db-down vet fmt docs selftest vuln release verify-release measure verify-upgrade test-toss clean
 
 help:
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t20
@@ -75,3 +75,8 @@ measure: ## 1 vCPU / 512MB 티어에서 자원 실측 (NFR-101, W4-08)
 
 verify-upgrade: ## 데이터가 든 인스턴스에서 업그레이드 절차 실측 (NFR-301, W4-11)
 	@sh scripts/verify-upgrade.sh
+
+# 토스 계정과 네트워크가 필요해 check 에도 test-integration 에도 넣지 않는다.
+# 태그 없이는 빌드조차 되지 않으므로 SKIP 이 생기지 않는다 (check-testrun.sh).
+test-toss: ## 토스 테스트 키로 어댑터 실측 (W3-34). ONDOLITH_TOSS_TEST_SECRET 필요
+	go test -tags tosslive -count=1 -v -run 'TestLiveToss' ./internal/commerce/

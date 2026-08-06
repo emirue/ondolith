@@ -39,6 +39,7 @@
 | D70 | [70-operations.md](70-operations.md) | 배포, **업그레이드(패치) 절차**, 백업, 모니터링 | 릴리즈·운영 |
 | D71 | [71-install-guide.md](71-install-guide.md) | **설치 가이드.** 빈 DB → 바이너리 → 브라우저 설치. 명령을 그대로 복사해 쓸 수 있다 | 처음 띄울 때 |
 | D72 | [72-deploy-lightsail.md](72-deploy-lightsail.md) | **배포 가이드.** systemd·TLS·CloudFront·WAF·백업·모니터링 | 상시 운영으로 만들 때 |
+| D73 | [73-toss-verification.md](73-toss-verification.md) | **토스 실측 절차.** 테스트 키로 확인하는 것 · 브라우저가 필요한 것 · 이미 자동인 것 | 결제를 실제 PG로 확인할 때 |
 | D80 | [80-roadmap.md](80-roadmap.md) | Phase별 범위와 완료 기준 | 다음에 뭘 할지 정할 때 |
 | D81 | [81-work-breakdown.md](81-work-breakdown.md) | **작업 분해.** Phase별 작업·선행 관계·완료 기준·임계 경로 | 무엇부터 만들지 정할 때 |
 | D82 | [82-execution-loop.md](82-execution-loop.md) | **실행 루프.** 종료 신호·진행 표시·재개 절차 (`scripts/next-task.sh`) | 작업을 실제로 돌릴 때 |
