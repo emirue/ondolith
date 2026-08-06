@@ -119,6 +119,7 @@ var adminScreenTitles = map[string]string{
 	"admin/stocktake.html":        "재고 실사",
 	"admin/pick.html":             "출고 피킹 대조",
 	"admin/scan-lookup.html":      "스캔 조회",
+	"admin/qr-labels.html":        "QR 라벨",
 }
 
 // Render writes one administrator screen.

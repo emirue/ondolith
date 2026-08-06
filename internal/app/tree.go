@@ -380,6 +380,9 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "order.update", Handler: ad.PickCheck})
 		r.Add(Route{Screen: "A-517", Method: "GET", Pattern: "/admin/scan/lookup", Class: SC4,
 			Permission: "product.view", Handler: ad.ScanLookup})
+		// A-513 QR 라벨. **상태를 바꾸지 않으므로 GET 만 있다** (FR-620).
+		r.Add(Route{Screen: "A-513", Method: "GET", Pattern: "/admin/products/{id}/labels", Class: SC4,
+			Permission: "product.view", Handler: ad.QRLabel})
 
 		// A-508 결제 대사 · A-603 웹훅 이력. **둘 다 필요하다** — 대사는 PG
 		// 조회와의 대조이고, 수신 이력은 "웹훅이 오긴 왔는가" 다 (D13 A-603).

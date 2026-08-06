@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -206,4 +207,52 @@ func (d *Deps) ScanLookup(w http.ResponseWriter, r *http.Request) {
 		data["Variant"] = got
 	}
 	d.Render(w, r, "admin/scan-lookup.html", http.StatusOK, data)
+}
+
+// QRLabel is A-513 — 라벨 인쇄 시트.
+//
+// **QR 이 담는 값은 `product_variants.id` 다** (FR-620). SKU 가 아니다: SKU 는
+// 외부 시스템이 정하고 바뀔 수 있어서, 바뀌는 순간 이미 붙은 스티커가 다른
+// 조합을 가리키거나 아무것도 가리키지 않게 된다.
+//
+// **상태를 바꾸지 않으므로 GET 만 있다.** 인쇄는 브라우저가 한다.
+func (d *Deps) QRLabel(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "product.view"); !ok {
+		return
+	}
+	productID := r.PathValue("id")
+	p, err := d.Commerce.ProductByID(r.Context(), productID)
+	if errors.Is(err, commerce.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// sellableOnly=false — 품절 조합에도 라벨은 필요하다. 라벨이 없으면
+	// 그 조합은 입고 스캔을 할 수 없어 영원히 품절로 남는다.
+	variants, err := d.Commerce.Variants(r.Context(), productID, false)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+
+	labels := make([]map[string]any, 0, len(variants))
+	for _, v := range variants {
+		svg, err := qrSVG(v.ID, 128)
+		if err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		labels = append(labels, map[string]any{
+			// **우리가 만든 SVG 다** — 사용자 입력이 아니라 위의 qrSVG 가
+			// 좌표만 찍은 문자열이라 template.HTML 로 낸다. 담기는 값은
+			// uuid 이고 그것도 속성이 아니라 도형 좌표로만 쓰인다.
+			"SVG":     template.HTML(svg), //nolint:gosec // 생성원이 qrSVG 하나다
+			"Variant": v,
+		})
+	}
+	d.Render(w, r, "admin/qr-labels.html", http.StatusOK,
+		map[string]any{"Product": p, "Labels": labels})
 }

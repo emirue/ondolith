@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1451,5 +1452,72 @@ func TestPickCheckRefusesAndLogsWithoutChangingAnything(t *testing.T) {
 	}
 	if stockAfter != stockBefore {
 		t.Errorf("재고가 %d → %d 로 바뀌었다 — 이중 차감이다", stockBefore, stockAfter)
+	}
+}
+
+// **QR 이 담는 값은 `product_variants.id` 다** (FR-620, W3-37 완료 기준).
+//
+// SKU 를 담으면 외부 시스템이 SKU 를 바꾸는 순간 이미 붙은 스티커가 다른
+// 조합을 가리키거나 아무것도 가리키지 않게 된다. 그림만 봐서는 알 수 없으므로
+// **같은 id 로 독립적으로 인코딩한 결과와 대조**하고, SKU 를 바꾼 뒤에도
+// 같은 그림이 나오는지 본다.
+func TestQRLabelEncodesTheVariantIDNotTheSKU(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.view": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	var productID, withSKU, noSKU string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta,stock,sku)
+		 VALUES ($1,'{"크기":"L"}',0,3,'SKU-A') RETURNING id`, productID).Scan(&withSKU); err != nil {
+		t.Fatal(err)
+	}
+	// **SKU 가 NULL 인 조합도 발행된다** — 라벨이 없으면 그 조합은 입고 스캔을
+	// 할 수 없어 영원히 품절로 남는다.
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		 VALUES ($1,'{"크기":"M"}',0,0) RETURNING id`, productID).Scan(&noSKU); err != nil {
+		t.Fatal(err)
+	}
+
+	render := func() map[string]string {
+		t.Helper()
+		out := map[string]string{}
+		d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+			m, _ := data.(map[string]any)
+			labels, _ := m["Labels"].([]map[string]any)
+			for _, l := range labels {
+				v := l["Variant"].(commerce.Variant)
+				out[v.ID] = string(l["SVG"].(template.HTML))
+			}
+		}
+		req := httptest.NewRequest(http.MethodGet, "/admin/products/"+productID+"/labels", nil)
+		req.SetPathValue("id", productID)
+		d.QRLabel(httptest.NewRecorder(), req)
+		return out
+	}
+
+	before := render()
+	if len(before) != 2 {
+		t.Fatalf("라벨 %d개, want 2 (SKU 없는 조합도 발행된다)", len(before))
+	}
+	// **독립 인코딩과 같아야 한다** — 다르면 담긴 값이 id 가 아니다.
+	for _, id := range []string{withSKU, noSKU} {
+		assertQRCarries(t, before[id], id)
+	}
+
+	// SKU 를 바꾼다. 스티커는 그대로여야 한다.
+	if _, err := pool.Exec(ctx,
+		`UPDATE product_variants SET sku = 'SKU-CHANGED' WHERE id = $1`, withSKU); err != nil {
+		t.Fatal(err)
+	}
+	after := render()
+	if after[withSKU] != before[withSKU] {
+		t.Error("SKU 를 바꿨더니 QR 이 달라졌다 — 이미 붙은 스티커가 무의미해진다")
 	}
 }

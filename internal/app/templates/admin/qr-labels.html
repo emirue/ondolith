@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="adm-card">
+  <h2>{{.Product.Name}} 라벨</h2>
+  {{/* **QR 이 담는 값은 조합 id 다** (FR-620) — SKU 가 아니다. SKU 를 담으면
+       외부 시스템이 SKU 를 바꾸는 순간 이미 붙은 스티커가 다른 조합을
+       가리킨다. SKU 가 없는 조합에도 라벨이 나온다. */}}
+  <div class="qr-sheet">
+    {{range .Labels}}
+    <figure class="qr-label">
+      {{.SVG}}
+      <figcaption>
+        {{with .Variant}}
+        <strong>{{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}</strong>
+        <span>{{if .SKU}}{{.SKU}}{{else}}SKU 없음{{end}}</span>
+        {{end}}
+      </figcaption>
+    </figure>
+    {{else}}
+    <p>조합이 없습니다.</p>
+    {{end}}
+  </div>
+  <p class="adm-hint">브라우저의 인쇄 기능으로 스티커 용지에 출력하세요. 벡터라 크기를 바꿔도 깨지지 않습니다.</p>
+</div>
+{{end}}

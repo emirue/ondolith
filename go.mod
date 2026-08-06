@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.27.3
 	golang.org/x/crypto v0.54.0
+	rsc.io/qr v0.2.0
 )
 
 require (
