@@ -115,6 +115,10 @@ var adminScreenTitles = map[string]string{
 	"admin/business.html":         "사업자 정보",
 	"admin/reconcile.html":        "결제 대사",
 	"admin/webhooks.html":         "웹훅 수신 이력",
+	"admin/scan-receive.html":     "스캔 입고",
+	"admin/stocktake.html":        "재고 실사",
+	"admin/pick.html":             "출고 피킹 대조",
+	"admin/scan-lookup.html":      "스캔 조회",
 }
 
 // Render writes one administrator screen.

@@ -1,0 +1,34 @@
+{{define "content"}}
+<div class="adm-card">
+  <h2>주문 {{.OrderNo}} 피킹 대조</h2>
+  {{/* **이 화면은 재고도 주문 상태도 바꾸지 않는다** (FR-623). 재고는 주문
+       시점에 이미 차감됐고, 상태는 A-506 이 옮긴다. 여기서 건드리면 이중
+       차감과 유령 전이가 생긴다. */}}
+  <table class="adm-table">
+    <thead><tr><th>상품</th><th>조합</th><th>주문</th><th>대조</th></tr></thead>
+    <tbody>
+    {{$s := .Scanned}}
+    {{range .Lines}}
+      <tr>
+        <td>{{.ProductName}}</td><td>{{.OptionLabel}}</td><td>{{.Ordered}}</td>
+        <td>{{index $s .VariantID}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+
+  <form method="post" action="/admin/orders/{{.OrderNo}}/pick">
+    {{range .Lines}}
+    <input type="hidden" name="count_{{.VariantID}}" value="{{index $s .VariantID}}">
+    {{end}}
+    <label class="adm-field"><span>스캔 값</span>
+      <input type="text" name="scanned" autofocus autocomplete="off" required></label>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">대조</button>
+    </div>
+  </form>
+  <p class="adm-hint">
+    주문에 없는 조합이나 수량을 넘긴 스캔은 거부되고 작업 로그에 남습니다.
+  </p>
+</div>
+{{end}}

@@ -1,0 +1,17 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* 스캐너·카메라·손입력이 전부 같은 칸으로 들어온다 (D13). 값은
+       product_variants.id 다 — SKU 가 아니다. SKU 는 외부 시스템이 정하고
+       바뀔 수 있어서, 바뀌는 순간 이미 붙은 스티커가 다른 조합을 가리킨다. */}}
+  <form method="post" action="/admin/scan/receive">
+    <label class="adm-field"><span>스캔 값</span>
+      <input type="text" name="scanned" autofocus autocomplete="off" required></label>
+    <label class="adm-field"><span>입고 수량</span>
+      <input type="number" name="quantity" min="1" max="10000" value="1" required></label>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">입고</button>
+    </div>
+  </form>
+  <p class="adm-hint">입고는 증감으로 반영됩니다. 같은 조합을 두 사람이 동시에 입고해도 합산됩니다.</p>
+</div>
+{{end}}

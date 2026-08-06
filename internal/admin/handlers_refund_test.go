@@ -1313,3 +1313,143 @@ func TestWebhookLogPutsUnprocessedFirst(t *testing.T) {
 		t.Errorf("경고 %q — 남은 건을 알리지 않았다", warning)
 	}
 }
+
+// **A-515 는 조정값을 받지 않는다** (D19 A-515 받지 않는 필드).
+//
+// 받으면 실사가 임의 재고 조작 창구가 된다. 조용히 무시하면 운영자는 자기가
+// 보낸 조정값이 적용됐다고 믿는다.
+func TestStocktakeRefusesAClientSuppliedDelta(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	var productID, variantID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		 VALUES ($1,'{"크기":"L"}',0,10) RETURNING id`, productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, field := range []string{"delta", "adjustment"} {
+		rec := postAdmin(t, d.Stocktake, "/admin/scan/stocktake", nil, url.Values{
+			"scanned": {variantID}, "ledger": {"10"}, "counted": {"10"}, field: {"999"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 필드 = HTTP %d, want 422", field, rec.Code)
+		}
+	}
+	var stock int
+	if err := pool.QueryRow(ctx,
+		`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&stock); err != nil {
+		t.Fatal(err)
+	}
+	if stock != 10 {
+		t.Errorf("재고 %d — 거부된 요청이 반영됐다", stock)
+	}
+
+	// 실측만 보내면 서버가 조정값을 계산한다.
+	rec := postAdmin(t, d.Stocktake, "/admin/scan/stocktake", nil, url.Values{
+		"scanned": {variantID}, "ledger": {"10"}, "counted": {"7"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("정상 실사 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&stock); err != nil {
+		t.Fatal(err)
+	}
+	if stock != 7 {
+		t.Errorf("재고 %d, want 7", stock)
+	}
+}
+
+// **작업 로그에 장부·실측·조정 셋이 모두 남는다** (FR-622, D15 7절).
+// 하나라도 빠지면 무엇을 근거로 재고가 바뀌었는지 재구성할 수 없다.
+func TestStocktakeLogsAllThreeNumbers(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	var productID, variantID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		 VALUES ($1,'{"크기":"L"}',0,10) RETURNING id`, productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	postAdmin(t, d.Stocktake, "/admin/scan/stocktake", nil, url.Values{
+		"scanned": {variantID}, "ledger": {"10"}, "counted": {"7"}})
+
+	var summary string
+	if err := pool.QueryRow(ctx,
+		`SELECT summary FROM operation_logs ORDER BY created_at DESC LIMIT 1`).Scan(&summary); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"장부 10", "실측 7", "조정 -3"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("작업 로그에 %q 가 없다: %q", want, summary)
+		}
+	}
+}
+
+// **A-516 은 주문 상태와 재고를 건드리지 않는다** (FR-623). 거부는 로그에 남는다.
+func TestPickCheckRefusesAndLogsWithoutChangingAnything(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.update": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+	order, _ := paidAdminOrder(t, d, pool)
+
+	var statusBefore string
+	var stockBefore int
+	if err := pool.QueryRow(ctx, `
+		SELECT o.status, v.stock FROM orders o
+		JOIN order_items oi ON oi.order_id = o.id
+		JOIN product_variants v ON v.id = oi.variant_id
+		WHERE o.order_no = $1`, order.OrderNo).Scan(&statusBefore, &stockBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	// 주문에 없는 조합을 스캔한다.
+	rec := postAdmin(t, d.PickCheck, "/admin/orders/"+order.OrderNo+"/pick",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"scanned": {"00000000-0000-4000-8000-000000000000"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("주문에 없는 조합 = HTTP %d, want 422", rec.Code)
+	}
+
+	var logged string
+	if err := pool.QueryRow(ctx,
+		`SELECT summary FROM operation_logs ORDER BY created_at DESC LIMIT 1`).Scan(&logged); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logged, "피킹 대조 거부") {
+		t.Errorf("거부가 로그에 남지 않았다: %q", logged)
+	}
+
+	var statusAfter string
+	var stockAfter int
+	if err := pool.QueryRow(ctx, `
+		SELECT o.status, v.stock FROM orders o
+		JOIN order_items oi ON oi.order_id = o.id
+		JOIN product_variants v ON v.id = oi.variant_id
+		WHERE o.order_no = $1`, order.OrderNo).Scan(&statusAfter, &stockAfter); err != nil {
+		t.Fatal(err)
+	}
+	if statusAfter != statusBefore {
+		t.Errorf("주문 상태가 %s → %s 로 바뀌었다", statusBefore, statusAfter)
+	}
+	if stockAfter != stockBefore {
+		t.Errorf("재고가 %d → %d 로 바뀌었다 — 이중 차감이다", stockBefore, stockAfter)
+	}
+}

@@ -1,0 +1,25 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* **조정값 칸이 없다** (D19 A-515 받지 않는 필드). 서버가 `실측 − 장부` 로
+       계산한다 — 클라이언트가 조정값을 주면 실사가 임의 재고 조작 창구가 된다. */}}
+  <form method="post" action="/admin/scan/stocktake">
+    <label class="adm-field"><span>스캔 값</span>
+      <input type="text" name="scanned" autofocus autocomplete="off" required></label>
+    <label class="adm-field"><span>장부 수량 (조회한 값)</span>
+      <input type="number" name="ledger" required></label>
+    <label class="adm-field"><span>실측 수량 — 0도 유효합니다</span>
+      <input type="number" name="counted" min="0" max="1000000" required></label>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">실사 반영</button>
+    </div>
+  </form>
+  {{with .Variant}}
+  <p class="adm-toast adm-toast--warn">
+    현재 재고 {{.Stock}}개 — 세는 동안 바뀌었습니다. 이 값으로 다시 시도하세요.
+  </p>
+  {{end}}
+  <p class="adm-hint">
+    세는 도중 주문이 들어오면 반영이 거부됩니다. 판매분을 지우지 않기 위해서입니다.
+  </p>
+</div>
+{{end}}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -83,6 +84,16 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	store := content.NewStore(pool)
+	// **`operation_logs.actor_user_id` 는 uuid 다.** `"u1"` 같은 임의 문자열은
+	// 22P02 로 실패하고, 그 실패를 운영 코드가 삼킨다 — 그래서 이 픽스처에서는
+	// 모든 작업 로그가 조용히 사라지고 있었다.
+	//
+	// 사용자 행을 만들어 붙이지는 않는다: 사용자 수를 세는 검사들이 그 한 행에
+	// 걸린다. 빈 값은 NULL 로 저장되고 (D30 이 익명 액터를 허용한다), 감사
+	// 스냅샷인 `actor_email` 은 그대로 남는다.
+	if f, ok := c.(*fakeCaller); ok && f.id != "" && !looksLikeUUIDForTest(f.id) {
+		f.id = ""
+	}
 	d := &Deps{
 		Content:  store,
 		Auth:     auth.NewStore(pool),
@@ -90,7 +101,16 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		// 운영과 같이 채운다. 비워 두면 첨부를 지우는 경로가 nil 로 터지는데,
 		// 그 사실이 테스트에서는 보이지 않는다.
 		Attachments: store.AttachmentsIn(t.TempDir()),
-		Caller:      func(*http.Request) Caller { return c },
+		// **작업 로그도 운영과 같이 붙인다.** 비워 두면 d.log 가 조용히
+		// 아무것도 안 하고, "로그에 남는다" 를 확인하는 검사가 전부 무의미해진다
+		// (D15 7절이 요구하는 것이 바로 그 기록이다).
+		OpLog: store.OpLog(),
+		// **작업 로그 기록 실패를 테스트 실패로 만든다.** 운영에서는 삼키는
+		// 것이 맞지만(변경은 이미 일어났다), 테스트에서 삼키면 "로그에 남는다"
+		// 는 단언이 전부 헛돈다 — 실제로 이 픽스처는 actor id 가 uuid 가
+		// 아니라서 모든 기록이 조용히 실패하고 있었다.
+		Logger: slog.New(failOnAudit{t: t}),
+		Caller: func(*http.Request) Caller { return c },
 		Render: func(w http.ResponseWriter, _ *http.Request, name string, code int, data any) {
 			w.WriteHeader(code)
 			_, _ = w.Write([]byte(name))
@@ -977,4 +997,24 @@ func TestTermsRefusesEditingAPublishedVersion(t *testing.T) {
 	if n != 2 {
 		t.Errorf("약관 %d행, want 2", n)
 	}
+}
+
+// failOnAudit turns a swallowed audit-log failure into a test failure.
+type failOnAudit struct{ t *testing.T }
+
+func (h failOnAudit) Enabled(context.Context, slog.Level) bool { return true }
+func (h failOnAudit) Handle(_ context.Context, r slog.Record) error {
+	if strings.Contains(r.Message, "작업 로그 기록 실패") {
+		var detail []string
+		r.Attrs(func(a slog.Attr) bool { detail = append(detail, a.String()); return true })
+		h.t.Errorf("작업 로그가 기록되지 않았다: %v", detail)
+	}
+	return nil
+}
+func (h failOnAudit) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h failOnAudit) WithGroup(string) slog.Handler      { return h }
+
+// looksLikeUUIDForTest mirrors the shape check the store uses.
+func looksLikeUUIDForTest(s string) bool {
+	return len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-'
 }

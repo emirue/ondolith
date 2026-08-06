@@ -363,6 +363,24 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		r.Add(Route{Screen: "A-511", Method: "POST", Pattern: "/admin/orders/{no}/returns", Class: SC6,
 			Permission: "order.return", Handler: ad.ReturnAction})
 
+		// A-514·A-515·A-516·A-517 QR 재고. **QR 은 재고 모델이 아니라 재고
+		// 조작의 입력 수단이다** (D13) — 재고는 여전히 정수 하나이고 delta 로만
+		// 움직인다. A-517 만 조회라 product.view 다.
+		r.Add(Route{Screen: "A-514", Method: "GET", Pattern: "/admin/scan/receive", Class: SC4,
+			Permission: "product.manage", Handler: ad.ScanReceive})
+		r.Add(Route{Screen: "A-514", Method: "POST", Pattern: "/admin/scan/receive", Class: SC5,
+			Permission: "product.manage", Handler: ad.ScanReceive})
+		r.Add(Route{Screen: "A-515", Method: "GET", Pattern: "/admin/scan/stocktake", Class: SC4,
+			Permission: "product.manage", Handler: ad.Stocktake})
+		r.Add(Route{Screen: "A-515", Method: "POST", Pattern: "/admin/scan/stocktake", Class: SC5,
+			Permission: "product.manage", Handler: ad.Stocktake})
+		r.Add(Route{Screen: "A-516", Method: "GET", Pattern: "/admin/orders/{no}/pick", Class: SC4,
+			Permission: "order.update", Handler: ad.PickCheck})
+		r.Add(Route{Screen: "A-516", Method: "POST", Pattern: "/admin/orders/{no}/pick", Class: SC5,
+			Permission: "order.update", Handler: ad.PickCheck})
+		r.Add(Route{Screen: "A-517", Method: "GET", Pattern: "/admin/scan/lookup", Class: SC4,
+			Permission: "product.view", Handler: ad.ScanLookup})
+
 		// A-508 결제 대사 · A-603 웹훅 이력. **둘 다 필요하다** — 대사는 PG
 		// 조회와의 대조이고, 수신 이력은 "웹훅이 오긴 왔는가" 다 (D13 A-603).
 		r.Add(Route{Screen: "A-508", Method: "GET", Pattern: "/admin/reconcile", Class: SC4,

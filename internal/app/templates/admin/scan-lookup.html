@@ -1,0 +1,20 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* 어떤 상태도 바꾸지 않는다. 그래서 GET 이고 권한이 product.view 다. */}}
+  <form method="get" action="/admin/scan/lookup">
+    <label class="adm-field"><span>스캔 값</span>
+      <input type="text" name="scanned" autofocus autocomplete="off" required></label>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn">조회</button>
+    </div>
+  </form>
+  {{with .Variant}}
+  <dl class="adm-detail">
+    <dt>상품</dt><dd>{{.ProductName}}</dd>
+    <dt>조합</dt><dd>{{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}</dd>
+    <dt>SKU</dt><dd>{{if .SKU}}{{.SKU}}{{else}}—{{end}}</dd>
+    <dt>재고</dt><dd>{{.Stock}}개</dd>
+  </dl>
+  {{end}}
+</div>
+{{end}}
