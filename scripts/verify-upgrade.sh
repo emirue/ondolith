@@ -96,6 +96,18 @@ if [ "${before:-0}" -lt 1 ]; then
 fi
 say "✓" "이전 릴리즈로 설치 완료 (users=$before)"
 
+# 업그레이드가 건드리면 안 되는 것들의 해시를 뜬다: 설정 파일·업로드·테마.
+# 바이너리 교체가 이것들을 만지면 운영자는 백업에서 되돌릴 수밖에 없는데,
+# 절차에는 그 단계가 없다.
+docker exec "$APP" sh -c 'mkdir -p /work/uploads /work/themes/mine &&
+	echo upload-probe > /work/uploads/probe.bin &&
+	echo theme-probe > /work/themes/mine/base.html' >/dev/null 2>&1 || true
+hash_of() { docker run --rm -v "$tmp:/w" alpine:3 sh -c \
+	'md5sum /w/ondolith.json /w/uploads/probe.bin /w/themes/mine/base.html 2>/dev/null | sort'; }
+before_hash=$(hash_of)
+[ -n "$before_hash" ] && say "✓" "설정·업로드·테마 해시 기록" \
+	|| { say "✗" "해시를 뜨지 못했다"; fail=1; }
+
 # ② 백업.
 docker exec "$PG" pg_dump -U u -Fc u > "$tmp/before.dump" 2>/dev/null
 [ -s "$tmp/before.dump" ] || { say "✗" "백업이 비어 있다"; exit 1; }
@@ -119,7 +131,33 @@ applied=$(docker exec "$PG" psql -U u -tAc \
 [ "$applied" = "1" ] && say "✓" "대기 마이그레이션이 부팅 때 적용됐다 ($(basename "$latest"))" \
 	|| { say "✗" "대기 마이그레이션이 적용되지 않았다"; fail=1; }
 
-# ④ 백업 복원이 실제로 되는지 (NFR-308 의 유일한 경로).
+# 설정·업로드·테마가 그대로인지. 바이너리 교체가 이것들을 만지면 안 된다.
+after_hash=$(hash_of)
+[ "$after_hash" = "$before_hash" ] && say "✓" "설정·업로드·테마가 바뀌지 않았다" \
+	|| { say "✗" "업그레이드가 파일을 건드렸다"; printf '%s\n---\n%s\n' "$before_hash" "$after_hash"; fail=1; }
+
+# ④ **다운그레이드 실측.** 이전 바이너리로 되돌려도 뜨는지 본다. 추가만 하는
+# 마이그레이션은 앞 릴리즈가 모르는 컬럼을 남길 뿐이라 기동을 막지 않는다 —
+# 그것이 D30 「두 릴리즈 규칙」이 지키려는 성질이고, 여기서 확인한다.
+if start_app "$tmp/old/$BIN"; then
+	down_users=$(docker exec "$PG" psql -U u -tAc "SELECT count(*) FROM users" 2>/dev/null | tr -d ' \r')
+	[ "$down_users" = "$before" ] && say "✓" "이전 바이너리로 되돌려도 뜨고 데이터가 남았다 (users=$down_users)" \
+		|| { say "✗" "다운그레이드 후 users=$down_users (want $before)"; fail=1; }
+else
+	say "✗" "이전 바이너리로 되돌리자 기동하지 못했다"; fail=1
+fi
+
+# ⑤ **로그에 DSN·시크릿이 없다** (W4-12, D22 4절). 실기동 로그로 확인한다 —
+# "안 찍는다" 는 규칙은 로그를 봐야 확인된다.
+logs=$(docker logs "$APP" 2>&1)
+leaked=0
+for needle in "postgres://" "password=" "u:u@"; do
+	printf '%s' "$logs" | grep -q "$needle" && { say "✗" "로그에 [$needle] 이 있다"; leaked=1; }
+done
+[ "$leaked" -eq 0 ] && say "✓" "실기동 로그에 DSN·자격증명이 없다"
+[ "$leaked" -eq 0 ] || fail=1
+
+# ⑥ 백업 복원이 실제로 되는지 (NFR-308 의 유일한 경로).
 docker rm -f "$APP" >/dev/null 2>&1 || true
 docker exec "$PG" psql -U u -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public" >/dev/null 2>&1
 docker exec -i "$PG" pg_restore -U u -d u --no-owner >/dev/null 2>&1 < "$tmp/before.dump" || true
