@@ -534,6 +534,28 @@ expect_ctr 0 "FAIL 만 있으면 검사기는 통과 (실패 판정은 go test �
 FAIL	github.com/x/a	0.1s
 '
 
+echo "selftest: CHANGELOG 마이그레이션 검사 (checkdocs)"
+
+# 새 마이그레이션이 CHANGELOG 없이 들어오는 것을 잡는가. 목록을 하드코딩하면
+# 이 주입이 통과해 버리므로, 그 사실을 여기서 고정한다.
+cp "$REPO/CHANGELOG.md" "$TMP/cl.bak"
+touch "$REPO/internal/migrations/09999_selftest_probe.sql"
+if (cd "$REPO" && sh scripts/checkdocs.sh 2>&1) | grep -q "없는 마이그레이션: 09999_selftest_probe.sql"; then
+	ok "CHANGELOG 에 없는 마이그레이션을 잡는다"
+else
+	err "새 마이그레이션이 CHANGELOG 없이 통과했다"
+fi
+rm -f "$REPO/internal/migrations/09999_selftest_probe.sql"
+
+# 다운그레이드 경로가 사라지면 잡는가.
+sed 's/백업 복원/되돌리기/g' "$TMP/cl.bak" > "$REPO/CHANGELOG.md"
+if (cd "$REPO" && sh scripts/checkdocs.sh 2>&1) | grep -q "다운그레이드 경로"; then
+	ok "다운그레이드 경로가 빠지면 잡는다"
+else
+	err "다운그레이드 경로 없이 통과했다"
+fi
+cp "$TMP/cl.bak" "$REPO/CHANGELOG.md"
+
 echo "selftest: 릴리즈 검증기 (verify-release.sh)"
 
 # 이 검사기는 **없는 것을 통과시키지 않는다** 가 전부다. 실제 docker 실행은

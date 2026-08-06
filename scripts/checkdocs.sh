@@ -1217,6 +1217,39 @@ else
 	done_ "$ROADMAP 기획 완결성 $n_rm 행의 숫자가 각 문서에서 센 값과 일치"
 fi
 
+# ---- 마이그레이션이 CHANGELOG 에 들어갔는가 (NFR-307, W4-03) ------------------
+#
+# 운영자는 업그레이드 전에 CHANGELOG 만 읽는다 (D70). 스키마를 바꾸는 릴리즈가
+# 거기 없으면, 되돌릴 수 없는 변경을 모르고 올린 뒤에야 알게 된다.
+#
+# 목록을 하드코딩하지 않고 **디렉터리에서 센다** — 하드코딩하면 새 마이그레이션이
+# 검사에 안 보이고, 그 상태가 바로 이 검사가 막으려는 것이다.
+CL=CHANGELOG.md
+if [ -f "$CL" ]; then
+	mig_missing=0
+	mig_n=0
+	for f in internal/migrations/*.sql; do
+		[ -f "$f" ] || continue
+		name=$(basename "$f")
+		mig_n=$((mig_n + 1))
+		grep -qF "$name" "$CL" || { err "$CL 에 없는 마이그레이션: $name"; mig_missing=1; }
+	done
+	if [ "$mig_n" -eq 0 ]; then
+		err "마이그레이션을 하나도 찾지 못했다 (검사가 헛돌았다)"
+	elif [ "$mig_missing" -eq 0 ]; then
+		ok "마이그레이션 $mig_n 개가 전부 $CL 에 있다"
+	fi
+	# 다운그레이드 경로가 무엇인지 적혀 있어야 한다. `Down` 이 있다는 것과
+	# 되돌릴 수 있다는 것은 다르다 (NFR-308).
+	if grep -q "백업 복원" "$CL"; then
+		ok "$CL 이 되돌릴 수 없는 변경의 경로를 밝힌다"
+	else
+		err "$CL 에 다운그레이드 경로(백업 복원)가 적혀 있지 않다 (NFR-308)"
+	fi
+else
+	err "$CL 이 없다"
+fi
+
 rm -f /tmp/cd_rm_want /tmp/cd_rm_have /tmp/cd_def_req /tmp/cd_def_req_u /tmp/cd_use_req /tmp/cd_def_dec \
 	/tmp/cd_use_dec /tmp/cd_def_mis /tmp/cd_use_mis /tmp/cd_stale \
 	/tmp/cd_def_scr /tmp/cd_def_scr_u /tmp/cd_use_scr /tmp/cd_scr_issues \

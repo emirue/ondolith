@@ -38,8 +38,10 @@ docker run -d --name "$PG" --network "$NET" \
 	-e POSTGRES_PASSWORD=m -e POSTGRES_USER=m -e POSTGRES_DB=m \
 	postgres:18-alpine -c shared_buffers=128MB >/dev/null
 
-printf '{"database_url":"postgres://m:m@%s:5432/m?sslmode=disable","site_name":"measure"}\n' "$PG" \
-	> "$tmp/ondolith.json"
+# **설정 파일을 미리 쓰지 않는다.** 쓰면 앱이 설치 마법사가 아니라 운영 모드로
+# 부팅해서, 아래 설치 POST 가 아무 일도 하지 않고 관리자 계정도 안 생긴다 —
+# "설치를 마친 뒤" 라고 적어 놓고 빈 DB 를 재는 것이 된다. 설정 파일은
+# 마법사가 쓴다.
 
 # DB 가 뜰 때까지 기다린다. 여기서 실패하면 측정이 아니라 하네스 문제다.
 i=0
@@ -86,7 +88,14 @@ until docker run --rm --network "$NET" alpine:3 \
 	fi
 	sleep 1
 done
-echo "  설치 완료 — 운영 트리에서 잰다"
+# 설치가 실제로 끝났는지: 관리자 계정이 있어야 한다.
+users=$(docker exec "$PG" psql -U m -tAc "SELECT count(*) FROM users" 2>/dev/null | tr -d ' \r')
+if [ "${users:-0}" -lt 1 ]; then
+	echo "  ✗ 설치가 관리자 계정을 만들지 않았다 (users=$users) — 빈 DB 를 재게 된다"
+	docker logs "$APP" 2>&1 | tail -20
+	exit 1
+fi
+echo "  설치 완료 (users=$users) — 운영 트리에서 잰다"
 
 # 몇 개 화면을 실제로 그려 본다. 템플릿은 처음 그릴 때 파싱되므로, 한 번도
 # 그리지 않은 상태의 RSS 는 운영 중인 값이 아니다.

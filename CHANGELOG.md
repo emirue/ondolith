@@ -195,6 +195,41 @@
 - 루트 `CLAUDE.md`와 `.ai/CLAUDE.md`에 중복되어 있던 규칙을 루트로 일원화.
   `.ai/CLAUDE.md`는 포인터만 남는다
 
+### 마이그레이션
+
+**모든 마이그레이션은 `Down` 을 갖는다** (NFR-303). 다만 `Down` 이 있다는 것과
+**되돌릴 수 있다**는 것은 다르다 — 컬럼을 지우는 `Down` 은 스키마를 되돌리지만
+그 안에 있던 값은 되살리지 못한다.
+
+> **되돌릴 수 없는 변경의 다운그레이드 경로는 「백업 복원」 하나다** (NFR-308).
+> `goose down` 이 아니다. 그래서 업그레이드 전 백업이 절차의 첫 단계다
+> ([D70](docs/70-operations.md) 「업그레이드 절차」).
+
+이 릴리즈까지 적용되는 마이그레이션 16개:
+
+| 파일 | 내용 |
+|---|---|
+| `00001_init.sql` | `users` · `settings` · 세션 테이블. 설치 마법사가 이것부터 적용한다 |
+| `00002_rbac.sql` | `roles` · `permissions` · `role_permissions` · `user_roles` · 게시판 스코프. `users.is_admin` 은 **남겨 둔다** — 지우면 이 릴리즈로 돌아갈 길이 없다 (NFR-308) |
+| `00003_rbac_seed.sql` | 기본 역할·권한 시드. Phase 1 권한 집합 |
+| `00004_content.sql` | `pages` · `menus` · `settings` 확장 |
+| `00005_auth_tokens.sql` | 메일 인증·비밀번호 재설정 토큰. 해시만 저장한다 |
+| `00007_board.sql` | `boards` · `posts` · `comments` · `attachments` · 커스텀 필드(JSONB) |
+| `00008_post_search.sql` | 전문검색 생성 컬럼(`simple` config + 접두 질의)과 인덱스 |
+| `00009_board_seed.sql` | Phase 2 권한 시드 |
+| `00010_oplog.sql` | `operation_logs` + **append-only 트리거**. 수정·삭제가 DB 수준에서 거부된다 |
+| `00011_product.sql` | `products` · `product_variants` · `categories`. 조합 유니크와 SKU 부분 유니크 |
+| `00012_order.sql` | `orders` · `order_items` · `carts` · `terms` · `order_agreements`. 주문 시점 스냅샷 |
+| `00013_payment.sql` | `payments` · `refunds` · `refund_items` · `webhook_events`. 환불 누적 CHECK 와 부분 유니크 |
+| `00014_fulfillment.sql` | `returns` · `return_items` · `shipments`. 처리 중 반품의 부분 유니크 |
+| `00015_commerce_seed.sql` | Phase 3 권한 시드 |
+| `00016_discount.sql` | `orders.discount_amount` · `order_items.discount_amount`. 배분 스냅샷 |
+| `00017_webhook_secret.sql` | `payments.secret`. 토스 웹훅 대조의 유일한 상대 |
+
+**이 목록에 ⚠️ 파괴적 변경은 없다.** 전부 추가만 하며, 각 `Down` 은 자기가 만든
+것을 지운다 — 앞선 릴리즈의 데이터를 건드리지 않는다. 첫 파괴적 마이그레이션은
+`00006_drop_is_admin.sql`(W2-01)이고, 그때 이 절에 표시가 붙는다.
+
 ### Changed
 - CSRF를 `gorilla/csrf`에서 표준 라이브러리 `net/http.CrossOriginProtection`으로 변경.
   `gorilla/csrf`는 최신 v1.7.3에도 수정 버전이 없는 CVE-2025-47909 대상이다.

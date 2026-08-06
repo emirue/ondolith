@@ -3,7 +3,7 @@ PKG     := ./cmd/ondolith
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help build run check test test-integration test-db-down vet fmt docs selftest vuln release verify-release measure clean
+.PHONY: help build run check test test-integration test-db-down vet fmt docs selftest vuln release verify-release measure verify-upgrade clean
 
 help:
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t20
@@ -72,3 +72,6 @@ verify-release: ## dist/ 산출물을 실제 아키텍처에서 실행해 검증
 
 measure: ## 1 vCPU / 512MB 티어에서 자원 실측 (NFR-101, W4-08)
 	@sh scripts/measure-resources.sh
+
+verify-upgrade: ## 데이터가 든 인스턴스에서 업그레이드 절차 실측 (NFR-301, W4-11)
+	@sh scripts/verify-upgrade.sh
