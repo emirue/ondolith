@@ -848,3 +848,121 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 	}
 	return target, tx.Commit(ctx)
 }
+
+// ErrNoPriceDiff 는 결제할 차액이 없다는 뜻이다 (P-514 409).
+var ErrNoPriceDiff = errors.New("commerce: 결제할 차액이 없습니다")
+
+// ExchangeDiff is what P-514 draws: 확정된 차액과 그 근거.
+type ExchangeDiff struct {
+	ReturnID string
+	ReturnNo string
+	OrderID  string
+	Amount   int
+}
+
+// ExchangeDiffDue finds the pending exchange difference for one order.
+//
+// **소유권을 SQL 술어로 대조한다.** 없는 건과 남의 건이 같은 404 여야 하므로
+// (D19 P-514), 조회에서 갈리게 두지 않는다 — 애플리케이션에서 나중에 비교하면
+// 그 사이의 오류 메시지가 존재 여부를 알려준다.
+func (s *Store) ExchangeDiffDue(ctx context.Context, orderNo, returnNo, userID string) (*ExchangeDiff, error) {
+	var d ExchangeDiff
+	var status string
+	err := s.pool.QueryRow(ctx, `
+		SELECT r.id, r.return_no, r.order_id, r.status, COALESCE(r.price_difference, 0)
+		FROM returns r JOIN orders o ON o.id = r.order_id
+		WHERE r.return_no = $1 AND o.order_no = $2 AND r.kind = '교환'
+		  AND ($3 = '' OR o.user_id::text = $3)`,
+		returnNo, orderNo, userID).Scan(&d.ReturnID, &d.ReturnNo, &d.OrderID, &status, &d.Amount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if Status(status) != StatusExchangeDiffDue || d.Amount <= 0 {
+		return nil, fmt.Errorf("%w: 상태 %s, 차액 %d", ErrNoPriceDiff, status, d.Amount)
+	}
+	return &d, nil
+}
+
+// ConfirmExchangeDiff approves the difference and ships the exchange.
+//
+// **금액은 `returns.price_difference` 를 그대로 쓴다** (FR-607). 결제창을 여는
+// 시점에 다시 계산하지 않는다 — 그 사이 관리자가 가격을 바꾸면 값이 달라지고,
+// 구매자가 본 금액과 청구된 금액이 어긋난다.
+//
+// 두 번째 승인은 `UNIQUE (order_id, return_id) WHERE kind='교환차액'` 이 막는다.
+// 애플리케이션 검사를 지워도 두 번째가 실패해야 한다 (FR-608).
+func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, orderNo,
+	returnNo, userID, paymentKey string, amount int, now time.Time) (err error) {
+
+	d, err := s.ExchangeDiffDue(ctx, orderNo, returnNo, userID)
+	if err != nil {
+		return err
+	}
+	// **금액 대조는 게이트웨이 호출 앞이다.** 뒤에 하면 돈은 이미 나갔고,
+	// 되돌리는 것은 취소 API 이지 검증이 아니다 (FR-607).
+	if amount != d.Amount {
+		return fmt.Errorf("%w: 확정 차액 %d, 요청 %d", ErrAmountMismatch, d.Amount, amount)
+	}
+
+	// 선점 행을 먼저 넣는다. 부분 유니크가 여기서 두 번째를 막으므로,
+	// 게이트웨이를 부르기 전에 중복이 걸러진다.
+	var paymentID string
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO payments (order_id, return_id, kind, status, pg, payment_key, approved_amount)
+		VALUES ($1, $2, '교환차액', '대기', $3, $4, $5) RETURNING id`,
+		d.OrderID, d.ReturnID, pgName, paymentKey, d.Amount).Scan(&paymentID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrAlreadyPaid
+	}
+	if err != nil {
+		return err
+	}
+
+	res, err := gw.Confirm(ctx, ConfirmRequest{
+		OrderNo: orderNo, PaymentKey: paymentKey, Amount: d.Amount, IdempotencyKey: paymentKey})
+	if err != nil {
+		if _, uerr := s.pool.Exec(ctx,
+			`UPDATE payments SET status = '실패', updated_at = now() WHERE id = $1`,
+			paymentID); uerr != nil {
+			return errors.Join(err, uerr)
+		}
+		return err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE payments SET status = $2, approved_at = now(), raw_response = $3,
+		       secret = NULLIF($4, ''), updated_at = now()
+		WHERE id = $1`, paymentID, string(res.Status), MaskCardFields(res.Raw), res.Secret); err != nil {
+		return err
+	}
+	// 상태 전이는 상태머신을 거친다 (D14 5절). P-514 가 일으키는 유일한 전이다.
+	if err := CanTransition(StatusExchangeDiffDue, StatusExchangeShipped, "P-514"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE returns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
+		d.ReturnID, string(StatusExchangeShipped), string(StatusExchangeDiffDue)); err != nil {
+		return err
+	}
+	// 차액을 다 받았으므로 처리 중 표시를 내린다 — 그 품목에 다시 걸 수 있다.
+	if _, err := tx.Exec(ctx,
+		`UPDATE return_items SET is_open = false WHERE return_id = $1`, d.ReturnID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`,
+		d.OrderID, string(StatusExchangeShipped)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

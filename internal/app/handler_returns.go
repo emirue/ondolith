@@ -141,3 +141,88 @@ func (d *shopDeps) returnFormExchange(w http.ResponseWriter, r *http.Request) {
 func (d *shopDeps) returnCreateExchange(w http.ResponseWriter, r *http.Request) {
 	d.returnKindCreate(w, r, commerce.KindExchange, "P-512")
 }
+
+// P-514 GET /orders/{orderNo}/exchange/{returnNo}/pay — 확정된 차액을 보여준다.
+//
+// **금액을 다시 계산하지 않는다.** A-511 의 수거 확인 트랜잭션에서 확정돼
+// `returns.price_difference` 에 있고, 화면은 그것을 읽기만 한다 (FR-607).
+func (d *shopDeps) exchangePayForm(w http.ResponseWriter, r *http.Request) {
+	diff, order, err := d.exchangeDiff(r)
+	switch {
+	case errors.Is(err, commerce.ErrNotFound):
+		// 없는 건과 남의 건이 같은 404 다 — 갈리면 그 차이가 존재를 알려준다.
+		d.notFound(w, r)
+		return
+	case errors.Is(err, commerce.ErrNoPriceDiff):
+		d.renderPage(w, r, "order/exchange-pay.html", http.StatusConflict,
+			d.shopView(r, "교환 차액 결제", map[string]any{
+				"Order": order, "Error": "결제할 차액이 없습니다."}))
+		return
+	case err != nil:
+		d.serverError(w, r, err)
+		return
+	}
+	d.renderPage(w, r, "order/exchange-pay.html", http.StatusOK,
+		d.shopView(r, "교환 차액 결제", map[string]any{
+			"Order": order, "Return": diff, "ClientKey": d.pgClientKey()}))
+}
+
+// P-514 POST — 승인. 폼은 금액을 싣지 않는다.
+func (d *shopDeps) exchangePayConfirm(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	diff, order, err := d.exchangeDiff(r)
+	switch {
+	case errors.Is(err, commerce.ErrNotFound):
+		d.notFound(w, r)
+		return
+	case errors.Is(err, commerce.ErrNoPriceDiff):
+		d.renderPage(w, r, "order/exchange-pay.html", http.StatusConflict,
+			d.shopView(r, "교환 차액 결제", map[string]any{
+				"Order": order, "Error": "결제할 차액이 없습니다."}))
+		return
+	case err != nil:
+		d.serverError(w, r, err)
+		return
+	}
+
+	// **금액은 폼에서 오지 않는다** (D19 P-514 받지 않는 필드). PG 콜백이
+	// 실어 보낸 값은 대조에만 쓰고, 청구하는 것은 확정된 차액이다.
+	userID := ""
+	if a := ActorFrom(r.Context()); a.IsAuthenticated() {
+		userID = a.User.ID
+	}
+	err = d.store.ConfirmExchangeDiff(r.Context(), d.gateway(), d.pgName(),
+		order.OrderNo, diff.ReturnNo, userID, r.PostFormValue("paymentKey"),
+		diff.Amount, time.Now())
+	switch {
+	case err == nil:
+		http.Redirect(w, r, "/orders/"+order.OrderNo+"/returns", http.StatusSeeOther)
+	case errors.Is(err, commerce.ErrAlreadyPaid):
+		d.renderPage(w, r, "order/exchange-pay.html", http.StatusConflict,
+			d.shopView(r, "교환 차액 결제", map[string]any{
+				"Order": order, "Error": "이미 결제되었습니다."}))
+	case errors.Is(err, commerce.ErrAmountMismatch), errors.Is(err, commerce.ErrNoPriceDiff):
+		d.renderPage(w, r, "order/exchange-pay.html", http.StatusConflict,
+			d.shopView(r, "교환 차액 결제", map[string]any{
+				"Order": order, "Error": "결제할 차액이 없습니다."}))
+	default:
+		d.serverError(w, r, err)
+	}
+}
+
+// exchangeDiff resolves both path values under the session's ownership.
+func (d *shopDeps) exchangeDiff(r *http.Request) (*commerce.ExchangeDiff, *commerce.OrderDetail, error) {
+	order, err := d.visibleOrder(r, r.PathValue("orderNo"))
+	if err != nil {
+		return nil, nil, commerce.ErrNotFound
+	}
+	userID := ""
+	if a := ActorFrom(r.Context()); a.IsAuthenticated() {
+		userID = a.User.ID
+	}
+	diff, err := d.store.ExchangeDiffDue(r.Context(), order.OrderNo, r.PathValue("returnNo"), userID)
+	return diff, order, err
+}

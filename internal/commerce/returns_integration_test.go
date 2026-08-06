@@ -941,3 +941,199 @@ func TestCompleteExchangeRefusesAReturn(t *testing.T) {
 		t.Fatalf("반품의 교환 완료 = %v, want ErrReturnKind", err)
 	}
 }
+
+// exchangeAwaitingDiff 는 차액이 양수인 교환을 `차액결제대기` 까지 몰고 간다.
+func exchangeAwaitingDiff(t *testing.T, s *Store, pool *pgxpool.Pool, slug string) (string, string, int) {
+	t.Helper()
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, slug, 1)
+	items := itemsOf(t, s, orderNo)
+	var productID string
+	if err := pool.QueryRow(ctx,
+		`SELECT product_id FROM order_items WHERE id = $1`, items[0].ID).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"M"}',6000,5) RETURNING id`, productID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind: KindExchange, NewVariantID: newVariant,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := s.ExchangeDiffDue(ctx, orderNo, ret.ReturnNo, "")
+	if err != nil {
+		t.Fatalf("차액결제대기가 아니다: %v", err)
+	}
+	return orderNo, ret.ReturnNo, diff.Amount
+}
+
+// **차액은 `returns` 에 확정된 값이다** (FR-607). 요청이 다른 금액을 말하면
+// 게이트웨이를 부르기 전에 거부한다 — 부른 뒤에 대조하면 돈은 이미 나갔다.
+func TestExchangeDiffUsesTheStoredAmountOnly(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, returnNo, amount := exchangeAwaitingDiff(t, s, pool, "tee-diff")
+	if amount <= 0 {
+		t.Fatalf("차액 %d — 이 검사가 성립하려면 양수여야 한다", amount)
+	}
+
+	gw := okGateway()
+	err := s.ConfirmExchangeDiff(ctx, gw, "toss", orderNo, returnNo, "", "pk-x", 1, time.Now())
+	if !errors.Is(err, ErrAmountMismatch) {
+		t.Fatalf("= %v, want ErrAmountMismatch", err)
+	}
+	if gw.count() != 0 {
+		t.Errorf("승인 API 를 %d번 불렀다 — 대조는 호출보다 앞이어야 한다", gw.count())
+	}
+
+	// 확정 금액이면 통과하고 교환발송으로 간다.
+	if err := s.ConfirmExchangeDiff(ctx, gw, "toss", orderNo, returnNo, "", "pk-ok", amount, time.Now()); err != nil {
+		t.Fatalf("확정 금액인데 막혔다: %v", err)
+	}
+	detail, err := s.OrderByNoUnscoped(ctx, orderNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Status != StatusExchangeShipped {
+		t.Errorf("결제 뒤 상태 %s, want %s", detail.Status, StatusExchangeShipped)
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, `
+		SELECT approved_amount FROM payments WHERE kind = '교환차액'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != amount {
+		t.Errorf("승인액 %d, want %d", stored, amount)
+	}
+}
+
+// **두 번째 승인은 DB 가 막는다** (FR-608).
+//
+// 애플리케이션 검사를 지워도 두 번째가 실패해야 한다 — 그것을 확인하려고
+// 부분 유니크에 직접 부딪혀 본다.
+func TestSecondExchangeDiffPaymentIsBlockedByTheDatabase(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, returnNo, amount := exchangeAwaitingDiff(t, s, pool, "tee-dup")
+
+	if err := s.ConfirmExchangeDiff(ctx, okGateway(), "toss", orderNo, returnNo, "",
+		"pk-1", amount, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	// 애플리케이션 경로를 우회해 같은 (order_id, return_id) 를 직접 넣는다.
+	var orderID, returnID string
+	if err := pool.QueryRow(ctx, `
+		SELECT o.id, r.id FROM returns r JOIN orders o ON o.id = r.order_id
+		WHERE r.return_no = $1`, returnNo).Scan(&orderID, &returnID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := pool.Exec(ctx, `
+		INSERT INTO payments (order_id, return_id, kind, status, pg, payment_key, approved_amount)
+		VALUES ($1, $2, '교환차액', '승인', 'toss', 'pk-2', $3)`, orderID, returnID, amount)
+	if err == nil {
+		t.Fatal("두 번째 교환차액 결제가 들어갔다 — 부분 유니크가 막지 못한다")
+	}
+	if !strings.Contains(err.Error(), "payments_exchange_idx") {
+		t.Errorf("막은 것이 payments_exchange_idx 가 아니다: %v", err)
+	}
+}
+
+// 상태가 `차액결제대기` 가 아니면 결제할 것이 없다 (409).
+func TestExchangeDiffRefusesWhenNotDue(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee-nodiff", 1)
+	items := itemsOf(t, s, orderNo)
+
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind:  KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 반품이라 교환 차액 자체가 성립하지 않는다 — 404 로 갈린다.
+	if _, err := s.ExchangeDiffDue(ctx, orderNo, ret.ReturnNo, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("반품 건의 차액 조회 = %v, want ErrNotFound", err)
+	}
+}
+
+// 남의 교환 건은 없는 건과 같은 404 다. 갈리면 그 차이가 존재를 알려준다.
+func TestExchangeDiffIsScopedToTheOwner(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, returnNo, _ := exchangeAwaitingDiff(t, s, pool, "tee-own")
+
+	if _, err := s.ExchangeDiffDue(ctx, orderNo, returnNo,
+		"00000000-0000-4000-8000-000000000000"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("남의 사용자 ID = %v, want ErrNotFound", err)
+	}
+	if _, err := s.ExchangeDiffDue(ctx, orderNo, "RN-없는번호", ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("없는 반품번호 = %v, want ErrNotFound", err)
+	}
+}
+
+// 교환이지만 아직 `차액결제대기` 가 아니면 결제할 것이 없다 (409, not 404).
+//
+// 404 로 접으면 "그런 교환 건이 없다" 가 되어, 구매자는 자기 교환이 사라진
+// 줄 안다. 존재는 하고 지금 결제할 수 없을 뿐이다.
+func TestExchangeDiffRefusesBeforeCompletion(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee-early", 1)
+	items := itemsOf(t, s, orderNo)
+	var productID string
+	if err := pool.QueryRow(ctx,
+		`SELECT product_id FROM order_items WHERE id = $1`, items[0].ID).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"M"}',6000,5) RETURNING id`, productID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind: KindExchange, NewVariantID: newVariant,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 교환접수 — 아직 수거도 안 했다.
+	if _, err := s.ExchangeDiffDue(ctx, orderNo, ret.ReturnNo, ""); !errors.Is(err, ErrNoPriceDiff) {
+		t.Errorf("교환접수 상태 = %v, want ErrNoPriceDiff", err)
+	}
+
+	// 교환수거 — 차액은 정해졌지만 아직 대기 상태가 아니다.
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExchangeDiffDue(ctx, orderNo, ret.ReturnNo, ""); !errors.Is(err, ErrNoPriceDiff) {
+		t.Errorf("교환수거 상태 = %v, want ErrNoPriceDiff", err)
+	}
+
+	// 교환 완료를 거치면 열린다 — 위 단언이 "항상 막힌다" 를 본 것이 아니다.
+	if _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExchangeDiffDue(ctx, orderNo, ret.ReturnNo, ""); err != nil {
+		t.Errorf("차액결제대기인데 막혔다: %v", err)
+	}
+}

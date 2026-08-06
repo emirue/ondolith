@@ -1,0 +1,23 @@
+{{define "body"}}
+<h1>교환 차액 결제</h1>
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+{{with .Return}}
+{{/* **금액은 확정된 값이다.** A-511 의 수거 확인 트랜잭션에서 정해져
+     returns 에 있고, 이 화면은 읽기만 한다 — 폼에 금액 칸이 없는 것이
+     그 규칙의 전부다 (FR-607). */}}
+<p>교환 건 {{.ReturnNo}}</p>
+<p class="amount">결제할 차액 <strong>{{.Amount}}원</strong></p>
+<form method="post" class="form">
+  {{/* paymentKey 는 PG 결제창이 채운다. 금액은 싣지 않는다. */}}
+  <input type="hidden" name="paymentKey" value="">
+  <button type="submit">차액 결제</button>
+</form>
+<p class="hint">
+  물건은 이미 수거되었습니다. 이 결제가 늦어져도 교환이 자동으로 취소되지는
+  않습니다.
+</p>
+{{end}}
+{{end}}
+{{end}}

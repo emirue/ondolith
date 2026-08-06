@@ -315,6 +315,14 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.returnCreateExchange})
 		r.Add(Route{Screen: "P-513", Method: "GET", Pattern: "/orders/{orderNo}/returns", Class: SC3,
 			Handler: sh.returnList})
+		// P-514 교환 차액. **차액이 양수인 교환에만 존재한다** — 물건은 이미
+		// 수거됐으므로 이 결제가 실패해도 되돌릴 것이 없다 (D19 P-514).
+		r.Add(Route{Screen: "P-514", Method: "GET",
+			Pattern: "/orders/{orderNo}/exchange/{returnNo}/pay", Class: SC4,
+			Handler: sh.exchangePayForm})
+		r.Add(Route{Screen: "P-514", Method: "POST",
+			Pattern: "/orders/{orderNo}/exchange/{returnNo}/pay", Class: SC6,
+			Handler: sh.exchangePayConfirm})
 
 		// ---- 관리자 커머스 (A-5xx) -----------------------------------------
 		r.Add(Route{Screen: "A-501", Method: "GET", Pattern: "/admin/products", Class: SC4,
