@@ -165,9 +165,12 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 		return nil, fmt.Errorf("%w: 승인하는 사이 주문 상태가 %s 에서 바뀌었습니다",
 			ErrTransitionNotAllowed, status)
 	}
+	// secret 을 함께 남긴다 — 웹훅이 올 때 대조할 상대가 이것뿐이다 (D50).
 	if _, err := tx2.Exec(ctx, `
-		UPDATE payments SET status = $2, approved_at = now(), raw_response = $3, updated_at = now()
-		WHERE id = $1`, paymentID, string(res.Status), MaskCardFields(res.Raw)); err != nil {
+		UPDATE payments SET status = $2, approved_at = now(), raw_response = $3,
+		       secret = NULLIF($4, ''), updated_at = now()
+		WHERE id = $1`, paymentID, string(res.Status), MaskCardFields(res.Raw),
+		res.Secret); err != nil {
 		return nil, err
 	}
 

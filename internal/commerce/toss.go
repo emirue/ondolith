@@ -106,9 +106,10 @@ func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, err
 	var raw struct {
 		EventType string `json:"eventType"`
 		Data      struct {
-			PaymentKey string `json:"paymentKey"`
-			OrderID    string `json:"orderId"`
-			Secret     string `json:"secret"`
+			PaymentKey  string `json:"paymentKey"`
+			OrderID     string `json:"orderId"`
+			Secret      string `json:"secret"`
+			TotalAmount int    `json:"totalAmount"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -126,6 +127,7 @@ func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, err
 		OrderNo:    raw.Data.OrderID,
 		PaymentKey: raw.Data.PaymentKey,
 		Secret:     raw.Data.Secret,
+		Amount:     raw.Data.TotalAmount,
 		Raw:        body,
 	}, nil
 }

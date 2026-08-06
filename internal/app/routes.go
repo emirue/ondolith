@@ -196,6 +196,27 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 		}
 	}
 
+	// 6 (warning). D11 에 있는데 라우트가 하나도 없는 화면은 **아직 구현되지
+	// 않은 것**이다. 위 검사들은 등록된 라우트만 훑으므로 그 사실을 영원히
+	// 모른다 — 화면 하나가 통째로 빠져 있어도 게이트는 전부 초록이다.
+	//
+	// 오류가 아니라 경고인 이유: Phase 가 끝나기 전에는 미구현 화면이 정상
+	// 상태다. 오류로 만들면 로드맵 중간에 서버가 뜨지 않는다.
+	routed := map[string]bool{}
+	for _, rt := range r.routes {
+		routed[rt.Screen] = true
+	}
+	var missing []string
+	for id := range inventory {
+		if !routed[id] && !servedOutsideTree[id] {
+			missing = append(missing, id)
+		}
+	}
+	sort.Strings(missing)
+	for _, id := range missing {
+		res.Warnings = append(res.Warnings, "D11 에 있는데 라우트가 없는 화면: "+id)
+	}
+
 	// 2b (warning). A permission no route uses is dead: it still appears in the
 	// role editor, so an operator grants it and nothing happens.
 	var dead []string

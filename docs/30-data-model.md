@@ -933,6 +933,7 @@ FR-612("스냅샷만으로 주문서 재발행")를 만족하려면 **상품명 
 | `approved_amount` | integer | NOT NULL `CHECK (>= 0)` |
 | `refunded_amount` | integer | NOT NULL DEFAULT 0, `CHECK (>= 0 AND <= approved_amount)` |
 | `raw_response` | jsonb | NULL — 카드 필드 마스킹 후 |
+| `secret` | text | NULL, 길이 ≤ 200. **웹훅 대조용** — 토스는 서명 헤더를 주지 않고, 공식 문서가 제시하는 검증 수단은 승인 응답의 이 값과 웹훅 본문의 값을 대조하는 것 하나뿐이다 ([D50](50-commerce.md) 「웹훅」). 저장하지 않으면 대조할 상대가 없다 |
 | `approved_at` | timestamptz | NULL |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 

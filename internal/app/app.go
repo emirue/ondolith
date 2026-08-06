@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -284,6 +285,25 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	h := withActor(sessions, authStore)(
 		withAdminRateLimit(limiter, limits.AdminTreeIP)(withTreeGate(mux)))
 	h = withMiddleware(h, sessions)
+
+	// **P-905 는 본 트리 밖이다** (D15 SC-8 1항). 세션도 CSRF 도 액터도 붙지
+	// 않는다 — PG 의 서버에는 줄 쿠키가 없고, `CrossOriginProtection` 이 이
+	// 요청을 통과시키는 것은 브라우저 헤더가 없어서 생기는 우연이지 설계된
+	// 보호가 아니다. 그 우연에 기대는 대신 아예 다른 문으로 받는다.
+	//
+	// `cms` 모드에서는 등록하지 않는다 — 커머스가 없으면 결제 웹훅도 없다.
+	if shopMode {
+		hooks := webhookMux(webhookDeps{store: commerceStore,
+			gateway: sh.gateway, pgName: sh.pgName, log: log})
+		main := h
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/webhooks/") {
+				hooks.ServeHTTP(w, r)
+				return
+			}
+			main.ServeHTTP(w, r)
+		})
+	}
 
 	cleanup := func() {
 		sessionStore.StopCleanup()

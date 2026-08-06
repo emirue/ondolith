@@ -187,3 +187,47 @@ func mustReq(t *testing.T, method, target string) *http.Request {
 	}
 	return req
 }
+
+// **D11 에 있는데 라우트가 없는 화면을 경고한다.**
+//
+// Check 의 다른 검사는 등록된 라우트만 훑으므로, 화면 하나가 통째로 빠져
+// 있어도 게이트는 전부 초록이다 — 무엇이 남았는지 아무도 모르는 상태가 된다.
+func TestCheckWarnsAboutScreensWithNoRoute(t *testing.T) {
+	reg := buildTree(nil, nil, nil, nil, nil, nil, true, noopHandler)
+	// 권한 목록은 비운다 — 이 검사가 보는 것은 Warnings 뿐이고, 없는 권한
+	// 키는 Errors 로 간다.
+	res := reg.Check(nil, screenInventory)
+
+	warned := map[string]bool{}
+	for _, w := range res.Warnings {
+		if id, ok := strings.CutPrefix(w, "D11 에 있는데 라우트가 없는 화면: "); ok {
+			warned[id] = true
+		}
+	}
+
+	routed := map[string]bool{}
+	for _, rt := range reg.Routes() {
+		routed[rt.Screen] = true
+	}
+	for id := range screenInventory {
+		if routed[id] || servedOutsideTree[id] {
+			if warned[id] {
+				t.Errorf("%s 는 서비스되는데 미구현으로 경고했다", id)
+			}
+			continue
+		}
+		if !warned[id] {
+			t.Errorf("%s 는 라우트가 없는데 경고하지 않았다", id)
+		}
+	}
+
+	// **P-905 는 목록에 있으니 경고되지 않아야 하고, 실제로 서비스돼야 한다.**
+	// 목록에 이름을 적는 것만으로 미구현이 숨겨지면 이 검사는 구멍이 된다 —
+	// 그 화면이 정말 응답하는지는 TestWebhookIsOutsideTheMainTree 가 본다.
+	if !servedOutsideTree["P-905"] {
+		t.Error("P-905 가 트리 밖 목록에 없다")
+	}
+	if warned["P-905"] {
+		t.Error("P-905 를 미구현으로 경고했다 — 별도 서브트리가 서비스한다")
+	}
+}

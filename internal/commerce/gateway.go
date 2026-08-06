@@ -93,7 +93,10 @@ type WebhookEvent struct {
 	// 그 사람이 곧 우리에게 입금을 통보할 수 있다.
 	PaymentKey string
 	Secret     string
-	Raw        []byte
+	// Amount 는 **대조용이다. 저장하지 않는다** (D19 P-905 받지 않는 필드) —
+	// 웹훅이 알려준 금액을 진실로 채택하면 통보하는 쪽이 결제액을 정한다.
+	Amount int
+	Raw    []byte
 }
 
 var (

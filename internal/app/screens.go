@@ -119,3 +119,16 @@ var screenInventory = map[string]SecurityClass{
 	"A-602": SC4, // 시스템 정보
 	"A-603": SC4, // 웹훅 수신 이력
 }
+
+// servedOutsideTree lists screens that are deliberately not in the route table.
+//
+// **목록이지 예외가 아니다** — 여기 적힌 화면은 "구현하지 않아도 된다" 가
+// 아니라 "다른 문으로 받는다" 는 뜻이고, 그 문에는 그것대로 테스트가 있다.
+// 이름을 여기 적는 것만으로 미구현이 숨겨지지 않도록, 각 항목은 어디서 서비스
+// 되는지를 적는다.
+var servedOutsideTree = map[string]bool{
+	// P-905 결제 웹훅: webhookMux 가 본 트리 밖에서 받는다 (D15 SC-8 1항).
+	// 세션·CSRF·액터가 붙지 않아야 하고, `CrossOriginProtection` 이 통과시키는
+	// 것은 브라우저 헤더가 없어서 생기는 우연이라 그것에 기대지 않는다.
+	"P-905": true,
+}
