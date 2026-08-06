@@ -114,14 +114,28 @@ func TestReauthIsRateLimitedPerAccount(t *testing.T) {
 	limiter := auth.NewLimiter()
 	limit := auth.DefaultLimits().ReauthAccount
 
-	var wrongAccepted, blockedAt int
+	// **D15 4.3-2 의 값을 코드에서 읽지 않고 직접 못박는다.** `limit.Burst` 로
+	// 기대값을 만들면 상수를 바꿀 때 테스트가 함께 움직여 아무것도 지키지
+	// 못한다 — 문서가 정한 숫자를 여기 적어야 그 문서가 지켜진다.
+	const d15ReauthPerMinute = 5
+	if limit.Burst != d15ReauthPerMinute || limit.Window != time.Minute {
+		t.Fatalf("재인증 한도가 %d회/%v — D15 4.3-2 는 %d회/분이다",
+			limit.Burst, limit.Window, d15ReauthPerMinute)
+	}
+
+	var wrongAccepted, attempts int
 	var rightAfterBlock bool
 	probe := sm.LoadAndSave(withActor(sm, store)(http.HandlerFunc(
 		func(_ http.ResponseWriter, r *http.Request) {
 			c := adminCaller{a: ActorFrom(r.Context()), now: late, ctx: r.Context(),
 				auth: store, sm: sm, limiter: limiter, limit: limit}
-			// 틀린 비밀번호를 한도 넘게 시도한다.
-			for i := 1; i <= limit.Burst+3; i++ {
+			// 틀린 비밀번호를 한도 넘게 시도한다. **몇 번을 실제로 시도할 수
+			// 있었는지 센다** — 제한이 걸리면 bcrypt 대조까지 가지 않으므로,
+			// 통과 여부만 보면 "늘 false" 와 "한도에 막힘" 이 구분되지 않는다.
+			for i := 1; i <= d15ReauthPerMinute+3; i++ {
+				if limiter.Allow("probe:"+id, limit) {
+					attempts++
+				}
 				if c.ConfirmReauth("틀린 비밀번호") {
 					wrongAccepted++
 				}
@@ -149,7 +163,13 @@ func TestReauthIsRateLimitedPerAccount(t *testing.T) {
 	if rightAfterBlock {
 		t.Error("한도를 넘긴 뒤에도 맞는 비밀번호가 통과했다 — 제한이 시도를 세지 않는다")
 	}
-	_ = blockedAt
+	// **버스트 경계가 D15 4.3-2 의 값과 같다.** 같은 한도를 별도 키로 재보면
+	// 정확히 Burst 회만 허용된다 — 그보다 크면 제한이 느슨한 것이고, 작으면
+	// 정상 사용자가 먼저 막힌다.
+	if attempts != d15ReauthPerMinute {
+		t.Errorf("허용된 시도 %d회, want %d (D15 4.3-2 계정당 5회/분)",
+			attempts, d15ReauthPerMinute)
+	}
 
 	// **다른 계정은 영향받지 않는다.** IP 기준이면 여기서도 막힌다.
 	other := auth.NewLimiter()

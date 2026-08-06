@@ -70,6 +70,12 @@ func (d webhookDeps) receive(w http.ResponseWriter, r *http.Request) {
 
 	// 서명·형태 검증. **실패는 조용히 버린다** — 사유를 응답에 담지 않는다
 	// (D15 SC-8 2항). 어디가 틀렸는지 알려주면 그것이 곧 위조 안내서다.
+	// **어댑터가 nil 일 수 없는 자리다.** 위 비교를 통과했다는 것은
+	// `d.pgName()` 이 비어 있지 않다는 뜻이고, 이름과 어댑터는 같은 함수에서
+	// 나오므로 (`pgAdapterFor`, 불변식은 TestPgAdapterNameAndGatewayAgree 가
+	// 고정한다) 이름이 있으면 어댑터도 있다. nil 검사를 따로 두지 않는 이유가
+	// 그것이다 — 무는 것이 없는 검사는 다음 사람에게 "여기 nil 이 올 수 있다"
+	// 는 잘못된 신호를 준다.
 	ev, err := d.gateway().VerifyWebhook(r.Context(), body)
 	if err != nil {
 		d.log.Warn("웹훅 검증 실패", "pg", pg, "remote", r.RemoteAddr,

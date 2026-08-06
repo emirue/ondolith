@@ -257,3 +257,40 @@ func TestClassAgreesOnlyForSafeReadsOfChangeScreens(t *testing.T) {
 		}
 	}
 }
+
+// **빈 이름과 nil 어댑터는 항상 함께 나온다** (A-209 「사용 안 함」).
+//
+// 이 불변식이 깨진 상태가 이 저장소에 한 번 있었다: 이름 쪽만 「사용 안 함」을
+// 반영해서 웹훅과 `payments.pg` 라벨은 닫히고 승인 경로는 열려 있었다.
+// 이름이 있는데 어댑터가 없으면 승인 시점에 패닉이고, 어댑터가 있는데 이름이
+// 없으면 대사(A-508)가 어느 PG 인지 알 수 없다.
+func TestPgAdapterNameAndGatewayAgree(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		enabled  bool
+	}{
+		{"toss", true},
+		{"", false},
+		{"stripe", false},
+		{"TOSS", false},
+		{" toss", false},
+		{"toss ", false},
+		{"../toss", false},
+	} {
+		name, gw := pgAdapterFor(tc.provider, "test_sk_x")
+		if (name != "") != tc.enabled || (gw != nil) != tc.enabled {
+			t.Errorf("provider=%q → 이름 %q · 어댑터 nil=%v, 둘 다 %v 여야 한다",
+				tc.provider, name, gw == nil, tc.enabled)
+		}
+		if tc.enabled && name != tc.provider {
+			t.Errorf("provider=%q 인데 이름이 %q — payments.pg 가 어긋난다", tc.provider, name)
+		}
+	}
+
+	// **시크릿이 없어도 이름만으로 어댑터를 만든다.** 시크릿 유무로 끄면
+	// A-209 의 「사용 안 함」과 「키를 아직 안 넣음」이 구분되지 않고,
+	// 화면이 띄우는 경고(클라이언트 키만 있음)가 의미를 잃는다.
+	if name, gw := pgAdapterFor("toss", ""); name != "toss" || gw == nil {
+		t.Error("시크릿이 비었다고 어댑터를 만들지 않았다 — 그 판단은 A-209 몫이다")
+	}
+}

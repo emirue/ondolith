@@ -248,6 +248,18 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
 		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore}
 
+	// **이름과 어댑터를 한 곳에서 낸다.** 둘을 따로 읽으면 갈라진다 — 실제로
+	// 「사용 안 함」을 처음 넣었을 때 이름 쪽만 고쳐서, 웹훅 경로와
+	// `payments.pg` 라벨은 닫히고 **승인 경로는 그대로 열려 있었다.**
+	// 관리자는 껐다고 믿는데 고객은 결제를 끝까지 완료하는 상태였다.
+	//
+	// 빈 이름과 nil 어댑터는 **항상 함께 나온다** (그 불변식을 테스트가 고정
+	// 한다). 시크릿 키가 남아 있어도 결제사를 고르지 않았으면 만들지 않는다.
+	pgAdapter := func() (string, commerce.Gateway) {
+		kv := setting("pg.provider", "pg.secret_key")
+		return pgAdapterFor(kv["pg.provider"], kv["pg.secret_key"])
+	}
+
 	sh := &shopDeps{publicDeps: pub, sm: sessions, store: commerceStore, log: log,
 		limiter: limiter, limits: limits,
 		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
@@ -259,22 +271,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 				FreeThreshold: atoiOr(kv["shipping.free_threshold"], 0),
 			}
 		},
-		// **A-209 가 정한다. 기본값을 두지 않는다.**
-		//
-		// 빈 값은 D19 A-209 가 정한 「사용 안 함」이다. 여기서 "toss" 로
-		// 되돌리면 관리자가 사용 안 함을 골라도 웹훅이 계속 열려 있고
-		// `payments.pg` 에 toss 가 찍힌다 — 화면은 껐다고 하는데 실제로는
-		// 켜져 있는 상태가 된다.
-		//
-		// 설정하지 않은 사이트에서 결제 경로가 닫히는 것은 의도다: PG 를
-		// 고르지 않은 상점이 결제를 받아서는 안 된다.
-		pgName: func() string { return setting("pg.provider")["pg.provider"] },
+		pgName: func() string { n, _ := pgAdapter(); return n },
 		// 공개 키다. 시크릿은 어떤 경로로도 화면에 오지 않는다 (D19 P-407).
 		pgClientKey: func() string { return setting("pg.client_key")["pg.client_key"] },
-		gateway: func() commerce.Gateway {
-			return commerce.NewToss(setting("pg.secret_key")["pg.secret_key"],
-				"https://api.tosspayments.com", commerce.AuthWindow)
-		}}
+		gateway:     func() commerce.Gateway { _, g := pgAdapter(); return g }}
 
 	// A-508 은 PG 에 실제 상태를 묻는다. sh 가 만들어진 뒤라야 하므로 여기서
 	// 붙인다 — 조립 순서를 바꾸는 대신 한 줄을 옮긴다.

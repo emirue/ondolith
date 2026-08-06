@@ -147,6 +147,10 @@ func (d *shopDeps) returnCreateExchange(w http.ResponseWriter, r *http.Request) 
 // **금액을 다시 계산하지 않는다.** A-511 의 수거 확인 트랜잭션에서 확정돼
 // `returns.price_difference` 에 있고, 화면은 그것을 읽기만 한다 (FR-607).
 func (d *shopDeps) exchangePayForm(w http.ResponseWriter, r *http.Request) {
+	if !d.paymentsAvailable() {
+		d.refusePayment(w, r)
+		return
+	}
 	diff, order, err := d.exchangeDiff(r)
 	switch {
 	case errors.Is(err, commerce.ErrNotFound):
@@ -169,6 +173,11 @@ func (d *shopDeps) exchangePayForm(w http.ResponseWriter, r *http.Request) {
 
 // P-514 POST — 승인. 폼은 금액을 싣지 않는다.
 func (d *shopDeps) exchangePayConfirm(w http.ResponseWriter, r *http.Request) {
+	// 차액 승인도 실제 결제다.
+	if !d.paymentsAvailable() {
+		d.refusePayment(w, r)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return

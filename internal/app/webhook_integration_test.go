@@ -261,34 +261,52 @@ func seedPaidOrderForWebhook(t *testing.T, pool *pgxpool.Pool) (string, int) {
 	return orderNo, total
 }
 
-// **A-209 가 저장한 결제사가 런타임에 실제로 쓰인다.**
+// **이름과 어댑터가 갈라지지 않는다** — 빈 이름과 nil 어댑터는 항상 함께다.
 //
-// 기본값과 같은 값(`toss`)으로는 아무것도 증명하지 못한다 — 하드코딩이어도
-// 통과한다. 그래서 **기본값이 될 수 없는 값**을 넣고 라우트가 그것을 따라가는지
-// 본다. `pg.provider` 는 A-209 가 허용목록으로 막지만 설정 행 자체는 임의
-// 문자열을 담을 수 있으므로, 여기서는 DB 에 직접 넣어 런타임 배선만 시험한다.
-func TestConfiguredProviderReachesTheWebhookRoute(t *testing.T) {
+// 이 불변식이 깨진 상태가 정확히 이 저장소에서 한 번 있었다: 이름 쪽만
+// 「사용 안 함」을 반영해서 웹훅과 `payments.pg` 라벨은 닫히고 승인 경로는
+// 열려 있었다. 둘을 한 함수에서 내되, 그 사실을 여기서 고정한다.
+func TestProviderNameAndGatewayNeverDisagree(t *testing.T) {
 	_, pool := liveSite(t)
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO settings (key, value) VALUES ('site.type','shop'), ('pg.provider','otherpg')
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
-		t.Fatal(err)
-	}
-	srv := restartOnSameSchema(t).URL
 
-	body := `{"eventType":"X","data":{"orderId":"없는주문","paymentKey":"pk"}}`
-	// 설정된 결제사가 받는다.
-	resp := postWebhook(t, srv, "otherpg", body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("설정된 결제사(otherpg) = HTTP %d, want 200 — 설정을 읽지 않는다", resp.StatusCode)
-	}
-	// **기본값이었던 이름은 404 다.** 이것이 하드코딩과 갈리는 지점이다.
-	resp = postWebhook(t, srv, "toss", body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("설정하지 않은 toss = HTTP %d, want 404 — 옛 하드코딩이 남아 있다", resp.StatusCode)
+	for _, tc := range []struct {
+		provider string
+		want     bool // 결제를 받을 수 있어야 하는가
+	}{
+		{"toss", true},
+		{"", false},
+		{"stripe", false}, // 등록되지 않은 이름
+		{"TOSS", false},   // 대소문자가 다르면 다른 이름이다
+		{"toss-x", false},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO settings (key, value) VALUES
+				('site.type','shop'), ('pg.provider',$1), ('pg.secret_key','test_sk_LEFTOVER')
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, tc.provider); err != nil {
+			t.Fatal(err)
+		}
+		srv := restartOnSameSchema(t).URL
+
+		// 웹훅은 이름으로 갈린다.
+		resp := postWebhook(t, srv, "toss",
+			`{"eventType":"X","data":{"orderId":"없는주문","paymentKey":"pk"}}`)
+		resp.Body.Close()
+		gotHook := resp.StatusCode == http.StatusOK
+
+		// 결제창은 어댑터로 갈린다. 둘이 같은 답을 내야 한다.
+		c := client()
+		got, err := c.Get(srv + "/checkout")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got.Body.Close()
+		gotPay := got.StatusCode != http.StatusServiceUnavailable
+
+		if gotHook != tc.want || gotPay != tc.want {
+			t.Errorf("provider=%q: 웹훅 열림=%v · 결제 열림=%v, 둘 다 %v 여야 한다",
+				tc.provider, gotHook, gotPay, tc.want)
+		}
 	}
 }
 
@@ -368,5 +386,172 @@ func TestConfiguredClientKeyReachesTheCheckoutScreen(t *testing.T) {
 	// **시크릿은 어떤 경로로도 오지 않는다** (D19 P-407).
 	if strings.Contains(body, "test_sk_NEVER_SHOWN") {
 		t.Error("시크릿 키가 결제 화면에 실렸다")
+	}
+}
+
+// **「사용 안 함」은 실제 결제를 막는다** (A-209, D19).
+//
+// 처음 고쳤을 때 `pgName()` 만 바꿔서 `payments.pg` 라벨과 웹훅 경로만 닫히고
+// **승인 경로는 그대로 열려 있었다** — 관리자는 껐다고 믿는데 고객은 결제를
+// 끝까지 완료할 수 있었다. 시크릿 키는 「그대로 두라」라 남아 있으므로,
+// 결제사만 비우면 그 상태가 된다.
+func TestDisabledProviderRefusesTheWholePaymentPath(t *testing.T) {
+	srvT, pool, variantID := shopSite(t)
+	_ = srvT
+	ctx := context.Background()
+	// 시크릿·클라이언트 키는 남긴 채 결제사만 비운다 — 실제 상황이다.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settings (key, value) VALUES
+			('pg.provider',''), ('pg.client_key','test_ck_LEFTOVER'),
+			('pg.secret_key','test_sk_LEFTOVER')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t)
+
+	c := client()
+	// 담기는 된다 — 구경과 담기는 결제가 아니다.
+	resp := post(t, c, srv.URL+"/cart/items",
+		url.Values{"variant_id": {variantID}, "quantity": {"1"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("담기 HTTP %d — 결제와 무관한 경로가 막혔다", resp.StatusCode)
+	}
+
+	// 주문서·결제창·승인 콜백이 전부 막힌다.
+	for _, tc := range []struct{ name, path string }{
+		{"주문서(P-405)", "/checkout"},
+		{"결제창(P-407)", "/checkout/pay"},
+		{"승인 콜백(P-408)", "/checkout/success"},
+	} {
+		got, err := c.Get(srv.URL + tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(got.Body)
+		got.Body.Close()
+		if got.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("%s = HTTP %d, want 503", tc.name, got.StatusCode)
+		}
+		// 남아 있는 클라이언트 키가 화면으로 나가지 않는다.
+		if strings.Contains(string(body), "test_ck_LEFTOVER") {
+			t.Errorf("%s 가 꺼진 상태에서 클라이언트 키를 실었다", tc.name)
+		}
+	}
+
+	// 주문 생성(P-406)도 막힌다 — **재고가 묶이지 않는다.**
+	var stockBefore int
+	if err := pool.QueryRow(ctx,
+		`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&stockBefore); err != nil {
+		t.Fatal(err)
+	}
+	resp = post(t, c, srv.URL+"/checkout", url.Values{
+		"receiver_name": {"받는이"}, "receiver_phone": {"010-0000-0000"},
+		"postcode": {"12345"}, "address1": {"서울시 어딘가"},
+		"orderer_email": {"a@example.com"}, "orderer_phone": {"010-1111-1111"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("주문 생성 = HTTP %d, want 503", resp.StatusCode)
+	}
+
+	var orders, payments, stockAfter int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM orders`).Scan(&orders); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM payments`).Scan(&payments); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&stockAfter); err != nil {
+		t.Fatal(err)
+	}
+	if orders != 0 {
+		t.Errorf("결제사가 꺼졌는데 주문 %d건이 생겼다", orders)
+	}
+	if payments != 0 {
+		t.Errorf("결제사가 꺼졌는데 결제 %d건이 생겼다", payments)
+	}
+	if stockAfter != stockBefore {
+		t.Errorf("재고가 %d → %d 로 묶였다 — 팔 수 없는 재고다", stockBefore, stockAfter)
+	}
+}
+
+// 결제사를 다시 고르면 열린다 — 위 검사가 "결제가 늘 막힌다" 를 본 것이
+// 아니라는 것.
+func TestReenablingTheProviderOpensPaymentAgain(t *testing.T) {
+	srvT, pool, variantID := shopSite(t)
+	_ = srvT
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO settings (key, value) VALUES ('pg.provider',''), ('pg.client_key','ck')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t)
+	c := client()
+	resp := post(t, c, srv.URL+"/cart/items",
+		url.Values{"variant_id": {variantID}, "quantity": {"1"}})
+	resp.Body.Close()
+	if got, _ := c.Get(srv.URL + "/checkout"); got.StatusCode != http.StatusServiceUnavailable {
+		got.Body.Close()
+		t.Fatalf("꺼진 상태 주문서 = HTTP %d", got.StatusCode)
+	}
+
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE settings SET value = 'toss' WHERE key = 'pg.provider'`); err != nil {
+		t.Fatal(err)
+	}
+	srv2 := restartOnSameSchema(t)
+	c2 := client()
+	resp = post(t, c2, srv2.URL+"/cart/items",
+		url.Values{"variant_id": {variantID}, "quantity": {"1"}})
+	resp.Body.Close()
+	got, err := c2.Get(srv2.URL + "/checkout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.Body.Close()
+	if got.StatusCode != http.StatusOK {
+		t.Errorf("다시 켠 뒤 주문서 = HTTP %d, want 200", got.StatusCode)
+	}
+}
+
+// **교환 차액 결제(P-514)도 「사용 안 함」에 막힌다.**
+//
+// 주문 결제와 다른 경로라, 한쪽만 막으면 여기로 결제가 새어 나간다.
+func TestDisabledProviderRefusesExchangeDiffPayment(t *testing.T) {
+	srvT, pool, _ := shopSite(t)
+	_ = srvT
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settings (key, value) VALUES ('pg.provider',''), ('pg.secret_key','test_sk_LEFTOVER')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t)
+
+	// 주문·교환 건이 없어도 **가드가 먼저다** — 조회보다 앞에서 거부해야
+	// 꺼진 상점에서 남의 주문번호를 넣어 보는 경로도 열리지 않는다.
+	c := client()
+	got, err := c.Get(srv.URL + "/orders/NO-SUCH-ORDER/exchange/RN-1/pay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.Body.Close()
+	if got.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("교환 차액 화면 = HTTP %d, want 503", got.StatusCode)
+	}
+
+	resp := post(t, c, srv.URL+"/orders/NO-SUCH-ORDER/exchange/RN-1/pay", url.Values{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("교환 차액 승인 = HTTP %d, want 503", resp.StatusCode)
+	}
+	var payments int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM payments`).Scan(&payments); err != nil {
+		t.Fatal(err)
+	}
+	if payments != 0 {
+		t.Errorf("꺼진 상태에서 결제 %d건이 생겼다", payments)
 	}
 }

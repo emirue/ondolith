@@ -24,6 +24,9 @@ type shopDeps struct {
 	shipping func() commerce.Shipping
 	// gateway·pgName·pgClientKey 도 요청마다 읽는다. A-2xx 가 PG 설정을
 	// 바꾸면 재시작 없이 반영돼야 한다.
+	// gateway 는 **nil 일 수 있다** — A-209 가 결제사를 고르지 않은 상태다.
+	// 그 nil 을 store 로 넘기면 승인 시점에 패닉이므로, 결제를 여는 화면마다
+	// 그 앞에서 거부한다 (paymentsAvailable).
 	gateway     func() commerce.Gateway
 	pgName      func() string
 	pgClientKey func() string
@@ -280,4 +283,51 @@ func pageOf(r *http.Request) int {
 		return 1
 	}
 	return n
+}
+
+// paymentsAvailable reports whether A-209 configured a payment provider.
+//
+// **라벨이 아니라 어댑터로 판단한다.** `pg.provider` 문자열만 보면, 어댑터를
+// 만드는 쪽과 판단하는 쪽이 갈라져 한쪽만 고치는 일이 생긴다 — 실제로
+// 「사용 안 함」을 처음 넣었을 때 `pgName()` 만 고쳐서 웹훅과 라벨은 닫히고
+// 승인 경로는 그대로 열려 있었다.
+func (d *shopDeps) paymentsAvailable() bool {
+	return d.gateway() != nil
+}
+
+// refusePayment draws "결제를 받을 수 없다" and stops.
+//
+// 503 이다: 요청도 주문도 잘못되지 않았고, **이 사이트가 지금 결제를 받지
+// 않는다.** 404 면 장바구니까지 온 손님이 길을 잃은 것처럼 보이고, 422 면
+// 자기가 뭘 잘못 넣었는지 찾게 된다.
+func (d *shopDeps) refusePayment(w http.ResponseWriter, r *http.Request) {
+	d.log.Warn("결제 요청 거부 — 결제사가 설정되지 않았다 (A-209)", "path", r.URL.Path)
+	d.renderPage(w, r, "shop/fail.html", http.StatusServiceUnavailable,
+		d.shopView(r, "결제", map[string]any{
+			"Message": "지금은 결제를 받을 수 없습니다. 잠시 후 다시 시도해 주세요.",
+		}))
+}
+
+// pgAdapterFor maps A-209's provider setting to the adapter that serves it.
+//
+// **이름과 어댑터를 한 곳에서 낸다.** 둘을 따로 읽으면 갈라진다 — 실제로
+// 「사용 안 함」을 처음 넣었을 때 이름 쪽만 고쳐서, 웹훅 경로와 `payments.pg`
+// 라벨은 닫히고 **승인 경로는 그대로 열려 있었다.** 관리자는 껐다고 믿는데
+// 고객은 결제를 끝까지 완료하는 상태였다.
+//
+// **불변식: 빈 이름과 nil 어댑터는 항상 함께 나온다.** 이름이 있는데 어댑터가
+// 없으면 승인 시점에 패닉이고, 어댑터가 있는데 이름이 없으면 `payments.pg` 에
+// 빈 값이 들어가 대사(A-508)가 어느 PG 인지 알 수 없게 된다.
+//
+// 등록되지 않은 이름은 「사용 안 함」과 같이 다룬다. A-209 가 허용목록으로
+// 막지만, 손으로 고친 설정이 「알 수 없는 PG 로 결제를 받는」 상태를 만들어서는
+// 안 된다.
+func pgAdapterFor(provider, secret string) (string, commerce.Gateway) {
+	switch provider {
+	case "toss":
+		return provider, commerce.NewToss(secret,
+			"https://api.tosspayments.com", commerce.AuthWindow)
+	default:
+		return "", nil
+	}
 }

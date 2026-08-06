@@ -19,6 +19,11 @@ const sessPendingOrder = "pending_order_no"
 
 // P-405 GET /checkout — the order form.
 func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
+	// 결제사가 없으면 주문서를 그리지 않는다 — 채워 봐야 결제할 수 없다.
+	if !d.paymentsAvailable() {
+		d.refusePayment(w, r)
+		return
+	}
 	ctx := r.Context()
 	owner, err := d.owner(r)
 	if err != nil {
@@ -65,6 +70,12 @@ func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
 // 폼에 금액이 없다 (D19 P-406 「받지 않는 필드」). 품목도 받지 않는다 —
 // 무엇을 사는지는 장바구니가 정한다.
 func (d *shopDeps) checkoutCreate(w http.ResponseWriter, r *http.Request) {
+	// **주문 생성은 재고를 차감한다.** 결제할 수 없는데 만들면 팔리지 않을
+	// 재고가 묶인다.
+	if !d.paymentsAvailable() {
+		d.refusePayment(w, r)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return
@@ -159,6 +170,10 @@ func (d *shopDeps) pendingOrder(r *http.Request) (*commerce.OrderDetail, error) 
 
 // P-407 GET /checkout/pay — hand the browser what the PG SDK needs.
 func (d *shopDeps) checkoutPay(w http.ResponseWriter, r *http.Request) {
+	if !d.paymentsAvailable() {
+		d.refusePayment(w, r)
+		return
+	}
 	order, err := d.pendingOrder(r)
 	if errors.Is(err, commerce.ErrNotFound) {
 		d.notFound(w, r)
@@ -182,6 +197,13 @@ func (d *shopDeps) checkoutPay(w http.ResponseWriter, r *http.Request) {
 
 // P-408 GET /checkout/success — approve.
 func (d *shopDeps) checkoutSuccess(w http.ResponseWriter, r *http.Request) {
+	// **여기가 실제 승인이다.** 앞의 가드를 다 통과했더라도 이 시점에
+	// 결제사가 꺼져 있으면 승인하지 않는다 — 설정은 요청마다 읽히므로
+	// 주문서와 콜백 사이에 꺼질 수 있다.
+	if !d.paymentsAvailable() {
+		d.refusePayment(w, r)
+		return
+	}
 	ctx := r.Context()
 	order, err := d.pendingOrder(r)
 	if errors.Is(err, commerce.ErrNotFound) {
