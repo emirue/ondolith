@@ -1,0 +1,16 @@
+{{define "body"}}
+<h1>회원 탈퇴</h1>
+{{/* **되돌릴 수 없다.** 주문 이력은 `orders.user_id` 가 SET NULL 이라 남고
+     (D30), 그 주문은 더 이상 어느 계정에도 연결되지 않는다 — 탈퇴 뒤에는
+     주문 조회를 비회원 경로로만 할 수 있다 (FR-212). */}}
+{{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
+<p>탈퇴하면 계정이 삭제되고 로그인할 수 없습니다. <strong>되돌릴 수 없습니다.</strong></p>
+<p>이미 하신 주문의 이력은 남지만, 더 이상 회원 주문 조회로 볼 수 없습니다.
+   주문번호로 비회원 조회를 이용하세요.</p>
+<form method="post" class="form">
+  <label>비밀번호 확인
+    <input name="password" type="password" required autocomplete="current-password">
+  </label>
+  <button type="submit" class="danger">탈퇴</button>
+</form>
+{{end}}

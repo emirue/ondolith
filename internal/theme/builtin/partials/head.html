@@ -1,0 +1,13 @@
+{{/* `<head>` 내용 (FR-511). base.html 에서 떼어 낸 이유는 테마가 메타·OG 태그만
+     바꾸고 싶을 때 레이아웃 전체를 복사하지 않아도 되게 하기 위해서다. */}}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .Meta.Title}}{{.Meta.Title}} · {{end}}{{.Site.Name}}</title>
+{{if .Meta.Description}}<meta name="description" content="{{.Meta.Description}}">{{end}}
+<meta property="og:title" content="{{if .Meta.Title}}{{.Meta.Title}}{{else}}{{.Site.Name}}{{end}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{.Site.Name}}">
+{{if .Meta.Description}}<meta property="og:description" content="{{.Meta.Description}}">{{end}}
+{{if .Meta.OGImage}}<meta property="og:image" content="{{.Meta.OGImage}}">{{end}}
+<link rel="stylesheet" href="{{asset "css/style.css"}}">
+<script src="{{asset "js/htmx.min.js"}}" defer></script>

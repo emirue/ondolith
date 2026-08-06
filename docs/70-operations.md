@@ -155,8 +155,31 @@ WantedBy=multi-user.target
 
 - 목표: 1 vCPU / 512MB~1GB 티어에서 동작
 - 백그라운드 작업은 고루틴이다. 별도 워커 프로세스·크론 유닛을 추가하지 않는다 (NFR-103)
-- 같은 인스턴스에 PostgreSQL을 올린다면 `shared_buffers` 등을 티어에 맞게 낮춘다.
-  기본값은 이 크기 인스턴스를 가정하지 않는다
+
+### 실측 (2026-08-06)
+
+```bash
+make measure          # scripts/measure-resources.sh
+```
+
+| 항목 | 값 |
+|---|---|
+| 티어 | 1 vCPU / 512MB (`--cpus=1 --memory=512m`) |
+| **유휴 RSS** | **5 MiB** — 티어의 1%, 기준(절반=256 MiB)의 2% |
+| 측정 시점 | **설치를 마친 뒤**, 홈·`/healthz`·`/login`·`/shop`을 한 번씩 그린 다음 5초 유휴 |
+| DB | 같은 네트워크의 `postgres:18-alpine`, `shared_buffers=128MB` |
+
+**설치 트리에서 재지 않는다.** 그 상태는 템플릿도 라우트도 적어서 운영 중인 사이트의
+숫자가 아니다. 템플릿은 처음 그릴 때 파싱되므로 화면을 한 번도 그리지 않은 값도 마찬가지다.
+
+**docker의 cgroup 제약은 Lightsail 인스턴스와 같은 것이 아니다.** 다만 *메모리 상한을
+넘기면 커널이 죽인다*는 성질은 같고, 이 측정이 답하는 질문은 그것 하나다. 실제 인스턴스의
+지연·디스크 특성은 이 숫자가 말하지 않는다.
+
+**같은 인스턴스에 PostgreSQL을 올린다면** `shared_buffers`를 티어에 맞게 낮춘다 — 위 측정은
+`128MB`로 했다. PostgreSQL 기본값은 이 크기 인스턴스를 가정하지 않는다. 512MB 티어에서
+애플리케이션 5 MiB + PostgreSQL `shared_buffers` 128MB + 커널·페이지캐시가 남은 공간을
+쓴다는 배분이고, 1GB 티어면 `shared_buffers=256MB`까지 올릴 수 있다.
 
 ## 백업
 

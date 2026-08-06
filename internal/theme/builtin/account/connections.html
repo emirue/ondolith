@@ -1,0 +1,26 @@
+{{define "body"}}
+<h1>연결된 계정</h1>
+{{/* **마지막 로그인 수단은 해제할 수 없다** (FR-213). 해제하면 그 계정으로
+     들어올 방법이 사라지고, 그것을 되돌릴 화면이 로그인 뒤에 있다. */}}
+{{with .Data}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+<ul class="connections">
+  {{range .Connections}}
+  <li>
+    <span>{{.Provider}}</span>
+    {{if .CanDisconnect}}
+    <form method="post" class="inline">
+      <input type="hidden" name="provider" value="{{.Provider}}">
+      <input type="hidden" name="action" value="disconnect">
+      <button type="submit">연결 해제</button>
+    </form>
+    {{else}}
+    <span class="hint">마지막 로그인 수단이라 해제할 수 없습니다</span>
+    {{end}}
+  </li>
+  {{else}}
+  <li class="empty">연결된 계정이 없습니다.</li>
+  {{end}}
+</ul>
+{{end}}
+{{end}}

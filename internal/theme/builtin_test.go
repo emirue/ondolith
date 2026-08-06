@@ -3,6 +3,7 @@ package theme
 import (
 	"bytes"
 	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -87,6 +88,16 @@ func TestEveryBuiltinTemplateRenders(t *testing.T) {
 			}
 			if !strings.Contains(b.String(), "<html") {
 				t.Errorf("레이아웃이 적용되지 않았다: %.120s", b.String())
+			}
+			// **없는 키 참조가 0건이어야 한다** (W4-04). html/template 은
+			// 기본적으로 없는 맵 키를 `<no value>` 로 그리고 오류를 내지
+			// 않는다 — 렌더링이 성공했다는 사실만으로는 화면이 온전한지 알 수
+			// 없다. 런타임을 `missingkey=error` 로 바꾸지는 않는다: 제3자
+			// 테마의 오타 하나가 사이트 전체를 500 으로 만들면 안 된다
+			// (D17). 대신 **우리 테마**는 여기서 완전해야 한다.
+			if i := strings.Index(b.String(), "<no value>"); i >= 0 {
+				lo := max(i-120, 0)
+				t.Errorf("없는 키를 참조한다 (…%s…)", b.String()[lo:min(i+40, b.Len())])
 			}
 		})
 	}
@@ -238,6 +249,15 @@ func payloadFor(name string) any {
 		return map[string]any{
 			"Order":  orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "차액결제대기"},
 			"Return": exchangeDiffLike{ReturnNo: "R20260805-ABCDEFGHJK", Amount: 5000},
+		}
+	case "account/delete.html":
+		return map[string]any{"Error": "비밀번호가 올바르지 않습니다."}
+	case "account/connections.html":
+		return map[string]any{
+			"Connections": []connectionLike{
+				{Provider: "google", CanDisconnect: true},
+				{Provider: "kakao", CanDisconnect: false},
+			},
 		}
 	case "order/guest-form.html":
 		return map[string]any{"Error": "주문 정보를 찾을 수 없습니다."}
@@ -546,4 +566,76 @@ func TestCommerceTemplatesFormatMoney(t *testing.T) {
 	if !strings.Contains(b.String(), "26,000원") {
 		t.Errorf("장바구니 합계가 통화 표기가 아니다:\n%.400s", b.String())
 	}
+}
+
+// **모바일 폭에서 레이아웃이 깨지지 않는다** (W4-04, FR-301).
+//
+// 브라우저 없이 확인할 수 있는 것은 두 가지다: 뷰포트 선언이 있는가(없으면
+// 모바일 브라우저가 데스크톱 폭으로 축소해 그린다), 그리고 스타일시트에 폭에
+// 반응하는 규칙이 있는가. 실제 렌더링은 사람이 봐야 하지만, **이 둘이 빠진
+// 채로는 볼 것도 없다.**
+func TestBuiltinThemeIsResponsive(t *testing.T) {
+	// **파일이 아니라 렌더링 결과를 본다.** 선언이 partial 로 옮겨 가도
+	// 브라우저가 받는 것은 같아야 하고, 검사가 봐야 하는 것도 그쪽이다.
+	l := newBuiltinLoader()
+	v := fullView()
+	v.Data = payloadFor("page.html")
+	var b bytes.Buffer
+	if err := l.Render(&b, "page.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, `name="viewport"`) {
+		t.Error("뷰포트 선언이 없다 — 모바일 브라우저가 데스크톱 폭으로 축소해 그린다")
+	}
+	if !strings.Contains(out, "width=device-width") {
+		t.Error("뷰포트가 기기 폭을 따르지 않는다")
+	}
+
+	css, err := builtinFS.ReadFile("builtin/static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), "@media") {
+		t.Error("스타일시트에 폭에 반응하는 규칙이 없다")
+	}
+	// 고정 픽셀 폭은 좁은 화면에서 가로 스크롤을 만든다.
+	if regexp.MustCompile(`(?m)^\s*width:\s*\d{3,}px`).Match(css) {
+		t.Error("고정 픽셀 폭이 있다 — 좁은 화면에서 가로 스크롤이 생긴다")
+	}
+}
+
+// D17 이 요구하는 템플릿이 **폴백 없이 전부** 내장 테마에 있다 (W4-04, FR-301).
+func TestBuiltinThemeHasEveryContractTemplate(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/17-theme-contract.md")
+	if err != nil {
+		t.Skipf("문서를 읽을 수 없다: %v", err)
+	}
+	re := regexp.MustCompile("(?m)^\\| `([a-z0-9/_.-]+\\.html)` \\|")
+	var want []string
+	for _, m := range re.FindAllStringSubmatch(string(doc), -1) {
+		want = append(want, m[1])
+	}
+	if len(want) < 40 {
+		t.Fatalf("계약 템플릿을 %d개만 읽었다 — 문서 형식이 바뀌었다", len(want))
+	}
+	have := map[string]bool{}
+	for _, n := range builtinTemplates(t) {
+		have[n] = true
+	}
+	var missing []string
+	for _, n := range want {
+		if !have[n] {
+			missing = append(missing, n)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("내장 테마에 없는 계약 템플릿 %d종: %v", len(missing), missing)
+	}
+}
+
+// connectionLike mirrors what P-111 hands the theme.
+type connectionLike struct {
+	Provider      string
+	CanDisconnect bool
 }
