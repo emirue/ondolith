@@ -534,6 +534,41 @@ expect_ctr 0 "FAIL 만 있으면 검사기는 통과 (실패 판정은 go test �
 FAIL	github.com/x/a	0.1s
 '
 
+echo "selftest: 릴리즈 검증기 (verify-release.sh)"
+
+# 이 검사기는 **없는 것을 통과시키지 않는다** 가 전부다. 실제 docker 실행은
+# `make release` 가 하고, 여기서는 그 앞의 거부들이 실제로 거부하는지 본다.
+VR_DIR=$TMP/vr
+mkdir -p "$VR_DIR/scripts" "$VR_DIR/dist"
+cp "$ROOT/scripts/verify-release.sh" "$VR_DIR/scripts/"
+
+run_vr() {  # $1=PATH 오버라이드("-" 면 그대로)
+	if [ "$1" = "-" ]; then
+		vr_out=$(cd "$VR_DIR" && VERSION=v9.9.9 sh scripts/verify-release.sh 2>&1) && vr_code=0 || vr_code=$?
+	else
+		vr_out=$(cd "$VR_DIR" && PATH="$1" VERSION=v9.9.9 sh scripts/verify-release.sh 2>&1) && vr_code=0 || vr_code=$?
+	fi
+}
+
+# 산출물이 없으면 실패한다. "빌드를 안 했다" 가 조용한 성공이 되면 안 된다.
+run_vr -
+if [ "$vr_code" -ne 0 ]; then
+	ok "산출물이 없으면 거부한다 → exit $vr_code"
+else
+	err "산출물이 없는데 통과했다"
+fi
+
+# docker 가 없으면 **건너뛰지 않고 실패한다** — "검증했다" 와 "검증할 수
+# 없었다" 를 같은 exit 0 으로 두면 게이트가 아니다.
+# /usr/bin:/bin 은 sh 와 file 은 주고 /usr/local/bin 의 docker 는 뺀다.
+# PATH 를 통째로 비우면 sh 조차 없어서 다른 이유(127)로 실패한다.
+run_vr /usr/bin:/bin
+if [ "$vr_code" -ne 0 ] && printf '%s' "$vr_out" | grep -q "docker"; then
+	ok "docker 가 없으면 건너뛰지 않고 거부한다"
+else
+	err "docker 없이 통과했다 (exit $vr_code)"
+fi
+
 echo "selftest: DB 단언 미실행 경고 (report-skips.sh)"
 
 # report-skips.sh 는 게이트가 아니라 알림이다. 그래서 두 가지를 확인한다:

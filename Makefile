@@ -3,7 +3,7 @@ PKG     := ./cmd/ondolith
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help build run check test test-integration test-db-down vet fmt docs selftest vuln release clean
+.PHONY: help build run check test test-integration test-db-down vet fmt docs selftest vuln release verify-release clean
 
 help:
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t20
@@ -49,7 +49,11 @@ fmt: ## gofmt 위반 검사 (수정하지 않는다)
 vuln: ## 의존성 취약점 조회 (NFR-209). check 에는 없다 — 릴리즈 전 필수
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-release: ## dist/ 에 크로스 컴파일 (NFR-306)
+# **취약점 게이트가 릴리즈의 일부다** (W4-02). 별도 단계로 두면 급할 때
+# 건너뛰는 단계가 되고, 건너뛴 릴리즈와 거친 릴리즈를 나중에 구분할 수 없다.
+# 오프라인이면 릴리즈가 멈춘다 — 그것이 맞다: 검증하지 않은 것을 내보내는 것이
+# 릴리즈를 못 만드는 것보다 나쁘다.
+release: vuln ## dist/ 에 크로스 컴파일 + 실행 검증 (NFR-306, NFR-209)
 	@rm -rf dist && mkdir -p dist
 	@for target in linux/amd64 linux/arm64; do \
 		os=$${target%/*}; arch=$${target#*/}; \
@@ -58,6 +62,10 @@ release: ## dist/ 에 크로스 컴파일 (NFR-306)
 			go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BIN)-$$os-$$arch $(PKG) || exit 1; \
 	done
 	@ls -lh dist
+	@sh scripts/verify-release.sh
 
 clean:
 	rm -rf $(BIN) dist
+
+verify-release: ## dist/ 산출물을 실제 아키텍처에서 실행해 검증 (W4-01)
+	@sh scripts/verify-release.sh
