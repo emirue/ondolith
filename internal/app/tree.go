@@ -400,10 +400,18 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "settings.update", Handler: ad.TermsList})
 		r.Add(Route{Screen: "A-207", Method: "POST", Pattern: "/admin/terms", Class: SC5,
 			Permission: "settings.update", Handler: ad.TermsAdd})
-		r.Add(Route{Screen: "A-208", Method: "GET", Pattern: "/admin/business", Class: SC4,
+		r.Add(Route{Screen: "A-208", Method: "GET", Pattern: "/admin/settings/business", Class: SC4,
 			Permission: "settings.update", Handler: ad.BusinessForm})
-		r.Add(Route{Screen: "A-208", Method: "POST", Pattern: "/admin/business", Class: SC5,
+		r.Add(Route{Screen: "A-208", Method: "POST", Pattern: "/admin/settings/business", Class: SC5,
 			Permission: "settings.update", Handler: ad.BusinessSave})
+
+		// A-209 결제 설정. **시크릿 키는 화면으로 돌아오지 않는다** — 설정
+		// 여부만 표시한다 (D19 A-205 와 같은 규칙). 여기가 없으면 상점은
+		// PG 를 설정할 방법이 없고, 커머스 전체가 코드 수정 없이는 못 쓴다.
+		r.Add(Route{Screen: "A-209", Method: "GET", Pattern: "/admin/settings/payment", Class: SC4,
+			Permission: "settings.update", Handler: ad.PaymentSettingsForm})
+		r.Add(Route{Screen: "A-209", Method: "POST", Pattern: "/admin/settings/payment", Class: SC5,
+			Permission: "settings.update", Handler: ad.PaymentSettingsSave})
 
 		// A-512 커머스 정책. **정책만 정하고 건별 금액은 받지 않는다** —
 		// 건별을 여기서 받으면 정책과 실행이 섞이고 과거 건이 소급 변경된다

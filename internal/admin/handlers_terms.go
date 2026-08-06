@@ -143,3 +143,100 @@ func (d *Deps) renderBusiness(w http.ResponseWriter, r *http.Request, code int,
 	}
 	d.Render(w, r, "admin/business.html", code, data)
 }
+
+// ---- A-209 결제 설정 -----------------------------------------------------------
+
+// paymentSettingKeys are what A-209 writes.
+//
+// **PG 어댑터가 여럿이라는 것이 FR-605 의 전제**이지만 지금 등록된 것은 토스
+// 하나다. 키를 `pg.` 접두사로 두는 이유가 그것이다 — 두 번째 어댑터가 붙으면
+// `pg.provider` 가 어느 쪽을 쓸지 정하고, 키 이름은 그대로다.
+var paymentSettingKeys = []string{
+	"pg.provider", "pg.client_key", "pg.secret_key",
+}
+
+// pgProviders is the allow-list. 자유 문자열을 그대로 어댑터 선택에 쓰지
+// 않는다 — 목록 밖 값은 "결제가 조용히 안 되는" 사이트를 만든다.
+var pgProviders = map[string]string{"toss": "토스페이먼츠"}
+
+// PaymentSettingsForm is A-209 GET.
+func (d *Deps) PaymentSettingsForm(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "settings.update"); !ok {
+		return
+	}
+	d.renderPayment(w, r, http.StatusOK, "")
+}
+
+// PaymentSettingsSave is A-209 POST.
+//
+// **시크릿 키는 화면으로 돌아오지 않는다** (D19 A-205 와 같은 규칙): 값을
+// 다시 보내면 관리자 화면을 여는 것 자체가 자격증명 노출이 되고, "화면에서
+// 가렸다" 는 "보낸 적 없다" 와 다르다.
+func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "settings.update")
+	if !ok {
+		return
+	}
+	// **PG 자격증명은 결제를 통째로 가른다.** 바꿔치기하면 이후 모든 결제가
+	// 공격자의 상점으로 간다 — 돈이 나가는 것은 아니지만 들어오는 돈이
+	// 사라진다 (D15 5.3-1 이 재인증을 요구하는 것과 같은 종류의 위험이다).
+	if !reauthOK(c, r) {
+		d.renderPayment(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+
+	kv := map[string]string{}
+	for _, k := range paymentSettingKeys {
+		v := strings.TrimSpace(r.PostFormValue(k))
+		if secretKeys[k] && v == "" {
+			// 빈 시크릿은 "그대로 두라" 이지 "지우라" 가 아니다. 화면이 현재
+			// 값을 보여줄 수 없으므로 빈 칸이 정상 상태다.
+			continue
+		}
+		kv[k] = v
+	}
+	if p, ok := kv["pg.provider"]; ok && p != "" {
+		if _, known := pgProviders[p]; !known {
+			d.renderPayment(w, r, http.StatusUnprocessableEntity,
+				"등록된 결제사가 아닙니다.")
+			return
+		}
+	}
+	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// D15 7절: 자격증명 변경은 분쟁의 근거가 된다. **값은 남기지 않는다.**
+	d.log(r, c, "settings.update", "settings", "payment", "결제 설정 변경")
+	http.Redirect(w, r, "/admin/settings/payment", http.StatusSeeOther)
+}
+
+func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	kv, err := d.Content.Settings(r.Context(), paymentSettingKeys...)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	shown := map[string]string{}
+	saved := map[string]bool{}
+	for k, v := range kv {
+		if secretKeys[k] {
+			// 설정 여부만. 값은 아니다.
+			saved[k] = v != ""
+			continue
+		}
+		shown[k] = v
+	}
+	data := map[string]any{"Settings": shown, "SecretSaved": saved,
+		"Providers": pgProviders, "Error": msg}
+	// 클라이언트 키만 있고 시크릿이 없으면 결제창은 뜨는데 승인이 실패한다 —
+	// 구매자가 카드를 넣은 뒤에 실패하는 가장 나쁜 순서다.
+	if shown["pg.client_key"] != "" && !saved["pg.secret_key"] {
+		data["Warning"] = "시크릿 키가 없습니다. 결제창은 열리지만 승인이 실패합니다."
+	}
+	d.Render(w, r, "admin/payment.html", code, data)
+}

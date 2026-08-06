@@ -258,7 +258,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 				FreeThreshold: atoiOr(kv["shipping.free_threshold"], 0),
 			}
 		},
-		pgName: func() string { return "toss" },
+		// **A-209 가 정한다.** 하드코딩이면 관리자가 결제사를 골라도 웹훅
+		// 경로와 payments.pg 가 옛 값으로 남는다. 미설정이면 토스다 —
+		// 지금 등록된 어댑터가 그것 하나뿐이고, 빈 문자열은 라우트로도
+		// 컬럼 값으로도 쓸 수 없다.
+		pgName: func() string {
+			if v := setting("pg.provider")["pg.provider"]; v != "" {
+				return v
+			}
+			return "toss"
+		},
 		// 공개 키다. 시크릿은 어떤 경로로도 화면에 오지 않는다 (D19 P-407).
 		pgClientKey: func() string { return setting("pg.client_key")["pg.client_key"] },
 		gateway: func() commerce.Gateway {

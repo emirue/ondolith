@@ -162,6 +162,8 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 // is not the same as "it was never sent".
 var secretKeys = map[string]bool{
 	"mail.smtp_password": true,
+	// PG 시크릿 키. 이것이 새면 상점의 모든 승인·취소를 남이 부를 수 있다.
+	"pg.secret_key": true,
 }
 
 var mailSettingKeys = []string{

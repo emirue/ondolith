@@ -85,6 +85,7 @@ var screenInventory = map[string]SecurityClass{
 	"A-206": SC5, // 소셜 로그인 설정
 	"A-207": SC5, // 약관 관리
 	"A-208": SC5, // 사업자 정보 설정
+	"A-209": SC5, // 결제 설정
 	"A-301": SC4, // 페이지 목록
 	"A-302": SC5, // 페이지 편집
 	"A-303": SC5, // 페이지 발행

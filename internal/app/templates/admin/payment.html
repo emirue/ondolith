@@ -1,0 +1,42 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* **시크릿 키는 화면으로 돌아오지 않는다** (D19 A-205 와 같은 규칙).
+       설정 여부만 보여준다 — 값을 다시 보내면 이 화면을 여는 것 자체가
+       자격증명 노출이고, "가렸다" 는 "보낸 적 없다" 와 다르다. */}}
+  <form method="post" action="/admin/settings/payment">
+    <label class="adm-field">
+      <span>결제사</span>
+      <select name="pg.provider">
+        <option value="">사용 안 함</option>
+        {{$cur := index .Settings "pg.provider"}}
+        {{range $key, $name := .Providers}}
+        <option value="{{$key}}" {{if eq $cur $key}}selected{{end}}>{{$name}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label class="adm-field">
+      <span>클라이언트 키 (공개 키 — 결제창이 씁니다)</span>
+      <input type="text" name="pg.client_key" maxlength="200"
+             value="{{index .Settings "pg.client_key"}}" autocomplete="off">
+    </label>
+    <label class="adm-field">
+      <span>
+        시크릿 키
+        {{if index .SecretSaved "pg.secret_key"}}— 저장되어 있습니다. 바꿀 때만 입력하세요{{end}}
+      </span>
+      <input type="password" name="pg.secret_key" maxlength="200" autocomplete="new-password"
+             placeholder="{{if index .SecretSaved "pg.secret_key"}}변경하지 않으려면 비워 두세요{{else}}미설정{{end}}">
+    </label>
+    {{/* 자격증명 교체는 이후 모든 결제의 수취인을 바꾼다. */}}
+    {{template "reauth-field" .}}
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+  <p class="adm-hint">
+    토스페이먼츠 개발자센터에서 발급한 키를 넣습니다. 테스트 키(<code>test_</code> 로
+    시작)로 먼저 확인한 뒤 라이브 키로 바꾸세요. 시크릿 키는 저장된 뒤 어떤 화면에도
+    다시 표시되지 않습니다.
+  </p>
+</div>
+{{end}}

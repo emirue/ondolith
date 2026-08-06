@@ -1018,3 +1018,167 @@ func (h failOnAudit) WithGroup(string) slog.Handler      { return h }
 func looksLikeUUIDForTest(s string) bool {
 	return len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-'
 }
+
+// **PG 시크릿 키는 저장된 뒤 어떤 화면에도 다시 오지 않는다** (A-209, D19 A-205).
+//
+// 값을 다시 보내면 관리자 화면을 여는 것 자체가 자격증명 노출이고, "화면에서
+// 가렸다" 는 "보낸 적 없다" 와 다르다.
+func TestPaymentSecretIsNeverRedisplayed(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com", password: "correct horse battery"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil, url.Values{
+		"pg.provider": {"toss"}, "pg.client_key": {"test_ck_public"},
+		"pg.secret_key": {"test_sk_SUPERSECRET"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	// 실제로 저장됐다.
+	kv, err := d.Content.Settings(ctx, "pg.secret_key", "pg.client_key", "pg.provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["pg.secret_key"] != "test_sk_SUPERSECRET" {
+		t.Fatalf("시크릿이 저장되지 않았다: %q", kv["pg.secret_key"])
+	}
+
+	// 화면에는 오지 않는다.
+	var shown map[string]string
+	var saved map[string]bool
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		m, _ := data.(map[string]any)
+		shown, _ = m["Settings"].(map[string]string)
+		saved, _ = m["SecretSaved"].(map[string]bool)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/admin/settings/payment", nil)
+	d.PaymentSettingsForm(httptest.NewRecorder(), req)
+
+	for k, v := range shown {
+		if strings.Contains(v, "SUPERSECRET") {
+			t.Errorf("%s 로 시크릿이 화면에 왔다", k)
+		}
+	}
+	if _, ok := shown["pg.secret_key"]; ok {
+		t.Error("시크릿 키가 표시 대상에 들어 있다")
+	}
+	if !saved["pg.secret_key"] {
+		t.Error("저장 여부조차 알려주지 않았다 — 운영자가 설정했는지 알 수 없다")
+	}
+	// 공개 키는 보여도 된다. 결제창이 브라우저에서 쓴다.
+	if shown["pg.client_key"] != "test_ck_public" {
+		t.Errorf("클라이언트 키 %q — 공개 키는 보여야 한다", shown["pg.client_key"])
+	}
+}
+
+// **빈 시크릿은 「그대로 두라」이지 「지우라」가 아니다.**
+//
+// 화면이 현재 값을 보여줄 수 없으므로 빈 칸이 정상 상태다. 지워 버리면
+// 다른 항목을 고치러 들어온 운영자가 결제를 꺼뜨린다.
+func TestEmptyPaymentSecretDoesNotEraseTheStoredOne(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	if err := d.Content.PutSettings(ctx, map[string]string{
+		"pg.provider": "toss", "pg.secret_key": "test_sk_KEEP"}); err != nil {
+		t.Fatal(err)
+	}
+	rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil, url.Values{
+		"pg.provider": {"toss"}, "pg.client_key": {"test_ck_new"}, "pg.secret_key": {""}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	kv, err := d.Content.Settings(ctx, "pg.secret_key", "pg.client_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["pg.secret_key"] != "test_sk_KEEP" {
+		t.Errorf("시크릿이 %q 로 바뀌었다 — 빈 칸이 지우기가 됐다", kv["pg.secret_key"])
+	}
+	if kv["pg.client_key"] != "test_ck_new" {
+		t.Errorf("클라이언트 키가 저장되지 않았다: %q", kv["pg.client_key"])
+	}
+}
+
+// 등록되지 않은 결제사는 422 다. 자유 문자열을 어댑터 선택에 쓰면 "결제가
+// 조용히 안 되는" 사이트가 된다.
+func TestPaymentProviderIsAnAllowList(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+
+	// 앞뒤 공백은 다듬는다 (운영자가 붙여넣는다) — 거부 대상이 아니다.
+	for _, bad := range []string{"stripe", "TOSS", "../toss", "toss;drop"} {
+		rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil,
+			url.Values{"pg.provider": {bad}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("결제사 %q = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	kv, err := d.Content.Settings(context.Background(), "pg.provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["pg.provider"] != "" {
+		t.Errorf("거부된 값이 저장됐다: %q", kv["pg.provider"])
+	}
+}
+
+// 자격증명 교체는 이후 모든 결제의 수취인을 바꾼다 — 재인증을 요구한다.
+func TestPaymentSettingsRequireReauth(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		reauth: true, id: "", email: "op@example.com", password: "correct horse battery"}
+	d, _ := fixture(t, caller)
+
+	rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil,
+		url.Values{"pg.provider": {"toss"}, "pg.secret_key": {"test_sk_X"}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("재인증 없이 = HTTP %d, want 403", rec.Code)
+	}
+	kv, err := d.Content.Settings(context.Background(), "pg.secret_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["pg.secret_key"] != "" {
+		t.Error("재인증 없이 자격증명이 저장됐다")
+	}
+
+	// 비밀번호를 함께 보내면 통과한다.
+	rec = postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil, url.Values{
+		"pg.provider": {"toss"}, "pg.secret_key": {"test_sk_X"},
+		"password": {"correct horse battery"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+}
+
+// **작업 로그에 키 값이 남지 않는다** (D15 7절, D22 4절). 로그는 지워지지
+// 않으므로 (append-only) 한 번 새면 영구히 남는다.
+func TestPaymentSettingsLogNeverCarriesTheKey(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+
+	postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil, url.Values{
+		"pg.provider": {"toss"}, "pg.client_key": {"test_ck_public"},
+		"pg.secret_key": {"test_sk_SUPERSECRET"}})
+
+	var summary, target string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT summary, COALESCE(target_id,'') FROM operation_logs
+		 ORDER BY created_at DESC LIMIT 1`).Scan(&summary, &target); err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"SUPERSECRET", "test_sk"} {
+		if strings.Contains(summary+target, leak) {
+			t.Errorf("작업 로그에 키가 남았다: %q / %q", summary, target)
+		}
+	}
+	if !strings.Contains(summary, "결제 설정") {
+		t.Errorf("변경 사실이 남지 않았다: %q", summary)
+	}
+}

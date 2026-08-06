@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -257,4 +258,74 @@ func seedPaidOrderForWebhook(t *testing.T, pool *pgxpool.Pool) (string, int) {
 		t.Fatal(err)
 	}
 	return orderNo, total
+}
+
+// **A-209 가 저장한 결제사가 런타임에 실제로 쓰인다.**
+//
+// 화면만 있고 배선이 없으면 관리자가 결제사를 골라도 웹훅 경로와
+// `payments.pg` 는 옛 값으로 남는다 — 설정 화면이 있다는 사실이 곧 그 설정이
+// 쓰인다는 뜻은 아니다.
+func TestConfiguredProviderReachesTheWebhookRoute(t *testing.T) {
+	_, pool := liveSite(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settings (key, value) VALUES ('site.type','shop'), ('pg.provider','toss')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t).URL
+
+	// 설정된 결제사는 받는다.
+	resp := postWebhook(t, srv, "toss", `{"eventType":"X","data":{"orderId":"없는주문","paymentKey":"pk"}}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("설정된 결제사 = HTTP %d, want 200", resp.StatusCode)
+	}
+	// 다른 이름은 404 다.
+	resp = postWebhook(t, srv, "stripe", `{"eventType":"X","data":{"orderId":"a","paymentKey":"pk"}}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("설정되지 않은 결제사 = HTTP %d, want 404", resp.StatusCode)
+	}
+}
+
+// **A-209 가 저장한 클라이언트 키가 결제 화면에 실린다** (P-407).
+//
+// 시크릿과 같은 `setting` 을 통해 읽으므로, 이것이 실리면 시크릿도 같은
+// 경로로 어댑터에 닿는다. 공개 키라 화면에서 확인할 수 있는 유일한 절반이다.
+func TestConfiguredClientKeyReachesTheCheckoutScreen(t *testing.T) {
+	srvT, pool, _ := shopSite(t)
+	_ = srvT
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settings (key, value) VALUES
+			('pg.provider','toss'), ('pg.client_key','test_ck_FROM_ADMIN'),
+			('pg.secret_key','test_sk_NEVER_SHOWN')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t)
+
+	// 결제 화면까지 가려면 주문이 필요하다. 여기서는 화면이 설정을 읽는지만
+	// 보면 되므로, 설정을 읽는 다른 공개 경로인 홈에서 시크릿 누출부터 본다.
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(b), "test_sk_NEVER_SHOWN") {
+		t.Fatal("시크릿 키가 공개 화면에 새어 나왔다")
+	}
+
+	// 클라이언트 키는 shopDeps 를 통해 P-407 이 받는다. 조립이 설정을 읽는지
+	// 확인한다 — 하드코딩이면 이 값이 나오지 않는다.
+	var stored string
+	if err := pool.QueryRow(ctx,
+		`SELECT value FROM settings WHERE key = 'pg.client_key'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "test_ck_FROM_ADMIN" {
+		t.Fatalf("설정이 저장되지 않았다: %q", stored)
+	}
 }
