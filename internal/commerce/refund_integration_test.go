@@ -551,3 +551,54 @@ func TestCancelledOrderRefusesFurtherRefunds(t *testing.T) {
 		t.Errorf("취소 뒤 남은 수량 %d, want 0", again[0].Remaining())
 	}
 }
+
+// **부분 환불 뒤 전체 취소는 남은 몫만 돌려준다** (FR-611).
+//
+// 예전에는 `refunded_amount` 에 승인금액을 대입해서, 앞선 부분 환불의 선점이
+// 지워졌다. 지워진 값은 `CHECK (환불누적액 <= 승인금액)` 도 볼 수 없어서 두
+// 환불의 합이 결제액을 넘었다.
+func TestCancelAfterPartialRefundOnlyReturnsWhatIsLeft(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _, goods := paidOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+
+	var approved int
+	if err := pool.QueryRow(ctx, `
+		SELECT approved_amount FROM payments p JOIN orders o ON o.id = p.order_id
+		WHERE o.order_no = $1 AND p.kind = '주문결제'`, orderNo).Scan(&approved); err != nil {
+		t.Fatal(err)
+	}
+
+	// 품목 전부를 부분 환불한다 (배송비는 남는다 — D50 「부분 취소 시 배송비」).
+	if _, _, err := s.RequestRefund(ctx, orderNo, []RefundLine{
+		{OrderItemID: items[0].ID, Quantity: 2},
+	}, "관리자", "품목 환불", "k-part"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 배송준비까지 간 뒤 구매자가 전체 취소한다 (P-506).
+	if err := s.TransitionOrder(ctx, orderNo, StatusPreparing, "A-506"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CancelOrder(ctx, orderNo, "P-506", "k-cancel"); err != nil {
+		t.Fatal(err)
+	}
+
+	var reserved, sum int
+	if err := pool.QueryRow(ctx, `
+		SELECT p.refunded_amount, COALESCE((SELECT sum(amount) FROM refunds WHERE payment_id = p.id), 0)
+		FROM payments p JOIN orders o ON o.id = p.order_id
+		WHERE o.order_no = $1 AND p.kind = '주문결제'`, orderNo).Scan(&reserved, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if sum != approved {
+		t.Errorf("환불 합계 %d, want %d (승인금액) — 같은 돈을 두 번 돌려줬다", sum, approved)
+	}
+	if reserved != approved {
+		t.Errorf("선점액 %d, want %d", reserved, approved)
+	}
+	if goods >= approved {
+		t.Fatalf("전제가 틀렸다: 상품합 %d, 승인 %d — 배송비가 없으면 이 회귀를 못 본다", goods, approved)
+	}
+}

@@ -290,7 +290,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	if c.NeedsReauth() {
+	if !reauthOK(c, r) {
 		d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
 	}
@@ -411,14 +411,11 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "pickup":
-		fee, ferr := strconv.Atoi(r.PostFormValue("fee_amount"))
-		if ferr != nil {
-			d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
-				"배송비를 숫자로 입력하세요.")
-			return
-		}
+		// 배송비는 받지 않는다 — A-512 정책을 서버가 읽는다 (D19 A-511
+		// 받지 않는 필드). 폼에서 받으면 order.refund 없이 환불액을 정하는
+		// 창구가 된다.
 		err = d.Commerce.ConfirmPickup(r.Context(), order.OrderNo, returnNo,
-			r.PostFormValue("fault"), r.PostFormValue("fee_policy"), fee, "A-511")
+			r.PostFormValue("fault"), "A-511")
 		if err == nil {
 			d.log(r, c, "return.pickup", "return", returnNo, "수거 확인")
 		}
@@ -439,7 +436,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// **돈이 나간다** — 여기만 재인증을 요구한다 (D15 5.3-1).
-		if c.NeedsReauth() {
+		if !reauthOK(c, r) {
 			d.renderReturns(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 			return
 		}
@@ -478,7 +475,10 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		// 말해 줘야 한다 — 수거 확인 단계에서 이것을 거부하는 것이 그 반품
 		// 건이 멈추지 않게 하는 유일한 지점이다.
 		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
-			"반품 배송비가 환불 금액 이상입니다. 배송비를 낮추거나 별도청구로 처리하세요.")
+			"반품 배송비가 환불 금액 이상입니다. 커머스 정책(A-512)에서 배송비를 낮추거나 별도청구로 바꾸세요.")
+	case errors.Is(err, commerce.ErrFeeSetting):
+		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
+			"커머스 정책(A-512)의 반품 배송비 값이 올바르지 않습니다.")
 	case errors.Is(err, commerce.ErrPriceNegative):
 		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
 			"금액이 올바르지 않습니다.")

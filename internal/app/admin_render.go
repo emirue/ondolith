@@ -2,12 +2,15 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/alexedwards/scs/v2"
 
 	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
@@ -167,6 +170,11 @@ func actorName(a *Actor) string {
 type adminCaller struct {
 	a   *Actor
 	now func() time.Time
+	// ctx·auth·sm 은 ConfirmReauth 만 쓴다. 재인증은 비밀번호를 실제로 대조
+	// 하고 세션에 시각을 찍는 일이라, Actor 스냅샷만으로는 할 수 없다.
+	ctx  context.Context
+	auth *auth.Store
+	sm   *scs.SessionManager
 }
 
 func (c adminCaller) Can(perm string) bool { return c.a.Can(perm) }
@@ -189,3 +197,20 @@ func (c adminCaller) IsSuperuser() bool {
 	return c.a != nil && c.a.Perms != nil && c.a.Perms.Superuser
 }
 func (c adminCaller) NeedsReauth() bool { return NeedsReauth(c.a, c.now()) }
+
+// ConfirmReauth verifies the password typed into the destructive screen's own
+// form and re-stamps the window (D15 5.3-1).
+//
+// **이 구현이 없으면 재인증 안내는 장식이다.** `reauth_at` 을 쓰는 곳이 비밀번호
+// 변경 하나뿐이면, 로그인 후 15분이 지난 운영자는 폼의 비밀번호 칸을 채워도
+// 계속 403 을 받는다 — 로그아웃했다 들어오기 전에는 환불이 불가능해진다.
+func (c adminCaller) ConfirmReauth(password string) bool {
+	if password == "" || c.a == nil || c.a.User == nil || c.auth == nil || c.sm == nil {
+		return false
+	}
+	if _, err := c.auth.Authenticate(c.ctx, c.a.User.Email, password); err != nil {
+		return false
+	}
+	putTime(c.sm, c.ctx, sessReauth, c.now())
+	return true
+}

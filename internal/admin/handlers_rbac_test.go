@@ -15,7 +15,7 @@ import (
 // R4 and R5 are enforced on the server. Hiding the superuser row in the UI is
 // not a check — a POST reaches the handler regardless of what was drawn.
 func TestSuperuserRoleCannotBeEditedFromTheServer(t *testing.T) {
-	d, pool := fixture(t, fakeCaller{perms: map[string]bool{"role.manage": true}, id: "me"})
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"role.manage": true}, id: "me"})
 	ctx := context.Background()
 
 	// The caller is a genuine superuser, so R4 could not refuse this — only R5
@@ -30,7 +30,7 @@ func TestSuperuserRoleCannotBeEditedFromTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
+		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
 	}
 
 	rec := post(d.RoleGrantPermission, "/admin/roles/grant", url.Values{
@@ -56,7 +56,7 @@ func TestCannotGrantAPermissionYouDoNotHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"role.manage": true}, id: me}
+		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me}
 	}
 
 	if rec := post(d.RoleGrantPermission, "/admin/roles/grant", url.Values{
@@ -87,7 +87,7 @@ func TestCannotAssignARoleToYourself(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"role.assign": true}, id: me, superuser: true}
+		return &fakeCaller{perms: map[string]bool{"role.assign": true}, id: me, superuser: true}
 	}
 
 	if rec := post(d.RoleAssign, "/admin/users/assign", url.Values{
@@ -112,7 +112,7 @@ func TestScopedGrantOnlyForScopedPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
+		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
 	}
 
 	// settings.update is not scoped (no scoped permission ships in Phase 1).
@@ -135,7 +135,7 @@ func TestRoleAssignmentIsImmediate(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"role.assign": true}, id: me, superuser: true}
+		return &fakeCaller{perms: map[string]bool{"role.assign": true}, id: me, superuser: true}
 	}
 
 	before, err := d.Auth.LoadPermissions(ctx, target)
@@ -188,7 +188,7 @@ func TestUnassignableRolesAreNotAssigned(t *testing.T) {
 // A cycle cannot be caught by a constraint (D30 3절), and writing first would
 // leave a menu that cannot render — behind which sits the screen that fixes it.
 func TestMenuCycleIsRefusedBeforeWriting(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"menu.manage": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"menu.manage": true}})
 	ctx := context.Background()
 
 	parent, err := d.Content.CreateMenuItem(ctx, contentItem("부모", "/p", ""))
@@ -228,7 +228,7 @@ func TestMenuCycleIsRefusedBeforeWriting(t *testing.T) {
 // one of its own descendants is legal for the row and invisible to the foreign
 // key (D30 3절). It shows up only when the tree is assembled.
 func TestReParentingUnderOwnDescendantIsRefusedBeforeWriting(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"menu.manage": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"menu.manage": true}})
 	ctx := context.Background()
 
 	// 조부 → 부모 → 자식
@@ -294,7 +294,7 @@ func TestReParentingUnderOwnDescendantIsRefusedBeforeWriting(t *testing.T) {
 }
 
 func TestMenuRejectsEmptyTitle(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"menu.manage": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"menu.manage": true}})
 	if rec := post(d.MenuCreate, "/admin/menus", url.Values{
 		"url": {"/x"}}); rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("빈 제목이 HTTP %d 로 통과했다", rec.Code)
@@ -304,7 +304,7 @@ func TestMenuRejectsEmptyTitle(t *testing.T) {
 // D17: base.html is checked BEFORE the switch. Activating a theme without it
 // leaves every page unrenderable, including the one that would switch back.
 func TestThemeActivationRefusesAnInvalidTheme(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"theme.activate": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"theme.activate": true}})
 	d.ValidateTheme = func(name string) (string, error) {
 		if name == "broken" {
 			return "", errors.New("base.html 이 없습니다")
@@ -341,7 +341,7 @@ func TestThemeActivationRefusesAnInvalidTheme(t *testing.T) {
 // The built-in theme always renders, so switching back to it needs no check —
 // and must always be possible, because it is the way out of a broken theme.
 func TestSwitchingBackToBuiltinAlwaysWorks(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"theme.activate": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"theme.activate": true}})
 	d.ValidateTheme = func(string) (string, error) { return "", errors.New("무조건 거부") }
 
 	if rec := post(d.ThemeActivate, "/admin/themes", url.Values{
@@ -351,7 +351,7 @@ func TestSwitchingBackToBuiltinAlwaysWorks(t *testing.T) {
 }
 
 func TestRbacHandlersCheckTheirOwnPermission(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"admin.access": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"admin.access": true}})
 	cases := map[string]http.HandlerFunc{
 		"메뉴 목록": d.MenuList, "메뉴 추가": d.MenuCreate, "메뉴 수정": d.MenuUpdate, "메뉴 삭제": d.MenuDelete,
 		"역할 목록": d.RoleList, "권한 부여": d.RoleGrantPermission,

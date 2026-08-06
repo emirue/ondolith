@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +36,57 @@ const (
 	KindReturn   ReturnKind = "반품"
 	KindExchange ReturnKind = "교환"
 )
+
+// 반품 배송비 부담 방식 (A-512). `차감`은 환불액에서 빼고, `별도청구`는
+// 시스템 밖에서 받으므로 환불액을 건드리지 않는다 (D19 A-511 거부 조건).
+const (
+	FeePolicyDeduct   = "차감"
+	FeePolicySeparate = "별도청구"
+
+	// SettingReturnFeePolicy·SettingReturnFeeAmount 는 A-512 가 쓰는 키다.
+	SettingReturnFeePolicy = "order.return_fee_policy"
+	SettingReturnFeeAmount = "order.return_fee_amount"
+)
+
+// ErrFeeSetting 은 A-512 정책값이 허용 범위를 벗어났다는 뜻이다. A-512 가
+// 저장 시점에 막지만, 손으로 고친 DB 가 500 을 그리게 두지 않는다.
+var ErrFeeSetting = errors.New("commerce: 반품 배송비 정책값이 올바르지 않습니다")
+
+// returnFeeSetting reads A-512's 반품 배송비 정책 inside the caller's
+// transaction, so the snapshot ConfirmPickup writes and the policy it was read
+// from cannot disagree.
+//
+// 기본값은 D19 A-512 의 것이다 — 방식 `차감`, 금액 0. 설정이 없는 사이트에서
+// 배송비 0 은 "정책을 아직 안 정했다"의 안전한 해석이다.
+func returnFeeSetting(ctx context.Context, tx pgx.Tx) (policy string, amount int, err error) {
+	policy, amount = FeePolicyDeduct, 0
+	rows, err := tx.Query(ctx, `SELECT key, value FROM settings WHERE key = ANY($1)`,
+		[]string{SettingReturnFeePolicy, SettingReturnFeeAmount})
+	if err != nil {
+		return "", 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return "", 0, err
+		}
+		switch k {
+		case SettingReturnFeePolicy:
+			if v != FeePolicyDeduct && v != FeePolicySeparate {
+				return "", 0, fmt.Errorf("%w: 부담 방식 %q", ErrFeeSetting, v)
+			}
+			policy = v
+		case SettingReturnFeeAmount:
+			n, cerr := strconv.Atoi(v)
+			if cerr != nil || n < 0 {
+				return "", 0, fmt.Errorf("%w: 금액 %q", ErrFeeSetting, v)
+			}
+			amount = n
+		}
+	}
+	return policy, amount, rows.Err()
+}
 
 // Return is one row of returns, as P-513/A-511 draw it.
 type Return struct {
@@ -315,23 +367,11 @@ func returnGross(ctx context.Context, tx pgx.Tx, returnID string) (int, []return
 //
 // 귀책이 판매자면 배송비는 0 이다 — 하자 상품의 반품비를 구매자가 물지 않는다
 // (DB CHECK 도 같은 것을 막는다).
-func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault, feePolicy string,
-	feeAmount int, actor Actor) error {
+func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault string,
+	actor Actor) error {
 
 	if fault != "구매자" && fault != "판매자" {
 		return fmt.Errorf("commerce: 귀책은 구매자 또는 판매자입니다: %q", fault)
-	}
-	// **음수 배송비는 환불액을 부풀린다** (`amount -= feeAmount`). DB CHECK 도
-	// 막지만 거기서 나오는 것은 제약 위반이라 화면이 500 을 그리고, 무엇보다
-	// 이 값은 재인증이 걸리지 않는 수거 확인 단계에서 심어진다 — 돈이 움직이는
-	// 것은 정산뿐이라고 보고 재인증을 뺀 자리라, 여기서 걸러야 한다.
-	if feeAmount < 0 {
-		return fmt.Errorf("%w: 배송비 %d", ErrPriceNegative, feeAmount)
-	}
-	if fault == "판매자" {
-		// 화면이 무엇을 보냈든 0 으로 만든다. DB CHECK 가 잡기도 하지만
-		// 거기서 나오는 것은 제약 위반이지 정책이 아니다.
-		feeAmount = 0
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -339,6 +379,21 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault, fee
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	// **배송비는 요청이 아니라 A-512 정책에서 읽는다** (D19 A-511 받지 않는
+	// 필드: "요청에서 오면 환불액을 요청자가 정하게 된다"). 수거 확인은
+	// order.return 만으로 되고 재인증도 걸리지 않는 단계다 — 창고 담당이
+	// 누르는 자리에서 폼 값을 받으면, 환불 확정을 order.refund 로 갈라놓은
+	// 것이 무의미해진다. 금액은 그 계정이 이미 정한 뒤이기 때문이다.
+	feePolicy, feeAmount, err := returnFeeSetting(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if fault == "판매자" {
+		// 하자 상품의 반품비를 구매자가 물지 않는다. DB CHECK 가 잡기도
+		// 하지만 거기서 나오는 것은 제약 위반이지 정책이 아니다.
+		feeAmount = 0
+	}
 
 	var id, kind, status, orderID string
 	// **그 주문의 반품 건인지 SQL 술어로 대조한다.** 폼의 return_no 를 그대로
@@ -370,8 +425,9 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault, fee
 	// 멈춘다 — 거부도 되돌리기도 안 된다.
 	//
 	// 교환은 대상이 아니다. 차액은 P-514 가 정산하고, 이 배송비는 환불에서
-	// 빼는 값이라 뺄 환불 자체가 없다.
-	if ReturnKind(kind) == KindReturn {
+	// 빼는 값이라 뺄 환불 자체가 없다. `별도청구` 도 대상이 아니다 — 환불에서
+	// 빼지 않고 시스템 밖에서 받으므로 환불 몫을 잠식하지 않는다.
+	if ReturnKind(kind) == KindReturn && feePolicy == FeePolicyDeduct {
 		gross, _, err := returnGross(ctx, tx, id)
 		if err != nil {
 			return err
@@ -418,13 +474,14 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	}
 	defer tx.Rollback(ctx)
 
-	var id, kind, status, orderID string
+	var id, kind, status, orderID, feePolicy string
 	var feeAmount int
 	err = tx.QueryRow(ctx, `
-		SELECT r.id, r.kind, r.status, r.order_id, COALESCE(r.shipping_fee_amount, 0)
+		SELECT r.id, r.kind, r.status, r.order_id,
+		       COALESCE(r.shipping_fee_policy, ''), COALESCE(r.shipping_fee_amount, 0)
 		FROM returns r JOIN orders o ON o.id = r.order_id
 		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`, returnNo, orderNo).
-		Scan(&id, &kind, &status, &orderID, &feeAmount)
+		Scan(&id, &kind, &status, &orderID, &feePolicy, &feeAmount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotFound
 	}
@@ -464,9 +521,12 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	}
 	amount = gross
 
-	// 반품 배송비를 뺀다 (A-512 스냅샷). 정책이 `별도청구` 면 환불에서 빼지
-	// 않고 따로 청구하므로 0 을 뺀 것과 같다 — 그 청구 경로는 아직 없다.
-	amount -= feeAmount
+	// 반품 배송비를 뺀다 (A-512 스냅샷) — **`차감` 일 때만**. `별도청구` 는
+	// 시스템 밖에서 받으므로 환불액에서 빼면 구매자가 배송비를 두 번 낸다
+	// (D19 A-511 거부 조건).
+	if feePolicy == FeePolicyDeduct {
+		amount -= feeAmount
+	}
 	if amount <= 0 {
 		// 수거 확인이 이미 막았어야 하는 경우다. 여기 오면 스냅샷이 그 사이
 		// 바뀐 것이고(예: 같은 품목이 부분 환불로 소진됨), 그때도 500 이

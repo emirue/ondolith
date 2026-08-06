@@ -10,7 +10,10 @@
   {{with .Reason}}<p>사유: {{.}}</p>{{end}}
   {{if .Fault}}<p>귀책 {{.Fault}} · 배송비 {{.FeeAmount}} ({{.FeePolicy}})</p>{{end}}
 
-  {{/* 수거 확인이 배송비 스냅샷을 찍는다. 판매자 귀책이면 서버가 0 으로
+  {{/* 수거 확인이 배송비 스냅샷을 찍는다. **배송비 입력란은 없다** — A-512
+       정책값을 서버가 읽는다 (D19 A-511 받지 않는 필드). 이 화면은 order.return
+       만으로 열리고 재인증도 없어서, 여기서 금액을 받으면 환불 확정을
+       order.refund 로 갈라놓은 것이 무의미해진다. 판매자 귀책이면 서버가 0 으로
        만든다 — 하자 상품의 반품비를 구매자가 물지 않는다. */}}
   <form method="post" class="form">
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
@@ -21,16 +24,6 @@
         <option value="판매자">판매자</option>
       </select>
     </label>
-    <label>배송비 정책
-      <select name="fee_policy">
-        <option value="차감">차감</option>
-        <option value="별도청구">별도청구</option>
-      </select>
-    </label>
-    {{/* 상한은 서버가 정한다 (환불 몫 미만). 여기 max 를 두지 않는 이유는
-         화면이 그 몫을 모르기 때문이고, 안다 해도 브라우저는 건너뛸 수 있다 —
-         거부하는 것은 ConfirmPickup 이다. */}}
-    <label>배송비 <input name="fee_amount" type="number" min="0" value="0"></label>
     <button type="submit">수거 확인</button>
   </form>
 

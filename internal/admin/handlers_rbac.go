@@ -355,7 +355,7 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// D15 5.3-1: uploading executable-ish content is the last step of a takeover.
-	if c.NeedsReauth() {
+	if !reauthOK(c, r) {
 		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
 		return
 	}

@@ -135,7 +135,7 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if c.NeedsReauth() {
+	if !reauthOK(c, r) {
 		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
 		return
 	}

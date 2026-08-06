@@ -16,12 +16,15 @@
   <h2>동작</h2>
   <div class="adm-actions">
     <form method="post" action="/admin/users/{{.ID}}/deactivate">
+      {{template "reauth-field" .}}
       <button class="adm-btn">비활성화</button>
     </form>
     <form method="post" action="/admin/users/{{.ID}}/reset-password">
+      {{template "reauth-field" .}}
       <button class="adm-btn">비밀번호 재설정 강제</button>
     </form>
     <form method="post" action="/admin/users/{{.ID}}/delete">
+      {{template "reauth-field" .}}
       <button class="adm-btn adm-btn--danger">삭제</button>
     </form>
   </div>

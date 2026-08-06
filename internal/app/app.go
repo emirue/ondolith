@@ -195,7 +195,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Content: contentStore,
 		Auth:    authStore,
 		Caller: func(r *http.Request) admin.Caller {
-			return adminCaller{a: ActorFrom(r.Context()), now: time.Now}
+			return adminCaller{a: ActorFrom(r.Context()), now: time.Now,
+				ctx: r.Context(), auth: authStore, sm: sessions}
 		},
 		Render:      adminUI.Render,
 		Commerce:    commerceStore,

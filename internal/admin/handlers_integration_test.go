@@ -30,19 +30,32 @@ type fakeCaller struct {
 	email     string
 	superuser bool
 	reauth    bool
+	// password 는 재인증에서 통과하는 값이다. 비어 있으면 어떤 입력도 통과하지
+	// 못한다 — 재인증을 만족시킬 수 없는 계정이다.
+	password string
 }
 
-func (f fakeCaller) Can(p string) bool { return f.superuser || f.perms[p] }
-func (f fakeCaller) CanOn(p string, board auth.BoardID) bool {
+func (f *fakeCaller) Can(p string) bool { return f.superuser || f.perms[p] }
+func (f *fakeCaller) CanOn(p string, board auth.BoardID) bool {
 	if f.superuser || f.perms[p] {
 		return true
 	}
 	return f.scoped[string(board)][p]
 }
-func (f fakeCaller) Email() string     { return f.email }
-func (f fakeCaller) UserID() string    { return f.id }
-func (f fakeCaller) IsSuperuser() bool { return f.superuser }
-func (f fakeCaller) NeedsReauth() bool { return f.reauth }
+func (f *fakeCaller) Email() string     { return f.email }
+func (f *fakeCaller) UserID() string    { return f.id }
+func (f *fakeCaller) IsSuperuser() bool { return f.superuser }
+func (f *fakeCaller) NeedsReauth() bool { return f.reauth }
+
+// ConfirmReauth 는 운영의 adminCaller 처럼 **성공을 남긴다** (그쪽은 세션에
+// 찍는다). 남기지 않으면 이 stub 은 운영이 만들 수 없는 상태를 시험하게 된다.
+func (f *fakeCaller) ConfirmReauth(p string) bool {
+	if f.password == "" || p != f.password {
+		return false
+	}
+	f.reauth = false
+	return true
+}
 
 func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 	t.Helper()
@@ -112,7 +125,7 @@ func get(h http.HandlerFunc, target string) *httptest.ResponseRecorder {
 // Every handler checks its own permission even though the tree gate ran: the
 // gate saw `/admin/...` and cannot know this request is a delete (D15 4.2).
 func TestEachHandlerChecksItsOwnPermission(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"admin.access": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"admin.access": true}})
 
 	cases := map[string]http.HandlerFunc{
 		"설정 조회":   d.SettingsForm,
@@ -138,7 +151,7 @@ func TestEachHandlerChecksItsOwnPermission(t *testing.T) {
 // FR-708: the secret is written once and never travels back. "Masked in the UI"
 // is not the same as "never sent" — the value would be in the HTML source.
 func TestSecretsAreNeverRedisplayed(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"settings.update": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
 
 	post(d.MailSettingsSave, "/admin/settings/mail", url.Values{
 		"mail.smtp_host":     {"smtp.example.com"},
@@ -161,7 +174,7 @@ func TestSecretsAreNeverRedisplayed(t *testing.T) {
 // value, so empty is the normal state of a screen opened to change something
 // else. Treating it as "erase" silently breaks mail on the next save.
 func TestEmptySecretDoesNotEraseTheStoredOne(t *testing.T) {
-	d, pool := fixture(t, fakeCaller{perms: map[string]bool{"settings.update": true}})
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
 	ctx := context.Background()
 
 	post(d.MailSettingsSave, "/admin/settings/mail", url.Values{
@@ -188,7 +201,7 @@ func TestEmptySecretDoesNotEraseTheStoredOne(t *testing.T) {
 // FR-710: a closed vocabulary. An unknown value leaves the router assembling a
 // tree nobody described.
 func TestSiteTypeIsAClosedVocabulary(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"settings.update": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
 
 	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
 		"site.type": {"marketplace"}}); rec.Code != http.StatusUnprocessableEntity {
@@ -205,7 +218,7 @@ func TestSiteTypeIsAClosedVocabulary(t *testing.T) {
 // page.update must not be able to publish, or the separation of the two
 // permissions is decorative.
 func TestPublishNeedsItsOwnPermission(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{
 		"page.view": true, "page.update": true, // no page.publish, no page.delete
 	}})
 
@@ -226,7 +239,7 @@ func TestPublishNeedsItsOwnPermission(t *testing.T) {
 // D15 5.3-1: destructive, so the password is re-confirmed. An open session is
 // not the same as the operator being present.
 func TestDeactivateRequiresReauth(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"user.update": true}, reauth: true})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}, reauth: true})
 	rec := post(d.UserDeactivate, "/admin/users/x/deactivate", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("재인증 없이 비활성화가 진행됐다: HTTP %d", rec.Code)
@@ -236,7 +249,7 @@ func TestDeactivateRequiresReauth(t *testing.T) {
 // R6: only a superuser may switch off a superuser holder. Without it, revoking
 // the role is blocked while turning off its holder is not — same end, other road.
 func TestNonSuperuserCannotDeactivateASuperuserHolder(t *testing.T) {
-	d, pool := fixture(t, fakeCaller{perms: map[string]bool{"user.update": true}, id: "me"})
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}, id: "me"})
 	ctx := context.Background()
 
 	target, err := d.Auth.CreateUser(ctx, "admin@example.com", "h", "관리자")
@@ -269,7 +282,7 @@ func TestNonSuperuserCannotDeactivateASuperuserHolder(t *testing.T) {
 // C5: the DSN carries the database password, and an admin screen is exactly
 // where a screenshot comes from.
 func TestSystemScreenDoesNotShowTheDSN(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"settings.view": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.view": true}})
 	rec := get(d.System, "/admin/system")
 
 	body := rec.Body.String()
@@ -289,7 +302,7 @@ func TestSystemScreenDoesNotShowTheDSN(t *testing.T) {
 // A-401 needs user.view. D15 2.2 lists it separately from user.update, and a
 // screen that accepted either would merge two permissions the design keeps apart.
 func TestUserListNeedsUserView(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"user.update": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}})
 	if rec := get(d.UserList, "/admin/users"); rec.Code != http.StatusForbidden {
 		t.Errorf("user.update 만으로 목록이 열렸다: HTTP %d", rec.Code)
 	}
@@ -298,7 +311,7 @@ func TestUserListNeedsUserView(t *testing.T) {
 // The list reads the columns the screen draws and nothing else. A password hash
 // that never leaves the database cannot leak from a template someone edits later.
 func TestUserListDoesNotCarryCredentials(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"user.view": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
 	ctx := context.Background()
 
 	const hash = "$2a$12$notarealhashbutdistinctive"
@@ -334,7 +347,7 @@ func TestUserListDoesNotCarryCredentials(t *testing.T) {
 // Roles come back with the row. One query per user would turn the screen most
 // likely to grow into N+1 the moment it does.
 func TestUserListCarriesRolesWithoutASecondQuery(t *testing.T) {
-	d, pool := fixture(t, fakeCaller{perms: map[string]bool{"user.view": true}})
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
 	ctx := context.Background()
 
 	id, err := d.Auth.CreateUser(ctx, "op@example.com", "h", "운영")
@@ -374,7 +387,7 @@ func TestUserListCarriesRolesWithoutASecondQuery(t *testing.T) {
 // An unbounded list is one seed script away from loading every account to draw
 // one screen.
 func TestUserListIsBounded(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"user.view": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
 	ctx := context.Background()
 
 	for i := range userPageSize + 5 {
@@ -412,7 +425,7 @@ func TestUserListIsBounded(t *testing.T) {
 // ?page= has to reach the query. A screen that draws page 1 while fetching page
 // 0 hides every account past the first screenful and looks like it worked.
 func TestUserListPagingReachesTheQuery(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"user.view": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
 	ctx := context.Background()
 
 	for i := range userPageSize + 3 {
@@ -470,7 +483,7 @@ func postID(h http.HandlerFunc, id string, form url.Values) *httptest.ResponseRe
 // user.update must not carry delete, create or forced reset with it — otherwise
 // the four rows describe one permission wearing four names.
 func TestEachAccountActionNeedsItsOwnPermission(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"user.update": true}, id: "me"})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}, id: "me"})
 	ctx := context.Background()
 	target, err := d.Auth.CreateUser(ctx, "t@example.com", "h", "대상")
 	if err != nil {
@@ -499,7 +512,7 @@ func TestEachAccountActionNeedsItsOwnPermission(t *testing.T) {
 // D15 5.3-1: all three destructive actions re-confirm the password. An open
 // session is not the same as the operator being present.
 func TestAllDestructiveAccountActionsRequireReauth(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{
+	d, _ := fixture(t, &fakeCaller{
 		perms: map[string]bool{"user.update": true, "user.delete": true, "user.reset_password": true},
 		id:    "me", reauth: true,
 	})
@@ -533,7 +546,7 @@ func TestCannotOperateOnYourOwnAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{
+		return &fakeCaller{perms: map[string]bool{
 			"user.update": true, "user.delete": true, "user.reset_password": true,
 		}, id: me}
 	}
@@ -568,7 +581,7 @@ func TestLastSuperuserCannotBeDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"user.delete": true}, id: me, superuser: true}
+		return &fakeCaller{perms: map[string]bool{"user.delete": true}, id: me, superuser: true}
 	}
 
 	if rec := postID(d.UserDelete, only, nil); rec.Code != http.StatusConflict {
@@ -590,7 +603,7 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
+		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
 	}
 	var sent []string
 	d.SendReset = func(email, token string) { sent = append(sent, email+"|"+token) }
@@ -646,7 +659,7 @@ func TestForcedResetWorksOnAnInactiveAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Caller = func(*http.Request) Caller {
-		return fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
+		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
 	}
 	d.SendReset = func(string, string) {}
 
@@ -658,7 +671,7 @@ func TestForcedResetWorksOnAnInactiveAccount(t *testing.T) {
 // D19 A-402 create: email lowercased, password hashed, duplicates refused by
 // the database, and no role comes with it.
 func TestUserCreateValidatesAndAssignsNoRole(t *testing.T) {
-	d, pool := fixture(t, fakeCaller{perms: map[string]bool{"user.create": true}, id: "me"})
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"user.create": true}, id: "me"})
 	ctx := context.Background()
 
 	if rec := post(d.UserCreate, "/admin/users", url.Values{
@@ -706,7 +719,7 @@ func TestUserCreateValidatesAndAssignsNoRole(t *testing.T) {
 
 // A-402 상세는 user.update 뒤에 있고, 자격증명은 화면에 없다.
 func TestUserDetailNeedsUpdateAndCarriesNoCredentials(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{perms: map[string]bool{"user.view": true}})
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
 	target, err := d.Auth.CreateUser(context.Background(), "t@example.com", "$2a$12$distinctivehash", "대상")
 	if err != nil {
 		t.Fatal(err)
@@ -719,7 +732,7 @@ func TestUserDetailNeedsUpdateAndCarriesNoCredentials(t *testing.T) {
 		t.Errorf("user.view 만으로 상세가 열렸다: HTTP %d", rec.Code)
 	}
 
-	d.Caller = func(*http.Request) Caller { return fakeCaller{perms: map[string]bool{"user.update": true}} }
+	d.Caller = func(*http.Request) Caller { return &fakeCaller{perms: map[string]bool{"user.update": true}} }
 	var handed string
 	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
 		w.WriteHeader(code)
@@ -739,7 +752,7 @@ func TestUserDetailNeedsUpdateAndCarriesNoCredentials(t *testing.T) {
 // 올리는 일이므로 비밀번호를 다시 확인한다. 세션이 열려 있는 것과 운영자가
 // 그 자리에 있는 것은 다르다.
 func TestThemeUploadRequiresReauth(t *testing.T) {
-	d, _ := fixture(t, fakeCaller{
+	d, _ := fixture(t, &fakeCaller{
 		perms: map[string]bool{"theme.upload": true}, id: "me", reauth: true,
 	})
 	var called bool

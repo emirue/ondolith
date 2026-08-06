@@ -28,6 +28,19 @@ type Caller interface {
 	Email() string
 	IsSuperuser() bool
 	NeedsReauth() bool
+	// ConfirmReauth checks the password typed into the destructive screen's
+	// own form and, on success, re-stamps the window (D15 5.3-1).
+	//
+	// **이것이 없으면 재인증 안내는 장식이다.** 화면은 비밀번호 칸을 그리는데
+	// 읽는 곳이 없으면, 15분이 지난 운영자는 로그아웃했다 들어오기 전에는
+	// 환불을 영원히 할 수 없다.
+	ConfirmReauth(password string) bool
+}
+
+// reauthOK is the one shape every destructive handler uses: 창이 살아 있거나,
+// 이 요청의 비밀번호로 되살렸거나.
+func reauthOK(c Caller, r *http.Request) bool {
+	return !c.NeedsReauth() || c.ConfirmReauth(r.PostFormValue("password"))
 }
 
 // Deps are the collaborators the admin screens use.
@@ -384,7 +397,7 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 // may operate on a superuser holder), and no self-targeting. Writing them once
 // is what keeps a later fourth action from getting two of the three.
 func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, target string) bool {
-	if c.NeedsReauth() {
+	if !reauthOK(c, r) {
 		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
 		return false
 	}

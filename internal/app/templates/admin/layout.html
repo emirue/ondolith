@@ -48,3 +48,15 @@
 </div>
 </body>
 </html>{{end}}
+
+{{/* reauth-field 는 파괴적 동작 폼이 함께 보내는 비밀번호 칸이다 (D15 5.3-1,
+     D19 C7). 별도 재인증 화면을 두지 않기로 했으므로 **칸이 폼 안에 있어야
+     한다** — 없으면 15분이 지난 운영자는 그 동작을 영원히 못 한다. 창이 아직
+     살아 있으면 서버가 값을 읽지 않는다. */}}
+{{define "reauth-field"}}
+<label class="adm-field">
+  <span>비밀번호 재확인</span>
+  <input name="password" type="password" autocomplete="current-password"
+         placeholder="마지막 확인 후 15분이 지났다면 입력하세요">
+</label>
+{{end}}

@@ -302,11 +302,11 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 
 	// 결제가 있었으면 전액 환불을 접수한다. 없으면(결제대기) 돌려줄 돈이 없다.
 	var paymentID string
-	var approved int
+	var approved, alreadyRefunded int
 	err = tx.QueryRow(ctx, `
-		SELECT id, approved_amount FROM payments
+		SELECT id, approved_amount, refunded_amount FROM payments
 		WHERE order_id = $1 AND kind = '주문결제' AND status = '승인' FOR UPDATE`,
-		orderID).Scan(&paymentID, &approved)
+		orderID).Scan(&paymentID, &approved, &alreadyRefunded)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return tx.Commit(ctx)
@@ -314,22 +314,32 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 		return err
 	}
 
-	// 전액 환불이다. 남은 수량을 전부 소진 처리해 두면, 취소된 주문에 다시
-	// 부분 환불을 넣는 경로가 닫힌다 — 금액 한도만으로는 막히지 않는다.
+	// 남은 수량을 전부 소진 처리해 두면, 취소된 주문에 다시 부분 환불을 넣는
+	// 경로가 닫힌다 — 금액 한도만으로는 막히지 않는다.
 	if _, err := tx.Exec(ctx,
 		`UPDATE order_items SET settled_quantity = quantity, updated_at = now()
 		 WHERE order_id = $1`, orderID); err != nil {
 		return err
 	}
+
+	// **남은 몫만 돌려준다.** 부분 환불이 이미 나간 주문을 전액으로 취소하면
+	// 같은 돈을 두 번 돌려주게 된다. 게다가 `refunded_amount` 에 **대입**하면
+	// 앞선 선점이 지워져서 `CHECK (환불누적액 <= 승인금액)` 이 막지 못한다 —
+	// 제약이 보는 값 자체가 사라지기 때문이다. 그래서 누적으로 더한다.
+	remaining := approved - alreadyRefunded
+	if remaining <= 0 {
+		// 이미 전액이 선점됐다. 취소 상태와 수량 소진만 남기고 끝낸다.
+		return tx.Commit(ctx)
+	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE payments SET refunded_amount = $2, updated_at = now() WHERE id = $1`,
-		paymentID, approved); err != nil {
+		UPDATE payments SET refunded_amount = refunded_amount + $2, updated_at = now()
+		WHERE id = $1`, paymentID, remaining); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO refunds (order_id, payment_id, status, requester, amount, reason, request_key)
 		VALUES ($1, $2, '요청', $3, $4, '주문 취소', $5)`,
-		orderID, paymentID, requesterOf(actor), approved, requestKey); err != nil {
+		orderID, paymentID, requesterOf(actor), remaining, requestKey); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return ErrRefundDuplicate

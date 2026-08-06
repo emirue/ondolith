@@ -25,6 +25,7 @@
             <div class="adm-actions">
               <a class="adm-btn adm-btn--sm" href="/admin/boards/{{.ID}}/fields">필드</a>
               <form method="post" action="/admin/boards/{{.ID}}/delete">
+                {{template "reauth-field" .}}
                 <input type="hidden" name="confirm" value="1">
                 <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
               </form>
