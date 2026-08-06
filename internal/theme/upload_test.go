@@ -59,7 +59,7 @@ func TestInstallUnpacksAValidTheme(t *testing.T) {
 		"partials/header.html": `<header></header>`,
 		"static/css/style.css": `body{}`,
 	})
-	if err := Install(root, "mytheme", r, n); err != nil {
+	if err := Install(root, "mytheme", r, n, false); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"base.html", "page.html", "partials/header.html", "static/css/style.css"} {
@@ -96,7 +96,7 @@ func TestZipSlipIsRefused(t *testing.T) {
 				"base.html": "<html></html>",
 				entry:       "공격",
 			})
-			err := Install(root, "t", r, n)
+			err := Install(root, "t", r, n, false)
 			if err == nil {
 				t.Fatalf("%q 가 통과했다", entry)
 			}
@@ -137,7 +137,7 @@ func TestSymlinkEntryIsRefused(t *testing.T) {
 	}
 
 	b := buf.Bytes()
-	if err := Install(root, "t", bytes.NewReader(b), int64(len(b))); !errors.Is(err, ErrZipEntry) {
+	if err := Install(root, "t", bytes.NewReader(b), int64(len(b)), false); !errors.Is(err, ErrZipEntry) {
 		t.Errorf("심볼릭 링크가 통과했다: %v", err)
 	}
 	if countFiles(t, root) != 0 {
@@ -167,7 +167,7 @@ func TestZipBombIsStoppedByBytesRead(t *testing.T) {
 	}
 	b := buf.Bytes()
 
-	err = Install(root, "t", bytes.NewReader(b), int64(len(b)))
+	err = Install(root, "t", bytes.NewReader(b), int64(len(b)), false)
 	if err == nil {
 		t.Fatal("zip 폭탄이 통과했다")
 	}
@@ -186,13 +186,13 @@ func TestEntryCountAndDepthAreBounded(t *testing.T) {
 		many["f"+strings.Repeat("0", i%3)+string(rune('a'+i%26))+string(rune('a'+(i/26)%26))+string(rune('a'+(i/676)%26))+".html"] = "x"
 	}
 	r, n := zipOf(t, many)
-	if err := Install(root, "t", r, n); err == nil {
+	if err := Install(root, "t", r, n, false); err == nil {
 		t.Error("엔트리 수 상한이 안 걸렸다")
 	}
 
 	deep := "a/a/a/a/a/a/a/a/a/a/a/a/deep.html"
 	r2, n2 := zipOf(t, map[string]string{"base.html": "<html></html>", deep: "x"})
-	if err := Install(t.TempDir(), "t", r2, n2); !errors.Is(err, ErrZipTooDeep) {
+	if err := Install(t.TempDir(), "t", r2, n2, false); !errors.Is(err, ErrZipTooDeep) {
 		t.Errorf("깊이 상한이 안 걸렸다: %v", err)
 	}
 }
@@ -202,7 +202,7 @@ func TestEntryCountAndDepthAreBounded(t *testing.T) {
 func TestThemeWithoutBaseIsRefused(t *testing.T) {
 	root := t.TempDir()
 	r, n := zipOf(t, map[string]string{"page.html": `{{define "body"}}쪽{{end}}`})
-	if err := Install(root, "t", r, n); !errors.Is(err, ErrZipNoBase) {
+	if err := Install(root, "t", r, n, false); !errors.Is(err, ErrZipNoBase) {
 		t.Errorf("base.html 없는 테마가 통과했다: %v", err)
 	}
 	if countFiles(t, root) != 0 {
@@ -219,7 +219,7 @@ func TestFailureLeavesNothingBehind(t *testing.T) {
 		"ok.html":      "정상",
 		"../evil.html": "공격",
 	})
-	if err := Install(root, "t", r, n); err == nil {
+	if err := Install(root, "t", r, n, false); err == nil {
 		t.Fatal("공격이 통과했다")
 	}
 	entries, err := os.ReadDir(root)
@@ -238,12 +238,12 @@ func TestFailureLeavesNothingBehind(t *testing.T) {
 func TestThemeNameIsBounded(t *testing.T) {
 	for _, name := range []string{"", "../evil", "a/b", "Theme", "테마", strings.Repeat("a", 65), "a_b"} {
 		r, n := zipOf(t, map[string]string{"base.html": "<html></html>"})
-		if err := Install(t.TempDir(), name, r, n); !errors.Is(err, ErrThemeBadName) {
+		if err := Install(t.TempDir(), name, r, n, false); !errors.Is(err, ErrThemeBadName) {
 			t.Errorf("이름 %q 가 통과했다: %v", name, err)
 		}
 	}
 	r, n := zipOf(t, map[string]string{"base.html": "<html></html>"})
-	if err := Install(t.TempDir(), "my-theme-2", r, n); err != nil {
+	if err := Install(t.TempDir(), "my-theme-2", r, n, false); err != nil {
 		t.Errorf("정상 이름이 거부됐다: %v", err)
 	}
 }
@@ -251,11 +251,11 @@ func TestThemeNameIsBounded(t *testing.T) {
 func TestExistingThemeIsNotOverwritten(t *testing.T) {
 	root := t.TempDir()
 	r, n := zipOf(t, map[string]string{"base.html": "<html>첫판</html>"})
-	if err := Install(root, "t", r, n); err != nil {
+	if err := Install(root, "t", r, n, false); err != nil {
 		t.Fatal(err)
 	}
 	r2, n2 := zipOf(t, map[string]string{"base.html": "<html>둘째판</html>"})
-	if err := Install(root, "t", r2, n2); !errors.Is(err, ErrThemeExists) {
+	if err := Install(root, "t", r2, n2, false); !errors.Is(err, ErrThemeExists) {
 		t.Errorf("기존 테마가 덮였다: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "t", "base.html"))
@@ -268,7 +268,7 @@ func TestExistingThemeIsNotOverwritten(t *testing.T) {
 }
 
 func TestOversizeArchiveIsRefusedBeforeReading(t *testing.T) {
-	if err := Install(t.TempDir(), "t", bytes.NewReader(nil), MaxZipBytes+1); !errors.Is(err, ErrZipTooLarge) {
+	if err := Install(t.TempDir(), "t", bytes.NewReader(nil), MaxZipBytes+1, false); !errors.Is(err, ErrZipTooLarge) {
 		t.Errorf("큰 아카이브가 통과했다: %v", err)
 	}
 }
@@ -343,7 +343,7 @@ func TestUncompressedOversizeEntryIsStoppedByTheByteCap(t *testing.T) {
 	}
 	b := buf.Bytes()
 
-	err = Install(root, "t", bytes.NewReader(b), int64(len(b)))
+	err = Install(root, "t", bytes.NewReader(b), int64(len(b)), false)
 	if !errors.Is(err, ErrZipTooLarge) {
 		t.Fatalf("용량 상한이 안 걸렸다: %v", err)
 	}
@@ -380,11 +380,77 @@ func TestHighRatioEntryUnderTheByteCapIsRefused(t *testing.T) {
 		t.Fatalf("아카이브가 %d 바이트 — 상한 아래여야 이 테스트가 뜻을 갖는다", len(b))
 	}
 
-	err = Install(root, "t", bytes.NewReader(b), int64(len(b)))
+	err = Install(root, "t", bytes.NewReader(b), int64(len(b)), false)
 	if !errors.Is(err, ErrZipRatio) {
 		t.Fatalf("압축비 검사가 안 걸렸다: %v", err)
 	}
 	if countFiles(t, root) != 0 {
 		t.Errorf("실패했는데 파일 %d개가 남았다", countFiles(t, root))
+	}
+}
+
+// **덮어쓰기는 바꿔치기다** (OPEN-42 결정). 옛 판의 파일이 남으면 안 된다 —
+// 새 zip 에 없는 파셜이 살아남으면 그리는 것과 올린 것이 달라진다.
+func TestReplaceSwapsTheWholeDirectory(t *testing.T) {
+	root := t.TempDir()
+	r, n := zipOf(t, map[string]string{
+		"base.html":             "<html>첫판</html>",
+		"partials/removed.html": "지워질 것",
+	})
+	if err := Install(root, "t", r, n, false); err != nil {
+		t.Fatal(err)
+	}
+
+	r2, n2 := zipOf(t, map[string]string{"base.html": "<html>둘째판</html>"})
+	if err := Install(root, "t", r2, n2, true); err != nil {
+		t.Fatalf("덮어쓰기가 막혔다: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "t", "base.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "둘째판") {
+		t.Errorf("base.html 이 %q — 덮어쓰지 않았다", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "t", "partials", "removed.html")); !os.IsNotExist(err) {
+		t.Errorf("옛 판의 파일이 남았다 (err=%v) — 비우지 않고 채웠다", err)
+	}
+	// 밀어 둔 옛 디렉터리도 치운다. 남으면 업로드마다 쓰레기가 는다.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "t" {
+			t.Errorf("찌꺼기 %q 가 남았다", e.Name())
+		}
+	}
+}
+
+// **거부된 zip 은 자리를 바꾸기 전에 멈춘다.** 압축을 다 풀고 나서 거부되는
+// 경로(base.html 없음)에서도 옛 테마는 그대로다 — 검사가 rename 앞에 있다는
+// 것이 이 테스트가 보는 것이다.
+//
+// 두 rename **사이**의 실패 복구는 여기서 보지 못한다. 그 창은 테스트에서
+// 만들 수 없다 (upload.go 의 주석 참조).
+func TestRejectedZipNeverTouchesTheOldTheme(t *testing.T) {
+	root := t.TempDir()
+	r, n := zipOf(t, map[string]string{"base.html": "<html>첫판</html>"})
+	if err := Install(root, "t", r, n, false); err != nil {
+		t.Fatal(err)
+	}
+	// base.html 이 없는 zip 은 압축을 다 푼 뒤에 거부된다 — 자리 바꾸기
+	// 직전까지 갔다가 멈추는 경로다.
+	r2, n2 := zipOf(t, map[string]string{"partials/x.html": "조각뿐"})
+	if err := Install(root, "t", r2, n2, true); !errors.Is(err, ErrZipNoBase) {
+		t.Fatalf("= %v, want ErrZipNoBase", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "t", "base.html"))
+	if err != nil {
+		t.Fatalf("옛 테마가 사라졌다: %v", err)
+	}
+	if !strings.Contains(string(got), "첫판") {
+		t.Errorf("base.html 이 %q", got)
 	}
 }

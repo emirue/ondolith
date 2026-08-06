@@ -77,7 +77,9 @@ type Deps struct {
 	Logger *slog.Logger
 	// InstallTheme unpacks an uploaded theme zip (A-203). Injected so admin does
 	// not import theme, and so the upload root stays configuration (NFR-304).
-	InstallTheme func(name string, r io.ReaderAt, size int64) error
+	// replace 는 같은 이름의 테마를 덮어쓸지다. 활성 테마면 A-203 이 409 로
+	// 거부하므로 여기까지 오지 않는다 (OPEN-42 결정).
+	InstallTheme func(name string, r io.ReaderAt, size int64, replace bool) error
 	// SendReset delivers a forced-reset link (A-402). Injected and fire-and-
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.

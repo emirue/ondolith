@@ -23,7 +23,9 @@ func (d *boardDeps) postDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok2 {
 		return
 	}
-	if err := d.content.DeletePost(r.Context(), p.ID); err != nil {
+	// 첨부 실물까지 지운다. content.DeletePost 만 부르면 행은 CASCADE 로
+	// 사라지고 파일은 영원히 남는다 — 정리 잡이 없다 (NFR-103, OPEN-40).
+	if err := d.attachments.DeletePost(r.Context(), p.ID); err != nil {
 		d.serverError(w, r, err)
 		return
 	}

@@ -214,8 +214,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		// 검증·교체)이 서로 다른 것을 가리키고, 검증에 통과한 테마가 그려지지
 		// 않는다 — 그 셋이 어긋난 상태를 통합 테스트가 잡았다.
 		OnThemeChange: func(name string) { loaderRef.Store(newLoader(themePath(cfg, name))) },
-		InstallTheme: func(name string, rd io.ReaderAt, size int64) error {
-			return theme.Install(cfg.Themes(), name, rd, size)
+		InstallTheme: func(name string, rd io.ReaderAt, size int64, replace bool) error {
+			return theme.Install(cfg.Themes(), name, rd, size, replace)
 		},
 		SendReset: func(email, token string) {
 			mailer.SendAsync(email, "비밀번호 재설정", "아래 링크로 재설정하세요:\n/password/reset/"+token)

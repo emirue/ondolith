@@ -375,6 +375,22 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = r.MultipartForm.RemoveAll() }()
 
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	// **활성 테마는 덮어쓰지 않는다** (OPEN-42 결정). 덮어쓰는 동안 사이트가
+	// 그 디렉터리를 그리고 있고, 새 zip 이 옛 테마의 파셜을 갖고 있지 않으면
+	// 그 순간의 방문자는 오류 더미를 본다. 비활성 테마는 아무도 안 보므로
+	// 덮어쓴다 — 거부하면 이름을 바꿔 올리게 되고 목록에 쓰레기가 쌓인다.
+	kv, err := d.Content.Settings(r.Context(), "theme.active")
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	if name != "" && name == kv["theme.active"] {
+		d.Render(w, r, "admin/theme-upload.html", http.StatusConflict,
+			map[string]any{"Error": "활성 테마는 덮어쓸 수 없습니다. 다른 테마로 바꾼 뒤 올리세요."})
+		return
+	}
+
 	file, header, err := r.FormFile("theme")
 	if err != nil {
 		d.Render(w, r, "admin/theme-upload.html", http.StatusUnprocessableEntity,
@@ -391,8 +407,7 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(r.PostFormValue("name"))
-	if err := d.InstallTheme(name, ra, size); err != nil {
+	if err := d.InstallTheme(name, ra, size, true); err != nil {
 		d.Render(w, r, "admin/theme-upload.html", http.StatusUnprocessableEntity,
 			map[string]any{"Error": "설치하지 못했습니다: " + err.Error()})
 		return

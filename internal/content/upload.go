@@ -31,12 +31,56 @@ var (
 	ErrUploadContent  = errors.New("content: 파일 내용이 확장자와 다릅니다")
 	ErrUploadTooLarge = errors.New("content: 파일이 너무 큽니다")
 	ErrUploadEmpty    = errors.New("content: 빈 파일")
+	// ErrUploadTooMany 는 글당 첨부 개수 상한을 넘었다는 뜻이다.
+	ErrUploadTooMany = errors.New("content: 첨부가 너무 많습니다")
+	// ErrUploadSetting 은 A-309 설정값이 올바르지 않다는 뜻이다.
+	ErrUploadSetting = errors.New("content: 첨부 설정값이 올바르지 않습니다")
 )
 
-// MaxAttachmentBytes bounds one attachment. NFR-101 sizes the box at 1 vCPU and
-// 512MB–1GB; a request that buffers more than this is a denial of service on
-// its own, whatever the file turns out to be.
+// MaxAttachmentBytes bounds one attachment by default. NFR-101 sizes the box at
+// 1 vCPU and 512MB–1GB; a request that buffers more than this is a denial of
+// service on its own, whatever the file turns out to be.
+//
+// 운영자가 A-309 에서 낮추거나 올릴 수 있다 (`upload.max_bytes`, OPEN-41 결정).
 const MaxAttachmentBytes = 20 << 20 // 20 MiB
+
+// MaxAttachmentsPerPost bounds how many files one post carries by default
+// (`upload.max_per_post`). 상한이 없으면 글 하나가 디스크를 다 쓴다.
+const MaxAttachmentsPerPost = 10
+
+// 설정 키 (A-309). 값은 UploadLimits 가 읽고 검증한다.
+const (
+	SettingUploadMaxBytes   = "upload.max_bytes"
+	SettingUploadMaxPerPost = "upload.max_per_post"
+	SettingUploadDenyExt    = "upload.deny_ext"
+)
+
+// UploadLimits are the bounds one upload is checked against.
+type UploadLimits struct {
+	MaxBytes   int64
+	MaxPerPost int
+	// Denied 는 **내장 허용목록에서 뺄 확장자**다. 더할 수는 없다.
+	//
+	// 권고는 "허용 확장자 목록을 설정값으로" 였지만, 자유 목록이면 운영자가
+	// `.svg` 를 한 줄로 되살릴 수 있다 — D60 이 SVG 를 뺀 이유(스크립트를
+	// 실어 나른다)와 그때 함께 열기로 한 첨부 전용 서빙 경로가 폼 한 칸으로
+	// 무효가 된다. 빼는 것은 안전하고, 더하는 것은 코드 변경이다.
+	Denied map[string]bool
+}
+
+// DefaultUploadLimits is what a site with no settings gets.
+func DefaultUploadLimits() UploadLimits {
+	return UploadLimits{MaxBytes: MaxAttachmentBytes, MaxPerPost: MaxAttachmentsPerPost}
+}
+
+// Allows reports whether ext is uploadable under these limits.
+func (l UploadLimits) Allows(ext string) bool {
+	if l.Denied[ext] {
+		return false
+	}
+	_, ok := allowedUploads[ext]
+	return ok
+}
 
 // allowedUploads maps an allowed extension to the content types
 // http.DetectContentType reports for that format.
@@ -71,12 +115,12 @@ type StoredUpload struct {
 //
 // It reads the head of r and returns a reader that still yields the whole
 // content, so the caller does not have to buffer the file twice.
-func ValidateUpload(name string, r io.Reader) (mime string, body io.Reader, err error) {
+func ValidateUpload(name string, r io.Reader, limits UploadLimits) (mime string, body io.Reader, err error) {
 	ext := strings.ToLower(filepath.Ext(name))
-	want, ok := allowedUploads[ext]
-	if !ok {
+	if !limits.Allows(ext) {
 		return "", nil, fmt.Errorf("%w: %q", ErrUploadExt, ext)
 	}
+	want := allowedUploads[ext]
 
 	// 512 bytes is what http.DetectContentType looks at.
 	head := make([]byte, 512)
@@ -117,8 +161,8 @@ func matchesType(got string, want []string) bool {
 // root is the upload directory, which lives outside the web root. Writes go
 // through os.Root so that no component of the path can leave it — the escape
 // check is the standard library's, not one written here (NFR-201).
-func StoreUpload(root, name string, r io.Reader, now time.Time) (StoredUpload, error) {
-	mime, body, err := ValidateUpload(name, r)
+func StoreUpload(root, name string, r io.Reader, now time.Time, limits UploadLimits) (StoredUpload, error) {
+	mime, body, err := ValidateUpload(name, r, limits)
 	if err != nil {
 		return StoredUpload{}, err
 	}
@@ -148,7 +192,7 @@ func StoreUpload(root, name string, r io.Reader, now time.Time) (StoredUpload, e
 	}
 	// One more byte than the limit, so hitting exactly the limit is not
 	// mistaken for overflow and overflow is always detected.
-	written, copyErr := io.Copy(f, io.LimitReader(body, MaxAttachmentBytes+1))
+	written, copyErr := io.Copy(f, io.LimitReader(body, limits.MaxBytes+1))
 	closeErr := f.Close()
 	switch {
 	case copyErr != nil:
@@ -157,11 +201,11 @@ func StoreUpload(root, name string, r io.Reader, now time.Time) (StoredUpload, e
 	case closeErr != nil:
 		_ = rt.Remove(rel)
 		return StoredUpload{}, closeErr
-	case written > MaxAttachmentBytes:
+	case written > limits.MaxBytes:
 		// The partial file goes: a half-written attachment that no row points
 		// at is litter nobody will ever identify.
 		_ = rt.Remove(rel)
-		return StoredUpload{}, fmt.Errorf("%w: %d 바이트 초과", ErrUploadTooLarge, MaxAttachmentBytes)
+		return StoredUpload{}, fmt.Errorf("%w: %d 바이트 초과", ErrUploadTooLarge, limits.MaxBytes)
 	case written == 0:
 		_ = rt.Remove(rel)
 		return StoredUpload{}, ErrUploadEmpty

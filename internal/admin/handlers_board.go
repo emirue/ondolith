@@ -271,7 +271,9 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 
 	switch r.PostFormValue("action") {
 	case "delete":
-		if err := d.Content.DeletePost(ctx, postID); err != nil {
+		// 첨부 실물까지 지운다 (OPEN-40). 행만 지우면 파일이 남는데,
+		// 글이 사라졌으니 A-309 목록에도 안 나와 아무도 찾지 못한다.
+		if err := d.Attachments.DeletePost(ctx, postID); err != nil {
 			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 			return
 		}

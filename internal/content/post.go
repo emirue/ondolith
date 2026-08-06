@@ -211,6 +211,11 @@ func (s *Store) SetPostFlags(ctx context.Context, id string, pinned bool, status
 	return nil
 }
 
+// DeletePost 는 글을 물리 삭제한다 (OPEN-40 결정, D30 3절).
+//
+// **첨부 실물은 지우지 않는다** — 이 타입은 업로드 경로를 모른다. 파일까지
+// 지우는 것은 `Attachments.DeletePost` 이고, 화면은 그쪽을 부른다. 이 메서드는
+// 첨부를 쓰지 않는 경로(P-210 툼스톤 정리 등)만 쓴다.
 func (s *Store) DeletePost(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM posts WHERE id = $1`, id)
 	if err != nil {

@@ -29,13 +29,13 @@ var uploadAt = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 func TestExtensionAllowList(t *testing.T) {
 	for _, ext := range []string{".php", ".php5", ".phtml", ".svg", ".html", ".htm",
 		".js", ".sh", ".exe", "", ".PHP", ".png.php"} {
-		if _, _, err := ValidateUpload("payload"+ext, bytes.NewReader(pngBytes)); !errors.Is(err, ErrUploadExt) {
+		if _, _, err := ValidateUpload("payload"+ext, bytes.NewReader(pngBytes), DefaultUploadLimits()); !errors.Is(err, ErrUploadExt) {
 			t.Errorf("확장자 %q 가 통과했다: %v", ext, err)
 		}
 	}
 	// 대문자 확장자는 허용목록에 있으면 통과한다 — 케이스로 우회하지 못한다.
 	for _, name := range []string{"a.png", "a.PNG", "a.PnG"} {
-		if _, _, err := ValidateUpload(name, bytes.NewReader(pngBytes)); err != nil {
+		if _, _, err := ValidateUpload(name, bytes.NewReader(pngBytes), DefaultUploadLimits()); err != nil {
 			t.Errorf("%s 가 거부됐다: %v", name, err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestMagicBytesMustMatchTheExtension(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			mime, _, err := ValidateUpload(tc.name, bytes.NewReader(tc.body))
+			mime, _, err := ValidateUpload(tc.name, bytes.NewReader(tc.body), DefaultUploadLimits())
 			if tc.ok {
 				if err != nil {
 					t.Errorf("정상 파일이 거부됐다: %v", err)
@@ -83,7 +83,7 @@ func TestMagicBytesMustMatchTheExtension(t *testing.T) {
 // 저장된 파일이 잘린다 — 조용하고, 이미지가 깨져서야 드러난다.
 func TestValidatedBodyStillYieldsEverything(t *testing.T) {
 	full := append(append([]byte(nil), pngBytes...), []byte(strings.Repeat("Z", 5000))...)
-	_, body, err := ValidateUpload("x.png", bytes.NewReader(full))
+	_, body, err := ValidateUpload("x.png", bytes.NewReader(full), DefaultUploadLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestValidatedBodyStillYieldsEverything(t *testing.T) {
 }
 
 func TestEmptyUploadIsRefused(t *testing.T) {
-	if _, _, err := ValidateUpload("x.png", bytes.NewReader(nil)); !errors.Is(err, ErrUploadEmpty) {
+	if _, _, err := ValidateUpload("x.png", bytes.NewReader(nil), DefaultUploadLimits()); !errors.Is(err, ErrUploadEmpty) {
 		t.Errorf("빈 파일이 통과했다: %v", err)
 	}
 }
@@ -116,7 +116,7 @@ func TestFilenameIsRegeneratedAndOriginalNeverTouchesDisk(t *testing.T) {
 		"normal.png",
 		"공백 있는 이름.png",
 	} {
-		got, err := StoreUpload(root, name, bytes.NewReader(pngBytes), uploadAt)
+		got, err := StoreUpload(root, name, bytes.NewReader(pngBytes), uploadAt, DefaultUploadLimits())
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -152,7 +152,7 @@ func TestFilenameIsRegeneratedAndOriginalNeverTouchesDisk(t *testing.T) {
 // D60 ④: 실행 권한 제거. 0644.
 func TestStoredFileHasNoExecuteBit(t *testing.T) {
 	root := t.TempDir()
-	got, err := StoreUpload(root, "x.png", bytes.NewReader(pngBytes), uploadAt)
+	got, err := StoreUpload(root, "x.png", bytes.NewReader(pngBytes), uploadAt, DefaultUploadLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestStoredFileHasNoExecuteBit(t *testing.T) {
 func TestStoredContentMatchesWhatWasSent(t *testing.T) {
 	root := t.TempDir()
 	full := append(append([]byte(nil), pngBytes...), []byte(strings.Repeat("Z", 3000))...)
-	got, err := StoreUpload(root, "x.png", bytes.NewReader(full), uploadAt)
+	got, err := StoreUpload(root, "x.png", bytes.NewReader(full), uploadAt, DefaultUploadLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestOversizeUploadIsRefusedAndLeavesNothing(t *testing.T) {
 	big := io.MultiReader(bytes.NewReader(pngBytes),
 		io.LimitReader(zeros{}, MaxAttachmentBytes+1))
 
-	if _, err := StoreUpload(root, "x.png", big, uploadAt); !errors.Is(err, ErrUploadTooLarge) {
+	if _, err := StoreUpload(root, "x.png", big, uploadAt, DefaultUploadLimits()); !errors.Is(err, ErrUploadTooLarge) {
 		t.Fatalf("상한 초과가 통과했다: %v", err)
 	}
 	var left int
@@ -214,7 +214,7 @@ func TestExactlyAtTheLimitIsAccepted(t *testing.T) {
 	root := t.TempDir()
 	body := io.MultiReader(bytes.NewReader(pngBytes),
 		io.LimitReader(zeros{}, MaxAttachmentBytes-int64(len(pngBytes))))
-	got, err := StoreUpload(root, "x.png", body, uploadAt)
+	got, err := StoreUpload(root, "x.png", body, uploadAt, DefaultUploadLimits())
 	if err != nil {
 		t.Fatalf("정확히 상한인 파일이 거부됐다: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestStoredPathsDoNotCollide(t *testing.T) {
 	root := t.TempDir()
 	seen := map[string]bool{}
 	for range 200 {
-		got, err := StoreUpload(root, "x.png", bytes.NewReader(pngBytes), uploadAt)
+		got, err := StoreUpload(root, "x.png", bytes.NewReader(pngBytes), uploadAt, DefaultUploadLimits())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -244,7 +244,7 @@ func TestStoredPathsDoNotCollide(t *testing.T) {
 // 거부된 셸이 파일로 남는다.
 func TestRefusedUploadNeverReachesDisk(t *testing.T) {
 	root := t.TempDir()
-	if _, err := StoreUpload(root, "shell.png", bytes.NewReader(phpBytes), uploadAt); err == nil {
+	if _, err := StoreUpload(root, "shell.png", bytes.NewReader(phpBytes), uploadAt, DefaultUploadLimits()); err == nil {
 		t.Fatal("위장 파일이 저장됐다")
 	}
 	var left int

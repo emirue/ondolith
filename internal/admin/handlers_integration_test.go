@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -79,11 +81,15 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 	if err := migrations.Run(ctx, db); err != nil {
 		t.Fatal(err)
 	}
+	store := content.NewStore(pool)
 	d := &Deps{
-		Content:  content.NewStore(pool),
+		Content:  store,
 		Auth:     auth.NewStore(pool),
 		Commerce: commerce.NewStore(pool),
-		Caller:   func(*http.Request) Caller { return c },
+		// 운영과 같이 채운다. 비워 두면 첨부를 지우는 경로가 nil 로 터지는데,
+		// 그 사실이 테스트에서는 보이지 않는다.
+		Attachments: store.AttachmentsIn(t.TempDir()),
+		Caller:      func(*http.Request) Caller { return c },
 		Render: func(w http.ResponseWriter, _ *http.Request, name string, code int, data any) {
 			w.WriteHeader(code)
 			_, _ = w.Write([]byte(name))
@@ -756,7 +762,7 @@ func TestThemeUploadRequiresReauth(t *testing.T) {
 		perms: map[string]bool{"theme.upload": true}, id: "me", reauth: true,
 	})
 	var called bool
-	d.InstallTheme = func(string, io.ReaderAt, int64) error {
+	d.InstallTheme = func(string, io.ReaderAt, int64, bool) error {
 		called = true
 		return nil
 	}
@@ -768,4 +774,105 @@ func TestThemeUploadRequiresReauth(t *testing.T) {
 	if called {
 		t.Error("재인증 전에 설치가 호출됐다")
 	}
+}
+
+// **A-307 의 글 삭제도 첨부 실물까지 지운다** (OPEN-40 결정).
+//
+// P-207 과 같은 규칙이다. 화면이 둘이니 배선도 둘이고, 한쪽만 고치면 나머지
+// 한쪽으로 지운 글의 파일이 조용히 쌓인다 — 정리 잡이 없다 (NFR-103).
+func TestAdminPostDeleteRemovesTheAttachmentFile(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"admin.access": true, "post.moderate": true},
+		id: "u1", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	boardID, err := d.Content.CreateBoard(ctx,
+		content.Board{Slug: "free", Name: "자유", PerPage: 20}, content.PresetPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	postID, err := d.Content.CreatePost(ctx,
+		content.Post{BoardID: boardID, Title: "지울 글", Body: "본문"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at, err := d.Attachments.Save(ctx, postID, "사진.png",
+		bytes.NewReader([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"+strings.Repeat("\x00", 40))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Attachments.Open(&at); err != nil {
+		t.Fatalf("업로드 직후 파일이 없다: %v", err)
+	}
+
+	rec := postAdmin(t, d.PostModerate, "/admin/posts", nil,
+		url.Values{"post_id": {postID}, "action": {"delete"}})
+	if rec.Code != http.StatusSeeOther && rec.Code != http.StatusOK {
+		t.Fatalf("삭제 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	if _, err := d.Attachments.Open(&at); !os.IsNotExist(err) {
+		t.Errorf("첨부 파일이 남았다 (err=%v) — 글이 없어 아무도 찾지 못한다", err)
+	}
+}
+
+// **활성 테마는 덮어쓸 수 없다 (409). 비활성은 덮어쓴다** (OPEN-42 결정).
+//
+// 활성 테마를 덮어쓰는 동안 사이트가 그 디렉터리를 그리고 있고, 새 zip 에
+// 옛 파셜이 없으면 그 순간의 방문자는 오류 더미를 본다.
+func TestThemeUploadRefusesToOverwriteTheActiveTheme(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"theme.upload": true}, id: "me"})
+	ctx := context.Background()
+	if err := d.Content.PutSettings(ctx, map[string]string{"theme.active": "live"}); err != nil {
+		t.Fatal(err)
+	}
+	var installed []string
+	d.InstallTheme = func(name string, _ io.ReaderAt, _ int64, replace bool) error {
+		if !replace {
+			t.Errorf("%q 를 replace=false 로 설치했다 — 비활성은 덮어써야 한다", name)
+		}
+		installed = append(installed, name)
+		return nil
+	}
+
+	if rec := postThemeZip(t, d, "live"); rec.Code != http.StatusConflict {
+		t.Errorf("활성 테마 재업로드 = HTTP %d, want 409 (%q)", rec.Code, rec.Body.String())
+	}
+	if len(installed) != 0 {
+		t.Errorf("활성 테마인데 설치가 %v 로 진행됐다", installed)
+	}
+
+	// 비활성 테마는 덮어쓴다 — 위 단언이 "무엇이든 막힌다" 를 본 것이 아니다.
+	if rec := postThemeZip(t, d, "spare"); rec.Code != http.StatusSeeOther {
+		t.Errorf("비활성 테마 재업로드 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
+	}
+	if len(installed) != 1 || installed[0] != "spare" {
+		t.Errorf("설치된 것 %v, want [spare]", installed)
+	}
+}
+
+// postThemeZip posts A-203 의 멀티파트 폼. urlencoded 로는 핸들러가 파일 앞에서
+// 멈춰서, 이름을 읽는 지점까지 가지 못한다.
+func postThemeZip(t *testing.T, d *Deps, name string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("name", name); err != nil {
+		t.Fatal(err)
+	}
+	fw, err := mw.CreateFormFile("theme", name+".zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("PK\x05\x06" + strings.Repeat("\x00", 18))); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/admin/themes/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	d.ThemeUpload(rec, req)
+	return rec
 }

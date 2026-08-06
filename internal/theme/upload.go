@@ -47,7 +47,10 @@ const (
 // failure part-way leaves nothing: a half-extracted theme is one whose base.html
 // arrived and whose partials did not, which renders as a stack of errors on
 // every page.
-func Install(root, name string, r io.ReaderAt, size int64) (err error) {
+// replace=true 면 같은 이름의 테마를 덮어쓴다. 활성 테마인지 판단하는 것은
+// 호출자다 — 이 패키지는 설정을 읽지 않는다 (활성 테마 덮어쓰기는 A-203 이
+// 409 로 거부한다, OPEN-42 결정).
+func Install(root, name string, r io.ReaderAt, size int64, replace bool) (err error) {
 	if err := validThemeName(name); err != nil {
 		return err
 	}
@@ -60,7 +63,9 @@ func Install(root, name string, r io.ReaderAt, size int64) (err error) {
 		return err
 	}
 	defer rt.Close()
-	if _, err := rt.Stat(name); err == nil {
+	_, statErr := rt.Stat(name)
+	existed := statErr == nil
+	if existed && !replace {
 		return ErrThemeExists
 	}
 
@@ -138,7 +143,35 @@ func Install(root, name string, r io.ReaderAt, size int64) (err error) {
 	if !sawBase {
 		return ErrZipNoBase
 	}
-	return os.Rename(tmp, filepath.Join(root, name))
+
+	target := filepath.Join(root, name)
+	if !existed {
+		return os.Rename(tmp, target)
+	}
+
+	// 덮어쓰기는 **비우고 채우는 것이 아니라 바꿔치기**다. 먼저 지우면 그
+	// 사이에 들어온 요청이 절반만 있는 테마를 그린다. 옛 것을 옆으로 밀고,
+	// 새 것을 자리에 넣고, 그 다음에 지운다.
+	//
+	// `tmp` 는 os.MkdirTemp 가 준 유일한 이름이고 방금 자리를 옮겨 비었으므로,
+	// 옛 것을 밀어 둘 이름으로 그대로 쓸 수 있다.
+	aside := tmp + "-old"
+	if err := os.Rename(target, aside); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		// 새 것이 들어가지 못했다. 옛 것을 제자리로 돌린다 — 돌리지 않으면
+		// 실패한 업로드가 멀쩡하던 테마를 없앤 것이 된다.
+		//
+		// **이 줄에는 테스트가 없다.** 두 rename 사이의 창은 같은 디렉터리·같은
+		// 파일시스템이고 대상 이름은 방금 비웠으므로, 테스트에서 실패시킬 방법이
+		// 없다 (디스크 가득참·I/O 오류라야 여기 온다). 검증되지 않은 채로 두는
+		// 이유는 비용이 한 줄이고, 없을 때의 결과가 "실패한 업로드가 쓰던 테마를
+		// 지웠다" 이기 때문이다.
+		_ = os.Rename(aside, target)
+		return err
+	}
+	return os.RemoveAll(aside)
 }
 
 // extractOne writes a single entry under the limits.

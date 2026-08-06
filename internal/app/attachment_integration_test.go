@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -195,5 +197,47 @@ func TestMissingFileIs404NotServerError(t *testing.T) {
 
 	if code, _ := mustGet(t, client(), srv.URL+"/attachments/"+fileID); code != http.StatusNotFound {
 		t.Errorf("파일 없는 첨부가 HTTP %d", code)
+	}
+}
+
+// **본인 글 삭제(P-207)가 첨부 실물까지 지운다** (OPEN-40 결정).
+//
+// 행은 CASCADE 로 사라진다. 파일은 따라가지 않고 정리 잡도 없으므로
+// (NFR-103), 화면이 파일까지 지우는 경로를 부르지 않으면 그 파일은 영원히
+// 남는다 — 글이 없으니 A-309 목록에도 안 나와 아무도 찾지 못한다.
+func TestDeletingOwnPostRemovesTheAttachmentFile(t *testing.T) {
+	srv, pool, root := liveSiteWithUploads(t)
+	boardID := mkBoard(t, pool, "free", content.PresetPublic)
+	store := content.NewStore(pool)
+	ctx := context.Background()
+
+	author := mkUser(t, pool, "writer@example.com")
+	post, err := store.CreatePost(ctx, content.Post{
+		BoardID: boardID, Title: "지울 글", Body: "본문", AuthorID: author})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attach(t, pool, root, post, "사진.png")
+
+	var stored string
+	if err := pool.QueryRow(ctx,
+		`SELECT stored_path FROM attachments WHERE post_id = $1`, post).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	full := filepath.Join(root, filepath.FromSlash(stored))
+	if _, err := os.Stat(full); err != nil {
+		t.Fatalf("업로드 직후 파일이 없다: %v", err)
+	}
+
+	c := client()
+	login(t, srv.URL, "writer@example.com", c)
+	resp := httpPost(t, c, srv.URL+"/board/free/"+post+"/delete", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("삭제 HTTP %d", resp.StatusCode)
+	}
+
+	if _, err := os.Stat(full); !os.IsNotExist(err) {
+		t.Errorf("첨부 파일이 남았다 (err=%v) — 아무도 찾지 못하는 쓰레기다", err)
 	}
 }
