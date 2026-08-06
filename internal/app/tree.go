@@ -327,6 +327,18 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		// ---- 관리자 커머스 (A-5xx) -----------------------------------------
 		r.Add(Route{Screen: "A-501", Method: "GET", Pattern: "/admin/products", Class: SC4,
 			Permission: "product.view", Handler: ad.ProductList})
+		// A-502 상품 편집 · A-503 옵션·재고 편집기. 권한은 **단일**이다 —
+		// D15 2.2 에 product.create/delete 가 없다 (D19 A-502).
+		r.Add(Route{Screen: "A-502", Method: "GET", Pattern: "/admin/products/{id}", Class: SC4,
+			Permission: "product.manage", Handler: ad.ProductForm})
+		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/products/{id}", Class: SC7,
+			Permission: "product.manage", Handler: ad.ProductSave})
+		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/products/{id}/delete", Class: SC7,
+			Permission: "product.manage", Handler: ad.ProductDelete})
+		r.Add(Route{Screen: "A-503", Method: "GET", Pattern: "/admin/products/{id}/variants", Class: SC4,
+			Permission: "product.manage", Handler: ad.VariantForm})
+		r.Add(Route{Screen: "A-503", Method: "POST", Pattern: "/admin/products/{id}/variants", Class: SC5,
+			Permission: "product.manage", Handler: ad.VariantSave})
 		r.Add(Route{Screen: "A-509", Method: "GET", Pattern: "/admin/categories", Class: SC4,
 			Permission: "product.manage", Handler: ad.CategoryList})
 		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories", Class: SC5,

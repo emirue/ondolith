@@ -1054,3 +1054,115 @@ func TestPolicyChangeDoesNotApplyRetroactively(t *testing.T) {
 		t.Errorf("스냅샷 배송비 %d, want 1000 — 정책 변경이 소급됐다", fee)
 	}
 }
+
+// **A-503 은 재고 절대값을 조용히 무시하지 않고 거부한다** (D19 A-503).
+//
+// 무시하면 운영자는 재고가 자기 입력대로 됐다고 믿는다. 절대값 덮어쓰기는
+// 동시 주문의 판매분을 지우므로 필드 자체가 없어야 하고, 실려 오면 거부다.
+func TestVariantSaveRefusesAbsoluteStock(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+
+	var productID, variantID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		 VALUES ($1,'{"크기":"L"}',0,7) RETURNING id`, productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, field := range []string{"stock", "stock_absolute"} {
+		rec := postAdmin(t, d.VariantSave, "/admin/products/"+productID+"/variants",
+			map[string]string{"id": productID},
+			url.Values{"variant_id": {variantID}, "delta_" + variantID: {"1"},
+				"price_delta_" + variantID: {"0"}, field: {"999"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 필드 = HTTP %d, want 422", field, rec.Code)
+		}
+	}
+	// 재고가 그대로다 — 거부된 요청이 아무것도 바꾸지 않았다.
+	var stock int
+	if err := pool.QueryRow(ctx,
+		`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&stock); err != nil {
+		t.Fatal(err)
+	}
+	if stock != 7 {
+		t.Errorf("재고 %d, want 7 — 거부된 요청이 반영됐다", stock)
+	}
+
+	// 증감만 보내면 통과한다.
+	rec := postAdmin(t, d.VariantSave, "/admin/products/"+productID+"/variants",
+		map[string]string{"id": productID},
+		url.Values{"variant_id": {variantID}, "delta_" + variantID: {"3"},
+			"price_delta_" + variantID: {"0"}, "version_" + variantID: {"7"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("증감 저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&stock); err != nil {
+		t.Fatal(err)
+	}
+	if stock != 10 {
+		t.Errorf("재고 %d, want 10", stock)
+	}
+}
+
+// **A-502 도 재고·SKU·조합을 받지 않는다** (D19 A-502 받지 않는 필드).
+// 받으면 재고 절대값을 덮어쓰는 경로가 하나 더 생긴다.
+func TestProductSaveRefusesStockAndSkuFields(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	var productID string
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, field := range []string{"stock", "sku", "variant_id"} {
+		rec := postAdmin(t, d.ProductSave, "/admin/products/"+productID,
+			map[string]string{"id": productID},
+			url.Values{"name": {"티셔츠"}, "slug": {"tee"}, "base_price": {"12000"},
+				field: {"999"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 필드 = HTTP %d, want 422", field, rec.Code)
+		}
+	}
+}
+
+// 가격은 정수 minor unit 이다 (D50). 소수·문자열·음수는 422.
+func TestProductSaveRefusesNonIntegerPrice(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	var productID string
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO products (slug,name,base_price,is_visible)
+		 VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{"12000.5", "12,000", "만이천원", "-1", ""} {
+		rec := postAdmin(t, d.ProductSave, "/admin/products/"+productID,
+			map[string]string{"id": productID},
+			url.Values{"name": {"티셔츠"}, "slug": {"tee"}, "base_price": {bad}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("가격 %q = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	var price int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT base_price FROM products WHERE id = $1`, productID).Scan(&price); err != nil {
+		t.Fatal(err)
+	}
+	if price != 12000 {
+		t.Errorf("가격이 %d 로 바뀌었다", price)
+	}
+}

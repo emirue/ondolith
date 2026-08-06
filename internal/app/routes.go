@@ -245,5 +245,8 @@ func classAgrees(rt Route, want SecurityClass) bool {
 	if rt.Class == want {
 		return true
 	}
-	return rt.Class == SC4 && (want == SC5 || want == SC6) && isSafeMethod(rt.Method)
+	// SC-7 도 포함된다: 그 유형의 검사 항목은 업로드 검증인데, 폼을 그리는
+	// GET 은 아무것도 업로드하지 않는다 (D15 4.4).
+	return rt.Class == SC4 && (want == SC5 || want == SC6 || want == SC7) &&
+		isSafeMethod(rt.Method)
 }

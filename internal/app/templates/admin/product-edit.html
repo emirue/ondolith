@@ -1,0 +1,47 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* **재고·SKU·조합 칸이 없다** (D19 A-502 받지 않는 필드). 여기서 받으면
+       재고 절대값을 덮어쓰는 경로가 하나 더 생긴다 — 그것은 A-503 소관이고,
+       A-503 도 절대값을 받지 않는다. */}}
+  <form method="post" action="/admin/products/{{if .New}}new{{else}}{{.Product.ID}}{{end}}">
+    {{with .Product}}
+    <label class="adm-field">
+      <span>이름</span>
+      <input type="text" name="name" maxlength="200" value="{{.Name}}" required>
+    </label>
+    <label class="adm-field">
+      <span>주소 (slug) — /shop/p/&lt;여기&gt;</span>
+      <input type="text" name="slug" maxlength="100" value="{{.Slug}}" required>
+    </label>
+    <label class="adm-field">
+      <span>설명</span>
+      <textarea name="description" rows="6">{{.Description}}</textarea>
+    </label>
+    {{/* 정수 minor unit 이다 (D50). step="1" 이 소수 입력을 막지만 거부하는
+         것은 서버다 — 브라우저는 건너뛸 수 있다. */}}
+    <label class="adm-field">
+      <span>기본가 (원)</span>
+      <input type="number" name="base_price" min="0" step="1" value="{{.BasePrice}}" required>
+    </label>
+    <label class="adm-field adm-field--check">
+      <input type="checkbox" name="is_visible" {{if .Visible}}checked{{end}}>
+      <span>공개</span>
+    </label>
+    {{end}}
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+
+  {{if not .New}}
+  <p><a href="/admin/products/{{.Product.ID}}/variants">옵션·재고 편집</a></p>
+  {{/* 주문된 상품은 FK 가 막는다 (409). 판매 중단은 위의 공개 체크를 끄는
+       것이고, 소프트 삭제 컬럼을 따로 두지 않는다 — "안 보이는 상태" 가
+       둘이 되면 조회에서 한쪽을 빠뜨리는 순간 지운 상품이 되살아난다. */}}
+  <form method="post" action="/admin/products/{{.Product.ID}}/delete">
+    {{template "reauth-field" .}}
+    <button class="adm-btn adm-btn--danger">삭제</button>
+  </form>
+  {{end}}
+</div>
+{{end}}

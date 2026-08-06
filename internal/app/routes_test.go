@@ -231,3 +231,29 @@ func TestCheckWarnsAboutScreensWithNoRoute(t *testing.T) {
 		t.Error("P-905 를 미구현으로 경고했다 — 별도 서브트리가 서비스한다")
 	}
 }
+
+// **읽기 라우트의 SC-4 완화는 SC-5·SC-6·SC-7 에만, 안전 메서드에만 적용된다**
+// (D15 4.4). 넓히면 아무 화면이나 SC-4 로 등록해 검토를 건너뛸 수 있다.
+func TestClassAgreesOnlyForSafeReadsOfChangeScreens(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		route  SecurityClass
+		method string
+		want   SecurityClass
+		ok     bool
+	}{
+		{"SC-5 화면의 GET", SC4, http.MethodGet, SC5, true},
+		{"SC-6 화면의 GET", SC4, http.MethodGet, SC6, true},
+		{"SC-7 화면의 GET", SC4, http.MethodGet, SC7, true},
+		{"SC-7 화면의 POST 를 SC-4 로", SC4, http.MethodPost, SC7, false},
+		{"SC-6 화면의 POST 를 SC-4 로", SC4, http.MethodPost, SC6, false},
+		{"SC-1 화면을 SC-4 로", SC4, http.MethodGet, SC1, false},
+		{"SC-8 화면을 SC-4 로", SC4, http.MethodGet, SC8, false},
+		{"같은 유형", SC7, http.MethodPost, SC7, true},
+	} {
+		got := classAgrees(Route{Class: tc.route, Method: tc.method}, tc.want)
+		if got != tc.ok {
+			t.Errorf("%s: classAgrees = %v, want %v", tc.name, got, tc.ok)
+		}
+	}
+}

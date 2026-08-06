@@ -1,0 +1,39 @@
+{{define "content"}}
+<div class="adm-card">
+  <h2>{{.Product.Name}}</h2>
+  {{/* **재고 절대값 칸이 없다** (D19 A-503 받지 않는 필드). 주문이 동시에
+       들어오면 절대값 덮어쓰기는 판매분을 지운다. 증감만 받고, 화면이 읽은
+       재고를 version 으로 함께 보내 그 사이 누가 바꿨으면 409 를 받는다. */}}
+  <form method="post" action="/admin/products/{{.Product.ID}}/variants">
+    <table class="adm-table">
+      <thead>
+        <tr><th>조합</th><th>SKU</th><th>가격 차액</th><th>현재 재고</th><th>증감</th></tr>
+      </thead>
+      <tbody>
+      {{range .Variants}}
+        <tr>
+          <td>
+            <input type="hidden" name="variant_id" value="{{.ID}}">
+            <input type="hidden" name="version_{{.ID}}" value="{{.Stock}}">
+            {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
+          </td>
+          <td><input type="text" name="sku_{{.ID}}" maxlength="64" value="{{.SKU}}"></td>
+          <td><input type="number" name="price_delta_{{.ID}}" step="1" value="{{.PriceDelta}}" required></td>
+          <td>{{.Stock}}</td>
+          <td><input type="number" name="delta_{{.ID}}" step="1" value="0" required></td>
+        </tr>
+      {{else}}
+        <tr><td colspan="5">조합이 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+  <p class="adm-hint">
+    재고는 <strong>증감</strong>으로 입력합니다. 절대값을 덮어쓰면 그 사이 팔린
+    수량이 사라집니다. 재고가 0보다 작아지는 조정은 거부됩니다 — 백오더는 없습니다.
+  </p>
+</div>
+{{end}}
