@@ -490,9 +490,10 @@ type orderItemLike struct {
 	Discount, Settled               int
 }
 
-// Remaining mirrors commerce.OrderItem.Remaining — 템플릿이 부르는 메서드는
-// 표본에도 있어야 렌더링 테스트가 그 경로를 지나간다.
-func (it orderItemLike) Remaining() int { return it.Quantity - it.Settled }
+// RemainingQty mirrors commerce.OrderItem.RemainingQty — 템플릿이 부르는
+// 메서드는 표본에도 있어야 렌더링 테스트가 그 경로를 지나간다. **이름이
+// 실물과 다르면 그 경로는 렌더링되지 않고, 검사는 통과한다** (M14).
+func (it orderItemLike) RemainingQty() int { return it.Quantity - it.Settled }
 
 type orderLike struct {
 	OrderNo, Status                                           string

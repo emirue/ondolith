@@ -1,5 +1,5 @@
 {{define "content"}}
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}
 <p>상태 <strong>{{.Status}}</strong> · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
 <table class="adm-table">
@@ -19,7 +19,7 @@
      않는 것이 D14 5절이 지목한 가장 흔한 구현 실수다 — 좁히는 것은 편의이고,
      거부하는 것은 서버다. */}}
 {{if .Next}}
-<form method="post" action="/admin/orders/{{.Order.OrderNo}}/transition" class="form">
+<form method="post" action="/admin/orders/{{.Order.OrderNo}}/transition" class="adm-form">
   <label for="to">다음 상태</label>
   <select id="to" name="to" required>
     {{range .Next}}<option value="{{.}}">{{.}}</option>{{end}}

@@ -1,10 +1,10 @@
 {{define "content"}}
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
-{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}{{if .Discount}} · 할인 {{.Discount}}{{end}}</p>{{end}}
-<dl>
-  <dt>결제 금액</dt><dd>{{.Approved}}</dd>
+{{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}{{if .Discount}} · 할인 {{money .Discount}}{{end}}</p>{{end}}
+<dl class="adm-dl">
+  <dt>결제 금액</dt><dd>{{money .Approved}}</dd>
   <dt>환불 접수·완료</dt><dd>{{money .Refunded}}</dd>
-  <dt>남은 금액</dt><dd>{{.Remaining}}</dd>
+  <dt>남은 금액</dt><dd><strong>{{money .Remaining}}</strong></dd>
 </dl>
 <table class="adm-table">
   <thead><tr><th>시각</th><th>요청자</th><th>금액</th><th>상태</th><th>사유</th></tr></thead>
@@ -20,18 +20,22 @@
 
 {{/* **금액 입력란이 없다.** 관리자 화면이라고 예외를 두면 그 경로만 위변조
      가능해진다 (FR-625). 품목·수량만 받고 서버가 스냅샷에서 계산한다. */}}
-<form method="post" class="form">
+<form method="post" class="adm-form">
   <fieldset>
     <legend>환불할 품목</legend>
     {{range .Order.Items}}
-    <div>
+    {{/* 한 품목이 한 줄이다 — 체크박스·설명·수량이 세로로 갈라지면 어느 수량이
+         어느 품목의 것인지 눈으로 이어야 한다. */}}
+    <div class="adm-checkrow">
       <label>
-        <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .Remaining}} disabled{{end}}>
-        {{.ProductName}} {{.OptionLabel}} — 주문 {{.Quantity}} · 남은 {{.Remaining}}
-        {{if .Discount}}(할인 {{.Discount}} 적용){{end}}
+        <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .RemainingQty}} disabled{{end}}>
+        {{.ProductName}} {{.OptionLabel}} — 주문 {{.Quantity}} · 남은 {{.RemainingQty}}
+        {{if .Discount}}(할인 {{money .Discount}} 적용){{end}}
       </label>
-      <input name="qty_{{.ID}}" type="number" min="1" max="{{.Remaining}}" value="1"
-             {{if not .Remaining}}disabled{{end}}>
+      <input class="adm-qty" name="qty_{{.ID}}" type="number" min="1"
+             max="{{.RemainingQty}}" value="1"
+             {{if not .RemainingQty}}disabled{{end}}
+             aria-label="{{.ProductName}} 수량">
     </div>
     {{end}}
   </fieldset>

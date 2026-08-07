@@ -1,5 +1,5 @@
 {{define "content"}}
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
 <table class="adm-table">
   <thead><tr><th>이름</th><th>주소</th><th>상위</th></tr></thead>
   <tbody>
@@ -12,7 +12,7 @@
 </table>
 {{/* 순환 지정은 서버가 거부한다 (A-509). DB 는 못 잡는다 — FK 는 순환을 보지
      못하고 `parent_id <> id` 는 직접 자기 참조만 잡는다. */}}
-<form method="post" class="form">
+<form method="post" class="adm-form">
   <label for="id">카테고리 ID</label>
   <input id="id" name="id" required>
   <label for="parent_id">새 상위 ID (비우면 최상위)</label>

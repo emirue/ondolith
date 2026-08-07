@@ -428,6 +428,10 @@ input[type="file"] { padding: var(--s10) var(--s12); }
 .adm-hint { font-size: 11.5px; opacity: .45; margin: var(--s4) 0 0; }
 
 /* ---- 버튼 --------------------------------------------------------------- */
+/* **`button` 요소에도 건다.** `.adm-btn` 을 안 붙인 제출 버튼이 여럿 있고
+   (환불 접수·기록·저장), 클래스가 없으면 브라우저 기본 모양으로 남는다.
+   `.adm-btn` 은 `<a>` 에도 쓰이므로 클래스 규칙은 그대로 둔다. */
+button,
 .adm-btn {
   display: inline-flex;
   align-items: center;
@@ -539,6 +543,175 @@ input[type="file"] { padding: var(--s10) var(--s12); }
  * 따라오고, currentColor 라 안 색은 헤더 토큰이 정한다. */
 .adm-mark { display: inline-flex; width: 1.55em; height: 1.55em; }
 .adm-mark svg { width: 100%; height: 100%; }
+
+/* ═══ 폼 구조 ══════════════════════════════════════════════════════════════
+ *
+ * 클래스를 안 붙이는 자리들이다. `<label>` 이 88개 있는데 규칙은
+ * `.adm-field label` 뿐이었고, `<fieldset>`·`<legend>`·`<dl>` 은 하나도 없어
+ * 브라우저 기본 모양으로 남았다 — 환불 화면의 「환불할 품목」 상자가 그랬다.
+ */
+fieldset {
+  margin: 0 0 var(--s20);
+  padding: var(--s16) var(--s20) var(--s20);
+  border: 1px solid var(--line);
+  border-radius: var(--chip-radius);
+  background: var(--panel);
+}
+
+legend {
+  padding: 0 var(--s8);
+  font-size: 12.5px;
+  font-weight: 600;
+  opacity: .6;
+}
+
+/* 라벨은 자기 입력칸 위에 선다. 체크박스처럼 **가로로 붙어야 하는** 것은
+   아래에서 뒤집는다 — 세로로 두면 무엇을 체크하는지 한 줄 건너 읽게 된다. */
+label { display: block; font-size: 12.5px; opacity: .6; margin-bottom: var(--s6); }
+
+/* 체크박스·라디오를 품은 라벨. `:has()` 로 마크업을 바꾸지 않고 잡는다. */
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]),
+.adm-field--check {
+  display: flex;
+  align-items: center;
+  gap: var(--s10);
+  font-size: 13.5px;
+  opacity: 1;
+  margin-bottom: 0;
+}
+
+dl { margin: 0 0 var(--s20); }
+
+/* 이름-값 쌍. 값이 이름 아래로 떨어지면 한 화면에 담기지 않는다. */
+.adm-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr);
+  gap: var(--s10) var(--s16);
+  font-size: 13.5px;
+}
+
+.adm-detail dt { opacity: .6; }
+.adm-detail dd { margin: 0; }
+
+/* ═══ 알림 ═════════════════════════════════════════════════════════════════ */
+.adm-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--s10);
+  margin: 0 0 var(--s20);
+  padding: var(--s12) var(--s16);
+  border-radius: var(--chip-radius);
+  background: var(--toast-bg);
+  color: var(--toast-ink);
+  font-size: 13.5px;
+}
+
+.adm-alert::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: currentColor;
+  flex: none;
+}
+
+.adm-alert--error { background: var(--danger-bg); color: var(--danger); }
+
+/* ═══ 폼 · 패널 ════════════════════════════════════════════════════════════ */
+.adm-form { display: grid; gap: var(--s14); margin: 0 0 var(--s20); }
+
+/* 폼 안의 가로줄(사유 · 비밀번호 · 버튼)은 줄바꿈되게 둔다 — 좁아지면 버튼이
+   화면 밖으로 나가는 것보다 아래로 내려오는 편이 낫다. */
+.adm-form > p,
+.adm-form > div { display: flex; gap: var(--s10); align-items: center; flex-wrap: wrap; margin: 0; }
+
+/* 폼의 주 동작. `.adm-btn--primary` 를 매번 붙이지 않아도 제출은 강조된다. */
+.adm-form button[type="submit"] {
+  justify-self: start;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.adm-panel {
+  margin: 0 0 var(--s20);
+  padding: var(--s18) var(--s20);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.adm-provider {
+  margin: 0 0 var(--s20);
+  padding: var(--s18) var(--s20);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+/* 콜백 주소는 프로바이더 콘솔에 붙여 넣는 값이다. 줄바꿈으로 잘리면 안 되고,
+   길어도 가로 스크롤을 만들지 않아야 한다. */
+.adm-callback {
+  display: inline-block;
+  max-width: 100%;
+  padding: var(--s6) var(--s10);
+  border-radius: var(--bar-radius);
+  background: var(--thead-bg);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+/* ═══ QR 라벨 ══════════════════════════════════════════════════════════════
+ * 인쇄를 전제한 화면이다. 화면에서는 격자로 보이고, 인쇄하면 그대로 잘린다. */
+.qr-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s16);
+}
+
+.qr-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s6);
+  margin: 0;
+  padding: var(--s12);
+  border: 1px solid var(--line);
+  border-radius: var(--bar-radius);
+  background: #fff;
+  color: #000;
+  font-size: 11.5px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.qr-label svg,
+.qr-label img { width: 100%; height: auto; }
+
+@media print {
+  .adm-header, .adm-sidebar { display: none; }
+  .qr-label { break-inside: avoid; }
+}
+
+/* 체크박스 한 줄 + 수량. 세로로 갈라지면 어느 수량이 어느 품목의 것인지
+   눈으로 이어야 한다 (A-507 환불 품목, A-511 반품 품목). */
+.adm-checkrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s12);
+  flex-wrap: wrap;
+  padding: var(--s10) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.adm-checkrow:last-child { border-bottom: 0; }
+.adm-checkrow > label { flex: 1 1 20rem; min-width: 0; }
+
+/* 수량은 두세 자리다. 폼 기본 폭이면 줄을 다 차지한다. */
+.adm-qty { width: 5.5rem; flex: none; text-align: center; }
 
 @media (max-width: 1199px) {
   :root { --pad: 24px; --gap: 18px; }

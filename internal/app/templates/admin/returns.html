@@ -1,8 +1,8 @@
 {{define "content"}}
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
 {{range .Returns}}
-<section class="return">
+<section class="adm-panel">
   <h2>{{.ReturnNo}} · {{.Kind}} · {{.Status}}</h2>
   <ul>{{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}</ul>
   {{with .Reason}}<p>사유: {{.}}</p>{{end}}
@@ -13,7 +13,7 @@
        만으로 열리고 재인증도 없어서, 여기서 금액을 받으면 환불 확정을
        order.refund 로 갈라놓은 것이 무의미해진다. 판매자 귀책이면 서버가 0 으로
        만든다 — 하자 상품의 반품비를 구매자가 물지 않는다. */}}
-  <form method="post" class="form">
+  <form method="post" class="adm-form">
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="pickup">
     <label>귀책
@@ -27,7 +27,7 @@
 
   {{/* **환불 확정에만 재인증이 걸린다** (D15 5.3-1) — 돈이 나가는 것은
        이 단계뿐이다. 수거 확인 전에는 서버가 거부한다 (D14 「수거 우선」). */}}
-  <form method="post" class="form">
+  <form method="post" class="adm-form">
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="settle">
     {{if $.NeedsReauth}}
@@ -42,7 +42,7 @@
        없으면 `교환수거` 는 나갈 길이 없는 상태가 되고, 예약 재고가 조용히
        잠긴다. 차액이 양수면 여기서 `차액결제대기` 로 가고 P-514 가 받는다. */}}
   {{if eq .Kind "교환"}}
-  <form method="post" class="form">
+  <form method="post" class="adm-form">
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="exchange">
     {{if gt .PriceDiff 0}}<p>차액 {{money .PriceDiff}} — 구매자 결제 후 발송됩니다.</p>{{end}}
@@ -50,7 +50,7 @@
   </form>
   {{end}}
 
-  <form method="post" class="form">
+  <form method="post" class="adm-form">
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="reject">
     <label>거부 사유 <input name="reason" maxlength="500"></label>

@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -126,7 +127,7 @@ func TestAdminStylesheetCoversFormElementsAndOrdersMediaLast(t *testing.T) {
 func TestAdminTemplatesFormatMoney(t *testing.T) {
 	// 이름이 금액인 것들. 새 화면이 다른 이름을 쓰면 여기 더한다.
 	money := regexp.MustCompile(
-		`\{\{\s*[.$][A-Za-z0-9.]*(Total|Amount|Price|Refunded|Paid|Fee|Diff|Delta)\s*\}\}`)
+		`\{\{\s*[.$][A-Za-z0-9.]*(Total|Amount|Price|Refunded|Paid|Fee|Diff|Delta|Approved|Remaining|Discount|Balance)\s*\}\}`)
 	// 시각도 같다 — `time.Time` 을 그대로 찍으면 나노초와 타임존 이름이 나온다.
 	when := regexp.MustCompile(`\{\{\s*[.$][A-Za-z0-9.]*(At|Date)\s*\}\}`)
 	// 입력칸의 `value=` 는 예외다. 사람이 고칠 숫자는 쉼표가 붙으면 안 된다 —
@@ -160,5 +161,87 @@ func TestAdminTemplatesFormatMoney(t *testing.T) {
 	}
 	if len(raw) > 0 {
 		t.Errorf("금액·시각을 money/date 없이 그리는 관리자 템플릿: %v", raw)
+	}
+}
+
+// **관리자 템플릿이 쓰는 클래스는 전부 스타일이 있어야 한다.**
+//
+// 규칙이 없는 클래스는 조용히 무시된다 — 마크업은 그려지고 브라우저는 오류를
+// 내지 않으며 핸들러는 200 을 돌려준다. 환불 화면의 「환불할 품목」 상자와
+// 체크박스 줄이 그 상태였다. 프론트 테마에는 같은 검사가 있었는데
+// (internal/theme) 관리자에는 없었다.
+func TestEveryAdminClassHasAStyle(t *testing.T) {
+	classAttr := regexp.MustCompile(`class="([^"]*)"`)
+	cssClass := regexp.MustCompile(`\.([a-z][a-z0-9-]*)`)
+	plainWord := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	tmplExpr := regexp.MustCompile(`\{\{[^}]*\}\}`)
+
+	used := map[string]bool{}
+	err := fs.WalkDir(adminFS, "templates/admin", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".html" {
+			return err
+		}
+		b, err := adminFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		// **템플릿 표현식을 먼저 걷어낸다.** `class="a{{if eq $x "y"}} b{{end}}"`
+		// 에서 `eq` 는 클래스가 아니라 함수 이름인데, 공백으로 자르면 클래스로
+		// 보인다 — 그것 때문에 있지도 않은 클래스의 규칙을 쓸 뻔했다.
+		body := tmplExpr.ReplaceAllString(string(b), " ")
+		for _, m := range classAttr.FindAllStringSubmatch(body, -1) {
+			for _, c := range strings.Fields(m[1]) {
+				// 템플릿 표현식 조각은 클래스 이름이 아니다.
+				if plainWord.MatchString(c) {
+					used[c] = true
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defined := map[string]bool{}
+	for _, m := range cssClass.FindAllStringSubmatch(string(css), -1) {
+		defined[m[1]] = true
+	}
+
+	if len(used) < 20 || len(defined) < 20 {
+		t.Fatalf("클래스를 사용 %d · 정의 %d 개밖에 못 찾았다 — 검사가 헛돌았다",
+			len(used), len(defined))
+	}
+	var missing []string
+	for c := range used {
+		if !defined[c] {
+			missing = append(missing, c)
+		}
+	}
+	slices.Sort(missing)
+	if len(missing) > 0 {
+		t.Errorf("스타일이 없는 관리자 클래스 %d개 — 그 화면은 스타일 없이 그려진다:\n  %s",
+			len(missing), strings.Join(missing, " "))
+	}
+}
+
+// **폼을 구성하는 요소에도 규칙이 있어야 한다.**
+//
+// 클래스 검사만으로는 `<fieldset>`·`<legend>`·`<label>` 처럼 클래스를 안 붙이는
+// 것들이 빠진다. 관리자 템플릿에 label 이 88개 있는데 규칙은 `.adm-field label`
+// 뿐이었고, 그 밖의 것은 브라우저 기본이었다.
+func TestAdminStylesheetStylesBareFormElements(t *testing.T) {
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, el := range []string{"fieldset", "legend", "label", "dl"} {
+		if !regexp.MustCompile(`(?m)^` + el + `[ ,{]`).Match(css) {
+			t.Errorf("`%s` 에 요소 규칙이 없다 — 클래스를 안 붙이는 자리는 기본 모양으로 남는다", el)
+		}
 	}
 }

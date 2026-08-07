@@ -26,13 +26,13 @@
     {{range .Order.Items}}
     <div class="refund-line">
       <label>
-        <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .Remaining}} disabled{{end}}>
+        <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .RemainingQty}} disabled{{end}}>
         {{.ProductName}} {{.OptionLabel}}
-        <span class="qty">주문 {{.Quantity}}개 · 남은 {{.Remaining}}개</span>
+        <span class="qty">주문 {{.Quantity}}개 · 남은 {{.RemainingQty}}개</span>
         {{if .Discount}}<span class="discount">할인 {{money .Discount}} 적용</span>{{end}}
       </label>
-      <input name="qty_{{.ID}}" type="number" min="1" max="{{.Remaining}}" value="1"
-             {{if not .Remaining}}disabled{{end}}>
+      <input name="qty_{{.ID}}" type="number" min="1" max="{{.RemainingQty}}" value="1"
+             {{if not .RemainingQty}}disabled{{end}}>
     </div>
     {{end}}
   </fieldset>

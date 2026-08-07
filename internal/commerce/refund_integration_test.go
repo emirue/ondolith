@@ -27,8 +27,8 @@ func refundAll(t *testing.T, s *Store, orderNo, key string) (string, int) {
 	t.Helper()
 	var lines []RefundLine
 	for _, it := range itemsOf(t, s, orderNo) {
-		if it.Remaining() > 0 {
-			lines = append(lines, RefundLine{OrderItemID: it.ID, Quantity: it.Remaining()})
+		if it.RemainingQty() > 0 {
+			lines = append(lines, RefundLine{OrderItemID: it.ID, Quantity: it.RemainingQty()})
 		}
 	}
 	id, amount, err := s.RequestRefund(context.Background(), orderNo, lines, "구매자", "", key)
@@ -157,7 +157,7 @@ func TestPartialRefundWithADiscountSumsExactly(t *testing.T) {
 		items := itemsOf(t, s, order.OrderNo)
 		done := true
 		for _, it := range items {
-			if it.Remaining() == 0 {
+			if it.RemainingQty() == 0 {
 				continue
 			}
 			done = false
@@ -549,8 +549,8 @@ func TestCancelledOrderRefusesFurtherRefunds(t *testing.T) {
 		t.Errorf("취소 뒤 부분 환불 = %v, want ErrRefundQuantity", err)
 	}
 	// 소진 수량이 주문 수량과 같다.
-	if again := itemsOf(t, s, orderNo); again[0].Remaining() != 0 {
-		t.Errorf("취소 뒤 남은 수량 %d, want 0", again[0].Remaining())
+	if again := itemsOf(t, s, orderNo); again[0].RemainingQty() != 0 {
+		t.Errorf("취소 뒤 남은 수량 %d, want 0", again[0].RemainingQty())
 	}
 }
 

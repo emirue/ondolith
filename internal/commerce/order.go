@@ -367,8 +367,12 @@ type OrderItem struct {
 // Net is what this line is worth after its share of the discount.
 func (it OrderItem) Net() int { return it.LineAmount - it.Discount }
 
-// Remaining is how many units may still be refunded.
-func (it OrderItem) Remaining() int { return it.Quantity - it.Settled }
+// RemainingQty is how many **units** may still be refunded.
+//
+// 이름에 `Qty` 가 붙는 이유: 같은 화면(A-507)에 「남은 금액」도 있고, 둘 다
+// `Remaining` 이면 금액 표시 검사가 수량까지 잡아 예외를 달게 된다 — 예외가
+// 붙은 검사는 다음 화면에서 진짜 금액을 놓친다.
+func (it OrderItem) RemainingQty() int { return it.Quantity - it.Settled }
 
 // OrderByNo reads one order, scoped to who may see it.
 //
