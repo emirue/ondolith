@@ -227,23 +227,36 @@ func (s *Store) CreateUser(ctx context.Context, email, hash, displayName string)
 	return id, err
 }
 
-// Now is the clock that stamps a session's auth_at.
+// DBTime is a moment that came off the database's clock.
 //
-// It is the database's clock, not the process's, and that is the whole point.
-// `sessions_valid_from` is written by `now()` — the database — and the session
-// gate compares the two (D15 5.4, withActor). Stamping the session with
-// `time.Now()` compares two clocks: a database a few milliseconds ahead of the
-// application makes a session issued *after* the cutoff look older than it, and
-// the middleware destroys the session the user just opened. Signing up and then
-// being bounced straight back to the login form is that bug, and it repeats on
-// every retry because the skew does not go away.
+// **Its field is unexported, so nothing outside this package can make one.**
+// That is the entire purpose of the type, and it is worth the small awkwardness
+// of the Time() unwrap.
 //
-// One clock owns both sides of the comparison. This is the same reason
-// SetPassword hands its cutoff back instead of letting the caller re-stamp.
-func (s *Store) Now(ctx context.Context) (time.Time, error) {
+// The session gate compares `auth_at` against `sessions_valid_from` (D15 5.4,
+// withActor). The right-hand side is written by `now()` — the database. Stamping
+// the left-hand side with `time.Now()` compares two clocks, and a database
+// running a few milliseconds ahead of the application makes a session issued
+// *after* the cutoff look older than it: the middleware destroys the session the
+// user just opened. Signing up and being bounced straight back to the login form
+// is that bug, and it repeats on every retry because the skew does not go away.
+//
+// A comment saying "use the database clock here" does not survive the next
+// edit, and neither does a checker that greps for `time.Now()` — the natural way
+// to write the bug is `at := time.Now()` two lines up, and any check that looks
+// at the argument expression sails right past it. A type the wrong value cannot
+// be spelled as does survive: `stampAuthAt` takes a DBTime, and the only way to
+// obtain one is to ask the database.
+type DBTime struct{ t time.Time }
+
+// Time unwraps the moment for storage and comparison.
+func (d DBTime) Time() time.Time { return d.t }
+
+// Now reads the database's clock. See DBTime for why this is not time.Now().
+func (s *Store) Now(ctx context.Context) (DBTime, error) {
 	var t time.Time
 	err := s.pool.QueryRow(ctx, `SELECT now()`).Scan(&t)
-	return t, err
+	return DBTime{t}, err
 }
 
 // InvalidateSessions moves the cutoff forward, ending every session issued

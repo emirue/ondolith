@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/alexedwards/scs/v2/memstore"
@@ -53,7 +52,7 @@ func authFixture(t *testing.T) (*auth.Store, *pgxpool.Pool, *scs.SessionManager)
 // request. That shows up as an unexplainable flake — the same test passes when
 // enough other tests ran first to burn off the skew — so the fixtures use the
 // same clock the handlers do.
-func loginStamp(t *testing.T, store *auth.Store) time.Time {
+func loginStamp(t *testing.T, store *auth.Store) auth.DBTime {
 	t.Helper()
 	at, err := store.Now(context.Background())
 	if err != nil {
@@ -119,7 +118,7 @@ func TestActorLoadsUserAndPermissions(t *testing.T) {
 
 	a, _ := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, id)
-		putTime(sm, c, sessAuthAt, loginStamp(t, store))
+		stampAuthAt(sm, c, loginStamp(t, store))
 	})
 	if !a.IsAuthenticated() {
 		t.Fatal("세션이 있는데 익명이다")
@@ -145,7 +144,7 @@ func TestDeactivatedAccountLosesSession(t *testing.T) {
 
 	a, _ := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, id)
-		putTime(sm, c, sessAuthAt, loginStamp(t, store))
+		stampAuthAt(sm, c, loginStamp(t, store))
 	})
 	if a.IsAuthenticated() {
 		t.Error("비활성 계정이 인증 상태로 남았다")
@@ -163,14 +162,17 @@ func TestSessionOlderThanCutoffIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A session authenticated before the account's cutoff.
-	old := time.Now().Add(-time.Hour)
+	// The order is the point: a session opens, and *then* "log out everywhere"
+	// moves the cutoff past it. Stamping a fabricated hour-old timestamp would
+	// test the same comparison but not the same event, and it would need a clock
+	// the handlers no longer have access to.
+	opened := loginStamp(t, store)
 	if err := store.InvalidateSessions(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 	a, _ := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, id)
-		putTime(sm, c, sessAuthAt, old)
+		stampAuthAt(sm, c, opened)
 	})
 	if a.IsAuthenticated() {
 		t.Error("컷오프 이전 세션이 살아남았다 — 전체 로그아웃이 듣지 않는다")
@@ -179,7 +181,7 @@ func TestSessionOlderThanCutoffIsRejected(t *testing.T) {
 	// ...while a session issued after it survives.
 	a2, _ := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, id)
-		putTime(sm, c, sessAuthAt, loginStamp(t, store))
+		stampAuthAt(sm, c, loginStamp(t, store))
 	})
 	if !a2.IsAuthenticated() {
 		t.Error("컷오프 이후 세션이 거부됐다")
@@ -190,7 +192,7 @@ func TestSessionNamingMissingUserIsDestroyed(t *testing.T) {
 	store, _, sm := authFixture(t)
 	a, code := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, "00000000-0000-0000-0000-000000000000")
-		putTime(sm, c, sessAuthAt, loginStamp(t, store))
+		stampAuthAt(sm, c, loginStamp(t, store))
 	})
 	if code != http.StatusOK {
 		t.Fatalf("HTTP %d — 없는 사용자는 오류가 아니라 익명이어야 한다", code)

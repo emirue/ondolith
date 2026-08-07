@@ -150,11 +150,12 @@ func (s *Store) MarkEmailVerified(ctx context.Context, userID string) error {
 // with it. Stamping with the application's own clock instead compares two
 // clocks — the database wrote `now()`, the process reads `time.Now()` — and a
 // few milliseconds of skew logs the user out of the session they just proved
-// they own. One clock, handed back, removes the question.
-func (s *Store) SetPassword(ctx context.Context, userID, hash string) (time.Time, error) {
+// they own. One clock, handed back, removes the question. It comes back as a
+// [DBTime] so the caller cannot substitute its own clock and still compile.
+func (s *Store) SetPassword(ctx context.Context, userID, hash string) (DBTime, error) {
 	var cutoff time.Time
 	err := s.pool.QueryRow(ctx,
 		`UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
 		 WHERE id = $1 RETURNING sessions_valid_from`, userID, hash).Scan(&cutoff)
-	return cutoff, err
+	return DBTime{cutoff}, err
 }

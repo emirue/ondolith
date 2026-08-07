@@ -105,7 +105,7 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 			return
 		}
-		putTime(d.sm, ctx, sessAuthAt, authAt)
+		stampAuthAt(d.sm, ctx, authAt)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -282,7 +282,9 @@ func (d *accountDeps) changePassword(w http.ResponseWriter, r *http.Request) {
 	// Stamp with the cutoff the database wrote, not with time.Now(): comparing
 	// the process clock against the database clock logs this user out of the
 	// session they just proved they own.
-	putTime(d.sm, ctx, sessAuthAt, cutoff)
-	putTime(d.sm, ctx, sessReauth, cutoff)
+	stampAuthAt(d.sm, ctx, cutoff)
+	// reauth_at 은 프로세스 시계(adminCaller.now)와만 비교되고 창이 분 단위라
+	// 시계 차이가 무의미하다 — auth_at 과 달리 DBTime 을 요구하지 않는다.
+	putTime(d.sm, ctx, sessReauth, cutoff.Time())
 	http.Redirect(w, r, "/me", http.StatusSeeOther)
 }

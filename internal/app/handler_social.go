@@ -185,7 +185,7 @@ func (d *socialDeps) finishSocialLogin(w http.ResponseWriter, r *http.Request,
 		d.serverError(w, r, err)
 		return
 	}
-	putTime(d.sm, ctx, sessAuthAt, authAt)
+	stampAuthAt(d.sm, ctx, authAt)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

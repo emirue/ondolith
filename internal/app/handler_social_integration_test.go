@@ -411,7 +411,7 @@ func TestSocialCallbackLinksWhenStartedWhileLoggedIn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		sm.Put(r.Context(), sessUserID, uid)
-		putTime(sm, r.Context(), sessAuthAt, loginStamp(t, store))
+		stampAuthAt(sm, r.Context(), loginStamp(t, store))
 	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	cookies := rec.Result().Cookies()
 
@@ -452,7 +452,7 @@ func TestConnectionsActionMapsErrors(t *testing.T) {
 	login := httptest.NewRecorder()
 	sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		sm.Put(r.Context(), sessUserID, uid)
-		putTime(sm, r.Context(), sessAuthAt, loginStamp(t, store))
+		stampAuthAt(sm, r.Context(), loginStamp(t, store))
 	})).ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/", nil))
 	cookies := login.Result().Cookies()
 

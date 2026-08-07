@@ -73,6 +73,17 @@ func putTime(sm *scs.SessionManager, ctx context.Context, key string, t time.Tim
 	sm.Put(ctx, key, t.UnixNano())
 }
 
+// stampAuthAt is the only writer of auth_at.
+//
+// It takes an [auth.DBTime] — a value only the database can produce — because
+// withActor compares auth_at against sessions_valid_from, and that column is
+// written by the database's clock. See auth.DBTime for what goes wrong when the
+// two sides come off different clocks. Nothing else may write this key; the
+// package's own test enforces that, and the type enforces the value.
+func stampAuthAt(sm *scs.SessionManager, ctx context.Context, at auth.DBTime) {
+	sm.Put(ctx, sessAuthAt, at.Time().UnixNano())
+}
+
 func getTime(sm *scs.SessionManager, ctx context.Context, key string) time.Time {
 	n := sm.GetInt64(ctx, key)
 	if n == 0 {

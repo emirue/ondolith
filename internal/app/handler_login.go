@@ -115,7 +115,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	putTime(d.sm, ctx, sessAuthAt, authAt)
+	stampAuthAt(d.sm, ctx, authAt)
 
 	// Successful login clears the failure counters: someone who mistyped four
 	// times must not stay throttled afterwards.
