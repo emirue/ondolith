@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -188,4 +189,143 @@ func (s *Store) AddVariant(ctx context.Context, productID string, options map[st
 		return "", ErrOptionDuplicate
 	}
 	return id, err
+}
+
+// Option is one option group of a product — 이름과 값 목록 (색상: 빨강·파랑).
+type Option struct {
+	Name   string
+	Values []string
+}
+
+// Options lists a product's option groups in display order.
+func (s *Store) Options(ctx context.Context, productID string) ([]Option, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT name, values FROM product_options
+		WHERE product_id = $1 ORDER BY sort_order, name`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Option
+	for rows.Next() {
+		var o Option
+		if err := rows.Scan(&o.Name, &o.Values); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+// SetOptions replaces a product's option groups and **creates the missing
+// combinations** (A-503, D19 「조합은 옵션 값의 곱으로 서버가 만든다」).
+//
+// 이 함수가 없어서 새 상품은 조합이 0개인 채로 남았고, 조합이 없으면 장바구니에
+// 담을 것이 없다 — **아무것도 팔 수 없었다.** 스토어에 AddVariant 는 있었지만
+// 어떤 화면도 부르지 않았다.
+//
+// **이미 있는 조합은 건드리지 않는다.** 재고와 SKU 가 거기 붙어 있으므로,
+// 옵션을 다시 저장할 때마다 지웠다 만들면 팔린 이력과 재고가 사라진다. 빠진
+// 곱만 채운다 — 옵션 값을 지워서 생긴 고아 조합도 남긴다. 그 조합을 가리키는
+// 주문이 있을 수 있고(order_items 는 RESTRICT), 재고를 0 으로 두면 팔리지
+// 않으므로 지울 이유가 없다.
+func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option) error {
+	for i := range opts {
+		opts[i].Name = strings.TrimSpace(opts[i].Name)
+		if opts[i].Name == "" {
+			return ErrOptionDuplicate
+		}
+		seen := map[string]bool{}
+		var vals []string
+		for _, v := range opts[i].Values {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				continue
+			}
+			if seen[v] {
+				return ErrOptionDuplicate
+			}
+			seen[v] = true
+			vals = append(vals, v)
+		}
+		if len(vals) == 0 {
+			return ErrOptionDuplicate
+		}
+		opts[i].Values = vals
+	}
+	if len(opts) == 0 {
+		return ErrOptionDuplicate
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // 커밋됐으면 무의미하다
+
+	var exists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT true FROM products WHERE id = $1`, productID).Scan(&exists); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM product_options WHERE product_id = $1`, productID); err != nil {
+		return err
+	}
+	for i, o := range opts {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO product_options (product_id, name, values, sort_order)
+			VALUES ($1, $2, $3, $4)`, productID, o.Name, o.Values, i); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return ErrOptionDuplicate
+			}
+			return err
+		}
+	}
+
+	// 곱을 만든다. `ON CONFLICT DO NOTHING` 이 이미 있는 조합을 지켜 준다 —
+	// UNIQUE (product_id, option_values) 가 그 열쇠다.
+	for _, combo := range optionProduct(opts) {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO product_variants (product_id, option_values, price_delta, stock)
+			VALUES ($1, $2, 0, 0)
+			ON CONFLICT (product_id, option_values) DO NOTHING`, productID, combo); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// optionProduct 는 옵션 값의 곱(데카르트 곱)을 낸다.
+//
+// 조합 수는 값 개수의 곱이라 금방 커진다. 스키마가 그룹당 값을 50개로 막지만
+// 그룹이 여럿이면 그것만으로는 부족하므로 여기서 상한을 둔다 — 옵션 몇 줄로
+// 수만 행을 만들어 데이터베이스를 채우는 것을 막는다.
+const maxVariants = 500
+
+func optionProduct(opts []Option) []map[string]string {
+	out := []map[string]string{{}}
+	for _, o := range opts {
+		var next []map[string]string
+		for _, base := range out {
+			for _, v := range o.Values {
+				if len(next) >= maxVariants {
+					return next
+				}
+				m := make(map[string]string, len(base)+1)
+				for k, vv := range base {
+					m[k] = vv
+				}
+				m[o.Name] = v
+				next = append(next, m)
+			}
+		}
+		out = next
+	}
+	return out
 }

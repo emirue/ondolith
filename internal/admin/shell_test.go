@@ -161,3 +161,30 @@ func TestForbiddenIs403(t *testing.T) {
 		t.Errorf("HTTP %d, want 403", rec.Code)
 	}
 }
+
+// **같은 화면이 메뉴에 두 번 있으면 안 된다.**
+//
+// A-207 약관과 A-208 사업자 정보가 표에 각각 두 줄씩 있었다. Order 도 같아서
+// 정렬해도 붙어 나왔고, 관리자 사이드바에 같은 링크가 나란히 두 번 그려졌다.
+// 순서 테스트는 정렬된 순서만 봤으므로 통과했다 — 중복은 순서를 어기지 않는다.
+func TestNoScreenAppearsTwiceInTheMenu(t *testing.T) {
+	seen := map[string]string{}
+	for _, it := range nav {
+		if prev, dup := seen[it.Screen]; dup {
+			t.Errorf("%s 가 메뉴에 두 번 있다 (%q, %q)", it.Screen, prev, it.Title)
+		}
+		seen[it.Screen] = it.Title
+	}
+	if len(seen) < 10 {
+		t.Fatalf("메뉴 항목을 %d개밖에 못 읽었다 — 검사가 헛돌았다", len(seen))
+	}
+
+	// 경로도 마찬가지다. 화면 ID 를 다르게 적으면서 같은 곳을 가리킬 수 있다.
+	byPath := map[string]string{}
+	for _, it := range nav {
+		if prev, dup := byPath[it.Path]; dup {
+			t.Errorf("경로 %s 가 메뉴에 두 번 있다 (%q, %q)", it.Path, prev, it.Title)
+		}
+		byPath[it.Path] = it.Title
+	}
+}

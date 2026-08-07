@@ -1,8 +1,6 @@
 {{define "content"}}
-<h1>카테고리</h1>
-{{with .Data}}
 {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
-<table>
+<table class="adm-table">
   <thead><tr><th>이름</th><th>주소</th><th>상위</th></tr></thead>
   <tbody>
     {{range .Categories}}
@@ -21,5 +19,4 @@
   <input id="parent_id" name="parent_id">
   <button type="submit">이동</button>
 </form>
-{{end}}
 {{end}}

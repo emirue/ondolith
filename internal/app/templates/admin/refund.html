@@ -1,6 +1,4 @@
 {{define "content"}}
-<h1>취소·환불 처리</h1>
-{{with .Data}}
 {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}{{if .Discount}} · 할인 {{.Discount}}{{end}}</p>{{end}}
 <dl>
@@ -8,7 +6,7 @@
   <dt>환불 접수·완료</dt><dd>{{.Refunded}}</dd>
   <dt>남은 금액</dt><dd>{{.Remaining}}</dd>
 </dl>
-<table>
+<table class="adm-table">
   <thead><tr><th>시각</th><th>요청자</th><th>금액</th><th>상태</th><th>사유</th></tr></thead>
   <tbody>
     {{range .Refunds}}
@@ -47,5 +45,4 @@
   {{end}}
   <button type="submit">환불 접수</button>
 </form>
-{{end}}
 {{end}}

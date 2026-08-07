@@ -4,12 +4,50 @@
   {{/* **재고 절대값 칸이 없다** (D19 A-503 받지 않는 필드). 주문이 동시에
        들어오면 절대값 덮어쓰기는 판매분을 지운다. 증감만 받고, 화면이 읽은
        재고를 version 으로 함께 보내 그 사이 누가 바꿨으면 409 를 받는다. */}}
+  {{/* **옵션 그룹이 먼저다.** 조합은 옵션 값의 곱으로 서버가 만든다
+       (D19 A-503 「variant_id 직접 지정」을 받지 않는 이유). 이 폼이 없을 때
+       새 상품은 조합이 0개인 채로 남았고, 조합이 없으면 장바구니에 담을 것이
+       없어서 아무것도 팔 수 없었다. */}}
+  <form method="post" action="/admin/products/{{.Product.ID}}/options" class="adm-form">
+    <h3>옵션</h3>
+    <table class="adm-table">
+      <thead><tr><th>그룹 이름</th><th>값 (쉼표로 구분)</th></tr></thead>
+      <tbody>
+      {{range $i, $o := .Options}}
+        <tr>
+          <td><input type="text" name="option_name" maxlength="50" value="{{$o.Name}}"></td>
+          <td><input type="text" name="option_values" value="{{.Joined}}"></td>
+        </tr>
+      {{end}}
+      {{/* 늘 빈 줄 두 개를 둔다 — 그룹을 추가하는 데 자바스크립트가 필요 없다. */}}
+        <tr>
+          <td><input type="text" name="option_name" maxlength="50" placeholder="색상"></td>
+          <td><input type="text" name="option_values" placeholder="빨강, 파랑"></td>
+        </tr>
+        <tr>
+          <td><input type="text" name="option_name" maxlength="50" placeholder="사이즈"></td>
+          <td><input type="text" name="option_values" placeholder="S, M, L"></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">옵션 저장 · 조합 생성</button>
+    </div>
+    <p class="adm-hint">
+      저장하면 <strong>값의 모든 조합</strong>이 만들어집니다. 이미 있는 조합은
+      그대로 둡니다 — 재고와 SKU 가 거기 붙어 있습니다. 값을 지워도 그 조합은
+      남습니다(주문이 가리킬 수 있습니다). 재고를 0 으로 두면 팔리지 않습니다.
+    </p>
+  </form>
+
+  <h3>조합</h3>
   <form method="post" action="/admin/products/{{.Product.ID}}/variants">
     <table class="adm-table">
       <thead>
         <tr><th>조합</th><th>SKU</th><th>가격 차액</th><th>현재 재고</th><th>증감</th></tr>
       </thead>
       <tbody>
+      {{if not .Variants}}<tr><td colspan="5">옵션을 저장하면 조합이 만들어집니다.</td></tr>{{end}}
       {{range .Variants}}
         <tr>
           <td>

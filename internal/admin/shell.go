@@ -70,8 +70,6 @@ var nav = []NavItem{
 	{Screen: "A-514", Title: "스캔 입고", Path: "/admin/scan/receive", Group: "커머스", Permission: "product.manage", Order: 38, Shop: true},
 	{Screen: "A-515", Title: "재고 실사", Path: "/admin/scan/stocktake", Group: "커머스", Permission: "product.manage", Order: 40, Shop: true},
 	{Screen: "A-517", Title: "스캔 조회", Path: "/admin/scan/lookup", Group: "커머스", Permission: "product.view", Order: 42, Shop: true},
-	{Screen: "A-207", Title: "약관", Path: "/admin/terms", Group: "커머스", Permission: "settings.update", Order: 30, Shop: true},
-	{Screen: "A-208", Title: "사업자 정보", Path: "/admin/settings/business", Group: "커머스", Permission: "settings.update", Order: 32, Shop: true},
 	{Screen: "A-602", Title: "시스템 정보", Path: "/admin/system", Group: "설정", Permission: "settings.view", Order: 90},
 }
 

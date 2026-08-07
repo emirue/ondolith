@@ -237,6 +237,74 @@ func (d *Deps) renderVariants(w http.ResponseWriter, r *http.Request, code int, 
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	opts, err := d.Commerce.Options(r.Context(), productID)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// 값을 미리 이어서 넘긴다. 관리자 템플릿에는 함수맵이 없고, `join` 하나를
+	// 위해 함수맵을 들이면 다음 화면부터 무엇이 쓸 수 있는지가 흐려진다.
+	type optView struct {
+		Name   string
+		Joined string
+	}
+	views := make([]optView, 0, len(opts))
+	for _, o := range opts {
+		views = append(views, optView{Name: o.Name, Joined: strings.Join(o.Values, ", ")})
+	}
 	d.Render(w, r, "admin/product-variants.html", code,
-		map[string]any{"Product": p, "Variants": variants, "Error": msg})
+		map[string]any{"Product": p, "Variants": variants, "Options": views, "Error": msg})
+}
+
+// OptionsSave is A-503's option half: 그룹과 값을 받아 **조합을 만든다**.
+//
+// 값은 쉼표로 나눈다. 자바스크립트로 행을 늘리는 편집기가 아니라 텍스트
+// 한 칸인 이유는, 옵션이 몇 개 안 되고 그 정도를 위해 클라이언트 상태를
+// 만들면 그것부터 테마와 어긋나기 시작하기 때문이다 (DEC-3.1 결).
+func (d *Deps) OptionsSave(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "product.manage")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	names := r.PostForm["option_name"]
+	values := r.PostForm["option_values"]
+	if len(names) != len(values) {
+		d.renderVariants(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
+		return
+	}
+	var opts []commerce.Option
+	for i, n := range names {
+		// 빈 줄은 「추가하지 않음」이다. 화면이 늘 빈 줄을 두 개 두므로 이것을
+		// 거부하면 아무것도 저장할 수 없다.
+		if strings.TrimSpace(n) == "" && strings.TrimSpace(values[i]) == "" {
+			continue
+		}
+		opts = append(opts, commerce.Option{
+			Name: n, Values: strings.Split(values[i], ","),
+		})
+	}
+	if len(opts) == 0 {
+		d.renderVariants(w, r, http.StatusUnprocessableEntity,
+			"옵션 그룹과 값을 하나 이상 입력하세요.")
+		return
+	}
+
+	productID := r.PathValue("id")
+	err := d.Commerce.SetOptions(r.Context(), productID, opts)
+	switch {
+	case errors.Is(err, commerce.ErrNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, commerce.ErrOptionDuplicate):
+		d.renderVariants(w, r, http.StatusUnprocessableEntity,
+			"그룹 이름과 값을 확인하세요. 빈 값이나 그룹 안의 중복은 저장하지 않습니다.")
+	case err != nil:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	default:
+		d.log(r, c, "product.manage", "product", productID, "옵션 저장·조합 생성")
+		http.Redirect(w, r, "/admin/products/"+productID+"/variants", http.StatusSeeOther)
+	}
 }

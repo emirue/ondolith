@@ -1,10 +1,8 @@
 {{define "content"}}
-{{with .Data}}
 {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}
-<h1>주문 {{.OrderNo}}</h1>
 <p>상태 <strong>{{.Status}}</strong> · 주문일 {{.CreatedAt}}</p>
-<table>
+<table class="adm-table">
   <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
   <tbody>
     {{range .Items}}
@@ -38,5 +36,4 @@
   {{else}}<li>발송 정보가 없습니다.</li>{{end}}
 </ul>
 <p><a href="/admin/orders/{{.Order.OrderNo}}/shipping">송장 입력</a></p>
-{{end}}
 {{end}}

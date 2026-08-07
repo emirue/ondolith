@@ -596,8 +596,12 @@ a:focus-visible {
 /* 합계는 **금액이 결론**인 자리다. 다른 줄과 같은 무게로 두면 얼마를 내는지
  * 한 번에 보이지 않는다. */
 .totals {
+  /* **`<dl>` 이다.** dt 와 dd 가 따로 자식이므로 각각을 flex 행으로 만들면
+     레이블과 금액이 두 줄로 갈라진다 — 장바구니 합계가 실제로 그렇게 그려지고
+     있었다. 2열 그리드가 쌍을 한 줄에 붙인다. */
   display: grid;
-  gap: 8px;
+  grid-template-columns: 1fr auto;
+  gap: 8px 16px;
   margin: 20px 0 0;
   padding: 18px 20px;
   border-radius: var(--chip-radius);
@@ -605,7 +609,23 @@ a:focus-visible {
   font-size: 14px;
 }
 
-.totals > * { display: flex; justify-content: space-between; gap: 16px; margin: 0; }
+.totals dt { opacity: .6; }
+
+.totals dd {
+  margin: 0;
+  text-align: right;
+  /* 금액은 자릿수가 맞아야 위아래로 읽힌다. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* dl 이 아닌 자식(안내 문단 등)은 한 줄을 통째로 쓴다. */
+.totals > p,
+.totals > div { grid-column: 1 / -1; margin: 0; }
+
+/* 마지막 쌍이 결제 금액이다 — 다른 줄과 같은 무게면 결론이 안 보인다. */
+.totals dt:last-of-type,
+.totals dd:last-of-type { font-size: 16px; font-weight: 700; opacity: 1; }
+
 .totals strong { font-size: 16px; }
 .discount { color: var(--ok); }
 

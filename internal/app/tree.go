@@ -381,6 +381,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "product.manage", Handler: ad.ProductDelete})
 		r.Add(Route{Screen: "A-503", Method: "GET", Pattern: "/admin/products/{id}/variants", Class: SC4,
 			Permission: "product.manage", Handler: ad.VariantForm})
+		// A-503 의 옵션 저장. 같은 화면의 두 번째 폼이다 — 조합을 만드는 것과
+		// 조합의 재고를 고치는 것은 다른 동작이라 경로를 나눈다.
+		r.Add(Route{Screen: "A-503", Method: "POST", Pattern: "/admin/products/{id}/options", Class: SC5,
+			Permission: "product.manage", Handler: ad.OptionsSave})
 		r.Add(Route{Screen: "A-503", Method: "POST", Pattern: "/admin/products/{id}/variants", Class: SC5,
 			Permission: "product.manage", Handler: ad.VariantSave})
 		r.Add(Route{Screen: "A-509", Method: "GET", Pattern: "/admin/categories", Class: SC4,

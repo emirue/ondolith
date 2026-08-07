@@ -1,7 +1,5 @@
 {{define "content"}}
-<h1>상품</h1>
-{{with .Data}}
-<table>
+<table class="adm-table">
   <thead><tr><th>이름</th><th>주소</th><th>가격</th><th>노출</th><th>재고</th></tr></thead>
   <tbody>
     {{range .Products}}
@@ -13,5 +11,4 @@
     {{end}}
   </tbody>
 </table>
-{{end}}
 {{end}}
