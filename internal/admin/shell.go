@@ -52,6 +52,7 @@ var nav = []NavItem{
 	{Screen: "A-403", Title: "역할·권한", Path: "/admin/roles", Group: "사용자", Permission: "role.view", Order: 40},
 	{Screen: "A-201", Title: "사이트 설정", Path: "/admin/settings", Group: "설정", Permission: "settings.update", Order: 50},
 	{Screen: "A-205", Title: "메일", Path: "/admin/settings/mail", Group: "설정", Permission: "settings.update", Order: 60},
+	{Screen: "A-206", Title: "소셜 로그인", Path: "/admin/settings/social", Group: "설정", Permission: "settings.update", Order: 65},
 	{Screen: "A-202", Title: "테마", Path: "/admin/themes", Group: "설정", Permission: "theme.view", Order: 80},
 	{Screen: "A-601", Title: "작업 로그", Path: "/admin/oplog", Group: "설정", Permission: "log.view", Order: 85},
 	// 커머스 항목. Shop=true 라 site.type=cms 에서는 메뉴에도 트리에도 없다

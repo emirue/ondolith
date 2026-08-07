@@ -20,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/markbates/goth"
+
 	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
@@ -196,8 +198,33 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		// 많은 것을 말하게 되는 경로가 된다.
 		ping: func(c context.Context) error { return pool.Ping(c) },
 	}
+	// A-206 에서 켠 프로바이더. 로그인 화면과 연결 관리 화면이 함께 쓴다 —
+	// 두 곳이 각자 판단하면 "로그인 화면엔 버튼이 있는데 눌러도 404" 가 된다.
+	socialConfigOf := func(name string) auth.SocialConfig {
+		kv := setting(
+			auth.SocialSettingKey(name, "client_id"),
+			auth.SocialSettingKey(name, "client_secret"),
+			auth.SocialSettingKey(name, "enabled"))
+		return auth.SocialConfig{
+			Provider:  name,
+			Label:     auth.SocialProviders[name],
+			ClientID:  kv[auth.SocialSettingKey(name, "client_id")],
+			HasSecret: kv[auth.SocialSettingKey(name, "client_secret")] != "",
+			Enabled:   kv[auth.SocialSettingKey(name, "enabled")] != "",
+		}
+	}
+	enabledSocial := func() []auth.SocialConfig {
+		var out []auth.SocialConfig
+		for _, n := range auth.SocialProviderKeys() {
+			if cfg := socialConfigOf(n); cfg.Enabled {
+				out = append(out, cfg)
+			}
+		}
+		return out
+	}
+
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
-		render: pub.renderNamed}
+		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: "",
 		verifyRequired: func() bool {
@@ -213,6 +240,17 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	if err != nil {
 		return fail(fmt.Errorf("app: 관리자 스타일: %w", err))
 	}
+	// 콜백 주소는 **요청에서** 만든다 (A-206 은 표시만 한다). 설정으로 두면
+	// 관리자가 그 값을 바꿔 인가 코드를 다른 곳으로 돌릴 수 있고, 그것이
+	// D19 A-206 이 콜백 URL 을 받지 않기로 한 이유다.
+	baseURL := func(r *http.Request) string {
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		return scheme + "://" + r.Host
+	}
+
 	ad := &admin.Deps{
 		Content: contentStore,
 		Auth:    authStore,
@@ -226,6 +264,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Attachments: contentStore.AttachmentsIn(cfg.Uploads()),
 		OpLog:       contentStore.OpLog(),
 		Logger:      log,
+		BaseURL:     baseURL,
 		Version:     version,
 		Migrations:  func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
 		ValidateTheme: func(name string) (string, error) {
@@ -260,6 +299,30 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		return pgAdapterFor(kv["pg.provider"], kv["pg.secret_key"])
 	}
 
+	// 소셜 로그인 (P-106·P-107·P-111). 설정은 요청마다 읽는다 — A-206 이
+	// 키를 바꾸면 재시작 없이 반영돼야 한다 (FR-303).
+	//
+	// **콜백 URL 은 요청에서 만든다.** 설정으로 두면 관리자가 그 값을 바꿔
+	// 인가 코드를 다른 곳으로 돌릴 수 있고, 그것이 D19 A-206 이 콜백 URL 을
+	// 받지 않기로 한 이유다.
+	soc := &socialDeps{publicDeps: pub, sm: sessions, store: authStore,
+		provider: func(r *http.Request, name string) (goth.Provider, error) {
+			cfg := socialConfigOf(name)
+			// **꺼진 프로바이더는 없는 것과 같다** (FR-709). 자격증명이
+			// 남아 있어도 만들지 않는다 — 「사용 안 함」이 화면에서만
+			// 꺼지고 경로는 열려 있는 상태를 만들지 않는다 (A-209 에서
+			// 같은 실수를 했다).
+			if !cfg.Enabled {
+				return nil, fmt.Errorf("app: %s 는 활성화되지 않았습니다", name)
+			}
+			secret := setting(auth.SocialSettingKey(name, "client_secret"))[auth.SocialSettingKey(name, "client_secret")]
+			return auth.NewSocialProvider(name, cfg.ClientID, secret,
+				auth.SocialCallbackURL(baseURL(r), name))
+		},
+		// **로그인 화면과 같은 목록을 쓴다.** 두 곳이 각자 판단하면
+		// "버튼은 있는데 눌러도 404" 가 된다.
+		enabled: enabledSocial}
+
 	sh := &shopDeps{publicDeps: pub, sm: sessions, store: commerceStore, log: log,
 		limiter: limiter, limits: limits,
 		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
@@ -285,7 +348,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 	// FR-710: 조립 시점에 정한다. site.type 이 shop 이 아니면 커머스 라우트는
 	// 등록되지 않고, 등록되지 않은 것은 404 다.
-	registry := buildTree(pub, lg, acc, bd, ad, sh, shopMode, static)
+	registry := buildTree(pub, lg, acc, bd, ad, sh, soc, shopMode, static)
 
 	perms, err := authStore.PermissionKeys(ctx)
 	if err != nil {

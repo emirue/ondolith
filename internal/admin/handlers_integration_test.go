@@ -105,6 +105,15 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		// 아무것도 안 하고, "로그에 남는다" 를 확인하는 검사가 전부 무의미해진다
 		// (D15 7절이 요구하는 것이 바로 그 기록이다).
 		OpLog: store.OpLog(),
+		// 운영과 같이 채운다. 비우면 A-206 이 콜백을 빈 주소로 그리고,
+		// 관리자가 그것을 프로바이더 콘솔에 붙여넣으면 연동이 안 된다.
+		BaseURL: func(r *http.Request) string {
+			scheme := "http"
+			if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+				scheme = "https"
+			}
+			return scheme + "://" + r.Host
+		},
 		// **작업 로그 기록 실패를 테스트 실패로 만든다.** 운영에서는 삼키는
 		// 것이 맞지만(변경은 이미 일어났다), 테스트에서 삼키면 "로그에 남는다"
 		// 는 단언이 전부 헛돈다 — 실제로 이 픽스처는 actor id 가 uuid 가
@@ -1218,5 +1227,129 @@ func TestPaymentKeysHaveAServerSideLengthLimit(t *testing.T) {
 		url.Values{"pg.provider": {"toss"}, "pg.client_key": {ok}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("200자 = HTTP %d, want 303", rec.Code)
+	}
+}
+
+// **A-206 은 콜백 URL 을 받지 않는다** (D19 A-206 받지 않는 필드).
+//
+// 입력받으면 인가 코드를 공격자 서버로 돌리는 경로가 된다. 무시하지 않고
+// 거부한다 — 무시는 조용해서 공격 시도를 놓친다.
+func TestSocialSettingsRefusesCallbackAndEndpointFields(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+
+	for _, field := range []string{"callback_url", "callback", "redirect_uri",
+		"authorize_url", "token_url", "scope"} {
+		rec := postAdmin(t, d.SocialSettingsSave, "/admin/settings/social", nil,
+			url.Values{"provider": {"google"}, "client_id": {"id"},
+				"client_secret": {"secret"}, field: {"https://evil.example.com/cb"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 필드 = HTTP %d, want 422", field, rec.Code)
+		}
+	}
+	kv, err := d.Content.Settings(context.Background(),
+		auth.SocialSettingKey("google", "client_id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv[auth.SocialSettingKey("google", "client_id")] != "" {
+		t.Error("거부된 요청이 저장됐다")
+	}
+}
+
+// **자격증명 없이 활성화할 수 없다** (D19 A-206 거부 조건).
+// 켜면 로그인 버튼이 즉시 깨지고, 사용자는 로그인이 고장 난 것으로 읽는다.
+func TestSocialCannotBeEnabledWithoutCredentials(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	rec := postAdmin(t, d.SocialSettingsSave, "/admin/settings/social", nil,
+		url.Values{"provider": {"google"}, "enabled": {"on"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("키 없이 활성화 = HTTP %d, want 422", rec.Code)
+	}
+
+	// 키를 넣으면 켜진다.
+	rec = postAdmin(t, d.SocialSettingsSave, "/admin/settings/social", nil,
+		url.Values{"provider": {"google"}, "client_id": {"cid"},
+			"client_secret": {"csecret"}, "enabled": {"on"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("키와 함께 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	kv, err := d.Content.Settings(ctx, auth.SocialSettingKey("google", "enabled"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv[auth.SocialSettingKey("google", "enabled")] == "" {
+		t.Error("켜지지 않았다")
+	}
+
+	// **이미 저장된 시크릿이 있으면 빈 칸으로도 켤 수 있다.** 빈 칸은
+	// 「그대로 두라」이므로, 다른 항목만 고치러 온 관리자가 막히면 안 된다.
+	rec = postAdmin(t, d.SocialSettingsSave, "/admin/settings/social", nil,
+		url.Values{"provider": {"google"}, "client_id": {"cid"}, "enabled": {"on"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("저장된 시크릿이 있는데 = HTTP %d", rec.Code)
+	}
+}
+
+// **시크릿은 저장 후 화면에 다시 오지 않는다** (D19 A-206).
+func TestSocialSecretIsNeverRedisplayed(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+
+	postAdmin(t, d.SocialSettingsSave, "/admin/settings/social", nil,
+		url.Values{"provider": {"naver"}, "client_id": {"cid"},
+			"client_secret": {"NAVER_SUPERSECRET"}})
+
+	var configs []auth.SocialConfig
+	var callbacks map[string]string
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		m, _ := data.(map[string]any)
+		configs, _ = m["Providers"].([]auth.SocialConfig)
+		callbacks, _ = m["Callbacks"].(map[string]string)
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://shop.example.com/admin/settings/social", nil)
+	req.Host = "shop.example.com"
+	d.SocialSettingsForm(httptest.NewRecorder(), req)
+
+	found := false
+	for _, c := range configs {
+		if c.Provider != "naver" {
+			continue
+		}
+		found = true
+		if !c.HasSecret {
+			t.Error("저장 여부조차 알려주지 않았다")
+		}
+		if strings.Contains(c.ClientID, "SUPERSECRET") {
+			t.Error("시크릿이 클라이언트 ID 자리로 나왔다")
+		}
+	}
+	if !found {
+		t.Fatal("naver 설정이 화면에 없다")
+	}
+	// **콜백은 서버가 계산해 보여준다.** 입력란이 아니다.
+	if callbacks["naver"] != "https://shop.example.com/auth/naver/callback" {
+		t.Errorf("콜백 %q — 서버가 계산한 값이 아니다", callbacks["naver"])
+	}
+}
+
+// 목록 밖 프로바이더는 422 다. 목록은 코드가 정한다 (D15 P1).
+func TestSocialProviderIsAnAllowList(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+
+	for _, bad := range []string{"", "facebook", "GOOGLE", "../google"} {
+		rec := postAdmin(t, d.SocialSettingsSave, "/admin/settings/social", nil,
+			url.Values{"provider": {bad}, "client_id": {"id"}, "client_secret": {"s"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("프로바이더 %q = HTTP %d, want 422", bad, rec.Code)
+		}
 	}
 }

@@ -1241,10 +1241,16 @@ if [ -f "$CL" ]; then
 	fi
 	# 다운그레이드 경로가 무엇인지 적혀 있어야 한다. `Down` 이 있다는 것과
 	# 되돌릴 수 있다는 것은 다르다 (NFR-308).
-	if grep -q "백업 복원" "$CL"; then
-		printf '  ✓ %s 이 되돌릴 수 없는 변경의 경로를 밝힌다\n' "$CL"
+	# **가장 최근 릴리즈 절 안에서 찾는다.** 파일 어딘가에 한 번 적혀 있으면
+	# 통과하게 두면, 다음 릴리즈가 파괴적 변경을 넣고 아무 말도 안 해도 옛
+	# 문장 하나로 계속 초록이 된다.
+	latest_section=$(awk '/^## /{n++} n==1' "$CL")
+	if [ -z "$latest_section" ]; then
+		err "$CL 에서 릴리즈 절을 찾지 못했다 (검사가 헛돌았다)"
+	elif printf '%s\n' "$latest_section" | grep -q "백업 복원"; then
+		printf '  ✓ %s 의 최신 릴리즈 절이 되돌릴 수 없는 변경의 경로를 밝힌다\n' "$CL"
 	else
-		err "$CL 에 다운그레이드 경로(백업 복원)가 적혀 있지 않다 (NFR-308)"
+		err "$CL 의 최신 릴리즈 절에 다운그레이드 경로(백업 복원)가 없다 (NFR-308)"
 	fi
 else
 	err "$CL 이 없다"

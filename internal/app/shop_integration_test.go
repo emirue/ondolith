@@ -19,8 +19,8 @@ import (
 // — 새 커머스 라우트를 추가하면 자동으로 검사 대상이 된다.
 func commerceRoutes(t *testing.T) []Route {
 	t.Helper()
-	shopOn := buildTree(nil, nil, nil, nil, nil, nil, true, noopHandler)
-	shopOff := buildTree(nil, nil, nil, nil, nil, nil, false, noopHandler)
+	shopOn := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler)
+	shopOff := buildTree(nil, nil, nil, nil, nil, nil, nil, false, noopHandler)
 
 	off := map[string]bool{}
 	for _, rt := range shopOff.Routes() {
@@ -45,7 +45,7 @@ func TestCommerceRoutesAreAbsentInCmsMode(t *testing.T) {
 	only := commerceRoutes(t)
 
 	mux := http.NewServeMux()
-	buildTree(nil, nil, nil, nil, nil, nil, false, noopHandler).Mount(mux)
+	buildTree(nil, nil, nil, nil, nil, nil, nil, false, noopHandler).Mount(mux)
 
 	for _, rt := range only {
 		req, err := http.NewRequest(rt.Method, sampleURL(rt.Pattern), nil)
@@ -71,7 +71,7 @@ func TestCommerceRoutesArePresentInShopMode(t *testing.T) {
 	only := commerceRoutes(t)
 
 	mux := http.NewServeMux()
-	buildTree(nil, nil, nil, nil, nil, nil, true, noopHandler).Mount(mux)
+	buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler).Mount(mux)
 
 	for _, rt := range only {
 		req, err := http.NewRequest(rt.Method, sampleURL(rt.Pattern), nil)
@@ -219,8 +219,8 @@ func TestNoCommerceFlagInsideHandlers(t *testing.T) {
 // 트리가 커머스를 켜고 끄는 것 말고는 같아야 한다. 게이팅이 코어 라우트를
 // 함께 지우면 cms 사이트의 게시판이 사라진다.
 func TestGatingOnlyAffectsCommerceRoutes(t *testing.T) {
-	on := buildTree(nil, nil, nil, nil, nil, nil, true, noopHandler).Routes()
-	off := buildTree(nil, nil, nil, nil, nil, nil, false, noopHandler).Routes()
+	on := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler).Routes()
+	off := buildTree(nil, nil, nil, nil, nil, nil, nil, false, noopHandler).Routes()
 
 	onSet := map[string]bool{}
 	for _, rt := range on {

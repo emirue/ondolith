@@ -83,6 +83,11 @@ type Deps struct {
 	// Gateway 는 A-508 이 PG 에 실제 상태를 물을 때 쓴다. nil 이면 대사가
 	// 우리 기록만 보여준다 — 조회 없이 「일치」로 그리지 않는다.
 	Gateway func() commerce.Gateway
+	// BaseURL 은 A-206 이 **표시만** 하는 콜백 주소를 만드는 데 쓴다.
+	// 요청에서 만든다 — 설정으로 두면 관리자가 그 값을 바꿔 인가 코드를
+	// 다른 곳으로 돌릴 수 있고, 그것이 D19 A-206 이 콜백 URL 을 받지 않기로
+	// 한 이유다.
+	BaseURL func(*http.Request) string
 	// SendReset delivers a forced-reset link (A-402). Injected and fire-and-
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.

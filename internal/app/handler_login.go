@@ -19,6 +19,18 @@ type loginDeps struct {
 	limiter *auth.Limiter
 	limits  auth.Limits
 	render  func(w http.ResponseWriter, r *http.Request, name string, code int, data any)
+	// social 은 A-206 에서 **켠** 프로바이더다. 화면이 버튼을 그리는 데 쓴다 —
+	// 활성 프로바이더가 0이면 버튼도 없다 (FR-709). nil 이면 소셜이 없는
+	// 배포다.
+	social func() []auth.SocialConfig
+}
+
+// socialButtons is what the login screen draws. 켠 것이 없으면 빈 목록이다.
+func (d *loginDeps) socialButtons() []auth.SocialConfig {
+	if d.social == nil {
+		return nil
+	}
+	return d.social()
 }
 
 // P-101 GET: the form.
@@ -28,7 +40,7 @@ func (d *loginDeps) loginForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.render(w, r, "auth/login.html", http.StatusOK, map[string]any{
-		"Next": auth.SafeNext(r.URL.Query().Get("next")),
+		"Next": auth.SafeNext(r.URL.Query().Get("next")), "Social": d.socialButtons(),
 	})
 }
 

@@ -47,6 +47,7 @@
 | `github.com/alexedwards/scs/pgxstore` | `v0.0.0-20251002162104-209de6e426de` | scs의 PostgreSQL 스토어 | 같은 `pgxpool.Pool`을 공유한다. 접속 설정이 한 군데다 |
 | `golang.org/x/crypto` | `v0.54.0` | bcrypt | 비밀번호 해시 (NFR-208). 표준 라이브러리에 없다 |
 | `rsc.io/qr` | `v0.2.0` | QR 인코딩 (FR-620) | **비트맵까지만 준다** — 사각형을 찍는 것은 우리 코드라 뷰박스·여백·SVG 출력을 우리가 정한다 (D50 은 서버에서 SVG 를 요구한다). API 가 `Encode`·`Black` 둘뿐이라 표면이 작고, 이미지 인코더·폰트 같은 딸린 의존성이 없다. 2026-08-06 조회: OSV 취약점 없음 |
+| `github.com/markbates/goth` | `v1.82.0` | 소셜 로그인 OAuth2 (FR-208) | 프로바이더별 인가 흐름은 자작 금지 대상이다 (NFR-201). **`gothic` 하위 패키지는 쓰지 않는다** — gorilla/sessions 를 쓰는데 우리 세션은 scs 라 (NFR-204) 두 스토어가 한 요청에 있으면 어느 쪽이 진짜 로그인 상태인지가 코드마다 달라진다. `goth.Provider`·`goth.Session` 만 쓴다. 2026-08-07 조회: OSV 취약점 없음 |
 
 **Phase 1에 추가 예정** — 착수 시 버전과 취약점을 다시 조회한다
 

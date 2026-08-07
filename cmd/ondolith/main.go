@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -146,7 +147,12 @@ func run() error {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("ondolith", versionString())
+		// **아키텍처를 함께 낸다.** 크로스 컴파일 산출물을 검증할 때, 대상
+		// 아키텍처에서 실제로 돌았는지는 바이너리 자신이 말해야 안다 —
+		// `docker run --platform` 은 이미지를 고를 뿐이고 프로세스는 호스트
+		// 커널이 exec 하므로, 네이티브 바이너리가 그대로 돈다
+		// (scripts/verify-release.sh 가 이 값을 대조한다).
+		fmt.Println("ondolith", versionString(), runtime.GOOS+"/"+runtime.GOARCH)
 		return nil
 	}
 

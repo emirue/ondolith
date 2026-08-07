@@ -105,12 +105,22 @@ say "✓" "이전 릴리즈로 설치 완료 (users=$before)"
 # 절차에는 그 단계가 없다.
 docker exec "$APP" sh -c 'mkdir -p /work/uploads /work/themes/mine &&
 	echo upload-probe > /work/uploads/probe.bin &&
-	echo theme-probe > /work/themes/mine/base.html' >/dev/null 2>&1 || true
+	echo theme-probe > /work/themes/mine/base.html' >/dev/null 2>&1 \
+	|| { say "✗" "프로브 파일을 만들지 못했다 — 이 검사가 헛돈다"; fail=1; }
+# **디렉터리 전체를 본다.** 정해 둔 세 경로만 해시하면 업그레이드가 *추가*
+# 하거나 *지운* 파일이 보이지 않는다 — 새 바이너리가 테마 디렉터리에 파일을
+# 하나 쓰면 해시는 그대로다.
 hash_of() { docker run --rm -v "$tmp:/w" alpine:3 sh -c \
-	'md5sum /w/ondolith.json /w/uploads/probe.bin /w/themes/mine/base.html 2>/dev/null | sort'; }
+	'find /w/ondolith.json /w/uploads /w/themes -type f 2>/dev/null | sort | xargs md5sum 2>/dev/null'; }
 before_hash=$(hash_of)
-[ -n "$before_hash" ] && say "✓" "설정·업로드·테마 해시 기록" \
-	|| { say "✗" "해시를 뜨지 못했다"; fail=1; }
+# 파일 수를 함께 확인한다. 셋 다 있어야 이 검사가 무엇이든 본 것이다.
+before_n=$(printf '%s\n' "$before_hash" | grep -c . || true)
+if [ "${before_n:-0}" -ge 3 ]; then
+	say "✓" "설정·업로드·테마 $before_n 개 파일 해시 기록"
+else
+	say "✗" "해시 대상이 $before_n 개뿐이다 — 프로브 파일이 만들어지지 않았다"
+	fail=1
+fi
 
 # ② 백업.
 docker exec "$PG" pg_dump -U u -Fc u > "$tmp/before.dump" 2>/dev/null
@@ -144,8 +154,13 @@ esac
 
 # 설정·업로드·테마가 그대로인지. 바이너리 교체가 이것들을 만지면 안 된다.
 after_hash=$(hash_of)
-[ "$after_hash" = "$before_hash" ] && say "✓" "설정·업로드·테마가 바뀌지 않았다" \
-	|| { say "✗" "업그레이드가 파일을 건드렸다"; printf '%s\n---\n%s\n' "$before_hash" "$after_hash"; fail=1; }
+if [ "$after_hash" = "$before_hash" ]; then
+	say "✓" "설정·업로드·테마가 바뀌지 않았다 (파일 $before_n 개)"
+else
+	say "✗" "업그레이드가 파일을 건드렸다"
+	printf '%s\n---\n%s\n' "$before_hash" "$after_hash"
+	fail=1
+fi
 
 # ④ **다운그레이드 실측.** 이전 바이너리로 되돌려도 뜨는지 본다. 추가만 하는
 # 마이그레이션은 앞 릴리즈가 모르는 컬럼을 남길 뿐이라 기동을 막지 않는다 —

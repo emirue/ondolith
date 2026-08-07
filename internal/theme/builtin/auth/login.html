@@ -10,5 +10,33 @@
   <input type="hidden" name="next" value="{{with .Data}}{{.Next}}{{end}}">
   <button type="submit">로그인</button>
 </form>
+{{/* 관리자가 A-206 에서 켠 프로바이더만 나온다 (FR-709). 켠 것이 없으면
+     이 블록 자체가 없다 — 눌러도 안 되는 버튼을 그리지 않는다.
+     **POST 다**: 시작이 세션에 state 를 심으므로 링크면 프리페치가 흐름을
+     시작시킨다. */}}
+{{with .Data}}{{with .Social}}
+<div class="social-login">
+  <p>다른 계정으로 로그인</p>
+  {{range .}}
+  <form method="post" action="/auth/{{.Provider}}" class="inline">
+    <button type="submit" class="social-btn social-btn--{{.Provider}}">{{.Label}}로 로그인</button>
+  </form>
+  {{end}}
+</div>
+{{end}}{{end}}
+{{/* 관리자가 A-206 에서 켠 프로바이더만 나온다 (FR-709). 켠 것이 없으면
+     이 블록 자체가 없다 — 눌러도 안 되는 버튼을 그리지 않는다.
+     **POST 다**: 시작이 세션에 state 를 심으므로, 링크면 프리페치가 흐름을
+     시작시킨다. */}}
+{{with .Data}}{{with .Social}}
+<div class="social-login">
+  <p>다른 계정으로 로그인</p>
+  {{range .}}
+  <form method="post" action="/auth/{{.Provider}}" class="inline">
+    <button type="submit" class="social-btn social-btn--{{.Provider}}">{{.Label}}로 로그인</button>
+  </form>
+  {{end}}
+</div>
+{{end}}{{end}}
 <p><a href="/signup">회원가입</a> · <a href="/password/reset">비밀번호를 잊으셨나요?</a></p>
 {{end}}

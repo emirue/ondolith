@@ -79,4 +79,4 @@ verify-upgrade: ## 데이터가 든 인스턴스에서 업그레이드 절차 �
 # 토스 계정과 네트워크가 필요해 check 에도 test-integration 에도 넣지 않는다.
 # 태그 없이는 빌드조차 되지 않으므로 SKIP 이 생기지 않는다 (check-testrun.sh).
 test-toss: ## 토스 테스트 키로 어댑터 실측 (W3-34). ONDOLITH_TOSS_TEST_SECRET 필요
-	go test -tags tosslive -count=1 -v -run 'TestLiveToss' ./internal/commerce/
+	@sh scripts/toss-live.sh

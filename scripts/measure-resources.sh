@@ -34,7 +34,14 @@ tmp=$(mktemp -d)
 
 docker network create "$NET" >/dev/null
 # PostgreSQL 을 같은 인스턴스에 올린 구성이다 (D70 이 권장값을 적는 대상).
+# **PostgreSQL 도 같은 티어 안에 둔다.** 앱만 제한하고 DB 를 밖에 두면
+# "1 vCPU / 512MB 에서 돈다" 가 아니라 "앱 혼자 512MB 안에서 돈다" 를 재게
+# 된다 — D70 이 적는 구성은 둘을 같은 인스턴스에 올린 것이다.
+#
+# 512MB 를 나눠 쓴다: DB 384MB (shared_buffers 128MB + 작업 메모리·커넥션),
+# 앱 128MB. 앱의 유휴 RSS 가 한 자리 MiB 이므로 이 배분이 실제 권고와 같다.
 docker run -d --name "$PG" --network "$NET" \
+	--cpus=1 --memory=384m \
 	-e POSTGRES_PASSWORD=m -e POSTGRES_USER=m -e POSTGRES_DB=m \
 	postgres:18-alpine -c shared_buffers=128MB >/dev/null
 
@@ -51,7 +58,7 @@ until docker exec "$PG" pg_isready -U m >/dev/null 2>&1; do
 done
 
 docker run -d --name "$APP" --network "$NET" \
-	--cpus=1 --memory="${MEM_LIMIT_MB}m" \
+	--cpus=1 --memory=128m \
 	-v "$PWD/$bin:/ondolith:ro" -v "$tmp:/work" -w /work \
 	alpine:3 /ondolith >/dev/null
 
@@ -152,7 +159,27 @@ case "$rss_mb" in
 	exit 1 ;;
 esac
 
-echo "  측정: 유휴 RSS ${rss_mb} MiB / 상한 ${RSS_CEILING_MB} MiB (티어 ${MEM_LIMIT_MB}MB, 1 vCPU)"
+# DB 도 함께 잰다. 합이 티어를 넘으면 그 구성은 그 인스턴스에서 안 돈다.
+pg_bytes=$(docker stats --no-stream --format '{{.MemUsage}}' "$PG" | awk '{print $1}')
+pg_mb=$(printf '%s' "$pg_bytes" | awk '
+	/GiB/ { gsub(/GiB/,""); printf "%.0f", $1 * 1024; exit }
+	/MiB/ { gsub(/MiB/,""); printf "%.0f", $1; exit }
+	/KiB/ { gsub(/KiB/,""); printf "%.1f", $1 / 1024; exit }
+	{ printf "%.1f", $1 / 1048576 }')
+case "$pg_mb" in
+'' | *[!0-9.]* ) echo "  ✗ DB 메모리를 재지 못했다 (출력: [${pg_bytes:-없음}])"; exit 1 ;;
+esac
+
+echo "  측정: 앱 ${rss_mb} MiB + DB ${pg_mb} MiB / 티어 ${MEM_LIMIT_MB}MB (1 vCPU)"
+echo "        앱 유휴 RSS 상한 ${RSS_CEILING_MB} MiB"
+
+# 합이 티어를 넘으면 그 구성은 그 인스턴스에서 돌지 않는다.
+total_over=$(awk -v a="$rss_mb" -v b="$pg_mb" -v t="$MEM_LIMIT_MB" \
+	'BEGIN{print (a + b > t) ? 1 : 0}')
+if [ "$total_over" = "1" ]; then
+	echo "  ✗ 앱+DB 합이 티어 메모리를 넘었다 (NFR-101)"
+	exit 1
+fi
 over=$(awk -v a="$rss_mb" -v b="$RSS_CEILING_MB" 'BEGIN{print (a + 0 > b + 0) ? 1 : 0}')
 if [ "$over" = "1" ]; then
 	echo "  ✗ 유휴 RSS 가 티어 메모리의 절반을 넘었다 (NFR-101)"

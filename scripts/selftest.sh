@@ -538,22 +538,16 @@ echo "selftest: CHANGELOG 마이그레이션 검사 (checkdocs)"
 
 # 새 마이그레이션이 CHANGELOG 없이 들어오는 것을 잡는가. 목록을 하드코딩하면
 # 이 주입이 통과해 버리므로, 그 사실을 여기서 고정한다.
+# **`detected` 를 쓴다.** 파이프로 grep 하면 파이프라인의 종료 코드가 grep 의
+# 것이 되어, checkdocs 가 위반을 출력하고도 exit 0 을 내는 M3 재발을 놓친다.
+# `detected` 는 출력·종료 코드·**어느 검사가 잡았는지**를 함께 본다.
 cp "$REPO/CHANGELOG.md" "$TMP/cl.bak"
 touch "$REPO/internal/migrations/09999_selftest_probe.sql"
-if (cd "$REPO" && sh scripts/checkdocs.sh 2>&1) | grep -q "없는 마이그레이션: 09999_selftest_probe.sql"; then
-	ok "CHANGELOG 에 없는 마이그레이션을 잡는다"
-else
-	err "새 마이그레이션이 CHANGELOG 없이 통과했다"
-fi
+detected "CHANGELOG 에 없는 마이그레이션" "없는 마이그레이션: 09999_selftest_probe.sql"
 rm -f "$REPO/internal/migrations/09999_selftest_probe.sql"
 
-# 다운그레이드 경로가 사라지면 잡는가.
 sed 's/백업 복원/되돌리기/g' "$TMP/cl.bak" > "$REPO/CHANGELOG.md"
-if (cd "$REPO" && sh scripts/checkdocs.sh 2>&1) | grep -q "다운그레이드 경로"; then
-	ok "다운그레이드 경로가 빠지면 잡는다"
-else
-	err "다운그레이드 경로 없이 통과했다"
-fi
+detected "다운그레이드 경로 누락" "다운그레이드 경로"
 cp "$TMP/cl.bak" "$REPO/CHANGELOG.md"
 
 echo "selftest: 릴리즈 검증기 (verify-release.sh)"
@@ -573,9 +567,14 @@ run_vr() {  # $1=PATH 오버라이드("-" 면 그대로)
 }
 
 # 산출물이 없으면 실패한다. "빌드를 안 했다" 가 조용한 성공이 되면 안 된다.
+# **어느 이유로 거부했는지 본다** (M10). exit 코드만 보면 docker 가 없는
+# 기계에서 docker 가드가 대신 잡고, 산출물 검사는 증명되지 않은 채 남는다 —
+# `make check` 는 오프라인에서도 돌아야 하므로 그 환경이 정상 경로다.
 run_vr -
-if [ "$vr_code" -ne 0 ]; then
+if [ "$vr_code" -ne 0 ] && printf '%s' "$vr_out" | grep -q "가 없다"; then
 	ok "산출물이 없으면 거부한다 → exit $vr_code"
+elif [ "$vr_code" -ne 0 ]; then
+	err "M10 — 다른 이유로 거부했다 (산출물 검사가 증명되지 않았다): $vr_out"
 else
 	err "산출물이 없는데 통과했다"
 fi

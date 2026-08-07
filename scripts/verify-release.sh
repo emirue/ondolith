@@ -39,6 +39,17 @@ for target in linux/amd64 linux/arm64; do
 	*) say "✗" "$arch 가 ELF 가 아니다: $desc"; fail=1 ;;
 	esac
 
+	# ①-b **파일 이름이 아니라 기계 코드를 본다.** 이것이 이 검증기의 존재
+	# 이유다: `GOARCH` 를 빠뜨린 빌드는 두 이름으로 같은 아키텍처를 낸다.
+	# 정적 링크·ELF 만 보면 그 산출물이 전부 통과한다.
+	case "$arch:$desc" in
+	amd64:*x86-64*) : ;;
+	arm64:*aarch64*) : ;;
+	*)
+		say "✗" "$arch 산출물의 기계 코드가 다르다: $desc"
+		fail=1 ;;
+	esac
+
 	# ② **해당 아키텍처에서 실행**해 버전을 보고하게 한다.
 	# stderr 를 섞지 않는다: 이미지 pull 진행 표시가 버전 문자열에 끼어들면
 	# 대조가 우연히 통과한다.
@@ -47,8 +58,18 @@ for target in linux/amd64 linux/arm64; do
 		say "✗" "$arch 실행 실패: $(cat /tmp/vr-err)"; fail=1; continue
 	fi
 	case "$got" in
-	*"$want"*) say "✓" "$arch 실행 → $got" ;;
-	*) say "✗" "$arch 가 보고한 버전 [$got] 에 [$want] 가 없다"; fail=1 ;;
+	*"$want"*) : ;;
+	*) say "✗" "$arch 가 보고한 버전 [$got] 에 [$want] 가 없다"; fail=1; continue ;;
+	esac
+	# ②-b **바이너리 자신이 말하는 아키텍처를 본다.**
+	#
+	# `docker run --platform` 은 **이미지**를 고를 뿐이다. 프로세스는 호스트
+	# 커널이 exec 하므로, 네이티브 아키텍처 바이너리는 어떤 --platform 아래서도
+	# 그냥 돈다 — 즉 실행이 성공했다는 사실만으로는 "대상 아키텍처에서 돌았다"
+	# 가 증명되지 않는다. 바이너리에게 직접 물어야 한다.
+	case "$got" in
+	*"linux/$arch"*) say "✓" "$arch 실행 → $got" ;;
+	*) say "✗" "$arch 산출물이 [$got] 을 보고했다 — linux/$arch 가 아니다"; fail=1 ;;
 	esac
 done
 

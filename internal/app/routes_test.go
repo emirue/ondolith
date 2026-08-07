@@ -193,7 +193,7 @@ func mustReq(t *testing.T, method, target string) *http.Request {
 // Check 의 다른 검사는 등록된 라우트만 훑으므로, 화면 하나가 통째로 빠져
 // 있어도 게이트는 전부 초록이다 — 무엇이 남았는지 아무도 모르는 상태가 된다.
 func TestCheckWarnsAboutScreensWithNoRoute(t *testing.T) {
-	reg := buildTree(nil, nil, nil, nil, nil, nil, true, noopHandler)
+	reg := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler)
 	// 권한 목록은 비운다 — 이 검사가 보는 것은 Warnings 뿐이고, 없는 권한
 	// 키는 Errors 로 간다.
 	res := reg.Check(nil, screenInventory)

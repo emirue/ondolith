@@ -22,7 +22,7 @@ import (
 // the boot check: a key that does not exist stops the server, and a permission
 // no route names is reported as dead weight in the role editor.
 func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
-	ad *admin.Deps, sh *shopDeps, shop bool, static http.HandlerFunc,
+	ad *admin.Deps, sh *shopDeps, soc *socialDeps, shop bool, static http.HandlerFunc,
 ) *Registry {
 	r := NewRegistry()
 
@@ -57,6 +57,21 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-108", Method: "POST", Pattern: "/me", Class: SC3, Handler: acc.updateProfile})
 	r.Add(Route{Screen: "P-109", Method: "GET", Pattern: "/me/password", Class: SC3, Handler: acc.passwordForm})
 	r.Add(Route{Screen: "P-109", Method: "POST", Pattern: "/me/password", Class: SC3, Handler: acc.changePassword})
+	// P-106 은 **POST 다.** 시작이 세션에 state 를 심으므로 GET 이면 P5
+	// 위반이고, 링크 프리페치가 로그인 흐름을 시작시킨다.
+	r.Add(Route{Screen: "P-106", Method: "POST", Pattern: "/auth/{provider}", Class: SC2,
+		Handler: soc.socialBegin})
+	// P-107 은 GET 이면서 상태를 바꾼다 — 프로바이더가 브라우저를 여기로
+	// 되돌린다. 우리가 메서드를 고를 수 없다 (D15 「P5 예외」).
+	r.Add(Route{Screen: "P-107", Method: "GET", Pattern: "/auth/{provider}/callback", Class: SC2,
+		Handler: soc.socialCallback,
+		UnsafeGETReason: "프로바이더가 브라우저를 이 주소로 GET 리다이렉트한다. " +
+			"OAuth2 가 정한 것이고 우리가 고를 수 없다 — 대신 방어가 state 대조에 걸려 있다: " +
+			"세션에 심은 값과 다르면 즉시 중단하고, 한 번 쓴 state 는 버린다."})
+	r.Add(Route{Screen: "P-111", Method: "GET", Pattern: "/me/connections", Class: SC3,
+		Handler: soc.connectionsPage})
+	r.Add(Route{Screen: "P-111", Method: "POST", Pattern: "/me/connections", Class: SC3,
+		Handler: soc.connectionsAction})
 
 	// ---- 게시판 (SC-1 은 읽기, SC-2 는 폼, SC-3 은 본인 글) ---------------------
 	// Permission is "" on all of them: the board's permission is scoped, so it
@@ -121,6 +136,12 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "settings.update", Handler: ad.MailSettingsForm})
 	r.Add(Route{Screen: "A-205", Method: "POST", Pattern: "/admin/settings/mail", Class: SC5,
 		Permission: "settings.update", Handler: ad.MailSettingsSave})
+	// A-206 소셜 로그인 설정. 커머스가 아니라 **코어**다 — cms 사이트도
+	// 회원 로그인을 쓴다.
+	r.Add(Route{Screen: "A-206", Method: "GET", Pattern: "/admin/settings/social", Class: SC4,
+		Permission: "settings.update", Handler: ad.SocialSettingsForm})
+	r.Add(Route{Screen: "A-206", Method: "POST", Pattern: "/admin/settings/social", Class: SC5,
+		Permission: "settings.update", Handler: ad.SocialSettingsSave})
 
 	r.Add(Route{Screen: "A-202", Method: "GET", Pattern: "/admin/themes", Class: SC4,
 		Permission: "theme.view", Handler: ad.ThemeList})

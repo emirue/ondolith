@@ -255,8 +255,9 @@ func payloadFor(name string) any {
 	case "account/connections.html":
 		return map[string]any{
 			"Connections": []connectionLike{
-				{Provider: "google", CanDisconnect: true},
-				{Provider: "kakao", CanDisconnect: false},
+				{Provider: "google", Label: "구글", Linked: true, CanDisconnect: true},
+				{Provider: "kakao", Label: "카카오", Linked: true, CanDisconnect: false},
+				{Provider: "naver", Label: "네이버"},
 			},
 		}
 	case "order/guest-form.html":
@@ -546,8 +547,10 @@ func TestCommerceTemplatesFormatMoney(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// `{{.Foo}}원` 은 money 를 안 쓴 자리다.
-		if regexp.MustCompile(`\{\{\.[A-Za-z][A-Za-z0-9.]*\}\}원`).Match(b) {
+		// `{{ .Foo }} 원` 처럼 공백이 있어도 잡는다. 앞의 정규식은 공백
+		// 하나만 넣으면 빠져나갔다 — 그 형태로 고쳐 두면 검사가 통과한 채
+		// 화면에는 `29000원` 이 나온다.
+		if regexp.MustCompile(`\{\{\s*[.$][A-Za-z][A-Za-z0-9.]*\s*\}\}\s*원`).Match(b) {
 			raw = append(raw, name)
 		}
 	}
@@ -555,16 +558,33 @@ func TestCommerceTemplatesFormatMoney(t *testing.T) {
 		t.Errorf("금액을 money 없이 그리는 템플릿: %v", raw)
 	}
 
-	// 실제로 통화 표기가 나오는지 — 정규식만 보면 money 를 쓰고도 깨질 수 있다.
+	// **실제로 통화 표기가 나오는지 — 금액을 그리는 템플릿 전부에서 본다.**
+	// 한 템플릿만 렌더링하면 나머지는 정규식에만 기대게 되고, 정규식은
+	// 빠져나갈 형태가 늘 남는다.
 	l := newBuiltinLoader()
-	v := fullView()
-	v.Data = payloadFor("shop/cart.html")
-	var b bytes.Buffer
-	if err := l.Render(&b, "shop/cart.html", v); err != nil {
-		t.Fatal(err)
+	rendered := 0
+	for _, name := range builtinTemplates(t) {
+		if !strings.HasPrefix(name, "shop/") && !strings.HasPrefix(name, "order/") {
+			continue
+		}
+		v := fullView()
+		v.Data = payloadFor(name)
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		out := b.String()
+		// 자릿수 구분 없이 4자리 이상 숫자에 곧바로 「원」이 붙으면 money 를
+		// 거치지 않은 것이다 (money 는 1,000 단위로 끊는다).
+		if m := regexp.MustCompile(`[^,\d](\d{4,})\s*원`).FindStringSubmatch(out); m != nil {
+			t.Errorf("%s 가 통화 표기 없이 %s원 을 그렸다", name, m[1])
+		}
+		if strings.Contains(out, "원") {
+			rendered++
+		}
 	}
-	if !strings.Contains(b.String(), "26,000원") {
-		t.Errorf("장바구니 합계가 통화 표기가 아니다:\n%.400s", b.String())
+	if rendered == 0 {
+		t.Fatal("금액을 그리는 템플릿을 하나도 렌더링하지 못했다 — 검사가 헛돌았다")
 	}
 }
 
@@ -637,5 +657,7 @@ func TestBuiltinThemeHasEveryContractTemplate(t *testing.T) {
 // connectionLike mirrors what P-111 hands the theme.
 type connectionLike struct {
 	Provider      string
+	Label         string
+	Linked        bool
 	CanDisconnect bool
 }
