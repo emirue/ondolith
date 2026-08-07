@@ -7,8 +7,12 @@
     <dt>상태</dt>
     <dd>{{if .IsActive}}<span class="adm-badge">활성</span>{{else}}<span class="adm-badge adm-badge--outline">비활성</span>{{end}}</dd>
     <dt>이메일 인증</dt>
-    <dd>{{if .EmailVerifiedAt.IsZero}}<span class="adm-badge adm-badge--outline">미인증</span>
-        {{else}}{{.EmailVerifiedAt.Format "2006-01-02"}}{{end}}</dd>
+    {{/* **포인터가 nil 인지를 먼저 본다.** `EmailVerifiedAt` 은 `*time.Time`
+         이고 `IsZero` 는 값 메서드다 — nil 포인터에 부르면 오류로 끝나
+         화면을 여는 것만으로 500 이 났다. 인증하지 않은 계정이 그 상태이고,
+         그것은 예외가 아니라 대부분이다. */}}
+    <dd>{{if .EmailVerifiedAt}}{{date .EmailVerifiedAt "2006-01-02"}}
+        {{else}}<span class="adm-badge adm-badge--outline">미인증</span>{{end}}</dd>
   </dl>
 </div>
 

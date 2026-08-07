@@ -147,8 +147,12 @@ func (d *Deps) PickCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		d.Render(w, r, "admin/pick.html", http.StatusOK,
-			map[string]any{"OrderNo": orderNo, "Lines": lines})
+		// **`Scanned` 를 빈 map 으로라도 넘긴다.** 없으면 템플릿의
+		// `index $s .VariantID` 가 nil 을 색인해 오류로 끝나고, 화면을 여는
+		// 것만으로 500 이 났다 — 아직 아무것도 스캔하지 않은 것이 이 화면의
+		// 정상 출발 상태인데도.
+		d.Render(w, r, "admin/pick.html", http.StatusOK, map[string]any{
+			"OrderNo": orderNo, "Lines": lines, "Scanned": map[string]int{}})
 		return
 	}
 	if err := r.ParseForm(); err != nil {

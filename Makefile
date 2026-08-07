@@ -3,10 +3,11 @@ PKG     := ./cmd/ondolith
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help build run check test test-integration schema e2e test-db-down vet fmt docs selftest vuln release verify-release measure verify-upgrade test-toss clean
+.PHONY: help build run check test test-integration schema e2e screens test-db-down vet fmt docs selftest vuln release verify-release measure verify-upgrade test-toss clean
 
 help:
-	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t20
+	@# 숫자를 포함한 대상(e2e)도 나와야 한다 — 목록에 없으면 없는 명령이다.
+	@grep -hE '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t20
 
 build: ## 로컬 바이너리 빌드
 	go build -o $(BIN) $(PKG)
@@ -31,6 +32,9 @@ test: ## 테스트 (경합 탐지 포함). DB 불필요
 	# 실행되지 않는데, 그때도 "check ok" 만 나오면 게이트가 전부 돌았다고 읽힌다.
 	# 실패로 만들지는 않는다 — 네트워크 없는 환경에서 게이트가 깨지면 안 된다.
 	@sh scripts/report-skips.sh
+
+screens: ## D11 의 모든 GET 화면을 열어 본다 (응답·본문·템플릿 오류)
+	sh scripts/screens.sh
 
 e2e: ## D83 시나리오 재실행 — 빌드된 바이너리에 빈 DB 를 붙여 설치부터 한 바퀴
 	sh scripts/e2e.sh

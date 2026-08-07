@@ -315,6 +315,12 @@ a:hover { color: var(--link-hover); }
   vertical-align: middle;
 }
 
+/* **마지막 행의 아래 선은 지운다.** 표의 마지막 td 테두리와 표를 감싼 상자의
+   경계가 같은 자리에 오면 1px 짜리 선 둘이 겹쳐 굵거나 어긋나 보인다 —
+   실측하니 0.5px 간격이었다. 행 사이를 가르는 것이 목적이므로 마지막 행
+   아래에는 가를 것이 없다. */
+.adm-table tbody tr:last-child td { border-bottom: 0; }
+
 .adm-table thead th {
   background: var(--thead-bg);
   border-top: 1px solid var(--line);

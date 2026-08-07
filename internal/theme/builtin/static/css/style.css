@@ -439,6 +439,11 @@ a:focus-visible {
   vertical-align: middle;
 }
 
+/* 마지막 행의 아래 선은 지운다 — 행 사이를 가르는 것이 목적이고, 마지막 행
+   아래에는 가를 것이 없다. 감싼 상자의 경계와 겹쳐 굵어 보인다. */
+.board-list tbody tr:last-child td,
+.order-list tbody tr:last-child td { border-bottom: 0; }
+
 .board-list tbody tr:hover,
 .order-list tbody tr:hover { background: var(--thead-bg); }
 

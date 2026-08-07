@@ -201,14 +201,14 @@
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
 | A-301 | 페이지 목록 | `/admin/pages` | GET | 권한:page.view | 없음 | SC-4 | FR-401, FR-403 |
-| A-302 | 페이지 편집 | `/admin/pages/{id}` | GET, POST, DELETE | 권한:page.update | 있음 | SC-5 | FR-401, FR-402, FR-404 |
+| A-302 | 페이지 편집 | `/admin/pages/{id}` | GET, POST | 권한:page.update | 있음 | SC-5 | FR-401, FR-402, FR-404 |
 | A-303 | 페이지 발행 | `/admin/pages/{id}/publish` | POST | 권한:page.publish | 있음 | SC-5 | FR-403 |
 | A-304 | 게시판 목록 | `/admin/boards` | GET | 권한:board.view | 없음 | SC-4 | FR-501, FR-705 |
-| A-305 | 게시판 생성·설정 | `/admin/boards/{id}` | GET, POST, DELETE | 권한:board.manage | 있음 | SC-5 | FR-501, FR-505, FR-506, FR-512, FR-705 |
+| A-305 | 게시판 생성·설정 | `/admin/boards/{id}` | GET, POST | 권한:board.manage | 있음 | SC-5 | FR-501, FR-505, FR-506, FR-512, FR-705 |
 | A-306 | 커스텀 필드 스키마 편집기 | `/admin/boards/{id}/fields` | GET, POST | 권한:board.manage | 있음 | SC-5 | FR-502, FR-503, FR-509, FR-705 |
-| A-307 | 글 관리 | `/admin/posts` | GET, POST, DELETE | 권한:post.moderate | 있음 | SC-5 | FR-504, FR-507, FR-512 |
-| A-308 | 댓글 관리 | `/admin/comments` | GET, POST, DELETE | 권한:comment.moderate | 있음 | SC-5 | FR-505 |
-| A-309 | 첨부파일 관리 | `/admin/attachments` | GET, DELETE | 권한:post.moderate | 있음 | SC-7 | FR-506, NFR-206 |
+| A-307 | 글 관리 | `/admin/posts` | GET, POST | 권한:post.moderate | 있음 | SC-5 | FR-504, FR-507, FR-512 |
+| A-308 | 댓글 관리 | `/admin/comments` | GET, POST | 권한:comment.moderate | 있음 | SC-5 | FR-505 |
+| A-309 | 첨부파일 관리 | `/admin/attachments` | GET, POST | 권한:post.moderate | 있음 | SC-7 | FR-506, NFR-206 |
 
 ### A-4xx 사용자·역할
 
@@ -216,31 +216,31 @@
 |---|---|---|---|---|---|---|---|
 | A-401 | 사용자 목록 | `/admin/users` | GET | 권한:user.view | 없음 | SC-4 | FR-704 |
 | A-402 | 사용자 상세·편집 | `/admin/users/{id}` | GET, POST | 권한:user.update | 있음 | SC-5 | FR-207, FR-704 |
-| A-403 | 역할 목록·정의 | `/admin/roles` | GET, POST, DELETE | 권한:role.manage | 있음 | SC-5 | FR-205, FR-704 |
-| A-404 | 역할 권한 편집 | `/admin/roles/{id}/permissions` | GET, POST | 권한:role.manage | 있음 | SC-5 | FR-205 |
-| A-405 | 사용자 역할 부여 | `/admin/users/{id}/roles` | GET, POST | 권한:role.assign | 있음 | SC-5 | FR-205, FR-704 |
+| A-403 | 역할 목록·정의 | `/admin/roles` | GET | 권한:role.manage | 있음 | SC-5 | FR-205, FR-704 |
+| A-404 | 역할 권한 편집 | `/admin/roles/{id}/permissions` | POST | 권한:role.manage | 있음 | SC-5 | FR-205 |
+| A-405 | 사용자 역할 부여 | `/admin/users/{id}/roles` | POST | 권한:role.assign | 있음 | SC-5 | FR-205, FR-704 |
 
 ### A-5xx 커머스 관리
 
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
 | A-501 | 상품 목록 | `/admin/products` | GET | 권한:product.view | 없음 | SC-4 | FR-601, FR-706 |
-| A-502 | 상품 편집 | `/admin/products/{id}` | GET, POST, DELETE | 권한:product.manage | 있음 | SC-7 | FR-601, NFR-206 |
+| A-502 | 상품 편집 | `/admin/products/{id}` | GET, POST | 권한:product.manage | 있음 | SC-7 | FR-601, NFR-206 |
 | A-503 | 옵션·재고 편집기 | `/admin/products/{id}/variants` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-602 |
 | A-504 | 주문 목록 | `/admin/orders` | GET | 권한:order.view | 없음 | SC-4 | FR-508, FR-604, FR-706 |
 | A-505 | 주문 상세 | `/admin/orders/{no}` | GET | 권한:order.view | 없음 | SC-4 | FR-604, FR-612 |
 | A-506 | 주문 상태 변경 | `/admin/orders/{no}/transition` | POST | 권한:order.update | 있음 | SC-5 | FR-604 |
 | A-507 | 취소·환불 처리 | `/admin/orders/{no}/refund` | GET, POST | 권한:order.refund | 있음 | SC-6 | FR-604, FR-611, FR-625 |
-| A-508 | 결제 대사 | `/admin/payments/reconcile` | GET, POST | 권한:payment.view | 있음 | SC-6 | FR-608, FR-609, FR-610 |
-| A-509 | 상품 카테고리 관리 | `/admin/categories` | GET, POST, DELETE | 권한:product.manage | 있음 | SC-5 | FR-615 |
+| A-508 | 결제 대사 | `/admin/reconcile` | GET | 권한:payment.view | 있음 | SC-6 | FR-608, FR-609, FR-610 |
+| A-509 | 상품 카테고리 관리 | `/admin/categories` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-615 |
 | A-510 | 배송 정보·송장 입력 | `/admin/orders/{no}/shipping` | GET, POST | 권한:order.update | 있음 | SC-5 | FR-616 |
 | A-511 | 반품·교환 처리 | `/admin/orders/{no}/returns` | GET, POST | 권한:order.return | 있음 | SC-6 | FR-617, FR-618 |
 | A-512 | 커머스 정책 설정 | `/admin/commerce/policy` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-617, FR-618, FR-604 |
-| A-513 | QR 라벨 발행 | `/admin/products/labels` | GET | 권한:product.manage | 없음 | SC-4 | FR-620 |
-| A-514 | 스캔 입고 | `/admin/stock/receive` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-621 |
-| A-515 | 재고 실사 | `/admin/stock/count` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-622 |
+| A-513 | QR 라벨 발행 | `/admin/products/{id}/labels` | GET | 권한:product.manage | 없음 | SC-4 | FR-620 |
+| A-514 | 스캔 입고 | `/admin/scan/receive` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-621 |
+| A-515 | 재고 실사 | `/admin/scan/stocktake` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-622 |
 | A-516 | 출고 피킹 대조 | `/admin/orders/{no}/pick` | GET, POST | 권한:order.update | 있음 | SC-5 | FR-623 |
-| A-517 | 스캔 재고 조회 | `/admin/stock/lookup` | GET | 권한:product.view | 없음 | SC-4 | FR-624 |
+| A-517 | 스캔 재고 조회 | `/admin/scan/lookup` | GET | 권한:product.view | 없음 | SC-4 | FR-624 |
 
 ### A-6xx 운영
 

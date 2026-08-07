@@ -1262,6 +1262,45 @@ else
 	err "$CL 이 없다"
 fi
 
+# --- 28b. D11 의 경로·메서드가 실제 라우트와 같다 --------------------------
+#
+# 부팅 자체 점검은 **화면 ID** 만 본다 — D11 에 있는 id 가 라우트에 있는가.
+# 경로와 메서드는 보지 않으므로, 같은 id 로 다른 주소를 등록해도 조용히 통과한다.
+# 실제로 일곱 화면이 그렇게 갈라져 있었다: A-508 은 문서가
+# `/admin/payments/reconcile`, 구현이 `/admin/reconcile`; A-514·A-515·A-517 은
+# `/admin/stock/*` 대 `/admin/scan/*`; A-513 은 `{id}` 유무; A-404·A-405 는
+# 문서가 GET 을 적었는데 구현은 POST 뿐이다.
+#
+# **문서가 거짓이면 그 문서를 보고 만든 것이 전부 어긋난다.** D11 은 화면의
+# 단일 정의이므로(D90) 여기서 대조한다.
+begin
+perl -ne 'next unless /^\|\s*([PA]-\d{3})\s*\|\s*[^|]+\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|/;
+	my ($id, $path, $m) = ($1, $2, $3);
+	for my $meth (split /\s*,\s*/, $m) {
+		next unless $meth =~ /^(GET|POST|PUT|DELETE|PATCH)$/;
+		print "$id\t$meth\t$path\n";
+	}' docs/11-screens.md | sort -u >"$T"/cd_scr_want
+
+# **파일 전체를 한 덩어리로 읽는다.** `Route{...}` 는 줄바꿈되어 등록되는
+# 것이 있어서(P-514 등), 줄 단위로 훑으면 그 라우트가 「없는 것」이 된다 —
+# 처음 만든 판이 실제로 그렇게 두 화면을 놓쳤다.
+perl -0ne 'print "$1\t$2\t$3\n"
+	while /Screen:\s*"([PA]-\d{3})",\s*Method:\s*"([A-Z]+)",\s*\n?\s*Pattern:\s*"([^"]+)"/gs' \
+	internal/app/tree.go | sort -u >"$T"/cd_scr_have
+
+if [ ! -s "$T"/cd_scr_want ] || [ ! -s "$T"/cd_scr_have ]; then
+	err "D11 표 또는 tree.go 의 라우트를 읽지 못했다 (검사가 헛돌았다)"
+else
+	# 다른 문으로 서비스되는 화면과 와일드카드는 대조 대상이 아니다
+	# (internal/app/screens.go servedOutsideTree).
+	grep -vE '^(P-001|P-002|P-903|P-904|P-905|A-102)\b' "$T"/cd_scr_want |
+		grep -v '\*' >"$T"/cd_scr_want2
+	for row in $(comm -23 "$T"/cd_scr_want2 "$T"/cd_scr_have | tr '\t' '|'); do
+		err "D11 이 적은 라우트가 구현에 없다: $(echo "$row" | tr '|' ' ')"
+	done
+	done_ "D11 의 라우트 $(wc -l <"$T"/cd_scr_want2 | tr -d ' ')개가 전부 구현과 일치"
+fi
+
 # --- 29. handlerJudged 에 적힌 권한은 실제로 핸들러가 판정한다 --------------
 #
 # 이 목록에 적힌 권한은 부팅 자체 점검의 「어떤 라우트도 쓰지 않는 권한」 경고에서
@@ -1339,7 +1378,7 @@ rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_
 	"$T"/cd_open_inline "$T"/cd_open_cited "$T"/cd_open_def \
 	"$T"/cd_wbs_cov "$T"/cd_wbs_done "$T"/cd_wbs_gap \
 	"$T"/cd_sch_doc "$T"/cd_sch_sql "$T"/cd_sch_mig "$T"/cd_sch_dump \
-	"$T"/cd_bs_list "$T"/cd_bs_used \
+	"$T"/cd_bs_list "$T"/cd_bs_used "$T"/cd_scr_want "$T"/cd_scr_want2 "$T"/cd_scr_have \
 	"$T"/cd_io_want_s "$T"/cd_io_have_s \
 	"$T"/cd_fr_exempt "$T"/cd_fr_ok "$T"/cd_fr_must "$T"/cd_req_nocrit "$T"/cd_req_vague \
 	"$T"/cd_tbl_d30 "$T"/cd_tbl_cov "$T"/cd_cov_blank \
