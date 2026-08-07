@@ -98,3 +98,41 @@ func sortedKeys(m map[string]bool) []string {
 	slices.Sort(out)
 	return out
 }
+
+// **좁은 화면 블록은 파일 맨 끝에 있어야 한다.**
+//
+// 미디어쿼리는 특정도를 올려 주지 않는다. 같은 특정도의 규칙이 뒤에 오면
+// 그것이 이긴다 — 그래서 `@media (max-width: 767px)` 가 파일 중간에 있으면
+// 그 아래 규칙들이 좁은 화면 설정을 조용히 덮는다. 실제로 그 상태였고, 게시판
+// 검색칸의 `flex` 되돌림이 무시돼 입력칸이 12rem 높이 상자로 늘어났다.
+//
+// 화면을 보지 않으면 알 수 없는 종류라, 파일 순서로 고정한다.
+func TestNarrowScreenRulesComeLast(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(b)
+
+	at := strings.Index(css, "@media (max-width:")
+	if at < 0 {
+		t.Fatal("좁은 화면 블록이 없다 — 검사가 헛돌았다")
+	}
+	// 그 뒤에 미디어쿼리 밖 규칙이 있으면 안 된다. 중괄호 깊이가 0 인 자리에서
+	// 선택자가 시작하면 그것이 최상위 규칙이다.
+	rest := css[at:]
+	depth := 0
+	line := 0
+	for _, ln := range strings.Split(rest, "\n") {
+		line++
+		trimmed := strings.TrimSpace(ln)
+		if depth == 0 && line > 1 && trimmed != "" &&
+			!strings.HasPrefix(trimmed, "/*") && !strings.HasPrefix(trimmed, "*") &&
+			!strings.HasPrefix(trimmed, "@") && !strings.HasPrefix(trimmed, "}") {
+			t.Errorf("좁은 화면 블록 뒤에 최상위 규칙이 있다 (%q) — 그 규칙이 좁은 화면 설정을 덮는다",
+				trimmed)
+			break
+		}
+		depth += strings.Count(ln, "{") - strings.Count(ln, "}")
+	}
+}
