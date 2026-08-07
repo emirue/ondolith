@@ -205,6 +205,26 @@ body GET /sitemap.xml | grep -q "/about" &&
 body GET / | grep -q "첫 공지" &&
 	ok "T3.6 cms 홈에 최근 글이 나온다" || bad "T3.6 cms 홈에 최근 글이 없다"
 
+# **비공개 게시판 글이 홈에 실리면 안 된다** (T3.7, D12 P-201).
+#
+# 홈의 최근 글은 여러 게시판을 가로지르므로, 호출자가 넘긴 「읽을 수 있는
+# 게시판」 목록이 유일한 울타리다. 그것이 새면 사이트 첫 화면에 비공개 글이
+# 뜬다 — **익명으로** 확인해야 의미가 있다.
+want "T3.7 비공개 게시판 생성" 303 "$(code POST /admin/boards/new \
+	--data-urlencode "name=직원 전용" --data-urlencode "slug=staff" \
+	--data-urlencode "per_page=20" --data-urlencode "preset=비공개")"
+want "T3.7 비공개 게시판에 글쓰기" 303 "$(code POST /board/staff/write \
+	--data-urlencode "title=직원만 보는 글" --data-urlencode "body=대외비")"
+
+# 쿠키 없이 — 방문자가 보는 그대로.
+ANON=$(curl -s "$BASE/")
+printf '%s' "$ANON" | grep -q "첫 공지" &&
+	ok "T3.7 익명 홈에 공개 글은 나온다" ||
+	bad "T3.7 익명 홈에 공개 글이 없다 — 아래 단언이 헛돈다"
+printf '%s' "$ANON" | grep -q "직원만 보는 글" &&
+	bad "T3.7 **익명 홈에 비공개 게시판 글이 실렸다**" ||
+	ok "T3.7 익명 홈에 비공개 게시판 글이 없다"
+
 # ---- 5단계 · 커머스 준비 ----------------------------------------------------
 echo "5단계 — 커머스 준비"
 
