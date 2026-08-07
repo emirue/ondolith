@@ -480,6 +480,8 @@ a:focus-visible {
   display: flex;
   gap: 10px;
   align-items: center;
+  /* 정렬 상자는 오른쪽에 붙인다 — 목록의 시작이 아니라 끝에 놓이는 조작이다. */
+  margin-left: auto;
   flex-wrap: wrap;
   margin: 0 0 18px;
 }
@@ -492,8 +494,6 @@ a:focus-visible {
   flex: 1 1 12rem;
   min-width: 0;
 }
-.sort { margin-left: auto; }
-
 .btn--sm { min-height: 34px; padding: 0 14px; font-size: 13px; }
 
 /* ═══ 글 보기 ═══════════════════════════════════════════════════════════════ */

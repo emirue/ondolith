@@ -136,3 +136,42 @@ func TestNarrowScreenRulesComeLast(t *testing.T) {
 		depth += strings.Count(ln, "{") - strings.Count(ln, "}")
 	}
 }
+
+// **같은 선택자를 두 번 적지 않는다.**
+//
+// 나중 것이 앞 것을 부분적으로 덮으므로, 한 요소의 모양이 두 곳에 흩어진다 —
+// 고칠 때 한쪽만 보고 고치면 나머지 절반이 남는다. 실제로 `.sort` 와
+// `.adm-logo` 가 그랬다.
+//
+// **중괄호 깊이 0 의 단일 선택자만** 본다. 미디어쿼리 안에서 같은 선택자를
+// 다시 적는 것은 재정의가 목적이므로 중복이 아니다.
+func TestNoSelectorIsDefinedTwice(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen, dup := map[string]int{}, []string{}
+	depth := 0
+	for _, ln := range strings.Split(string(b), "\n") {
+		trimmed := strings.TrimSpace(ln)
+		if depth == 0 {
+			if m := topLevelRule.FindStringSubmatch(trimmed); m != nil {
+				seen[m[1]]++
+				if seen[m[1]] == 2 {
+					dup = append(dup, m[1])
+				}
+			}
+		}
+		depth += strings.Count(ln, "{") - strings.Count(ln, "}")
+	}
+	if len(seen) < 20 {
+		t.Fatalf("최상위 규칙을 %d개밖에 못 찾았다 — 검사가 헛돌았다", len(seen))
+	}
+	if len(dup) > 0 {
+		t.Errorf("같은 선택자가 두 번 정의됐다 — 모양이 두 곳에 흩어진다: %v", dup)
+	}
+}
+
+// 여러 선택자를 쉼표로 묶은 규칙은 대상이 아니다. 겹치는 것이 정상이고,
+// 그것까지 잡으면 검사가 늘 울린다.
+var topLevelRule = regexp.MustCompile(`^(\.[a-z][a-z0-9-]*)\s*\{`)

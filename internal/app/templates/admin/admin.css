@@ -163,6 +163,11 @@ a:hover { color: var(--link-hover); }
 }
 
 .adm-logo {
+  /* 마크와 글자가 한 줄에 선다. 크기를 글꼴 크기에 묶어 두면(.adm-mark) 헤더
+     높이를 바꿔도 따라온다. */
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: -.02em;
@@ -363,23 +368,47 @@ a:hover { color: var(--link-hover); }
   margin-bottom: var(--s8);
 }
 
-.adm-field input,
-.adm-field select,
-.adm-field textarea,
-.adm-filterbar input,
-.adm-filterbar select {
-  width: 100%;
-  height: var(--h-input);
+/* **요소 선택자다.** 이 규칙이 `.adm-field`·`.adm-filterbar` 안에만 걸려
+ * 있었고, 그 밖의 입력칸은 브라우저 기본 모양이었다 — 옵션·재고 편집기, 반품
+ * 처리, 주문 목록 등 13개 화면의 입력 요소 40개가 그랬다. 어디에 놓이든 같은
+ * 모양이어야 하므로 요소에 걸고, 컨테이너는 배치(폭)만 정한다.
+ *
+ * 폼 요소는 `font` 를 상속하지 않는다 — 적지 않으면 브라우저 기본 글꼴이 나온다. */
+input,
+select,
+textarea {
+  min-height: var(--h-input);
   padding: 0 var(--s14);
   border: 1px solid var(--line);
   border-radius: var(--chip-radius);
   background: var(--input-bg);
   color: var(--ink);
   font: inherit;
+  max-width: 100%;
 }
 
+/* 체크박스·라디오는 상자다. 위 높이·여백을 그대로 받으면 빈 사각형이 된다. */
+input[type="checkbox"],
+input[type="radio"] {
+  min-height: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+input[type="file"] { padding: var(--s10) var(--s12); }
+
+/* 표 안의 입력칸은 칸을 채운다. 기본 폭(대략 20자)이 열을 밀어낸다. */
+.adm-table input,
+.adm-table select { width: 100%; }
+
+.adm-field input,
+.adm-field select,
+.adm-field textarea { width: 100%; }
+
 .adm-filterbar input,
-.adm-filterbar select { width: auto; height: var(--h-aux); font-size: 13px; }
+.adm-filterbar select { width: auto; min-height: var(--h-aux); font-size: 13px; }
 
 .adm-field textarea {
   height: auto;
@@ -506,6 +535,11 @@ a:hover { color: var(--link-hover); }
 .adm-dl dd { margin: 0; }
 
 /* ---- 반응형 (핸드오프 「Responsive Behavior」) ----------------------------- */
+/* 마크는 글자 옆에 선다. 크기를 글꼴 크기에 묶어 두면 헤더 높이를 바꿔도
+ * 따라오고, currentColor 라 안 색은 헤더 토큰이 정한다. */
+.adm-mark { display: inline-flex; width: 1.55em; height: 1.55em; }
+.adm-mark svg { width: 100%; height: 100%; }
+
 @media (max-width: 1199px) {
   :root { --pad: 24px; --gap: 18px; }
   .adm-body { grid-template-columns: 184px minmax(0, 1fr); }
@@ -537,9 +571,3 @@ a:hover { color: var(--link-hover); }
   .adm-btn { min-height: 44px; }
   .adm-sidebar a { min-height: 44px; display: flex; align-items: center; }
 }
-
-/* 마크는 글자 옆에 선다. 크기를 글꼴 크기에 묶어 두면 헤더 높이를 바꿔도
- * 따라오고, currentColor 라 안 색은 헤더 토큰이 정한다. */
-.adm-logo { display: inline-flex; align-items: center; gap: 10px; }
-.adm-mark { display: inline-flex; width: 1.55em; height: 1.55em; }
-.adm-mark svg { width: 100%; height: 100%; }

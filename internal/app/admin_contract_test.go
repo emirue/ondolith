@@ -72,3 +72,45 @@ func TestAdminTemplatesUseTheRendererContract(t *testing.T) {
 			bareTable)
 	}
 }
+
+// **관리자 스타일시트도 폼 요소를 요소 선택자로 잡아야 한다.**
+//
+// 규칙이 `.adm-field`·`.adm-filterbar` 안에만 있었고, 그 밖의 입력칸은 브라우저
+// 기본 모양이었다 — 13개 화면의 입력 요소 40개가 그랬다. 컨테이너 안에 있는지는
+// 화면마다 다르고, 새 화면이 그 컨테이너를 안 쓰면 다시 벌어진다.
+//
+// 좁은 화면 블록이 맨 끝인지도 함께 본다: 미디어쿼리는 특정도를 올려 주지
+// 않으므로, 뒤에 오는 규칙이 같은 특정도로 덮으면 조용히 무시된다
+// (프론트 테마에서 실제로 그랬다 — internal/theme 의 같은 이름 검사).
+func TestAdminStylesheetCoversFormElementsAndOrdersMediaLast(t *testing.T) {
+	b, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(b)
+
+	for _, sel := range []string{"\ninput,", "\nselect,", "\ntextarea {"} {
+		if !strings.Contains(css, sel) {
+			t.Errorf("요소 선택자 %q 가 없다 — 컨테이너 밖 입력칸에 스타일이 붙지 않는다",
+				strings.TrimSpace(sel))
+		}
+	}
+
+	at := strings.Index(css, "@media (max-width:")
+	if at < 0 {
+		t.Fatal("좁은 화면 블록이 없다 — 검사가 헛돌았다")
+	}
+	depth, line := 0, 0
+	for _, ln := range strings.Split(css[at:], "\n") {
+		line++
+		trimmed := strings.TrimSpace(ln)
+		if depth == 0 && line > 1 && trimmed != "" &&
+			!strings.HasPrefix(trimmed, "/*") && !strings.HasPrefix(trimmed, "*") &&
+			!strings.HasPrefix(trimmed, "@") && !strings.HasPrefix(trimmed, "}") {
+			t.Errorf("좁은 화면 블록 뒤에 최상위 규칙이 있다 (%q) — 그 규칙이 좁은 화면 설정을 덮는다",
+				trimmed)
+			break
+		}
+		depth += strings.Count(ln, "{") - strings.Count(ln, "}")
+	}
+}
