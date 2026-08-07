@@ -460,6 +460,17 @@ inject "시드 매트릭스에서만 권한 한 줄 누락" docs/15-access-contr
 	'perl -ni -e "print unless /^\| \`log\.view\` \|(\s*\|)+\s*\$/ || /^\| \`log\.view\` \|[ ●|]*\$/" docs/15-access-control.md' \
 	'권한이 2.5 시드 매트릭스에 없다: log.view'
 
+# handlerJudged 는 부팅 경고를 끄는 목록이다. 판정하지 않는 권한을 여기 적으면
+# 죽은 권한이 조용히 숨으므로, 적기만 한 것이 걸려야 한다.
+inject "판정하지 않는 권한을 handlerJudged 에 적음" internal/app/screens.go \
+	'perl -0pi -e "s/\\t.comment\\.moderate.: true,/\\t\\x22comment.moderate\\x22: true,\\n\\t\\x22nosuch.perm\\x22:  true,/" internal/app/screens.go' \
+	'handlerJudged 에 적혔는데 핸들러가 판정하지 않는다: nosuch.perm'
+
+# 목록 자체를 못 읽으면 「전부 판정된다」가 아니라 실패여야 한다.
+inject "handlerJudged 를 못 읽음" internal/app/screens.go \
+	'perl -0pi -e "s/var handlerJudged = map/var handlerJudgedRenamed = map/" internal/app/screens.go' \
+	'handlerJudged 를 읽지 못했다'
+
 # docs/schema.sql 이 마이그레이션보다 뒤처지면 잡아야 한다. 이 파일은 손으로
 # 유지하는 사본이고, 사본이 조용히 어긋나는 것이 바로 이 검사를 만든 이유다.
 inject "재생성 안 된 schema.sql" docs/schema.sql \

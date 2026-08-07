@@ -21,6 +21,11 @@
           <option value="cms"{{if eq (index .Settings "site.type") "cms"}} selected{{end}}>cms — 콘텐츠</option>
           <option value="shop"{{if eq (index .Settings "site.type") "shop"}} selected{{end}}>shop — 커머스</option>
         </select>
+        {{/* 커머스 라우트는 **조립 시점에** 등록된다 (FR-710) — 핸들러 안에서
+             `if 커머스켜짐` 을 검사하지 않으므로, 유형을 바꿔도 이미 서 있는
+             트리는 그대로다. 이 안내가 없으면 저장 뒤 상품 메뉴가 나타나지
+             않는 것이 고장으로 보인다. */}}
+        <span class="adm-hint">바꾼 뒤 <strong>재시작</strong>해야 상품·주문 화면이 나타나거나 사라집니다.</span>
       </label>
       <label class="adm-field">
         <span>이메일 인증 요구</span>

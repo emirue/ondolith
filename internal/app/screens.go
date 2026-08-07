@@ -151,3 +151,37 @@ var servedOutsideTree = map[string]bool{
 	// 전부 이것을 통해 그려진다 — 라우트가 생기면 그것이 오히려 이상하다.
 	"A-102": true,
 }
+
+// handlerJudged lists permissions the route table cannot declare.
+//
+// `Route.Permission` 은 **경로만으로 답이 나오는** 권한을 적는 자리다. 답이
+// 요청 내용에 달려 있으면 라우트는 그것을 적을 수 없고, 핸들러가 판정한다.
+//
+// **목록이지 예외가 아니다.** 여기 적으면 「어떤 라우트도 쓰지 않는 권한」
+// 경고에서 빠지므로, 실제로 판정하지 않는 권한을 적으면 죽은 권한이 숨는다.
+// 그래서 `scripts/checkdocs.sh` 가 각 항목이 `Can("…")` 또는 `CanOn("…")` 로
+// 실제 호출되는지 대조한다 — 적기만 하고 안 쓰면 빌드가 깨진다.
+//
+// 이 목록이 없을 때 경고는 매 부팅 8건이었고 그중 6건이 거짓이었다. 늘 울리는
+// 경고는 아무도 읽지 않고, 안 읽으면 나머지 2건(진짜 죽은 권한)이 함께 묻힌다 —
+// 00003 의 시드가 "37개를 전부 심으면 경고가 18건 울려 검사 자체가 무시된다" 고
+// 적어 둔 것과 같은 함정이다. 실제로 그 2건이 그렇게 묻혀 있었다.
+var handlerJudged = map[string]bool{
+	// 게시판 스코프 (D15 2.4): 라우트는 `/board/{slug}` 까지만 알고, 그 slug 가
+	// 어느 게시판인지는 요청이 와야 안다. 핸들러가 게시판을 찾은 뒤
+	// `CanOn(perm, boardID)` 로 묻는다.
+	"post.read":        true,
+	"post.read_secret": true,
+	"post.write":       true,
+	"post.moderate":    true,
+	"comment.write":    true,
+	"comment.moderate": true,
+
+	// 같은 경로가 두 동작을 받는다. A-302 의 POST 는 `id` 가 "new" 면 만들기,
+	// 아니면 고치기다 — 경로 패턴은 하나이므로 라우트가 가를 수 없다.
+	"page.create": true,
+
+	// A-506 의 POST 는 어느 상태로 보내는지가 폼 값에 있다. `취소` 로 가는
+	// 전이만 order.cancel 이고 나머지는 order.update 다 (D15 2.2).
+	"order.cancel": true,
+}

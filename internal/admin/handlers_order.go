@@ -66,6 +66,16 @@ func (d *Deps) OrderTransition(w http.ResponseWriter, r *http.Request) {
 	orderNo := r.PathValue("no")
 	to := commerce.Status(r.PostFormValue("to"))
 
+	// **취소는 order.cancel 이다** (D15 2.2). 상태 전이 권한 하나로 취소까지
+	// 보내면 `order.cancel` 은 역할 편집기에 나타나기만 하고 아무 데서도
+	// 판정되지 않는 죽은 권한이 되고, 「배송 상태는 만지되 취소는 못 하는」
+	// 역할을 만들 방법이 사라진다. 돈이 돌아가는 전이라 다른 전이와 같은
+	// 문턱에 두지 않는다.
+	if to == commerce.StatusCancelled && !c.Can("order.cancel") {
+		Forbidden(w)
+		return
+	}
+
 	err := d.Commerce.TransitionOrder(r.Context(), orderNo, to, "A-506")
 	switch {
 	case errors.Is(err, commerce.ErrNotFound):

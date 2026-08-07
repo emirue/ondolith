@@ -266,8 +266,20 @@ func TestPublishNeedsItsOwnPermission(t *testing.T) {
 		t.Errorf("page.update 만으로 삭제됐다: HTTP %d", rec.Code)
 	}
 	// ...and editing itself still works.
-	if rec := post(d.PageSave, "/admin/pages", url.Values{
-		"slug": {"about"}, "title": {"회사"}, "body": {"본문"}}); rec.Code != http.StatusSeeOther {
+	//
+	// **경로 변수를 실어 부른다.** 라우트는 `/admin/pages/{id}` 이므로 운영에서
+	// `id` 가 비는 일은 없고, 비워 두면 PageSave 가 「새로 만들기」로 읽어
+	// page.create 를 요구한다 (D15 2.2). 픽스처가 라우트와 달랐던 것이지
+	// 핸들러가 틀린 것이 아니다.
+	id := mkPage(t, d)
+	req := httptest.NewRequest(http.MethodPost, "/admin/pages/"+id,
+		strings.NewReader(url.Values{
+			"slug": {"about"}, "title": {"회사"}, "body": {"본문"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("id", id)
+	rec := httptest.NewRecorder()
+	d.PageSave(rec, req)
+	if rec.Code != http.StatusSeeOther {
 		t.Errorf("page.update 로 저장이 안 된다: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
 }
@@ -1352,4 +1364,17 @@ func TestSocialProviderIsAnAllowList(t *testing.T) {
 			t.Errorf("프로바이더 %q = HTTP %d, want 422", bad, rec.Code)
 		}
 	}
+}
+
+// mkPage 는 수정 대상 한 건을 만든다. 만드는 데 권한 검사를 거치지 않도록
+// 스토어를 직접 쓴다 — 여기서 보려는 것은 수정 경로의 권한이지 생성이 아니다.
+func mkPage(t *testing.T, d *Deps) string {
+	t.Helper()
+	id, err := d.Content.CreatePage(context.Background(), content.Page{
+		Slug: "seed", Title: "씨앗", Body: "본문",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

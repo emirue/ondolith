@@ -219,9 +219,13 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 
 	// 2b (warning). A permission no route uses is dead: it still appears in the
 	// role editor, so an operator grants it and nothing happens.
+	//
+	// 게시판 스코프 권한은 제외한다 — 라우트가 선언할 수 있는 형태가 아니고
+	// (screens.go handlerJudged), 포함하면 매 부팅 6건이 거짓으로 울려 나머지
+	// 경고까지 함께 무시된다.
 	var dead []string
 	for _, p := range knownPerms {
-		if !used[p] {
+		if !used[p] && !handlerJudged[p] {
 			dead = append(dead, p)
 		}
 	}

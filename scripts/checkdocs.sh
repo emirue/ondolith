@@ -1262,6 +1262,43 @@ else
 	err "$CL 이 없다"
 fi
 
+# --- 29. handlerJudged 에 적힌 권한은 실제로 핸들러가 판정한다 --------------
+#
+# 이 목록에 적힌 권한은 부팅 자체 점검의 「어떤 라우트도 쓰지 않는 권한」 경고에서
+# 빠진다. 그러니 판정하지 않는 권한을 여기 적으면 죽은 권한이 조용히 숨는다 —
+# 경고를 끄는 목록은 그 자체로 검사가 필요하다. Can 과 CanOn 을 모두 본다:
+# 라우트가 선언할 수 없는 이유는 게시판 스코프 말고도 있다 (한 경로가 두 동작을
+# 받는 경우, 전이 대상이 폼 값에 있는 경우).
+begin
+perl -nle 'if (/^var handlerJudged = map\[string\]bool\{/) { $in = 1; next }
+	if ($in && /^\}/) { $in = 0 }
+	print $1 if $in && /^\t"([a-z][a-z_.]+)":\s+true,/;' internal/app/screens.go | sort -u >"$T"/cd_bs_list
+# admin 패키지도 본다. 게시판 스코프 판정은 공개 화면(internal/app)과 관리자
+# 화면(internal/admin) 양쪽에 있고, 한쪽만 훑으면 실제로 판정하는 권한을
+# 「판정하지 않는다」고 보고한다 — 실제로 comment.moderate 가 그렇게 걸렸다.
+# 판정 형태는 하나가 아니다: `Can("x")`, `CanOn("x", board)`, 그리고
+# `perm := "x"; d.require(w, r, perm)` 처럼 변수로 넘기는 것도 있다. 형태를
+# 열거하면 새 형태가 생길 때마다 이 검사가 거짓 경고를 낸다 — 그래서 **핸들러
+# 소스에 그 이름이 문자열로 나오는지**만 본다. 잡으려는 것은 "어디서도 언급되지
+# 않는 권한" 이고, 그 목적에는 이것으로 충분하다.
+# **목록이 있는 파일은 제외한다.** screens.go 를 함께 훑으면 목록의 항목이
+# 자기 자신을 만족시켜 검사가 통째로 헛돈다 — 실제로 주입한 가짜 권한이 그렇게
+# 통과했다.
+perl -nle 'print $1 while /"([a-z][a-z_]+\.[a-z_]+)"/g' \
+	$(ls internal/app/*.go internal/admin/*.go | grep -v 'internal/app/screens\.go') |
+	grep -v '^$' | sort -u >"$T"/cd_bs_used
+
+if [ ! -s "$T"/cd_bs_list ]; then
+	err "internal/app/screens.go 의 handlerJudged 를 읽지 못했다 (검사가 헛돌았다)"
+elif [ ! -s "$T"/cd_bs_used ]; then
+	err "핸들러에서 Can/CanOn 호출을 하나도 찾지 못했다 (검사가 헛돌았다)"
+else
+	for p in $(comm -23 "$T"/cd_bs_list "$T"/cd_bs_used); do
+		err "handlerJudged 에 적혔는데 핸들러가 판정하지 않는다: $p"
+	done
+	done_ "handlerJudged $(wc -l <"$T"/cd_bs_list | tr -d ' ')개가 전부 핸들러에서 판정된다"
+fi
+
 # --- 30. docs/schema.sql 이 마이그레이션보다 뒤처지지 않았다 ---------------
 #
 # 이 파일은 ERD 도구에 올리는 통합 DDL 이고 `make schema` 가 만든다. 만드는
@@ -1302,6 +1339,7 @@ rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_
 	"$T"/cd_open_inline "$T"/cd_open_cited "$T"/cd_open_def \
 	"$T"/cd_wbs_cov "$T"/cd_wbs_done "$T"/cd_wbs_gap \
 	"$T"/cd_sch_doc "$T"/cd_sch_sql "$T"/cd_sch_mig "$T"/cd_sch_dump \
+	"$T"/cd_bs_list "$T"/cd_bs_used \
 	"$T"/cd_io_want_s "$T"/cd_io_have_s \
 	"$T"/cd_fr_exempt "$T"/cd_fr_ok "$T"/cd_fr_must "$T"/cd_req_nocrit "$T"/cd_req_vague \
 	"$T"/cd_tbl_d30 "$T"/cd_tbl_cov "$T"/cd_cov_blank \

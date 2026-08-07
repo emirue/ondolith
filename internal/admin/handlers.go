@@ -324,7 +324,18 @@ func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "page.update"); !ok {
+	// **만들기와 고치기는 다른 권한이다** (D15 2.2: page.create / page.update).
+	//
+	// 둘 다 page.update 로 받고 있었다. 그래서 `page.create` 는 역할 편집기에
+	// 나타나고 부여할 수 있는데 아무 데서도 판정되지 않는 죽은 권한이었고,
+	// 반대로 「고칠 수만 있고 만들 수는 없는」 역할을 만들 방법이 없었다.
+	// 부팅 자체 점검이 매 부팅 「어떤 라우트도 쓰지 않는 권한」으로 말하고
+	// 있었지만, 게시판 스코프 권한 6건의 거짓 경고에 묻혀 있었다.
+	perm := "page.update"
+	if id := r.PathValue("id"); id == "" || id == "new" {
+		perm = "page.create"
+	}
+	if _, ok := d.require(w, r, perm); !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
