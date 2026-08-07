@@ -11,7 +11,7 @@
 </dl>
 <ul class="refunds">
   {{range .Refunds}}
-  <li>{{.CreatedAt}} · {{.Requester}} · {{money .Amount}} · {{.Status}}
+  <li>{{date .CreatedAt "2006-01-02 15:04"}} · {{.Requester}} · {{money .Amount}} · {{.Status}}
       {{with .Reason}}<span class="reason">{{.}}</span>{{end}}</li>
   {{else}}
   <li class="empty">접수된 요청이 없습니다.</li>

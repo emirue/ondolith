@@ -6,7 +6,7 @@
   <h2>{{.ReturnNo}} · {{.Kind}} · {{.Status}}</h2>
   <ul>{{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}</ul>
   {{with .Reason}}<p>사유: {{.}}</p>{{end}}
-  {{if .Fault}}<p>귀책 {{.Fault}} · 배송비 {{.FeeAmount}} ({{.FeePolicy}})</p>{{end}}
+  {{if .Fault}}<p>귀책 {{.Fault}} · 배송비 {{money .FeeAmount}} ({{.FeePolicy}})</p>{{end}}
 
   {{/* 수거 확인이 배송비 스냅샷을 찍는다. **배송비 입력란은 없다** — A-512
        정책값을 서버가 읽는다 (D19 A-511 받지 않는 필드). 이 화면은 order.return
@@ -45,7 +45,7 @@
   <form method="post" class="form">
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="exchange">
-    {{if gt .PriceDiff 0}}<p>차액 {{.PriceDiff}}원 — 구매자 결제 후 발송됩니다.</p>{{end}}
+    {{if gt .PriceDiff 0}}<p>차액 {{money .PriceDiff}} — 구매자 결제 후 발송됩니다.</p>{{end}}
     <button type="submit">교환 완료</button>
   </form>
   {{end}}

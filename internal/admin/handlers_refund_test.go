@@ -224,7 +224,7 @@ func TestAdminOrderDetailOffersOnlyReachableStates(t *testing.T) {
 	req.SetPathValue("no", order.OrderNo)
 	d.OrderDetail(httptest.NewRecorder(), req)
 
-	want := commerce.Next(commerce.StatusPaid)
+	want := commerce.Next(commerce.StatusPaid, "A-506")
 	if len(got) != len(want) {
 		t.Fatalf("선택지 %v, want %v (상태머신이 낸 목록)", got, want)
 	}

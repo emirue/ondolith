@@ -1,17 +1,17 @@
 {{define "content"}}
 {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}
-<p>상태 <strong>{{.Status}}</strong> · 주문일 {{.CreatedAt}}</p>
+<p>상태 <strong>{{.Status}}</strong> · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
 <table class="adm-table">
   <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
   <tbody>
     {{range .Items}}
     <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-        <td>{{.UnitPrice}}</td><td>{{.Quantity}}</td><td>{{.LineAmount}}</td></tr>
+        <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
     {{end}}
   </tbody>
 </table>
-<p>결제 금액 {{.Total}}</p>
+<p>결제 금액 <strong>{{money .Total}}</strong></p>
 <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
 {{end}}
 
@@ -32,7 +32,7 @@
 
 <h2>배송</h2>
 <ul>
-  {{range .Shipments}}<li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{.ShippedAt}})</li>
+  {{range .Shipments}}<li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{date .ShippedAt "2006-01-02 15:04"}})</li>
   {{else}}<li>발송 정보가 없습니다.</li>{{end}}
 </ul>
 <p><a href="/admin/orders/{{.Order.OrderNo}}/shipping">송장 입력</a></p>

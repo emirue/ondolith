@@ -135,8 +135,12 @@ func TestExchangeReturnsToDeliveredAndCanRunAgain(t *testing.T) {
 // check would be the only defence and D14 opens by naming that the commonest
 // mistake.
 func TestNextIsWhatTheDropdownOffers(t *testing.T) {
-	got := Next(StatusPreparing)
-	want := []Status{StatusShipping, StatusCancelled} // 유니코드 순 (ㅂ < ㅊ)
+	// **취소는 없다.** 표는 배송준비 → 취소를 P-506·A-507 에게만 준다 (D14 5절) —
+	// 취소는 돈이 돌아가는 동작이라 `order.cancel` 이 걸린 별도 화면이 받는다.
+	// 이 테스트는 `[배송중 취소]` 를 기대하고 있었는데, 그것은 Next 가 행위자를
+	// 무시하던 시절의 동작이다. A-506 이 그 항목을 그려도 서버가 거부한다.
+	got := Next(StatusPreparing, "A-506")
+	want := []Status{StatusShipping}
 	if len(got) != len(want) {
 		t.Fatalf("배송준비 다음 = %v, want %v", got, want)
 	}
@@ -145,11 +149,38 @@ func TestNextIsWhatTheDropdownOffers(t *testing.T) {
 			t.Fatalf("배송준비 다음 = %v, want %v", got, want)
 		}
 	}
-	if n := Next(StatusConfirmed); len(n) != 0 {
+	if n := Next(StatusConfirmed, "A-506"); len(n) != 0 {
 		t.Errorf("구매확정 다음 = %v, want 없음", n)
 	}
-	if n := Next("없는상태"); len(n) != 0 {
+	if n := Next("없는상태", "A-506"); len(n) != 0 {
 		t.Errorf("없는 상태 다음 = %v", n)
+	}
+}
+
+// **화면이 제시하는 전이는 그 화면이 일으킬 수 있는 것뿐이다.**
+//
+// Next 가 행위자를 무시하고 쌍만 내면, 화면은 자기가 못 하는 전이를 제시한다.
+// A-506 이 그랬다: 결제대기 주문의 유일한 선택지가 「결제실패」였는데 그것은
+// 시스템(만료)만 일으킬 수 있어서, 고를 때마다 422 가 났다 — 고를 수 있는 것이
+// 전부 실패하는 화면은 아무것도 못 하는 화면이다.
+func TestNextOnlyOffersWhatTheActorCanCause(t *testing.T) {
+	// 결제대기에서 A-506 이 할 수 있는 것은 없다. 결제 결과는 결제 흐름이 낸다.
+	if n := Next(StatusPaymentPending, "A-506"); len(n) != 0 {
+		t.Errorf("A-506 이 결제대기에서 %v 를 제시한다 — 전부 다른 행위자의 전이다", n)
+	}
+	// 표에는 있다 — 즉 위 단언은 "표가 비어서" 통과한 것이 아니다.
+	if len(transitions[StatusPaymentPending]) == 0 {
+		t.Fatal("결제대기의 전이가 표에 없다 — 검사가 헛돌았다")
+	}
+
+	// 제시된 것은 전부 실제로 통과해야 한다. 이것이 "화면과 서버가 같은 표를
+	// 본다" 의 내용이다.
+	for from := range transitions {
+		for _, to := range Next(from, "A-506") {
+			if err := CanTransition(from, to, "A-506"); err != nil {
+				t.Errorf("A-506 이 %s → %s 를 제시하는데 서버가 거부한다: %v", from, to, err)
+			}
+		}
 	}
 }
 

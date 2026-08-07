@@ -3,14 +3,14 @@
 {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}{{if .Discount}} · 할인 {{.Discount}}{{end}}</p>{{end}}
 <dl>
   <dt>결제 금액</dt><dd>{{.Approved}}</dd>
-  <dt>환불 접수·완료</dt><dd>{{.Refunded}}</dd>
+  <dt>환불 접수·완료</dt><dd>{{money .Refunded}}</dd>
   <dt>남은 금액</dt><dd>{{.Remaining}}</dd>
 </dl>
 <table class="adm-table">
   <thead><tr><th>시각</th><th>요청자</th><th>금액</th><th>상태</th><th>사유</th></tr></thead>
   <tbody>
     {{range .Refunds}}
-    <tr><td>{{.CreatedAt}}</td><td>{{.Requester}}</td><td>{{.Amount}}</td>
+    <tr><td>{{date .CreatedAt "2006-01-02 15:04"}}</td><td>{{.Requester}}</td><td>{{money .Amount}}</td>
         <td>{{.Status}}</td><td>{{.Reason}}</td></tr>
     {{else}}
     <tr><td colspan="5">접수된 요청이 없습니다.</td></tr>

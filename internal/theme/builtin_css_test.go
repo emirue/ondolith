@@ -175,3 +175,38 @@ func TestNoSelectorIsDefinedTwice(t *testing.T) {
 // 여러 선택자를 쉼표로 묶은 규칙은 대상이 아니다. 겹치는 것이 정상이고,
 // 그것까지 잡으면 검사가 늘 울린다.
 var topLevelRule = regexp.MustCompile(`^(\.[a-z][a-z0-9-]*)\s*\{`)
+
+// **시각은 `date` 로 낸다.**
+//
+// `time.Time` 을 그대로 그리면 `2026-08-07 23:54:32.711708 +0900 KST` 가 나온다.
+// 나노초와 타임존 이름은 사람이 읽으라고 있는 것이 아니고, 화면마다 형식이
+// 다르면 같은 주문의 시각이 목록과 상세에서 달라 보인다. 배송 조회에서 실제로
+// 그 문자열이 그려지고 있었다.
+func TestTemplatesFormatTimes(t *testing.T) {
+	// `…At` / `…Date` 로 끝나는 필드를 그대로 찍는 곳.
+	raw := regexp.MustCompile(`\{\{\s*[.$][A-Za-z0-9.]*(At|Date)\s*\}\}`)
+	var bad, scanned []string
+	err := fs.WalkDir(Builtin(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".html" {
+			return err
+		}
+		b, err := fs.ReadFile(Builtin(), p)
+		if err != nil {
+			return err
+		}
+		scanned = append(scanned, p)
+		if m := raw.FindString(string(b)); m != "" {
+			bad = append(bad, p+" "+m)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scanned) < 10 {
+		t.Fatalf("템플릿을 %d개밖에 못 읽었다 — 검사가 헛돌았다", len(scanned))
+	}
+	if len(bad) > 0 {
+		t.Errorf("시각을 date 없이 그리는 템플릿: %v", bad)
+	}
+}

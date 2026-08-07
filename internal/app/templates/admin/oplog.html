@@ -20,7 +20,7 @@
     </table>
   </div>
   <div class="adm-pagination">
-    <span class="adm-count">{{.Total}}건 · {{.PageNo}}쪽</span>
+    <span class="adm-count">{{number .Count}}건 · {{.PageNo}}쪽</span>
     {{if .HasPrev}}<a href="/admin/oplog?page={{.PrevPage}}">‹</a>{{end}}
     <span class="adm-page adm-page--current">{{.PageNo}}</span>
     {{if .HasNext}}<a href="/admin/oplog?page={{.NextPage}}">›</a>{{end}}

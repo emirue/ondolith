@@ -114,3 +114,51 @@ func TestAdminStylesheetCoversFormElementsAndOrdersMediaLast(t *testing.T) {
 		depth += strings.Count(ln, "{") - strings.Count(ln, "}")
 	}
 }
+
+// **관리자 화면도 금액을 `money` 로 낸다.**
+//
+// 프론트 테마에는 같은 검사가 있었지만(internal/theme) 관리자는 없었고, 실제로
+// 주문 목록·상세·환불·반품·상품 화면이 `378000` 을 그대로 찍고 있었다. 앞뒤
+// 화면에서 같은 주문의 금액이 다르게 보이면 그것이 환불액을 잘못 넣는 경로다.
+//
+// 금액으로 보이는 필드 이름을 목록으로 둔다 — 관리자 템플릿은 뷰 모델이
+// 화면마다 달라서 「모든 정수」로는 잡을 수 없다.
+func TestAdminTemplatesFormatMoney(t *testing.T) {
+	// 이름이 금액인 것들. 새 화면이 다른 이름을 쓰면 여기 더한다.
+	money := regexp.MustCompile(
+		`\{\{\s*[.$][A-Za-z0-9.]*(Total|Amount|Price|Refunded|Paid|Fee|Diff|Delta)\s*\}\}`)
+	// 시각도 같다 — `time.Time` 을 그대로 찍으면 나노초와 타임존 이름이 나온다.
+	when := regexp.MustCompile(`\{\{\s*[.$][A-Za-z0-9.]*(At|Date)\s*\}\}`)
+	// 입력칸의 `value=` 는 예외다. 사람이 고칠 숫자는 쉼표가 붙으면 안 된다 —
+	// 폼이 그 값을 다시 받아 파싱하기 때문이다.
+	valueAttr := regexp.MustCompile(`value="\{\{[^}]*\}\}"`)
+
+	var raw, scanned []string
+	err := fs.WalkDir(adminFS, "templates/admin", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".html" {
+			return err
+		}
+		b, err := adminFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		scanned = append(scanned, path.Base(p))
+		body := valueAttr.ReplaceAllString(string(b), "")
+		if m := money.FindString(body); m != "" {
+			raw = append(raw, path.Base(p)+" "+m)
+		}
+		if m := when.FindString(body); m != "" {
+			raw = append(raw, path.Base(p)+" "+m+" (date 필요)")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scanned) < 10 {
+		t.Fatalf("관리자 템플릿을 %d개밖에 못 읽었다 — 검사가 헛돌았다", len(scanned))
+	}
+	if len(raw) > 0 {
+		t.Errorf("금액·시각을 money/date 없이 그리는 관리자 템플릿: %v", raw)
+	}
+}

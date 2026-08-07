@@ -7,6 +7,7 @@ package commerce
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -134,16 +135,24 @@ func Terminal(s Status) bool {
 	return ok && len(next) == 0
 }
 
-// Next lists the states reachable from s, sorted, for A-506's dropdown.
+// Next lists the states `actor` can move s to, sorted, for a screen's dropdown.
 //
 // The dropdown is built from this rather than from the full status list. That
 // is the whole point: if the screen offers only what the table allows, the
 // server check below stops being the first line of defence and becomes the
 // second one.
-func Next(s Status) []Status {
+//
+// **행위자를 함께 본다.** 전이표는 쌍마다 그것을 일으킬 수 있는 화면을 적어
+// 두는데, 이 함수가 그 목록을 버리고 쌍만 내면 화면은 **자기가 일으킬 수 없는
+// 전이를 제시한다.** A-506 이 실제로 그랬다: 결제대기 주문의 유일한 선택지가
+// 「결제실패」였고 — 그것은 P-409 결제 실패 콜백만 일으킬 수 있다 — 고를 때마다
+// 422 가 났다. 고를 수 있는 것이 전부 실패하는 화면은 아무것도 못 하는 화면이다.
+func Next(s Status, actor Actor) []Status {
 	out := make([]Status, 0, len(transitions[s]))
-	for to := range transitions[s] {
-		out = append(out, to)
+	for to, actors := range transitions[s] {
+		if slices.Contains(actors, actor) {
+			out = append(out, to)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out

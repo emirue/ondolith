@@ -203,7 +203,8 @@ func payloadFor(name string) any {
 		return map[string]any{
 			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "배송중"},
 			"Shipments": []shipmentLike{{Kind: "최초발송", Carrier: "cj",
-				TrackingNo: "T-1", ShippedAt: "2026-08-05"}},
+				TrackingNo: "T-1",
+				ShippedAt:  time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
 		}
 	case "order/refunds.html":
 		return map[string]any{
@@ -503,7 +504,14 @@ type orderLike struct {
 	Items                                                     []orderItemLike
 }
 
-type shipmentLike struct{ Kind, Carrier, TrackingNo, ShippedAt string }
+// **ShippedAt 은 time.Time 이다** (commerce.Shipment). 여기서 string 으로
+// 두었더니 템플릿이 `{{.ShippedAt}}` 로 그대로 찍는 동안 검사가 통과했고,
+// 운영에서는 `2026-08-07 23:54:32.711708 +0900 KST` 가 화면에 나왔다.
+// 픽스처 타입이 실물과 다르면 그 필드에 대한 검사는 전부 헛돈다 (M14).
+type shipmentLike struct {
+	Kind, Carrier, TrackingNo string
+	ShippedAt                 time.Time
+}
 
 type refundLike struct {
 	Status, Requester, Reason string

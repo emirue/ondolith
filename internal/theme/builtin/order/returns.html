@@ -5,7 +5,7 @@
 <ul class="returns">
   {{range .Returns}}
   <li>
-    <strong>{{.ReturnNo}}</strong> · {{.Kind}} · {{.Status}} · {{.CreatedAt}}
+    <strong>{{.ReturnNo}}</strong> · {{.Kind}} · {{.Status}} · {{date .CreatedAt "2006-01-02 15:04"}}
     <ul>
       {{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}
     </ul>

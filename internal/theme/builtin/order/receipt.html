@@ -1,7 +1,7 @@
 {{define "body"}}
 {{with .Data}}{{with .Order}}
 <h1>주문서·영수증</h1>
-<p>주문번호 {{.OrderNo}} · 주문일 {{.CreatedAt}}</p>
+<p>주문번호 {{.OrderNo}} · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
 {{/* 스냅샷만으로 재발행한다 (FR-612). 상품 표를 조인하면 상품이 바뀐 뒤
      영수증 내용이 달라지고, 그 영수증은 증빙이 아니다. */}}
 <table class="order-items">

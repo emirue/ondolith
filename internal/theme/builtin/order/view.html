@@ -1,7 +1,7 @@
 {{define "body"}}
 {{with .Data}}{{with .Order}}
 <h1>주문 {{.OrderNo}}</h1>
-<p>상태 {{.Status}} · 주문일 {{.CreatedAt}}</p>
+<p>상태 {{.Status}} · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
 {{/* 스냅샷만 그린다 (FR-612). 상품 표를 조인해 현재 이름·가격을 보여주면
      상품이 바뀐 뒤 주문서가 달라진다. */}}
 <table class="order-items">

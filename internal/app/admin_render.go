@@ -14,6 +14,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 //go:embed templates/admin/*.html templates/admin/admin.css templates/admin/logo.svg
@@ -85,6 +86,24 @@ func newAdminRenderer(site func() string, theme string, shop bool, log *slog.Log
 	}, nil
 }
 
+// adminFuncs 는 관리자 화면이 쓰는 표시 함수다.
+//
+// **테마 함수맵에서 포맷 함수만 가져온다** (theme.FuncMap). 금액을 어떻게
+// 그리는지가 앞뒤 화면에서 다르면 같은 주문을 두 자리에서 다르게 읽게 되고,
+// 그것이 환불액을 잘못 넣는 경로다. `money` 를 여기 다시 구현하면 반드시
+// 갈라지므로 같은 것을 쓴다.
+//
+// URL 생성 함수(`url`·`asset`)는 넘기지 않는다 — 테마 자산 해시와 공개 경로는
+// 관리자 화면과 무관하고, 넘기면 관리자 템플릿이 테마 계약(D17)에 묶인다.
+var adminFuncs = func() template.FuncMap {
+	all := theme.FuncMap(theme.Deps{})
+	out := template.FuncMap{}
+	for _, name := range []string{"date", "dateAgo", "money", "number", "filesize"} {
+		out[name] = all[name]
+	}
+	return out
+}()
+
 func (a *adminRenderer) lookup(name string) (*template.Template, error) {
 	a.mu.RLock()
 	t, ok := a.cache[name]
@@ -92,7 +111,11 @@ func (a *adminRenderer) lookup(name string) (*template.Template, error) {
 	if ok {
 		return t, nil
 	}
-	t, err := template.ParseFS(adminFS, "templates/admin/layout.html", "templates/"+name)
+	// New 의 이름은 쓰이지 않는다 — 실행은 ExecuteTemplate 이 이름을 명시한다.
+	// 파일 이름처럼 적으면 「코어가 그리는 템플릿」 검사가 테마 계약의 이름으로
+	// 오인한다 (checkdocs). Funcs 를 붙이려면 New 가 먼저 와야 한다.
+	t, err := template.New("admin").Funcs(adminFuncs).
+		ParseFS(adminFS, "templates/admin/layout.html", "templates/"+name)
 	if err != nil {
 		return nil, err
 	}

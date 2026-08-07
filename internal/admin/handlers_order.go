@@ -46,7 +46,7 @@ func (d *Deps) OrderDetail(w http.ResponseWriter, r *http.Request) {
 		// 드롭다운은 **상태머신이 낸 목록**이다. 전체 상태를 나열하고 서버에서
 		// 검증하지 않는 것이 D14 5절이 지목한 가장 흔한 구현 실수다. 여기서
 		// 파생시키면 화면과 서버가 같은 표를 본다.
-		"Next": commerce.Next(order.Status),
+		"Next": commerce.Next(order.Status, "A-506"),
 	})
 }
 

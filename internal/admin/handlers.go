@@ -700,7 +700,11 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 		prev = 0
 	}
 	d.Render(w, r, "admin/oplog.html", http.StatusOK, map[string]any{
-		"Entries": entries, "Total": total,
+		// `Total` 이 아니라 `Count` 다 — 이 화면의 숫자는 금액이 아니라 건수이고,
+		// 「…Total」 이라는 이름은 금액 표시 검사가 찾는 이름이다. 이름 하나로
+		// 금액과 건수가 섞이면 그 검사는 예외를 달기 시작하고, 예외가 붙은
+		// 검사는 다음 화면에서 진짜 금액을 놓친다.
+		"Entries": entries, "Count": total,
 		"PageNo": page + 1, "PrevPage": prev, "NextPage": page + 1,
 		"HasPrev": page > 0, "HasNext": int64((page+1)*oplogPageSize) < total,
 	})

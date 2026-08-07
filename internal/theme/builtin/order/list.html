@@ -6,7 +6,7 @@
   <tbody>
     {{range .Orders}}
     <tr><td><a href="/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
-        <td>{{.Status}}</td><td>{{money .Total}}</td><td>{{.CreatedAt}}</td></tr>
+        <td>{{.Status}}</td><td>{{money .Total}}</td><td>{{date .CreatedAt "2006-01-02 15:04"}}</td></tr>
     {{else}}
     <tr><td colspan="4" class="empty">주문이 없습니다.</td></tr>
     {{end}}
