@@ -64,11 +64,7 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 	// The ORDER BY comes from the allow list (listquery.go). Everything else is
 	// a bind parameter.
 	sql := `
-		SELECT p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
-		       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-		       p.view_count, p.created_at, p.updated_at,
-		       (SELECT count(*) FROM comments c WHERE c.post_id = p.id),
-		       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)
+		SELECT ` + postColumns + `
 		FROM posts p
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.board_id = $1
@@ -88,26 +84,7 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []Post
-	for rows.Next() {
-		var p Post
-		var raw []byte
-		if err := rows.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
-			&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
-			&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
-			&p.CommentCount, &p.HasAttachment); err != nil {
-			return nil, err
-		}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
-				return nil, err
-			}
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return scanPosts(rows)
 }
 
 // CountPosts is the total for the pager. It counts exactly what ListPosts
@@ -131,30 +108,16 @@ func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (in
 // fetch: a row that must not be shown should not leave the database (SC-1 4항).
 func (s *Store) PostByID(ctx context.Context, id, viewerID string, canSecret bool) (*Post, error) {
 	const q = `
-		SELECT p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
-		       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-		       p.view_count, p.created_at, p.updated_at,
-		       (SELECT count(*) FROM comments c WHERE c.post_id = p.id),
-		       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)
+		SELECT ` + postColumns + `
 		FROM posts p
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.id = $1 AND ($2 OR NOT p.is_secret OR p.author_id = $3)`
-	var p Post
-	var raw []byte
-	err := s.pool.QueryRow(ctx, q, id, canSecret, nullIfEmpty(viewerID)).
-		Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName, &p.Title, &p.Body, &raw,
-			&p.Status, &p.IsPinned, &p.IsSecret, &p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
-			&p.CommentCount, &p.HasAttachment)
+	p, err := scanPost(s.pool.QueryRow(ctx, q, id, canSecret, nullIfEmpty(viewerID)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
-	}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
-			return nil, err
-		}
 	}
 	return &p, nil
 }
@@ -444,11 +407,7 @@ func (s *Store) SearchPosts(ctx context.Context, readable, secretIn []string,
 		return nil, nil
 	}
 	sql := `
-		SELECT p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
-		       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-		       p.view_count, p.created_at, p.updated_at,
-		       (SELECT count(*) FROM comments c WHERE c.post_id = p.id),
-		       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)
+		SELECT ` + postColumns + `
 		FROM posts p
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.board_id = ANY($1)
@@ -486,11 +445,7 @@ func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []strin
 // hidden post cannot un-hide it.
 func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit int) ([]Post, error) {
 	const q = `
-		SELECT p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
-		       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-		       p.view_count, p.created_at, p.updated_at,
-		       (SELECT count(*) FROM comments c WHERE c.post_id = p.id),
-		       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)
+		SELECT ` + postColumns + `
 		FROM posts p
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.board_id = $1
@@ -547,23 +502,39 @@ const postColumns = `
 	(SELECT count(*) FROM comments c WHERE c.post_id = p.id),
 	EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)`
 
+// postScanner is what pgx.Row and pgx.Rows share — 한 행을 읽는 것.
+type postScanner interface{ Scan(dest ...any) error }
+
+// scanPost reads one row shaped by postColumns.
+//
+// **컬럼 목록과 스캔 순서는 한 쌍이다.** 둘이 갈라지면 컴파일은 되고 런타임에
+// 타입 오류가 나거나, 더 나쁘게는 같은 타입끼리 자리가 바뀌어 조용히 틀린
+// 값이 나온다. 그래서 목록도 스캔도 각각 한 곳에만 둔다.
+func scanPost(row postScanner) (Post, error) {
+	var p Post
+	var raw []byte
+	if err := row.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
+		&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
+		&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
+		&p.CommentCount, &p.HasAttachment); err != nil {
+		return p, err
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
+			return p, err
+		}
+	}
+	return p, nil
+}
+
 // scanPosts reads rows shaped by postColumns.
 func scanPosts(rows pgx.Rows) ([]Post, error) {
 	defer rows.Close()
 	var out []Post
 	for rows.Next() {
-		var p Post
-		var raw []byte
-		if err := rows.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
-			&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
-			&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
-			&p.CommentCount, &p.HasAttachment); err != nil {
+		p, err := scanPost(rows)
+		if err != nil {
 			return nil, err
-		}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
-				return nil, err
-			}
 		}
 		out = append(out, p)
 	}
