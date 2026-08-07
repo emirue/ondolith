@@ -31,9 +31,14 @@ Go 단일 바이너리 CMS + 커머스. 브라우저에서 설치가 끝나고, 
 | 다음에 뭘 할지 | [docs/80-roadmap.md](docs/80-roadmap.md) |
 | **작업을 실제로 돌릴 때** | [docs/82-execution-loop.md](docs/82-execution-loop.md) — `scripts/next-task.sh` |
 | **문서를 쓰거나 요구사항을 추가** | [docs/90-conventions.md](docs/90-conventions.md) |
+| **코드를 어떤 모습으로 남길지** | [.ai/ENGINEERING.md](.ai/ENGINEERING.md) — 공통화·리팩터링·간결함 |
+| 코딩 행동 지침 (원문) | [.ai/KARPATHY.md](.ai/KARPATHY.md) |
 
 **라이브러리·기술 선택을 제안하기 전에 반드시:** [.ai/DECISIONS.md](.ai/DECISIONS.md)
 — 이미 배제된 것을 되살리지 않기 위한 목록이다.
+
+**이 파일은 색인이다.** 규칙 본문은 위 표의 파일에 두고 여기에는 한 줄만 늘린다 —
+진입점이 길어지면 아무도 끝까지 읽지 않고, 그때부터 규칙은 있으나 마나가 된다.
 
 ## 어기면 작업을 버리게 되는 규칙
 

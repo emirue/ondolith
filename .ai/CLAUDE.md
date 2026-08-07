@@ -10,5 +10,7 @@
 | 파일 | 내용 |
 |---|---|
 | [DECISIONS.md](DECISIONS.md) | 확정 스택 + **배제된 선택지.** 되살리지 말 것 |
+| [ENGINEERING.md](ENGINEERING.md) | 공통화·리팩터링·간결함 — 코드를 어떤 모습으로 남길지 |
+| [KARPATHY.md](KARPATHY.md) | 코딩 행동 지침 (외부 원문) |
 | [PATTERNS.md](PATTERNS.md) | 이 저장소의 코드 관례 |
 | [MISTAKES.md](MISTAKES.md) | 반복된 실수 기록 |
