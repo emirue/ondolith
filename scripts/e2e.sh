@@ -201,6 +201,10 @@ want "T4.7 robots.txt" 200 "$(code GET /robots.txt)"
 body GET /sitemap.xml | grep -q "/about" &&
 	ok "T4.7 sitemap 에 발행된 페이지가 있다" || bad "T4.7 sitemap 에 페이지가 없다"
 
+# **홈이 사이트 유형을 따른다** (T3.6, FR-710). 아직 cms 모드다.
+body GET / | grep -q "첫 공지" &&
+	ok "T3.6 cms 홈에 최근 글이 나온다" || bad "T3.6 cms 홈에 최근 글이 없다"
+
 # ---- 5단계 · 커머스 준비 ----------------------------------------------------
 echo "5단계 — 커머스 준비"
 
@@ -276,6 +280,36 @@ want "T5.4 재고가 10 이 됐다" 10 "$(sql "select stock from product_variant
 
 want "T5.6 PG 미설정이면 주문서를 거절한다" 503 "$(code GET /checkout)"
 
+# **상품이 있는 상태에서 cms 로 되돌려 본다.** 그냥 "cms 홈에 상품이 없다" 를
+# 확인하면 상품이 아직 없어서 없는 것인지 유형이 갈라서 없는 것인지 구별되지
+# 않는다 — 실제로 그 상태였고, 유형 분기를 지워도 아무것도 실패하지 않았다.
+want "T3.6 cms 로 되돌리기" 303 "$(code POST /admin/settings \
+	--data-urlencode "site.name=E2E" --data-urlencode "site.type=cms" \
+	--data-urlencode "site.meta_description=" --data-urlencode "site.og_image=" \
+	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
+restart || exit 1
+code POST /login --data-urlencode "email=admin@example.com" \
+	--data-urlencode "password=$ADMIN_PW" >/dev/null
+body GET / | grep -q "새로 들어온 상품" &&
+	bad "T3.6 cms 홈에 상품 절이 있다 — 상품이 있는데도 유형이 갈라야 한다" ||
+	ok "T3.6 상품이 있어도 cms 홈에는 상품 절이 없다"
+
+want "T3.6 다시 shop 으로" 303 "$(code POST /admin/settings \
+	--data-urlencode "site.name=E2E" --data-urlencode "site.type=shop" \
+	--data-urlencode "site.meta_description=" --data-urlencode "site.og_image=" \
+	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
+restart || exit 1
+code POST /login --data-urlencode "email=admin@example.com" \
+	--data-urlencode "password=$ADMIN_PW" >/dev/null
+
+# 커머스를 켠 뒤의 홈. 같은 템플릿이 유형에 따라 다른 것을 그린다.
+body GET / | grep -q "새로 들어온 상품" &&
+	ok "T3.6 shop 홈에 신상품이 나온다" || bad "T3.6 shop 홈에 신상품이 없다"
+body GET / | grep -q "온돌 매트" &&
+	ok "T3.6 shop 홈에 상품 이름이 있다" || bad "T3.6 shop 홈에 상품 이름이 없다"
+body GET / | grep -q "첫 공지" &&
+	ok "T3.6 shop 홈에도 최근 글이 나온다" || bad "T3.6 shop 홈에 최근 글이 없다"
+
 # ---- 6단계 · 구매 흐름 ------------------------------------------------------
 echo "6단계 — 구매 흐름"
 
@@ -350,7 +384,10 @@ want "T8.4 없는 주소는 404" 404 "$(code GET /nope-does-not-exist)"
 #
 # **커머스를 켠 뒤의 부팅만 본다.** 첫 부팅은 `cms` 모드라 커머스 화면이
 # 등록되지 않는 것이 정상이고, 그 경고까지 세면 이 검사는 늘 실패한다.
-WARN=$(sed -n '/운영 모드/,$p' "$WORK/log" | grep -c "라우트 자체 점검")
+# **마지막 부팅만 본다.** 시나리오가 유형을 오가며 여러 번 재시작하므로,
+# 「운영 모드」 첫 줄부터 세면 그 사이 cms 부팅의 정상 경고까지 들어온다.
+WARN=$(awk '/운영 모드/ { n = "" } { n = n $0 "\n" } END { printf "%s", n }' "$WORK/log" |
+	grep -c "라우트 자체 점검")
 want "부팅 자체 점검 경고 없음 (커머스 켠 뒤)" 0 "$WARN"
 
 # ---- 결과 -------------------------------------------------------------------

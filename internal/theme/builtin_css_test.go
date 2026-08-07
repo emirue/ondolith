@@ -5,6 +5,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -49,6 +50,7 @@ var (
 	plainWord = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 )
 
+// classAttr·plainWord 는 두 검사가 함께 쓴다.
 func classesInTemplates(t *testing.T) []string {
 	t.Helper()
 	seen := map[string]bool{}
@@ -83,12 +85,21 @@ func classesInStylesheet(t *testing.T) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// **주석을 먼저 걷어낸다.** 주석 속 `style.css` 와 `app.defaultAdminTheme`
+	// 이 `.css`·`.default` 로 읽혀 없는 클래스가 잡혔다.
 	seen := map[string]bool{}
-	for _, m := range cssClass.FindAllStringSubmatch(string(b), -1) {
+	for _, m := range cssClass.FindAllStringSubmatch(stripComments(string(b)), -1) {
 		seen[m[1]] = true
 	}
 	return sortedKeys(seen)
 }
+
+// condClass 는 `{{…}}` 사이에 낀 평범한 낱말을 집는다 — 조건부 클래스다.
+var condClass = regexp.MustCompile(`\}\}([a-z][a-z0-9-]*)\{\{`)
+
+var cssComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+
+func stripComments(css string) string { return cssComment.ReplaceAllString(css, " ") }
 
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
@@ -208,5 +219,123 @@ func TestTemplatesFormatTimes(t *testing.T) {
 	}
 	if len(bad) > 0 {
 		t.Errorf("시각을 date 없이 그리는 템플릿: %v", bad)
+	}
+}
+
+// **규칙만 있고 아무 템플릿도 안 쓰는 클래스가 없어야 한다.**
+//
+// 앞의 검사(TestEveryBuiltinClassHasAStyle)는 한 방향만 본다 — 템플릿이 쓰는
+// 것에 규칙이 있는가. 반대 방향은 **계획된 화면이 만들어지지 않은 것**을
+// 가리킨다: `.hero-eyebrow`·`.cards`·`.card-list` 에 규칙이 있는데 홈이 그것을
+// 안 쓰고 있었고, 그래서 첫 화면이 사이트 이름 하나뿐이었다. 한 방향만 보는
+// 검사가 그 공백을 못 봤다.
+//
+// **템플릿이 이름을 조립하는 경우를 빼야 한다.** `class="social-btn--{{.Provider}}"`
+// 는 실행 시 `social-btn--google` 이 되지만 정적 스캔에는 안 보인다 — 그것을
+// 미사용으로 보고하면 검사가 오탐을 내고, 오탐이 나는 검사는 곧 무시된다.
+// 접두사가 쓰이면 그 접두사로 시작하는 규칙은 쓰인 것으로 본다.
+func TestNoStyleIsWrittenForAScreenThatDoesNotExist(t *testing.T) {
+	used := map[string]bool{}
+	prefixes := []string{}
+	err := fs.WalkDir(Builtin(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".html" {
+			return err
+		}
+		b, err := fs.ReadFile(Builtin(), p)
+		if err != nil {
+			return err
+		}
+		for _, m := range classAttr.FindAllStringSubmatch(string(b), -1) {
+			for _, c := range strings.Fields(m[1]) {
+				if plainWord.MatchString(c) {
+					used[c] = true
+					continue
+				}
+				// `social-btn--{{.Provider}}` → 접두사 `social-btn--`
+				if i := strings.Index(c, "{{"); i > 0 {
+					prefixes = append(prefixes, c[:i])
+				}
+				// `{{if .ParentID}}reply{{end}}` — 조건부로 붙는 이름도 쓰인다.
+				for _, w := range condClass.FindAllStringSubmatch(c, -1) {
+					used[w[1]] = true
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defined := classesInStylesheet(t)
+	if len(used) < 30 || len(defined) < 20 {
+		t.Fatalf("사용 %d · 정의 %d — 검사가 헛돌았다", len(used), len(defined))
+	}
+
+	var orphan []string
+	for _, c := range defined {
+		if used[c] {
+			continue
+		}
+		covered := false
+		for _, pre := range prefixes {
+			if strings.HasPrefix(c, pre) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			orphan = append(orphan, c)
+		}
+	}
+	if len(orphan) > 0 {
+		t.Errorf("규칙만 있고 아무 템플릿도 안 쓰는 클래스 %d개 — 계획된 화면이 없는 것이다:\n  %s",
+			len(orphan), strings.Join(orphan, " "))
+	}
+}
+
+// **같은 블록이 한 템플릿에 두 번 나오지 않는다.**
+//
+// 로그인 화면에 소셜 로그인 블록이 통째로 두 번 있었다 — 붙여넣기 사고다.
+// 버튼이 6개로 그려지는데 둘 다 동작하므로 오류가 나지 않고, 응답 코드도
+// 200 이다. 눈으로 세기 전에는 안 보인다.
+//
+// 한 화면에 한 번만 나와야 하는 블록의 클래스를 센다. 목록으로 두는 이유는
+// 「모든 클래스가 한 번씩」이 참이 아니기 때문이다 — `.card-list` 처럼 여러
+// 번 나오는 것이 정상인 것도 있다.
+func TestSingletonBlocksAppearOnce(t *testing.T) {
+	once := []string{"social-login", "auth", "hero", "totals"}
+	var dup, scanned []string
+	err := fs.WalkDir(Builtin(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".html" {
+			return err
+		}
+		b, err := fs.ReadFile(Builtin(), p)
+		if err != nil {
+			return err
+		}
+		scanned = append(scanned, p)
+		for _, c := range once {
+			if n := strings.Count(string(b), `class="`+c+`"`); n > 1 {
+				dup = append(dup, p+" "+c+"×"+strconv.Itoa(n))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scanned) < 10 {
+		t.Fatalf("템플릿을 %d개밖에 못 읽었다 — 검사가 헛돌았다", len(scanned))
+	}
+	// 검사가 헛돌지 않는지: 목록의 클래스가 실제로 어딘가 쓰이는가.
+	used := classesInTemplates(t)
+	for _, c := range once {
+		if !slices.Contains(used, c) {
+			t.Fatalf("%q 를 쓰는 템플릿이 없다 — 목록이 낡았고 검사가 헛돈다", c)
+		}
+	}
+	if len(dup) > 0 {
+		t.Errorf("한 번만 나와야 하는 블록이 여러 번 있다: %v", dup)
 	}
 }

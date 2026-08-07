@@ -19,23 +19,12 @@ func (d *boardDeps) search(w http.ResponseWriter, r *http.Request) {
 	a := ActorFrom(ctx)
 	q := content.ParseListQuery(r.URL.Query(), 20)
 
-	// The boards this caller may read, resolved once. Passing the ids is what
-	// keeps the permission decision in Go (where the grant model lives) and the
-	// filtering in SQL (where the rows are).
 	boards, err := d.content.Boards(ctx)
 	if err != nil {
 		d.serverError(w, r, err)
 		return
 	}
-	var readable, secretIn []string
-	for _, b := range boards {
-		if a.CanOn("post.read", auth.BoardID(b.ID)) {
-			readable = append(readable, b.ID)
-			if a.CanOn("post.read_secret", auth.BoardID(b.ID)) {
-				secretIn = append(secretIn, b.ID)
-			}
-		}
-	}
+	readable, secretIn := readableBoards(a, boards)
 
 	var results []content.Post
 	var total int64
@@ -61,4 +50,23 @@ func (d *boardDeps) search(w http.ResponseWriter, r *http.Request) {
 		"Query": q, "Results": results, "Total": total, "Boards": byID,
 	}
 	d.renderPage(w, r, "search.html", http.StatusOK, v)
+}
+
+// readableBoards splits boards into "this caller may read" and "…including
+// secret posts".
+//
+// 결정은 Go 에서(부여 모델이 거기 있다), 걸러내기는 SQL 에서(행이 거기 있다) —
+// id 목록을 넘기는 것이 그 경계다. 홈(P-201)과 검색(P-212)이 같은 계산을
+// 하므로 한 곳에 둔다. 두 곳이 갈라지면 한쪽에만 비공개 게시판 글이 샌다.
+func readableBoards(a *Actor, boards []content.Board) (readable, secretIn []string) {
+	for _, b := range boards {
+		if !a.CanOn("post.read", auth.BoardID(b.ID)) {
+			continue
+		}
+		readable = append(readable, b.ID)
+		if a.CanOn("post.read_secret", auth.BoardID(b.ID)) {
+			secretIn = append(secretIn, b.ID)
+		}
+	}
+	return readable, secretIn
 }

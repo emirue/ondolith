@@ -1,8 +1,14 @@
 {{define "body"}}
-{{/* 핸드오프의 프론트 히어로. 아이브로·사업영역 3열·공지 목록은 그 자리에
-     들어갈 데이터가 아직 없다 — 게시판이 Phase 2 다. 없는 것을 그리는 대신
-     사이트가 실제로 가진 것(이름·설명·메뉴)으로 채운다. */}}
+{{/* 홈은 **사이트가 실제로 가진 것**만 그린다.
+
+     `{{if}}` 가 절마다 붙는 이유: 설치 직후에는 글도 상품도 없다. 빈 상자를
+     남기면 첫 화면이 고장 난 것처럼 보이고, 운영자가 그것을 지울 방법도 없다.
+
+     무엇을 보일지는 `Site.Type` 이 정한다 (FR-710) — 한 바이너리가 두 종류의
+     사이트를 굴리므로 첫 화면이 그 성격을 말해야 한다. 분기는 여기 하나뿐이고,
+     핸들러는 그 유형에 맞는 데이터만 넘긴다. */}}
 <section class="hero">
+  <p class="hero-eyebrow">{{if eq .Site.Type "shop"}}SHOP{{else}}WELCOME{{end}}</p>
   <h1>{{.Site.Name}}</h1>
   {{if .Site.MetaDescription}}<p class="lede">{{.Site.MetaDescription}}</p>{{end}}
   {{if .Menu}}
@@ -11,4 +17,44 @@
   </div>
   {{end}}
 </section>
+
+{{with .Data}}
+{{if or .Products .Posts}}
+<div class="cards">
+
+  {{/* 신상품. 커머스가 꺼진 배포에는 이 키가 아예 없다 — 템플릿이 유형을
+       두 번 검사하지 않도록 핸들러가 조립 시점에 정한다. */}}
+  {{with .Products}}
+  <section class="card-list">
+    <h2>새로 들어온 상품 <a href="/shop">전체 보기</a></h2>
+    <ul>
+      {{range .}}
+      <li>
+        <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
+        <span class="meta">{{money .BasePrice}}</span>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{/* 최근 글. **읽을 수 있는 게시판의 것만** 온다 — 그 판단은 핸들러가
+       검색(P-212)과 같은 술어로 한다 (D12 P-201). */}}
+  {{with .Posts}}
+  <section class="card-list">
+    <h2>최근 글</h2>
+    <ul>
+      {{range .}}
+      <li>
+        <a href="/board/{{.BoardSlug}}/{{.ID}}">{{.Title}}</a>
+        <span class="meta">{{date .CreatedAt "01-02"}}</span>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+</div>
+{{end}}
+{{end}}
 {{end}}

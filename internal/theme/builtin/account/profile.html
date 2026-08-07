@@ -1,4 +1,7 @@
 {{define "body"}}
+{{/* 인증·내 계정 화면은 **한 축에 선다.** 제목·폼·소셜 버튼·링크가
+     각자 다른 폭이면 어느 것이 이 화면의 본체인지 눈이 못 고른다. */}}
+<div class="auth">
 <h1>내 정보</h1>
 {{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
 <form method="post" action="/me" class="form">
@@ -10,4 +13,5 @@
   <button type="submit">저장</button>
 </form>
 <p><a href="/me/password">비밀번호 변경</a> · <a href="/me/delete">회원 탈퇴</a></p>
+</div>
 {{end}}

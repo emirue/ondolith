@@ -235,6 +235,17 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// five directions share one markup, so switching is a token swap.
 	shopMode := site().Type == "shop"
 	commerceStore := commerce.NewStore(pool)
+	// **커머스일 때만 채운다** (FR-710). nil 이면 홈이 신상품 절을 그리지
+	// 않는다 — 핸들러 안에서 `if 커머스켜짐` 을 검사하는 대신 조립 시점에
+	// 정한다. tree.go 가 라우트를 가르는 것과 같은 규칙이고, 그래야 검사를
+	// 빠뜨릴 자리가 생기지 않는다.
+	if shopMode {
+		pub.products = func(c context.Context, limit int) ([]commerce.Product, error) {
+			return commerceStore.ListProducts(c, commerce.ProductQuery{
+				VisibleOnly: true, Sort: "new", PerPage: limit, Page: 1,
+			})
+		}
+	}
 	adminUI, err := newAdminRenderer(func() string { return site().Name },
 		setting("admin.theme")["admin.theme"], shopMode, log)
 	if err != nil {

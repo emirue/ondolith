@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
+	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/theme"
 )
@@ -24,14 +25,81 @@ type publicDeps struct {
 	// dev decides how much an error page says (FR-306). In production it says
 	// nothing; in development it names the cause.
 	dev bool
+	// products lists the newest visible products for the home page. nil 이면
+	// 커머스가 꺼진 배포다 — 핸들러가 `if 커머스켜짐` 을 검사하는 대신 조립
+	// 시점에 정해진다 (FR-710, tree.go 와 같은 규칙).
+	products func(ctx context.Context, limit int) ([]commerce.Product, error)
 	// ping answers P-907. 함수인 이유는 이 타입이 풀을 알 필요가 없기 때문이다
 	// — 헬스체크가 필요한 것은 "지금 DB 에 닿는가" 하나다.
 	ping func(context.Context) error
 }
 
+// homeItems is how many entries each home section shows.
+//
+// 한 화면에 담기는 만큼이다. 더 보려면 그 목록 화면으로 가면 되고, 홈이 목록
+// 화면을 대신하려 들면 둘 다 어중간해진다.
+const homeItems = 6
+
 // P-201 GET / — the home page.
+//
+// **사이트 유형이 무엇을 보일지 정한다** (FR-710). `shop` 이면 신상품,
+// `cms` 면 최근 글이다 — 한 바이너리가 두 종류의 사이트를 굴리므로 첫 화면이
+// 그 성격을 말해야 한다.
+//
+// **데이터가 없으면 그 절을 아예 넘긴다.** 빈 상자를 남기면 설치 직후의 사이트가
+// 고장 난 것처럼 보이고, 운영자가 지울 방법도 없다.
 func (d *publicDeps) home(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	a := ActorFrom(ctx)
 	v := d.view(r, "홈", "")
+
+	data := map[string]any{}
+	// **유형을 여기서 다시 보지 않는다.** `products` 는 커머스일 때만 채워지므로
+	// (app.go 조립부, FR-710) nil 여부가 곧 유형이다. 두 곳에서 판단하면 한쪽만
+	// 고쳐진 채로 남고, 그 어긋남은 화면에서만 보인다 — 실제로 사이트 유형을
+	// 여기 한 번 더 검사해 두었더니 그 조건을 지워도 아무 테스트가 안 물었다.
+	// TestNoCommerceFlagInsideHandlers 가 이 규칙을 소스에서 강제한다.
+	if d.products != nil {
+		// 신상품. 보이는 것만 — 숨긴 상품이 첫 화면에 뜨면 숨긴 의미가 없다.
+		items, err := d.products(ctx, homeItems)
+		if err != nil {
+			d.serverError(w, r, err)
+			return
+		}
+		data["Products"] = items
+	}
+
+	// 최근 글은 두 유형 모두에서 쓸모가 있다 — 쇼핑몰도 공지를 쓴다.
+	boards, err := d.content.Boards(ctx)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	// **권한 술어는 검색과 같은 것을 쓴다.** 홈이 자기 조건을 따로 쓰면 그 한
+	// 줄이 어긋나는 날 비공개 게시판 글이 첫 화면에 뜬다 (D12 P-201).
+	readable, secretIn := readableBoards(a, boards)
+	posts, err := d.content.RecentPosts(ctx, readable, secretIn, actorID(a), homeItems)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	if len(posts) > 0 {
+		name := map[string]string{}
+		for _, b := range boards {
+			name[b.ID] = b.Slug
+		}
+		type postView struct {
+			content.Post
+			BoardSlug string
+		}
+		views := make([]postView, 0, len(posts))
+		for _, p := range posts {
+			views = append(views, postView{Post: p, BoardSlug: name[p.BoardID]})
+		}
+		data["Posts"] = views
+	}
+
+	v.Data = data
 	d.renderPage(w, r, "home.html", http.StatusOK, v)
 }
 

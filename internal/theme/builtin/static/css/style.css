@@ -342,8 +342,10 @@ button,
 input,
 select,
 textarea,
-.card,
-.panel {
+/* 그림자·테두리가 상태에 따라 바뀌는 것들. `.card`·`.panel` 을 적어 뒀었는데
+   그런 클래스를 쓰는 템플릿이 없었다 — 있지도 않은 화면의 규칙이었다.
+   `.page` 는 위에 이미 정의돼 있어 여기 다시 적지 않는다 (호버 상태가 없다). */
+.product-list li {
   transition: background-color .16s ease, border-color .16s ease,
               box-shadow .16s ease, color .16s ease, transform .16s ease;
 }
@@ -666,6 +668,11 @@ a:focus-visible {
 .social-login { display: grid; gap: 10px; margin: 20px 0 0; }
 
 .social-btn {
+  /* **`width: fit-content` 을 물려받지 않게 한다.** `.badge` 에 준 것이
+     `inline-flex` 를 통해 여기까지 오지는 않지만, grid 자식이 자기 내용만큼만
+     차지하면 버튼 폭이 글자 수를 따라 제각각이 된다 — 「구글로 로그인」과
+     「카카오로 로그인」이 다른 크기로 서면 목록이 아니라 우연으로 보인다. */
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -736,6 +743,36 @@ a:focus-visible {
  * 실제로 그렇게 무시됐고, 화면에서는 입력칸이 12rem 높이 상자로 늘어났다.
  * 규칙을 더할 때는 **이 블록 위에** 더한다.
  */
+/* ═══ 인증 · 내 계정 ═══════════════════════════════════════════════════════
+ *
+ * **한 축에 세운다.** 제목은 화면 폭, 폼은 24rem, 소셜 버튼은 또 화면 폭 —
+ * 셋이 각자 다른 폭에 서 있으면 어느 것이 이 화면의 본체인지 눈이 못 고른다.
+ * 로그인 화면이 그 상태였다.
+ *
+ * 폭을 여기서 정하므로 `.form` 의 `max-width` 는 이 안에서 푼다. 두 곳이
+ * 폭을 정하면 어느 쪽이 이겼는지 보고 고쳐야 한다.
+ */
+.auth {
+  max-width: 26rem;
+  margin: 0 auto;
+  display: grid;
+  gap: 16px;
+}
+
+.auth h1 {
+  margin: 0;
+  font-size: clamp(22px, 2.6vw, 28px);
+  letter-spacing: -.02em;
+}
+
+.auth .form,
+.auth .form--wide { max-width: none; margin: 0; }
+.auth .social-login { margin: 0; }
+.auth > p { margin: 0; font-size: 13.5px; }
+
+/* 링크 줄은 카드 밖이라 배경이 없다 — 가운데로 모으면 카드와 축이 맞는다. */
+.auth > p:last-child { text-align: center; opacity: .7; }
+
 @media (max-width: 767px) {
   :root { --pad: 16px; --gap: 14px; }
   main { padding: 20px var(--pad) 48px; }

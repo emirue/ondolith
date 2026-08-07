@@ -462,25 +462,7 @@ func (s *Store) SearchPosts(ctx context.Context, readable, secretIn []string,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Post
-	for rows.Next() {
-		var p Post
-		var raw []byte
-		if err := rows.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
-			&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
-			&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
-			&p.CommentCount, &p.HasAttachment); err != nil {
-			return nil, err
-		}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
-				return nil, err
-			}
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return scanPosts(rows)
 }
 
 func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []string,
@@ -518,25 +500,7 @@ func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Post
-	for rows.Next() {
-		var p Post
-		var raw []byte
-		if err := rows.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
-			&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
-			&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
-			&p.CommentCount, &p.HasAttachment); err != nil {
-			return nil, err
-		}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
-				return nil, err
-			}
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return scanPosts(rows)
 }
 
 // ModerateComments is A-308's list, newest first across one board.
@@ -570,4 +534,65 @@ func (s *Store) ModerateComments(ctx context.Context, boardID string, limit int)
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// postColumns is the SELECT list every post listing uses.
+//
+// 목록마다 베껴 적으면 컬럼 하나를 더할 때 한 곳을 빠뜨리고, 그 화면만 조용히
+// 옛 모양으로 남는다 — 스캔 순서가 어긋나면 그때는 런타임 오류다.
+const postColumns = `
+	p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
+	p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+	p.view_count, p.created_at, p.updated_at,
+	(SELECT count(*) FROM comments c WHERE c.post_id = p.id),
+	EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)`
+
+// scanPosts reads rows shaped by postColumns.
+func scanPosts(rows pgx.Rows) ([]Post, error) {
+	defer rows.Close()
+	var out []Post
+	for rows.Next() {
+		var p Post
+		var raw []byte
+		if err := rows.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
+			&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
+			&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
+			&p.CommentCount, &p.HasAttachment); err != nil {
+			return nil, err
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// RecentPosts lists the newest published posts across the boards the caller may
+// read — P-201 의 「최근 글」이다.
+//
+// **권한 술어가 검색과 같다.** 홈이 자기 조건을 따로 쓰면 그 한 줄이 어긋나는
+// 날 비공개 게시판 글이 첫 화면에 뜬다 (D12 P-201). 읽을 수 있는 게시판이
+// 없으면 빈 목록이다 — 「전부」로 읽지 않는다.
+func (s *Store) RecentPosts(ctx context.Context, readable, secretIn []string,
+	viewerID string, limit int,
+) ([]Post, error) {
+	if len(readable) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+postColumns+`
+		FROM posts p
+		LEFT JOIN users u ON u.id = p.author_id
+		WHERE p.board_id = ANY($1)
+		  AND p.status = 'published'
+		  AND (NOT p.is_secret OR p.board_id = ANY($2) OR p.author_id = $3)
+		ORDER BY p.created_at DESC
+		LIMIT $4`, readable, secretIn, nullIfEmpty(viewerID), limit)
+	if err != nil {
+		return nil, err
+	}
+	return scanPosts(rows)
 }

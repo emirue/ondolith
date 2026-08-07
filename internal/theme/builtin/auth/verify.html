@@ -1,4 +1,7 @@
 {{define "body"}}
+{{/* 인증·내 계정 화면은 **한 축에 선다.** 제목·폼·소셜 버튼·링크가
+     각자 다른 폭이면 어느 것이 이 화면의 본체인지 눈이 못 고른다. */}}
+<div class="auth">
 {{with .Data}}{{if .Error}}
 <h1>인증하지 못했습니다</h1>
 <p class="error" role="alert">{{.Error}}</p>
@@ -7,4 +10,5 @@
 <h1>인증이 완료되었습니다</h1>
 <p><a href="/login">로그인하기</a></p>
 {{end}}{{end}}
+</div>
 {{end}}
