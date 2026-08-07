@@ -21,12 +21,7 @@ func (d *Deps) ProductForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := d.Commerce.ProductByID(r.Context(), id)
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	d.Render(w, r, "admin/product-edit.html", http.StatusOK, map[string]any{"Product": p})
@@ -233,12 +228,7 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) renderVariants(w http.ResponseWriter, r *http.Request, code int, msg string) {
 	productID := r.PathValue("id")
 	p, err := d.Commerce.ProductByID(r.Context(), productID)
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	// sellableOnly=false — 관리자는 품절 조합도 봐야 재고를 채운다.

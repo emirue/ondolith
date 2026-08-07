@@ -143,12 +143,7 @@ func (d *Deps) PickCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	orderNo := r.PathValue("no")
 	lines, err := d.Commerce.PickList(r.Context(), orderNo)
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -222,12 +217,7 @@ func (d *Deps) QRLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	productID := r.PathValue("id")
 	p, err := d.Commerce.ProductByID(r.Context(), productID)
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	// sellableOnly=false — 품절 조합에도 라벨은 필요하다. 라벨이 없으면

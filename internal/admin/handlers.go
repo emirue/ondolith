@@ -109,6 +109,38 @@ func (d *Deps) require(w http.ResponseWriter, r *http.Request, perm string) (Cal
 	return c, true
 }
 
+// fail writes the response a store error deserves and reports whether the
+// handler must stop. A nil error writes nothing and returns false, so the
+// call reads as the `if err != nil` it replaces:
+//
+//	order, err := d.Commerce.OrderByNo(ctx, no)
+//	if d.fail(w, r, err) {
+//		return
+//	}
+//
+// **"없다"는 404 다.** 없는 id 를 물어본 것은 서버 잘못이 아니고, 500 으로
+// 답하면 정상적인 오탈자가 로그에서 장애와 구별되지 않는다.
+//
+// 그 밖의 모든 것은 500 에 **한 문장**이다. 스토어가 만든 문구는 브라우저에
+// 닿지 않는다 — 제약 이름·컬럼명·SQL 조각이 그대로 새는 경로가 여기다
+// (D14 2절). 원인은 로그가 받는다.
+//
+// 도메인 오류(ErrOutOfStock 같은 것)는 화면마다 문구와 코드가 다르므로 여기서
+// 다루지 않는다. 호출자가 먼저 걸러내고, 남은 것만 넘긴다.
+func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, commerce.ErrNotFound),
+		errors.Is(err, content.ErrNotFound),
+		errors.Is(err, auth.ErrNoUser):
+		http.NotFound(w, r)
+	default:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	}
+	return true
+}
+
 // ---- A-201 사이트 설정 -------------------------------------------------------
 
 // siteSettingKeys is what A-201 owns. Listing them is what keeps one screen

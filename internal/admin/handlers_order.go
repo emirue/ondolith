@@ -33,12 +33,7 @@ func (d *Deps) OrderDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	shipments, err := d.Commerce.Shipments(r.Context(), order.ID)
@@ -99,12 +94,7 @@ func (d *Deps) ShippingForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	shipments, err := d.Commerce.Shipments(r.Context(), order.ID)
@@ -234,12 +224,7 @@ func (d *Deps) RefundForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	d.renderRefund(w, r, c, order, http.StatusOK, "")
@@ -282,12 +267,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	if !reauthOK(c, r) {
@@ -357,12 +337,7 @@ func (d *Deps) ReturnList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	d.renderReturns(w, r, c, order, http.StatusOK, "")
@@ -398,12 +373,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
-	if errors.Is(err, commerce.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if d.fail(w, r, err) {
 		return
 	}
 	returnNo := r.PostFormValue("return_no")
