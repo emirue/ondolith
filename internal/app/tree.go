@@ -134,6 +134,19 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	// sees a path prefix, the handler sees the target (D15 4.2).
 	r.Add(Route{Screen: "A-101", Method: "GET", Pattern: "/admin/{$}", Class: SC4,
 		Permission: "admin.access", Handler: ad.Dashboard})
+	// `/admin` 은 `/admin/` 으로 보낸다.
+	//
+	// 위 패턴이 `{$}` 라 **정확히** `/admin/` 만 받는다. ServeMux 가 자동으로
+	// 붙여 주는 슬래시 보정은 서브트리 패턴(`/admin/`)을 등록했을 때의 동작이고
+	// 여기에는 없다 — 그래서 슬래시 없이 친 `/admin` 은 404 였다. 관리자가
+	// 주소창에 치는 것은 거의 언제나 슬래시 없는 쪽이다.
+	//
+	// 301 이 아니라 **308** 이다: 301 은 캐시가 영구히 물고, 이 경로의 접두사는
+	// 나중에 바뀔 수 있다 (OPEN-31).
+	r.Add(Route{Screen: "A-101", Method: "GET", Pattern: "/admin", Class: SC4,
+		Permission: "admin.access", Handler: func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/admin/", http.StatusPermanentRedirect)
+		}})
 
 	r.Add(Route{Screen: "A-201", Method: "GET", Pattern: "/admin/settings", Class: SC4,
 		Permission: "settings.update", Handler: ad.SettingsForm})

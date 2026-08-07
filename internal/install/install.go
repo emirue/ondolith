@@ -207,9 +207,27 @@ func (h *handler) provision(ctx context.Context, cfg *config.Config, f *form) er
 		return fmt.Errorf("비밀번호를 처리하지 못했습니다: %w", err)
 	}
 
-	const q = `INSERT INTO users (email, password_hash, display_name, is_admin)
-	           VALUES ($1, $2, $3, true)
-	           ON CONFLICT (email) DO NOTHING`
+	// **계정과 역할을 한 문장에서 만든다.**
+	//
+	// `is_admin` 만 켜는 것으로는 관리자가 되지 않는다. 권한은 역할이 정하고
+	// (D15), `is_admin` 은 Phase 0 의 잔재로 W2-01 이 지울 컬럼이다.
+	// 00003 의 백필(`WHERE u.is_admin`)은 **마이그레이션 시점에 한 번** 도는데
+	// 설치는 마이그레이션을 먼저 돌리고 계정을 나중에 만든다 — 그 순서 때문에
+	// 백필은 늘 빈 테이블을 보고, 새로 설치한 사이트의 유일한 관리자는 역할이
+	// 없는 채로 남아 `/admin` 에서 「권한이 없습니다」를 본다. 되돌릴 화면이
+	// 관리자 화면 안에 있으므로 그 사이트는 손댈 방법이 없다.
+	//
+	// CTE 로 묶는 이유: 계정만 만들고 역할 부여에서 실패하면 정확히 위의 잠긴
+	// 상태가 되고, 재설치는 「이미 계정이 존재한다」로 거부된다. 둘은 함께
+	// 성립하거나 함께 없어야 한다.
+	const q = `WITH created AS (
+	               INSERT INTO users (email, password_hash, display_name, is_admin)
+	               VALUES ($1, $2, $3, true)
+	               ON CONFLICT (email) DO NOTHING
+	               RETURNING id
+	           )
+	           INSERT INTO user_roles (user_id, role_id)
+	           SELECT created.id, r.id FROM created, roles r WHERE r.key = 'admin'`
 	tag, err := pool.Exec(ctx, q, f.AdminEmail, string(hash), f.AdminEmail)
 	if err != nil {
 		return fmt.Errorf("관리자 계정을 만들지 못했습니다: %w", err)

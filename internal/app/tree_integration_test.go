@@ -601,3 +601,45 @@ func TestPublicScreensCarryTheBuiltInDesign(t *testing.T) {
 		t.Errorf("스타일시트에 토큰이 없다: %.200s", css)
 	}
 }
+
+// **`/admin` 은 `/admin/` 으로 보낸다.**
+//
+// A-101 의 패턴이 `{$}` 라 정확히 `/admin/` 만 받는다. ServeMux 의 슬래시
+// 보정은 서브트리 패턴을 등록했을 때의 동작이고 여기에는 없어서, 슬래시 없이
+// 친 `/admin` 이 404 였다 — 관리자가 주소창에 치는 것은 거의 언제나 그쪽이다.
+// 브라우저로 설치를 마치고 처음 관리자 화면에 들어가려다 걸렸다 (D83 8단계).
+func TestAdminWithoutTrailingSlashRedirects(t *testing.T) {
+	srv, pool := liveSite(t)
+	c, _ := adminSession(t, srv, pool)
+
+	// 리다이렉트를 따라가지 않게 해야 응답 자체를 볼 수 있다. 쿠키 jar 는
+	// 그대로 두고 CheckRedirect 만 갈아 끼운다 — 새 클라이언트를 만들면 세션이
+	// 실리지 않아 「로그인으로 밀림」을 리다이렉트로 오인한다.
+	follow := c.CheckRedirect
+	c.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	res, err := c.Get(srv.URL + "/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	c.CheckRedirect = follow
+
+	if res.StatusCode/100 != 3 {
+		t.Fatalf("/admin → HTTP %d, 리다이렉트가 아니다", res.StatusCode)
+	}
+	if got := res.Header.Get("Location"); got != "/admin/" {
+		t.Fatalf("Location = %q, want /admin/ — 로그인으로 밀린 것일 수 있다", got)
+	}
+	// 따라갔을 때 대시보드가 나오는지까지 본다. 리다이렉트만 확인하면 목적지가
+	// 깨져 있어도 통과한다.
+	res2, err := c.Get(srv.URL + "/admin/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res2.Body.Close()
+	if res2.StatusCode != http.StatusOK {
+		t.Errorf("/admin/ → HTTP %d", res2.StatusCode)
+	}
+}

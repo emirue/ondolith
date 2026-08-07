@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -157,6 +158,44 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 	}
 	if !isAdmin {
 		t.Error("is_admin = false, want true")
+	}
+
+	// **FR-104 는 "관리자 계정" 이지 "is_admin 이 켜진 행" 이 아니다.**
+	//
+	// 권한은 역할이 정한다 (D15). 불리언만 보던 이 테스트는 통과하는데 새로
+	// 설치한 사이트의 유일한 관리자가 `/admin` 에서 「권한이 없습니다」를 보고
+	// 있었다 — 00003 의 백필은 마이그레이션 시점에 한 번 돌고, 그때 users 는
+	// 아직 비어 있다. 관리자 화면에 못 들어가면 그 사이트는 손댈 방법이 없다.
+	var roles []string
+	rows, err := pool.Query(ctx, `
+		SELECT r.key FROM users u
+		JOIN user_roles ur ON ur.user_id = u.id
+		JOIN roles r ON r.id = ur.role_id
+		WHERE u.email = 'admin@example.com'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		roles = append(roles, k)
+	}
+	rows.Close()
+	if !slices.Contains(roles, "admin") {
+		t.Errorf("관리자 역할이 없다 (역할: %v) — 설치 직후 /admin 에 들어갈 수 없다", roles)
+	}
+
+	// 그 역할이 실제로 superuser 여야 의미가 있다. 이름만 'admin' 이고 권한이
+	// 없으면 위 단언은 통과하면서 아무것도 보장하지 않는다.
+	var superuser bool
+	if err := pool.QueryRow(ctx,
+		`SELECT r.is_superuser FROM roles r WHERE r.key = 'admin'`).Scan(&superuser); err != nil {
+		t.Fatal(err)
+	}
+	if !superuser {
+		t.Error("admin 역할이 superuser 가 아니다 — 역할을 붙여도 관리자가 되지 않는다")
 	}
 	if strings.Contains(hash, "correct-horse-battery") {
 		t.Fatal("비밀번호가 평문으로 저장됐다")
