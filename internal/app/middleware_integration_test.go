@@ -43,6 +43,25 @@ func authFixture(t *testing.T) (*auth.Store, *pgxpool.Pool, *scs.SessionManager)
 	return auth.NewStore(pool), pool, sm
 }
 
+// loginStamp is the value production puts in auth_at — the database's clock
+// (auth.Store.Now), not the process's.
+//
+// A test that stamps time.Now() instead re-creates the bug the handlers were
+// fixed for: withActor compares auth_at against sessions_valid_from, which the
+// database wrote, and on a machine whose database runs a couple of milliseconds
+// ahead the session of a just-created account is destroyed on the very next
+// request. That shows up as an unexplainable flake — the same test passes when
+// enough other tests ran first to burn off the skew — so the fixtures use the
+// same clock the handlers do.
+func loginStamp(t *testing.T, store *auth.Store) time.Time {
+	t.Helper()
+	at, err := store.Now(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return at
+}
+
 // runWithSession drives one request whose session was prepared by setup.
 // The returned Actor is what the middleware built.
 func runWithSession(t *testing.T, sm *scs.SessionManager, store *auth.Store,
@@ -100,7 +119,7 @@ func TestActorLoadsUserAndPermissions(t *testing.T) {
 
 	a, _ := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, id)
-		putTime(sm, c, sessAuthAt, time.Now())
+		putTime(sm, c, sessAuthAt, loginStamp(t, store))
 	})
 	if !a.IsAuthenticated() {
 		t.Fatal("세션이 있는데 익명이다")
@@ -126,7 +145,7 @@ func TestDeactivatedAccountLosesSession(t *testing.T) {
 
 	a, _ := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, id)
-		putTime(sm, c, sessAuthAt, time.Now())
+		putTime(sm, c, sessAuthAt, loginStamp(t, store))
 	})
 	if a.IsAuthenticated() {
 		t.Error("비활성 계정이 인증 상태로 남았다")
@@ -160,7 +179,7 @@ func TestSessionOlderThanCutoffIsRejected(t *testing.T) {
 	// ...while a session issued after it survives.
 	a2, _ := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, id)
-		putTime(sm, c, sessAuthAt, time.Now().Add(time.Second))
+		putTime(sm, c, sessAuthAt, loginStamp(t, store))
 	})
 	if !a2.IsAuthenticated() {
 		t.Error("컷오프 이후 세션이 거부됐다")
@@ -171,7 +190,7 @@ func TestSessionNamingMissingUserIsDestroyed(t *testing.T) {
 	store, _, sm := authFixture(t)
 	a, code := runWithSession(t, sm, store, func(c context.Context) {
 		sm.Put(c, sessUserID, "00000000-0000-0000-0000-000000000000")
-		putTime(sm, c, sessAuthAt, time.Now())
+		putTime(sm, c, sessAuthAt, loginStamp(t, store))
 	})
 	if code != http.StatusOK {
 		t.Fatalf("HTTP %d — 없는 사용자는 오류가 아니라 익명이어야 한다", code)

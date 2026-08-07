@@ -51,7 +51,7 @@ func TestAdminReauthWindowCanBeReopenedWithThePassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		sm.Put(r.Context(), sessUserID, id)
-		putTime(sm, r.Context(), sessAuthAt, time.Now())
+		putTime(sm, r.Context(), sessAuthAt, loginStamp(t, store))
 	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	cookies := rec.Result().Cookies()
 
@@ -143,7 +143,7 @@ func TestReauthIsRateLimitedPerAccount(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		sm.Put(r.Context(), sessUserID, id)
-		putTime(sm, r.Context(), sessAuthAt, time.Now())
+		putTime(sm, r.Context(), sessAuthAt, loginStamp(t, store))
 	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -193,7 +193,7 @@ func TestReauthLimitIsScopedPerAccount(t *testing.T) {
 		rec := httptest.NewRecorder()
 		sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			sm.Put(r.Context(), sessUserID, userID)
-			putTime(sm, r.Context(), sessAuthAt, time.Now())
+			putTime(sm, r.Context(), sessAuthAt, loginStamp(t, store))
 		})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		for _, c := range rec.Result().Cookies() {
@@ -207,11 +207,24 @@ func TestReauthLimitIsScopedPerAccount(t *testing.T) {
 	}
 
 	// 공격자가 자기 세션에서 한도를 다 쓴다.
+	//
+	// **액터가 실제로 실렸는지 먼저 본다.** 세션이 안 실리면 ConfirmReauth 가
+	// nil 가드에서 바로 false 를 돌려주고 제한을 **소비하지 않는다** — 그러면
+	// 아래 「공격자는 막혀 있다」가 이유 없이 뒤집힌다. 조용한 통과가 아니라
+	// 여기서 실패해야 한다.
+	burned := 0
 	run(attacker, func(c adminCaller) {
+		if c.a == nil || c.a.User == nil || c.a.User.ID != attacker {
+			t.Fatal("공격자 세션이 실리지 않았다 — 제한을 소비하지 못한다")
+		}
 		for range limit.Burst + 2 {
 			c.ConfirmReauth("틀린 비밀번호")
+			burned++
 		}
 	})
+	if burned != limit.Burst+2 {
+		t.Fatalf("시도 %d회 — 버닝 단계가 돌지 않았다", burned)
+	}
 
 	// **피해자는 영향받지 않아야 한다.** 전역 키면 여기서 막힌다.
 	var victimOK bool

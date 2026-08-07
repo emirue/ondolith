@@ -97,7 +97,15 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.sm.Put(ctx, sessUserID, userID)
-		putTime(d.sm, ctx, sessAuthAt, time.Now())
+		// The account was created a moment ago, so its cutoff is the freshest
+		// one in the table — this is the exact spot where a process clock
+		// running behind the database logs the new user straight back out.
+		authAt, err := d.store.Now(ctx)
+		if err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		putTime(d.sm, ctx, sessAuthAt, authAt)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}

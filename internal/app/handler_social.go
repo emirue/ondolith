@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/markbates/goth"
@@ -179,7 +178,14 @@ func (d *socialDeps) finishSocialLogin(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	d.sm.Put(ctx, sessUserID, u.ID)
-	putTime(d.sm, ctx, sessAuthAt, time.Now())
+	// 데이터베이스 시계로 찍는다, time.Now() 가 아니다 — auth.Store.Now 참조.
+	// 첫 소셜 로그인은 계정을 만든 직후이므로 여기가 가장 아슬아슬하다.
+	authAt, err := d.store.Now(ctx)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	putTime(d.sm, ctx, sessAuthAt, authAt)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

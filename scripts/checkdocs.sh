@@ -10,6 +10,12 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
+# 중간 산출물은 실행마다 새 디렉터리에 둔다. 고정된 /tmp 이름을 쓰면 이 스크립트를
+# 두 번 동시에 돌릴 때 — selftest 가 배경에서 도는 동안 make check 를 돌리는 것이
+# 그렇다 — 서로의 파일을 덮어쓰고, 고치려야 고칠 수 없는 위반이 보고된다.
+T=$(mktemp -d) || exit 1
+trap 'rm -rf "$T"' EXIT INT TERM
+
 fail=0
 mark=0 # violations recorded by the check currently running
 
@@ -53,9 +59,9 @@ done_ "상대 링크 $n 개 전부 해석됨"
 # (docs/90-conventions.md 5절).
 begin
 REQ=docs/10-requirements.md
-perl -nle 'print $1 if /^\| ((?:N?FR)-\d{3}) /' "$REQ" | sort >/tmp/cd_def_req
-sort -u /tmp/cd_def_req >/tmp/cd_def_req_u
-for id in $(uniq -d /tmp/cd_def_req); do err "요구사항 중복 정의: $id"; done
+perl -nle 'print $1 if /^\| ((?:N?FR)-\d{3}) /' "$REQ" | sort >"$T"/cd_def_req
+sort -u "$T"/cd_def_req >"$T"/cd_def_req_u
+for id in $(uniq -d "$T"/cd_def_req); do err "요구사항 중복 정의: $id"; done
 # Every requirement's last column is its acceptance criterion. An empty one is
 # a requirement nobody can ever declare done (docs/90-conventions.md 6절).
 perl -nle 'next unless /^\|\s*((?:N?FR)-\d{3})\s*\|(.*)$/;
@@ -64,10 +70,10 @@ perl -nle 'next unless /^\|\s*((?:N?FR)-\d{3})\s*\|(.*)$/;
 	pop @c if @c && $c[-1] =~ /^\s*$/;
 	my $last = @c ? $c[-1] : "";
 	$last =~ s/\s//g;
-	print $id if $last eq "";' "$REQ" >/tmp/cd_req_nocrit
+	print $id if $last eq "";' "$REQ" >"$T"/cd_req_nocrit
 while read -r id; do
 	[ -n "$id" ] && err "$REQ: 완료 기준이 비어 있다: $id"
-done </tmp/cd_req_nocrit
+done <"$T"/cd_req_nocrit
 
 # A criterion phrased as a deliberation ("…인지 결론", "…할지 검토") is not a
 # criterion — it is an open decision wearing a requirement's clothes, and it can
@@ -79,33 +85,33 @@ perl -nle 'next unless /^\|\s*((?:N?FR)-\d{3})\s*\|(.*)$/;
 	pop @c if @c && $c[-1] =~ /^\s*$/;
 	my $crit = @c ? $c[-1] : "";
 	next if $crit =~ /폐기/;
-	print $id if $crit =~ /인지 결론|할지 검토|여부를 검토|결론을 낸다|판단한다$/;' "$REQ" >/tmp/cd_req_vague
+	print $id if $crit =~ /인지 결론|할지 검토|여부를 검토|결론을 낸다|판단한다$/;' "$REQ" >"$T"/cd_req_vague
 while read -r id; do
 	[ -n "$id" ] && err "$REQ: 완료 기준이 심의 형태다 (미결이지 기준이 아니다): $id — D18로 옮길 것"
-done </tmp/cd_req_vague
+done <"$T"/cd_req_vague
 
-used '\b((?:N?FR)-\d{3})\b' >/tmp/cd_use_req
-for id in $(comm -23 /tmp/cd_use_req /tmp/cd_def_req_u); do
+used '\b((?:N?FR)-\d{3})\b' >"$T"/cd_use_req
+for id in $(comm -23 "$T"/cd_use_req "$T"/cd_def_req_u); do
 	err "$REQ 에 정의되지 않은 요구사항 인용: $id"
 done
-done_ "요구사항 $(wc -l </tmp/cd_def_req_u | tr -d ' ') 개 정의 · 인용 해석 · 완료 기준 전부 채워짐"
+done_ "요구사항 $(wc -l <"$T"/cd_def_req_u | tr -d ' ') 개 정의 · 인용 해석 · 완료 기준 전부 채워짐"
 
 # --- 4. DEC- citations resolve -----------------------------------------------
 begin
 DEC=.ai/DECISIONS.md
-perl -nle 'print $1 if /^#{2,3} (DEC-\d+(?:\.\d+)?)\b/' "$DEC" | sort -u >/tmp/cd_def_dec
-used '\b(DEC-\d+(?:\.\d+)?)\b' >/tmp/cd_use_dec
-for id in $(comm -23 /tmp/cd_use_dec /tmp/cd_def_dec); do
+perl -nle 'print $1 if /^#{2,3} (DEC-\d+(?:\.\d+)?)\b/' "$DEC" | sort -u >"$T"/cd_def_dec
+used '\b(DEC-\d+(?:\.\d+)?)\b' >"$T"/cd_use_dec
+for id in $(comm -23 "$T"/cd_use_dec "$T"/cd_def_dec); do
 	err "$DEC 에 정의되지 않은 결정 인용: $id"
 done
-done_ "결정 $(wc -l </tmp/cd_def_dec | tr -d ' ') 개 정의 · 인용 전부 해석됨"
+done_ "결정 $(wc -l <"$T"/cd_def_dec | tr -d ' ') 개 정의 · 인용 전부 해석됨"
 
 # --- 5. M# citations resolve -------------------------------------------------
 begin
 MIS=.ai/MISTAKES.md
-perl -nle 'print $1 if /^## (M\d+)\b/' "$MIS" | sort -u >/tmp/cd_def_mis
-used '\b(M\d+)\b' >/tmp/cd_use_mis
-for id in $(comm -23 /tmp/cd_use_mis /tmp/cd_def_mis); do
+perl -nle 'print $1 if /^## (M\d+)\b/' "$MIS" | sort -u >"$T"/cd_def_mis
+used '\b(M\d+)\b' >"$T"/cd_use_mis
+for id in $(comm -23 "$T"/cd_use_mis "$T"/cd_def_mis); do
 	err "$MIS 에 정의되지 않은 실수 인용: $id"
 done
 done_ "실수 기록 인용 전부 해석됨"
@@ -143,10 +149,10 @@ begin
 md_files |
 	xargs perl -nle 'close ARGV if eof;
 		next if /checkdocs:allow-legacy-id/;
-		print "$ARGV:$.: $&" if /\bD\d\.\d+\b|\bD[0-4]\b(?![\d])/' 2>/dev/null >/tmp/cd_stale
+		print "$ARGV:$.: $&" if /\bD\d\.\d+\b|\bD[0-4]\b(?![\d])/' 2>/dev/null >"$T"/cd_stale
 while read -r line; do
 	err "옛 결정 ID 형식 (DEC- 를 쓸 것): $line"
-done </tmp/cd_stale
+done <"$T"/cd_stale
 done_ "옛 결정 ID 형식 없음"
 
 # --- 11..14. screen inventory ------------------------------------------------
@@ -159,12 +165,12 @@ SCR=docs/11-screens.md
 if [ ! -f "$SCR" ]; then
 	err "화면 인벤토리가 없다: $SCR"
 else
-	perl -nle 'print $1 if /^\|\s*([PA]-\d{3})\s*\|/' "$SCR" | sort >/tmp/cd_def_scr
-	sort -u /tmp/cd_def_scr >/tmp/cd_def_scr_u
-	for id in $(uniq -d /tmp/cd_def_scr); do err "화면 중복 정의: $id"; done
+	perl -nle 'print $1 if /^\|\s*([PA]-\d{3})\s*\|/' "$SCR" | sort >"$T"/cd_def_scr
+	sort -u "$T"/cd_def_scr >"$T"/cd_def_scr_u
+	for id in $(uniq -d "$T"/cd_def_scr); do err "화면 중복 정의: $id"; done
 
-	used '\b([PA]-\d{3})\b' >/tmp/cd_use_scr
-	for id in $(comm -23 /tmp/cd_use_scr /tmp/cd_def_scr_u); do
+	used '\b([PA]-\d{3})\b' >"$T"/cd_use_scr
+	for id in $(comm -23 "$T"/cd_use_scr "$T"/cd_def_scr_u); do
 		err "$SCR 에 정의되지 않은 화면 인용: $id"
 	done
 
@@ -181,26 +187,26 @@ else
 		# whole table exists to prevent.
 		print "관리자 화면인데 접근이 권한이 아니다 ($id): [$acc]" if $id =~ /^A-/ && $acc !~ /^권한:/;
 		print "STATEFUL $id" if $mut eq "있음";
-	' "$SCR" >/tmp/cd_scr_issues
+	' "$SCR" >"$T"/cd_scr_issues
 
-	grep -v '^STATEFUL ' /tmp/cd_scr_issues >/tmp/cd_scr_bad
+	grep -v '^STATEFUL ' "$T"/cd_scr_issues >"$T"/cd_scr_bad
 	while read -r line; do
 		[ -n "$line" ] && err "$line"
-	done </tmp/cd_scr_bad
+	done <"$T"/cd_scr_bad
 
 	# A state-changing screen must carry a detail section somewhere in docs/ —
 	# these are the ones that can be abused, so they cannot be a bare table row.
 	# The heading may cover several related screens, so the ID only has to
 	# appear in it.
-	grep '^STATEFUL ' /tmp/cd_scr_issues | cut -d' ' -f2 >/tmp/cd_scr_stateful
+	grep '^STATEFUL ' "$T"/cd_scr_issues | cut -d' ' -f2 >"$T"/cd_scr_stateful
 	while read -r id; do
 		[ -z "$id" ] && continue
 		grep -qhE "^#{2,4} .*$id" docs/*.md ||
 			err "상태변경 화면인데 상세 절이 없다: $id (제목에 $id 를 포함할 것)"
-	done </tmp/cd_scr_stateful
+	done <"$T"/cd_scr_stateful
 
-	n_scr=$(wc -l </tmp/cd_def_scr_u | tr -d ' ')
-	n_state=$(wc -l </tmp/cd_scr_stateful | tr -d ' ')
+	n_scr=$(wc -l <"$T"/cd_def_scr_u | tr -d ' ')
+	n_state=$(wc -l <"$T"/cd_scr_stateful | tr -d ' ')
 	done_ "화면 $n_scr 개 정의 (상태변경 $n_state 개) · 인용·어휘·상세 절 전부 확인"
 fi
 
@@ -213,19 +219,19 @@ if [ -f "$SCR" ]; then
 	# Cited = appears in the 관련 FR column of a screen row.
 	perl -nle 'next unless /^\|\s*[PA]-\d{3}\s*\|.*\|([^|]*)\|\s*$/;
 		my $c = $1;
-		while ($c =~ /\b(FR-\d{3})\b/g) { print $1 }' "$SCR" | sort -u >/tmp/cd_fr_cited
+		while ($c =~ /\b(FR-\d{3})\b/g) { print $1 }' "$SCR" | sort -u >"$T"/cd_fr_cited
 	# Declared exceptions = rows of the "화면이 없는 필수 요구사항" table.
 	perl -nle 'if (/^## 화면이 없는 필수 요구사항/) { $in = 1; next }
 		if ($in && /^## /) { $in = 0 }
 		next unless $in;
-		print $1 if /^\|\s*(FR-\d{3})\s*\|/' "$SCR" | sort -u >/tmp/cd_fr_exempt
-	sort -u /tmp/cd_fr_cited /tmp/cd_fr_exempt >/tmp/cd_fr_ok
+		print $1 if /^\|\s*(FR-\d{3})\s*\|/' "$SCR" | sort -u >"$T"/cd_fr_exempt
+	sort -u "$T"/cd_fr_cited "$T"/cd_fr_exempt >"$T"/cd_fr_ok
 
-	perl -nle 'print $1 if /^\|\s*(FR-\d{3})\s*\|[^|]*\|\s*필수\s*\|/' "$REQ" | sort -u >/tmp/cd_fr_must
-	for fr in $(comm -23 /tmp/cd_fr_must /tmp/cd_fr_ok); do
+	perl -nle 'print $1 if /^\|\s*(FR-\d{3})\s*\|[^|]*\|\s*필수\s*\|/' "$REQ" | sort -u >"$T"/cd_fr_must
+	for fr in $(comm -23 "$T"/cd_fr_must "$T"/cd_fr_ok); do
 		err "필수 요구사항을 실현하는 화면이 없다: $fr (화면을 추가하거나 $SCR 의 예외 표에 이유를 적을 것)"
 	done
-	done_ "필수 FR $(wc -l </tmp/cd_fr_must | tr -d ' ') 건 · 화면 대응 또는 예외 선언 확인"
+	done_ "필수 FR $(wc -l <"$T"/cd_fr_must | tr -d ' ') 건 · 화면 대응 또는 예외 선언 확인"
 fi
 
 # --- 14-2. every table has a screen that writes it and one that shows it -----
@@ -243,14 +249,14 @@ else
 	perl -nle 'if (/^### 3-3\./) { $in = 1; next }
 		if ($in && /^#{2,3} /) { $in = 0 }
 		next unless $in && /^\| Phase /;
-		print $1 while /`([a-z][a-z_]{2,})`/g;' docs/30-data-model.md | sort -u >/tmp/cd_tbl_d30
-	[ -s /tmp/cd_tbl_d30 ] || err "docs/30-data-model.md 3-3 테이블 목록을 읽지 못했다 (검사가 헛돌았다)"
+		print $1 while /`([a-z][a-z_]{2,})`/g;' docs/30-data-model.md | sort -u >"$T"/cd_tbl_d30
+	[ -s "$T"/cd_tbl_d30 ] || err "docs/30-data-model.md 3-3 테이블 목록을 읽지 못했다 (검사가 헛돌았다)"
 
-	perl -nle 'print $1 if /^\|\s*`([a-z][a-z_]{2,})`\s*\|/' "$COV" | sort -u >/tmp/cd_tbl_cov
-	for t in $(comm -23 /tmp/cd_tbl_d30 /tmp/cd_tbl_cov); do
+	perl -nle 'print $1 if /^\|\s*`([a-z][a-z_]{2,})`\s*\|/' "$COV" | sort -u >"$T"/cd_tbl_cov
+	for t in $(comm -23 "$T"/cd_tbl_d30 "$T"/cd_tbl_cov); do
 		err "$COV 에 없는 테이블: $t (만드는 화면·보여주는 화면을 적을 것)"
 	done
-	for t in $(comm -13 /tmp/cd_tbl_d30 /tmp/cd_tbl_cov); do
+	for t in $(comm -13 "$T"/cd_tbl_d30 "$T"/cd_tbl_cov); do
 		err "$COV 가 D30 에 없는 테이블을 적었다: $t"
 	done
 
@@ -259,12 +265,12 @@ else
 		my ($t, $make, $show) = ($1, $2, $3);
 		for ($make, $show) { s/^\s+//; s/\s+$// }
 		print "만드는 화면이 비어 있다: $t"   if $make eq "";
-		print "보여주는 화면이 비어 있다: $t" if $show eq "";' "$COV" >/tmp/cd_cov_blank
+		print "보여주는 화면이 비어 있다: $t" if $show eq "";' "$COV" >"$T"/cd_cov_blank
 	while read -r line; do
 		[ -n "$line" ] && err "$COV: $line"
-	done </tmp/cd_cov_blank
+	done <"$T"/cd_cov_blank
 
-	done_ "테이블 $(wc -l </tmp/cd_tbl_cov | tr -d ' ') 종 · 생산·소비 화면 전부 명시"
+	done_ "테이블 $(wc -l <"$T"/cd_tbl_cov | tr -d ' ') 종 · 생산·소비 화면 전부 명시"
 fi
 
 # --- 14-3. every screen belongs to exactly one module ------------------------
@@ -274,14 +280,14 @@ fi
 # whichever branch happens to touch it.
 begin
 if [ -f "$SCR" ]; then
-	perl -nle 'print $1 if /^\|\s*([PA]-\d{3})\s*\|/' "$SCR" | sort -u >/tmp/cd_mod_all
+	perl -nle 'print $1 if /^\|\s*([PA]-\d{3})\s*\|/' "$SCR" | sort -u >"$T"/cd_mod_all
 	# Commerce = the bands D11 declares, plus P-905 (the declared exception).
-	grep -E '^(P-[345]|A-5|P-905)' /tmp/cd_mod_all | sort -u >/tmp/cd_mod_shop
-	comm -23 /tmp/cd_mod_all /tmp/cd_mod_shop >/tmp/cd_mod_core
+	grep -E '^(P-[345]|A-5|P-905)' "$T"/cd_mod_all | sort -u >"$T"/cd_mod_shop
+	comm -23 "$T"/cd_mod_all "$T"/cd_mod_shop >"$T"/cd_mod_core
 	# A screen in neither list would mean the band regex and the ID set disagree.
-	n_all=$(wc -l </tmp/cd_mod_all | tr -d ' ')
-	n_shop=$(wc -l </tmp/cd_mod_shop | tr -d ' ')
-	n_core=$(wc -l </tmp/cd_mod_core | tr -d ' ')
+	n_all=$(wc -l <"$T"/cd_mod_all | tr -d ' ')
+	n_shop=$(wc -l <"$T"/cd_mod_shop | tr -d ' ')
+	n_core=$(wc -l <"$T"/cd_mod_core | tr -d ' ')
 	if [ $((n_shop + n_core)) -ne "$n_all" ]; then
 		err "모듈 분류가 화면 총수와 맞지 않는다: 핵심 $n_core + 커머스 $n_shop != 전체 $n_all"
 	fi
@@ -308,13 +314,13 @@ else
 	# resets the capture variables, which silently emptied this list once.
 	perl -nle 'next unless /^\|\s*(P-\d{3})\s*\|([^|]*)\|([^|]*)\|([^|]*)\|/;
 		my ($id, $methods) = ($1, $4);
-		print $id if $methods =~ /GET/;' "$SCR" | sort -u >/tmp/cd_tpl_get
+		print $id if $methods =~ /GET/;' "$SCR" | sort -u >"$T"/cd_tpl_get
 	# Screens named in the template table, and screens declared template-less.
-	perl -nle 'print $1 while /\b(P-\d{3})\b/g' "$THEME" | sort -u >/tmp/cd_tpl_named
-	for id in $(comm -23 /tmp/cd_tpl_get /tmp/cd_tpl_named); do
+	perl -nle 'print $1 while /\b(P-\d{3})\b/g' "$THEME" | sort -u >"$T"/cd_tpl_named
+	for id in $(comm -23 "$T"/cd_tpl_get "$T"/cd_tpl_named); do
 		err "$THEME 에 템플릿도 예외도 없는 화면: $id (FR-308)"
 	done
-	for id in $(comm -13 /tmp/cd_tpl_get /tmp/cd_tpl_named); do
+	for id in $(comm -13 "$T"/cd_tpl_get "$T"/cd_tpl_named); do
 		err "$THEME 이 GET 없는(또는 없는) 화면에 템플릿을 배정했다: $id"
 	done
 	# The slash must be escaped: an unescaped one ends the m// delimiter and the
@@ -344,20 +350,20 @@ else
 	# 코어 생성 and the literals that match here are URL paths, not templates.
 	BUILTIN=internal/theme/builtin
 	perl -nle 'print $1 if /^\|\s*`([a-z][a-z0-9\/._-]*\.(?:html|xml|txt))`\s*\|/' "$THEME" |
-		sort -u >/tmp/cd_tpl_names
+		sort -u >"$T"/cd_tpl_names
 	drift=0
 	for t in $(find internal -name '*.go' ! -name '*_test.go' -print0 |
 			xargs -0 grep -hoE '"[a-z][a-z0-9_-]*(/[a-z0-9._-]+)*\.(html|xml|txt)"' |
 			tr -d '"' | sort -u |
 			grep -Ev '^(admin|templates|builtin)/|^(base|install)\.html$' |
 			grep -Ev '^(sitemap\.xml|robots\.txt)$'); do
-		grep -qxF "$t" /tmp/cd_tpl_names ||
+		grep -qxF "$t" "$T"/cd_tpl_names ||
 			{ err "코어가 그리는 템플릿이 $THEME 에 없다: $t (테마가 갈아끼울 수 없다)"; drift=1; }
 		[ -f "$BUILTIN/$t" ] ||
 			{ err "코어가 그리는 템플릿이 폴백 테마에 없다: $BUILTIN/$t"; drift=1; }
 	done
 	[ "$drift" -eq 0 ] && done_ "코어가 그리는 테마 템플릿이 전부 $THEME 에 있고 $BUILTIN/ 에 존재한다 (FR-308)"
-	done_ "테마 템플릿 $n_tpl 종 · GET 공개 화면 $(wc -l </tmp/cd_tpl_get | tr -d ' ') 개 전부 배정 또는 예외 (FR-308)"
+	done_ "테마 템플릿 $n_tpl 종 · GET 공개 화면 $(wc -l <"$T"/cd_tpl_get | tr -d ' ') 개 전부 배정 또는 예외 (FR-308)"
 fi
 
 # --- 14-4b. no document contains a verbatim copy of itself ------------------
@@ -414,14 +420,14 @@ else
 	# drift the same way per-document tables did: an item gets decided, the
 	# ledger row is deleted, and the prose keeps saying "not decided yet".
 	# This recurred after six items were closed (.ai/MISTAKES.md M9, M11).
-	perl -nle 'print "$ARGV:$.: $_" if /^- \*\*미결\*\*/ && !/OPEN-\d{2}/' docs/*.md >/tmp/cd_open_inline
+	perl -nle 'print "$ARGV:$.: $_" if /^- \*\*미결\*\*/ && !/OPEN-\d{2}/' docs/*.md >"$T"/cd_open_inline
 	while read -r line; do
 		[ -n "$line" ] && err "인라인 미결이 대장 항목을 인용하지 않았다 (OPEN-## 를 적을 것): $line"
-	done </tmp/cd_open_inline
+	done <"$T"/cd_open_inline
 
-	perl -nle 'print $1 if /^- \*\*미결\*\*.*\b(OPEN-\d{2})\b/' docs/*.md | sort -u >/tmp/cd_open_cited
-	perl -nle 'print $1 if /^\|\s*(OPEN-\d{2})\s*\|/' "$LEDGER" | sort -u >/tmp/cd_open_def
-	for id in $(comm -23 /tmp/cd_open_cited /tmp/cd_open_def); do
+	perl -nle 'print $1 if /^- \*\*미결\*\*.*\b(OPEN-\d{2})\b/' docs/*.md | sort -u >"$T"/cd_open_cited
+	perl -nle 'print $1 if /^\|\s*(OPEN-\d{2})\s*\|/' "$LEDGER" | sort -u >"$T"/cd_open_def
+	for id in $(comm -23 "$T"/cd_open_cited "$T"/cd_open_def); do
 		err "인라인 미결이 대장에 없는 항목을 인용한다 (이미 결정된 것 아닌가): $id"
 	done
 
@@ -432,12 +438,12 @@ else
 	for f in docs/*.md; do
 		[ "$f" = "$LEDGER" ] && continue
 		perl -nle 'print "$ARGV\t$.\t$1" while /\b(OPEN-\d{2})\b/g' "$f"
-	done | sort -u >/tmp/cd_open_all
+	done | sort -u >"$T"/cd_open_all
 	while IFS="$(printf '\t')" read -r f ln id; do
 		[ -z "$id" ] && continue
-		grep -q "^$id\$" /tmp/cd_open_def ||
+		grep -q "^$id\$" "$T"/cd_open_def ||
 			err "대장에 없는 미결 번호를 인용한다 (닫히면서 인용이 남았다): $f:$ln $id"
-	done </tmp/cd_open_all
+	done <"$T"/cd_open_all
 
 	n_open=$(perl -nle 'print $1 if /^\|\s*(OPEN-\d{2})\s*\|/' "$LEDGER" | sort -u | wc -l | tr -d ' ')
 	[ "$n_open" -gt 0 ] || err "$LEDGER 에서 OPEN- 항목을 하나도 읽지 못했다"
@@ -457,15 +463,15 @@ if [ ! -f "$TECH" ]; then
 else
 	# Direct (non-indirect) requires, as go itself reports them.
 	go list -m -f '{{if not .Indirect}}{{.Path}} {{.Version}}{{end}}' all 2>/dev/null |
-		grep -v '^github.com/emirue/ondolith' | grep -v '^ *$' | sort >/tmp/cd_dep_mod
+		grep -v '^github.com/emirue/ondolith' | grep -v '^ *$' | sort >"$T"/cd_dep_mod
 	# Rows whose first two cells are a backticked module and a backticked version.
 	perl -nle 'print "$1 $2" if /^\|\s*`([a-z][^`]*)`\s*\|\s*`(v[^`]*)`\s*\|/' "$TECH" |
-		sort >/tmp/cd_dep_doc
+		sort >"$T"/cd_dep_doc
 
-	for line in $(comm -23 /tmp/cd_dep_mod /tmp/cd_dep_doc | tr ' ' '@'); do
+	for line in $(comm -23 "$T"/cd_dep_mod "$T"/cd_dep_doc | tr ' ' '@'); do
 		err "$TECH 에 없거나 버전이 다른 의존성: $(echo "$line" | tr '@' ' ')"
 	done
-	for line in $(comm -13 /tmp/cd_dep_mod /tmp/cd_dep_doc | tr ' ' '@'); do
+	for line in $(comm -13 "$T"/cd_dep_mod "$T"/cd_dep_doc | tr ' ' '@'); do
 		err "$TECH 이 go.mod 에 없는 의존성을 적었다: $(echo "$line" | tr '@' ' ')"
 	done
 
@@ -474,13 +480,13 @@ else
 	grep -q "\`$godir\`" "$TECH" ||
 		err "$TECH 이 go.mod 의 최소 버전($godir)을 적지 않았다"
 
-	done_ "의존성 $(wc -l </tmp/cd_dep_mod | tr -d ' ') 종 · go.mod 와 $TECH 일치 · 툴체인 버전 명시"
+	done_ "의존성 $(wc -l <"$T"/cd_dep_mod | tr -d ' ') 종 · go.mod 와 $TECH 일치 · 툴체인 버전 명시"
 fi
 
 # --- 15. every screen is written up somewhere -------------------------------
 # A screen that exists only as a table row was never actually designed.
 begin
-for id in $(cat /tmp/cd_def_scr_u 2>/dev/null); do
+for id in $(cat "$T"/cd_def_scr_u 2>/dev/null); do
 	case "$id" in
 	P-*) detail=docs/12-screens-public.md ;;
 	A-*) detail=docs/13-screens-admin.md ;;
@@ -499,16 +505,16 @@ IO=docs/19-screen-io.md
 if [ ! -f "$IO" ]; then
 	err "화면 입력·검증 명세가 없다: $IO"
 else
-	perl -nle 'print $1 if /^###\s+([PA]-\d{3})\b/' "$IO" | sort -u >/tmp/cd_io_spec
-	for id in $(comm -23 /tmp/cd_io_spec /tmp/cd_def_scr_u); do
+	perl -nle 'print $1 if /^###\s+([PA]-\d{3})\b/' "$IO" | sort -u >"$T"/cd_io_spec
+	for id in $(comm -23 "$T"/cd_io_spec "$T"/cd_def_scr_u); do
 		err "$SCR 에 없는 화면을 $IO 가 명세한다: $id"
 	done
 	while read -r id; do
 		[ -z "$id" ] && continue
-		grep -q "^$id\$" /tmp/cd_io_spec ||
+		grep -q "^$id\$" "$T"/cd_io_spec ||
 			err "상태변경 화면인데 입력 명세가 없다: $id ($IO 에 '### $id' 절을 쓸 것)"
-	done </tmp/cd_scr_stateful
-	n_io=$(wc -l </tmp/cd_io_spec | tr -d ' ')
+	done <"$T"/cd_scr_stateful
+	n_io=$(wc -l <"$T"/cd_io_spec | tr -d ' ')
 	[ "$n_io" -gt 0 ] || err "$IO 에서 화면 절을 하나도 찾지 못했다 (검사가 헛돌았다)"
 
 	# 15-2. D19 restates each screen's access and security class in its own
@@ -518,7 +524,7 @@ else
 		($id, $acc, $cls) = ($1, $5, $7);
 		for ($acc, $cls) { s/^\s+//; s/\s+$// }
 		$acc =~ s/^권한://;
-		print "$id\t$acc\t$cls"' "$SCR" >/tmp/cd_io_want
+		print "$id\t$acc\t$cls"' "$SCR" >"$T"/cd_io_want
 
 	# The heading itself may carry the metadata (admin sections) or the line
 	# after it (public sections), so both are read together.
@@ -531,17 +537,17 @@ else
 			my ($acc) = $head =~ /`(공개|로그인|본인)`/;
 			($acc) = $head =~ /`(?:권한:)?([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`/ unless $acc;
 			print "$id\t", ($acc // "?"), "\t", ($cls // "?"), "\n";
-		}' "$IO" >/tmp/cd_io_have
+		}' "$IO" >"$T"/cd_io_have
 
-	sort /tmp/cd_io_want >/tmp/cd_io_want_s
-	sort /tmp/cd_io_have >/tmp/cd_io_have_s
+	sort "$T"/cd_io_want >"$T"/cd_io_want_s
+	sort "$T"/cd_io_have >"$T"/cd_io_have_s
 	while IFS="$(printf '\t')" read -r id acc cls; do
 		[ -z "$id" ] && continue
-		want=$(grep "^$id$(printf '\t')" /tmp/cd_io_want_s)
+		want=$(grep "^$id$(printf '\t')" "$T"/cd_io_want_s)
 		[ -z "$want" ] && continue # unknown-screen case is reported above
 		[ "$id$(printf '\t')$acc$(printf '\t')$cls" = "$want" ] ||
 			err "$IO 의 $id 머리줄이 $SCR 과 다르다: [$acc / $cls] vs [$(echo "$want" | cut -f2-3 | tr '\t' '/')]"
-	done </tmp/cd_io_have_s
+	done <"$T"/cd_io_have_s
 	done_ "상태변경 화면 $n_io 개 입력 명세 · 접근·유형이 $SCR 과 일치"
 fi
 
@@ -560,11 +566,11 @@ if [ -f "$IO" ]; then
 	# The 대상 tables list screens one band per row: `| P-5xx | P-504 ... |`.
 	perl -nle 'next unless /^\|\s*[PA]-\dxx[^|]*\|(.*)$/;
 		my $row = $1;
-		while ($row =~ /\b([PA]-\d{3})\b/g) { print $1 }' "$IO" | sort -u >/tmp/cd_io_band
-	for id in $(comm -23 /tmp/cd_io_band /tmp/cd_io_spec); do
+		while ($row =~ /\b([PA]-\d{3})\b/g) { print $1 }' "$IO" | sort -u >"$T"/cd_io_band
+	for id in $(comm -23 "$T"/cd_io_band "$T"/cd_io_spec); do
 		err "$IO 대상 표에 있는데 절이 없는 화면: $id"
 	done
-	for id in $(comm -13 /tmp/cd_io_band /tmp/cd_io_spec); do
+	for id in $(comm -13 "$T"/cd_io_band "$T"/cd_io_spec); do
 		err "$IO 이 명세하면서 대상 표에 올리지 않은 화면: $id"
 	done
 
@@ -573,11 +579,11 @@ if [ -f "$IO" ]; then
 		my ($band, $want, $row) = ($1, $2, $3);
 		my $have = 0;
 		$have++ while $row =~ /\b[PA]-\d{3}\b/g;
-		print "$band\t$want\t$have" if $want != $have' "$IO" >/tmp/cd_io_bandn
+		print "$band\t$want\t$have" if $want != $have' "$IO" >"$T"/cd_io_bandn
 	while IFS="$(printf '\t')" read -r band want have; do
 		[ -z "$band" ] && continue
 		err "$IO 대역 $band 의 선언 개수가 실제와 다르다: ($want) vs $have 개"
-	done </tmp/cd_io_bandn
+	done <"$T"/cd_io_bandn
 
 	# Every screen count written in prose. Limiting the scan to lines about
 	# 화면/대상 keeps unrelated numbers out; leaving it otherwise generic means
@@ -597,14 +603,14 @@ if [ -f "$IO" ]; then
 		my @n;
 		while (/(?<!\d)(\d+)\s*개/g) { push @n, $1 }
 		while (/\((\d+)\)/g) { push @n, $1 }
-		for my $c (@n) { print "$.\t$c\t$want\t$_" }' "$n_p" "$n_a" "$n_all" "$IO" >/tmp/cd_io_counts
+		for my $c (@n) { print "$.\t$c\t$want\t$_" }' "$n_p" "$n_a" "$n_all" "$IO" >"$T"/cd_io_counts
 	n_counts=0
 	while IFS="$(printf '\t')" read -r ln c want line; do
 		[ -z "$ln" ] && continue
 		n_counts=$((n_counts + 1))
 		[ "$c" = "$want" ] ||
 			err "$IO:$ln 의 화면 개수 $c 가 그 구간의 실제 값 $want 와 다르다 (공개 $n_p · 관리자 $n_a · 합 $n_all): $line"
-	done </tmp/cd_io_counts
+	done <"$T"/cd_io_counts
 	[ "$n_counts" -gt 0 ] || err "$IO 에서 화면 개수 진술을 하나도 읽지 못했다 (검사가 헛돌았다)"
 	done_ "$IO 대상 표 · 개수 진술 $n_counts 건이 절 $n_all 개(공개 $n_p · 관리자 $n_a)와 구간별 일치"
 fi
@@ -646,7 +652,7 @@ else
 				next unless $body =~ /ADD COLUMN/;
 				print "$t\t$1\n" while $body =~ /ADD COLUMN (\w+)/g;
 			}
-		}' | sort -u >/tmp/cd_sch_sql
+		}' | sort -u >"$T"/cd_sch_sql
 
 	# table<TAB>column from D30. A heading may name more than one table
 	# (`password_reset_tokens` · `email_verification_tokens`) and a table may
@@ -675,31 +681,31 @@ else
 			for my $c ($cell =~ /`([a-z_]+)`/g) {
 				print "$_\t$c\n" for @cur;
 			}
-		}' "$DM" | sort -u >/tmp/cd_sch_doc
+		}' "$DM" | sort -u >"$T"/cd_sch_doc
 
-	if [ ! -s /tmp/cd_sch_doc ] || [ ! -s /tmp/cd_sch_sql ]; then
+	if [ ! -s "$T"/cd_sch_doc ] || [ ! -s "$T"/cd_sch_sql ]; then
 		err "$DM 또는 마이그레이션에서 컬럼을 하나도 읽지 못했다 (검사가 헛돌았다)"
 	fi
 
-	cut -f1 /tmp/cd_sch_sql | sort -u >/tmp/cd_sch_tbl
+	cut -f1 "$T"/cd_sch_sql | sort -u >"$T"/cd_sch_tbl
 	n_col=0
 	while read -r t; do
 		[ -z "$t" ] && continue
-		grep "^$t$(printf '\t')" /tmp/cd_sch_sql | cut -f2 | sort -u >/tmp/cd_sch_s1
-		grep "^$t$(printf '\t')" /tmp/cd_sch_doc | cut -f2 | sort -u >/tmp/cd_sch_d1
-		if [ ! -s /tmp/cd_sch_d1 ]; then
+		grep "^$t$(printf '\t')" "$T"/cd_sch_sql | cut -f2 | sort -u >"$T"/cd_sch_s1
+		grep "^$t$(printf '\t')" "$T"/cd_sch_doc | cut -f2 | sort -u >"$T"/cd_sch_d1
+		if [ ! -s "$T"/cd_sch_d1 ]; then
 			err "마이그레이션이 만드는 테이블인데 $DM 에 정의가 없다: $t"
 			continue
 		fi
-		n_col=$((n_col + $(wc -l </tmp/cd_sch_s1 | tr -d ' ')))
-		for c in $(comm -23 /tmp/cd_sch_d1 /tmp/cd_sch_s1); do
+		n_col=$((n_col + $(wc -l <"$T"/cd_sch_s1 | tr -d ' ')))
+		for c in $(comm -23 "$T"/cd_sch_d1 "$T"/cd_sch_s1); do
 			err "$DM 이 마이그레이션에 없는 컬럼을 적었다: $t.$c"
 		done
-		for c in $(comm -13 /tmp/cd_sch_d1 /tmp/cd_sch_s1); do
+		for c in $(comm -13 "$T"/cd_sch_d1 "$T"/cd_sch_s1); do
 			err "마이그레이션에 있는데 $DM 에 없는 컬럼: $t.$c"
 		done
-	done </tmp/cd_sch_tbl
-	done_ "$DM ↔ 마이그레이션: 테이블 $(wc -l </tmp/cd_sch_tbl | tr -d ' ') 종 · 컬럼 $n_col 개 일치"
+	done <"$T"/cd_sch_tbl
+	done_ "$DM ↔ 마이그레이션: 테이블 $(wc -l <"$T"/cd_sch_tbl | tr -d ' ') 종 · 컬럼 $n_col 개 일치"
 fi
 
 # --- 15-3. every screen has a work item -------------------------------------
@@ -720,15 +726,15 @@ else
 		while ($t =~ /\b([PA])-(\d{3})\s*~\s*[PA]?-?(\d{3})\b/g) {
 			$c{sprintf "%s-%03d", $1, $_} = 1 for ($2 .. $3);
 		}
-		print "$_\n" for sort keys %c;' "$WBS" >/tmp/cd_wbs_cov
+		print "$_\n" for sort keys %c;' "$WBS" >"$T"/cd_wbs_cov
 
 	# Phase 0 is already built and released; its screens are history, not work.
-	printf 'P-001\nP-002\n' | sort >/tmp/cd_wbs_done
-	comm -23 /tmp/cd_def_scr_u /tmp/cd_wbs_cov >/tmp/cd_wbs_gap
-	for id in $(comm -23 /tmp/cd_wbs_gap /tmp/cd_wbs_done); do
+	printf 'P-001\nP-002\n' | sort >"$T"/cd_wbs_done
+	comm -23 "$T"/cd_def_scr_u "$T"/cd_wbs_cov >"$T"/cd_wbs_gap
+	for id in $(comm -23 "$T"/cd_wbs_gap "$T"/cd_wbs_done); do
 		err "$WBS 에 작업 항목이 없는 화면: $id (만들 사람이 이 화면을 볼 일이 없다)"
 	done
-	done_ "화면 $(wc -l </tmp/cd_def_scr_u | tr -d ' ') 개 전부 작업 항목 보유 (Phase 0 구현분 제외)"
+	done_ "화면 $(wc -l <"$T"/cd_def_scr_u | tr -d ' ') 개 전부 작업 항목 보유 (Phase 0 구현분 제외)"
 fi
 
 # --- 16..18. the permission ↔ screen map agrees in both directions ----------
@@ -749,13 +755,13 @@ else
 		next unless /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|/;
 		($k, $scr) = ($1, $5);
 		$scr =~ s/^\s+//; $scr =~ s/\s+$//;
-		print "$k\t$scr"' "$ACL" >/tmp/cd_perm_map
-	cut -f1 /tmp/cd_perm_map | sort -u >/tmp/cd_perm_def
+		print "$k\t$scr"' "$ACL" >"$T"/cd_perm_map
+	cut -f1 "$T"/cd_perm_map | sort -u >"$T"/cd_perm_def
 
 	# 16. every 권한: used in D11 is a permission D15 defines
 	perl -nle 'print $1 if /^\|\s*[PA]-\d{3}\s*\|[^|]*\|[^|]*\|[^|]*\|\s*권한:([a-z0-9._]+)\s*\|/' "$SCR" |
-		sort -u >/tmp/cd_perm_used
-	for p in $(comm -23 /tmp/cd_perm_used /tmp/cd_perm_def); do
+		sort -u >"$T"/cd_perm_used
+	for p in $(comm -23 "$T"/cd_perm_used "$T"/cd_perm_def); do
 		err "$ACL 에 정의되지 않은 권한을 화면이 요구한다: $p"
 	done
 
@@ -770,7 +776,7 @@ else
 			case "$s" in [PA]-[0-9][0-9][0-9]) ;; *) continue ;; esac
 			grep -q "^| $s |" "$SCR" || err "권한 $key 가 존재하지 않는 화면을 가리킨다: $s"
 		done
-	done </tmp/cd_perm_map
+	done <"$T"/cd_perm_map
 
 	# 18. if a screen's 접근 is 권한:X, D15's row for X must list that screen.
 	#
@@ -779,15 +785,15 @@ else
 	# check reintroduced once already. scripts/selftest.sh injects a mismatch
 	# here so it cannot come back a fourth time.
 	perl -nle 'print "$1\t$2" if /^\|\s*([PA]-\d{3})\s*\|[^|]*\|[^|]*\|[^|]*\|\s*권한:([a-z0-9._]+)\s*\|/' \
-		"$SCR" >/tmp/cd_scr_perm
+		"$SCR" >"$T"/cd_scr_perm
 	while IFS="$(printf '\t')" read -r id key; do
 		[ -z "$id" ] && continue
-		row=$(grep "^$key$(printf '\t')" /tmp/cd_perm_map)
+		row=$(grep "^$key$(printf '\t')" "$T"/cd_perm_map)
 		case "$row" in
 		*"$id"*) ;;
 		*) err "$ACL 의 $key 행이 $id 를 사용 화면으로 적지 않았다" ;;
 		esac
-	done </tmp/cd_scr_perm
+	done <"$T"/cd_scr_perm
 
 	# 19. §2.5 seed matrix must cover exactly the permissions §2.2 defines.
 	# Two hand-written tables in one file drift the same way two files do.
@@ -795,14 +801,14 @@ else
 		if ($in && /^### /) { $in = 0 }
 		next unless $in;
 		print $1 if /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|/' "$ACL" |
-		sort -u >/tmp/cd_perm_seed
-	for p in $(comm -23 /tmp/cd_perm_def /tmp/cd_perm_seed); do
+		sort -u >"$T"/cd_perm_seed
+	for p in $(comm -23 "$T"/cd_perm_def "$T"/cd_perm_seed); do
 		err "권한이 2.5 시드 매트릭스에 없다: $p"
 	done
-	for p in $(comm -13 /tmp/cd_perm_def /tmp/cd_perm_seed); do
+	for p in $(comm -13 "$T"/cd_perm_def "$T"/cd_perm_seed); do
 		err "2.5 시드 매트릭스에 정의되지 않은 권한이 있다: $p"
 	done
-	done_ "권한 $(wc -l </tmp/cd_perm_def | tr -d ' ') 종 · 화면↔권한 양방향 일치 · 시드 매트릭스 일치"
+	done_ "권한 $(wc -l <"$T"/cd_perm_def | tr -d ' ') 종 · 화면↔권한 양방향 일치 · 시드 매트릭스 일치"
 fi
 
 # --- 19b. the RBAC seed migration matches D15 -------------------------------
@@ -826,7 +832,7 @@ else
 	# 파일마다 돌린다. perl 에 여러 파일을 주고 <> 로 한 번에 슬러프하면 내용이
 	# 이어 붙고, 첫 `-- +goose Down` 에서 자르는 순간 **두 번째 시드가 통째로
 	# 사라진다** — 검사는 조용히 통과한다.
-	: >/tmp/cd_seed_sql
+	: >"$T"/cd_seed_sql
 	for f in $SEEDS; do
 		perl -e 'my $s = do { local $/; <> };
 			($s) = $s =~ /(.*?)^-- \+goose Down/ms or exit;
@@ -842,7 +848,7 @@ else
 			if ($s =~ /INSERT INTO roles[^;]*?VALUES(.*?);/s) {
 				my $b = $1;
 				print "role\t$1\n" while $b =~ /\(\s*'"'"'([a-z_]+)'"'"'/g;
-			}' "$f" >>/tmp/cd_seed_sql
+			}' "$f" >>"$T"/cd_seed_sql
 	done
 
 	# D15 §2.2. **어느 Phase 까지 볼지를 적지 않고 유도한다** — `[12]` 로
@@ -851,7 +857,7 @@ else
 	perl -nle 'if (/^### 2\.2 /) { $i = 1; next } if ($i && /^### /) { $i = 0 }
 		next unless $i;
 		print "$1\t$2" if /^\|\s*`([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`\s*\|[^|]*\|[^|]*\|\s*(\d+)\s*\|/' \
-		"$ACL" | sort -u >/tmp/cd_perm_phase
+		"$ACL" | sort -u >"$T"/cd_perm_phase
 	# 범위는 **시드 파일이 스스로 밝힌 Phase** 에서 온다. 심어진 권한의 Phase
 	# 최대값으로 구하면 순환이다 — 문서가 어떤 권한을 나중 Phase 로 옮겨도 그
 	# 권한 자신이 범위를 넓혀서 위반이 사라진다. 시드는 "Phase N 권한" 이라고
@@ -869,7 +875,7 @@ else
 		[ "$ph" -gt "$max_phase" ] && max_phase=$ph
 	done
 	awk -F'\t' -v m="$max_phase" '$2+0 <= m { print "perm\t" $1 }' \
-		/tmp/cd_perm_phase | sort -u >/tmp/cd_seed_doc
+		"$T"/cd_perm_phase | sort -u >"$T"/cd_seed_doc
 	# D15 §2.5, restricted to those permissions. ● is a global grant; ◐ is board
 	# scoped and the preset writes it when a board is created (2.4) — it must
 	# never appear in a seed, or every board is already public before anyone
@@ -882,27 +888,27 @@ else
 		# Compare the literal byte sequence: perl reads the file as bytes, so a
 		# \x{25cf} wide character never equals the three UTF-8 bytes on the page.
 		for my $j (0 .. 3) { my $v = $r[$j]; $v =~ s/\s//g;
-			print "grant\t$n[$j]\t$k" if $v eq "●" }' "$ACL" >>/tmp/cd_seed_doc
+			print "grant\t$n[$j]\t$k" if $v eq "●" }' "$ACL" >>"$T"/cd_seed_doc
 	# §1.1 builtin roles.
 	perl -nle 'if (/^### 1\.1 /) { $i = 1; next } if ($i && /^### /) { $i = 0 }
 		next unless $i;
-		print "role\t$1" if /^\|\s*`([a-z_]+)`\s*\|/' "$ACL" >>/tmp/cd_seed_doc
+		print "role\t$1" if /^\|\s*`([a-z_]+)`\s*\|/' "$ACL" >>"$T"/cd_seed_doc
 
-	sort -u /tmp/cd_seed_sql >/tmp/cd_seed_sql_s
-	sort -u /tmp/cd_seed_doc >/tmp/cd_seed_doc_s
+	sort -u "$T"/cd_seed_sql >"$T"/cd_seed_sql_s
+	sort -u "$T"/cd_seed_doc >"$T"/cd_seed_doc_s
 	# Grants are only expected for the Phase 1 permissions; D15 §2.5 also lists
 	# later-phase rows, which this migration correctly does not seed.
-	grep '^perm	' /tmp/cd_seed_doc_s | cut -f2 | sort -u >/tmp/cd_seed_p1
+	grep '^perm	' "$T"/cd_seed_doc_s | cut -f2 | sort -u >"$T"/cd_seed_p1
 	awk -F'\t' 'NR==FNR{p[$0];next} $1!="grant" || ($3 in p)' \
-		/tmp/cd_seed_p1 /tmp/cd_seed_doc_s >/tmp/cd_seed_want
+		"$T"/cd_seed_p1 "$T"/cd_seed_doc_s >"$T"/cd_seed_want
 
-	for l in $(comm -23 /tmp/cd_seed_want /tmp/cd_seed_sql_s | tr '\t' '/'); do
+	for l in $(comm -23 "$T"/cd_seed_want "$T"/cd_seed_sql_s | tr '\t' '/'); do
 		err "RBAC 시드가 $ACL 에 있는 것을 심지 않았다: $l"
 	done
-	for l in $(comm -13 /tmp/cd_seed_want /tmp/cd_seed_sql_s | tr '\t' '/'); do
+	for l in $(comm -13 "$T"/cd_seed_want "$T"/cd_seed_sql_s | tr '\t' '/'); do
 		err "RBAC 시드가 $ACL 에 없는 것을 심는다: $l"
 	done
-	n_seed=$(wc -l </tmp/cd_seed_want | tr -d ' ')
+	n_seed=$(wc -l <"$T"/cd_seed_want | tr -d ' ')
 	[ "$n_seed" -gt 0 ] || err "$ACL 에서 시드 대상을 하나도 읽지 못했다 (검사가 헛돌았다)"
 	done_ "RBAC 시드 $n_seed 건(역할·Phase 1 권한·부여)이 $ACL 과 일치"
 fi
@@ -982,15 +988,15 @@ else
 		$ph{ substr($_, 0, 2) }++ for @order;
 		print "OK\t" . scalar(@order) . "\t$done\t$opt\t"
 			. join(",", map { "$_=$ph{$_}" } sort keys %ph) . "\n";
-	' "$WBS" >/tmp/cd_wbs_loop
+	' "$WBS" >"$T"/cd_wbs_loop
 
 	while IFS="$(printf '\t')" read -r kind a b c d; do
 		[ "$kind" = "ERR" ] && err "$WBS: $a"
-	done </tmp/cd_wbs_loop
+	done <"$T"/cd_wbs_loop
 
 	# 4. The summary table restates the counts by hand. It said 117 while the
 	#    table held 123, which is the number a reader plans a schedule with.
-	sums=$(grep '^OK	' /tmp/cd_wbs_loop)
+	sums=$(grep '^OK	' "$T"/cd_wbs_loop)
 	if [ -n "$sums" ]; then
 		n_all=$(printf '%s' "$sums" | cut -f2)
 		n_opt=$(printf '%s' "$sums" | cut -f4)
@@ -1015,10 +1021,10 @@ else
 			}
 			print "요약표 합계 " . ($seen_total // "없음") . " 가 실제 $all 와 다르다\n"
 				if !defined $seen_total || $seen_total != $all;
-		' "$per" "$n_all" "$n_opt" "$WBS" >/tmp/cd_wbs_sum
+		' "$per" "$n_all" "$n_opt" "$WBS" >"$T"/cd_wbs_sum
 		while read -r line; do
 			[ -n "$line" ] && err "$WBS: $line"
-		done </tmp/cd_wbs_sum
+		done <"$T"/cd_wbs_sum
 		done_ "$WBS 작업 $n_all 건 · 선행 순환 없음 · 완료 $(printf '%s' "$sums" | cut -f3)건의 산출물 실재 · 요약표 일치"
 	fi
 fi
@@ -1038,24 +1044,24 @@ else
 	perl -nle 'if (/^## 패키지 구조/) { $i = 1; next }
 		if ($i && /^Phase 1 이후/) { $i = 0 }
 		next unless $i;
-		print $1 if /^\s{2}([a-z][a-z0-9_]*)\/\s/' "$ARCH" | sort -u >/tmp/cd_pkg_doc
+		print $1 if /^\s{2}([a-z][a-z0-9_]*)\/\s/' "$ARCH" | sort -u >"$T"/cd_pkg_doc
 
 	# A directory is a package when it holds a non-test .go file. templates/
 	# dirs hold embedded assets and no Go, so they are not packages and must not
 	# be listed.
 	find internal -name '*.go' -not -name '*_test.go' 2>/dev/null |
-		sed 's|^internal/||; s|/[^/]*$||' | grep -v '/' | sort -u >/tmp/cd_pkg_real
+		sed 's|^internal/||; s|/[^/]*$||' | grep -v '/' | sort -u >"$T"/cd_pkg_real
 
-	if [ ! -s /tmp/cd_pkg_doc ] || [ ! -s /tmp/cd_pkg_real ]; then
+	if [ ! -s "$T"/cd_pkg_doc ] || [ ! -s "$T"/cd_pkg_real ]; then
 		err "$ARCH 또는 internal/ 에서 패키지를 하나도 읽지 못했다 (검사가 헛돌았다)"
 	fi
-	for p in $(comm -23 /tmp/cd_pkg_doc /tmp/cd_pkg_real); do
+	for p in $(comm -23 "$T"/cd_pkg_doc "$T"/cd_pkg_real); do
 		err "$ARCH 이 없는 패키지를 현재 구조로 적었다: internal/$p (「Phase 1 이후」 블록으로 옮길 것)"
 	done
-	for p in $(comm -13 /tmp/cd_pkg_doc /tmp/cd_pkg_real); do
+	for p in $(comm -13 "$T"/cd_pkg_doc "$T"/cd_pkg_real); do
 		err "internal/$p 가 $ARCH 「패키지 구조」에 없다 — 새 코드를 어디 둘지 문서가 답하지 못한다"
 	done
-	done_ "$ARCH 패키지 구조 $(wc -l </tmp/cd_pkg_real | tr -d ' ') 개가 internal/ 과 일치"
+	done_ "$ARCH 패키지 구조 $(wc -l <"$T"/cd_pkg_real | tr -d ' ') 개가 internal/ 과 일치"
 fi
 
 # --- 19e. internal/app/screens.go matches D11's screen table ----------------
@@ -1069,21 +1075,21 @@ INV=internal/app/screens.go
 if [ ! -f "$INV" ]; then
 	err "화면 인벤토리가 없다: $INV"
 else
-	perl -nle 'print "$1 $2" if /^\t"([PA]-\d+)":\s+SC(\d)/' "$INV" | sort >/tmp/cd_inv_go
+	perl -nle 'print "$1 $2" if /^\t"([PA]-\d+)":\s+SC(\d)/' "$INV" | sort >"$T"/cd_inv_go
 	perl -F'\|' -nle 'next unless /^\| [PA]-\d+ /;
 		for (@F) { s/^\s+|\s+$//g }
-		$F[7] =~ /^SC-(\d)$/ and print "$F[1] $1"' "$SCR" | sort >/tmp/cd_inv_doc
+		$F[7] =~ /^SC-(\d)$/ and print "$F[1] $1"' "$SCR" | sort >"$T"/cd_inv_doc
 
-	if [ ! -s /tmp/cd_inv_go ] || [ ! -s /tmp/cd_inv_doc ]; then
+	if [ ! -s "$T"/cd_inv_go ] || [ ! -s "$T"/cd_inv_doc ]; then
 		err "$INV 또는 $SCR 에서 화면을 하나도 읽지 못했다 (검사가 헛돌았다)"
 	fi
-	for l in $(comm -23 /tmp/cd_inv_go /tmp/cd_inv_doc | tr ' ' ':'); do
+	for l in $(comm -23 "$T"/cd_inv_go "$T"/cd_inv_doc | tr ' ' ':'); do
 		err "$INV 의 항목이 $SCR 과 다르다: $(echo "$l" | tr ':' ' ') — D11 에 없거나 유형이 다르다"
 	done
-	for l in $(comm -13 /tmp/cd_inv_go /tmp/cd_inv_doc | tr ' ' ':'); do
+	for l in $(comm -13 "$T"/cd_inv_go "$T"/cd_inv_doc | tr ' ' ':'); do
 		err "$SCR 의 화면이 $INV 에 없다: $(echo "$l" | tr ':' ' ') — 부팅 점검이 이 화면을 모른다"
 	done
-	done_ "$INV 화면 $(wc -l </tmp/cd_inv_doc | tr -d ' ') 개가 $SCR 과 일치"
+	done_ "$INV 화면 $(wc -l <"$T"/cd_inv_doc | tr -d ' ') 개가 $SCR 과 일치"
 fi
 
 # --- 19g. P5 exemptions in code match D15's list ----------------------------
@@ -1097,18 +1103,18 @@ if [ ! -f "$TREE" ]; then
 else
 	# 코드 쪽: UnsafeGETReason 이 붙은 라우트의 화면 ID.
 	perl -nle 'if (/Screen: "([PA]-\d+)"/) { $id = $1 }
-		print $id if /UnsafeGETReason:/ && $id' "$TREE" | sort -u >/tmp/cd_p5_go
+		print $id if /UnsafeGETReason:/ && $id' "$TREE" | sort -u >"$T"/cd_p5_go
 	# 문서 쪽: 「P5 예외」표의 화면 ID.
 	perl -nle 'if (/^### P5 예외/) { $in = 1; next } if ($in && /^#{2,3} /) { $in = 0 }
-		print $1 if $in && /^\|.*\(([PA]-\d+)\)/' "$ACL" | sort -u >/tmp/cd_p5_doc
+		print $1 if $in && /^\|.*\(([PA]-\d+)\)/' "$ACL" | sort -u >"$T"/cd_p5_doc
 
-	for l in $(comm -23 /tmp/cd_p5_go /tmp/cd_p5_doc); do
+	for l in $(comm -23 "$T"/cd_p5_go "$T"/cd_p5_doc); do
 		err "$TREE 의 P5 예외가 $ACL 「P5 예외」에 없다: $l"
 	done
-	for l in $(comm -13 /tmp/cd_p5_go /tmp/cd_p5_doc); do
+	for l in $(comm -13 "$T"/cd_p5_go "$T"/cd_p5_doc); do
 		err "$ACL 이 예외로 적었는데 코드에 없다: $l"
 	done
-	done_ "P5 예외 $(wc -l </tmp/cd_p5_doc | tr -d ' ') 건이 $ACL 과 $TREE 에서 일치"
+	done_ "P5 예외 $(wc -l <"$T"/cd_p5_doc | tr -d ' ') 건이 $ACL 과 $TREE 에서 일치"
 fi
 
 # --- 19f. internal/commerce/state.go matches D14's order state diagram ------
@@ -1130,7 +1136,7 @@ else
 	perl -nle 'if (/^## 5\. 주문 상태머신/) { $in = 1; next } if ($in && /^## /) { $in = 0 }
 		next unless $in;
 		print "$1>$2" if /^\s*(\S+)\s*-->\s*(\S+):/ && $1 ne "[*]" && $2 ne "[*]"' \
-		"$FLOW" | sort -u >/tmp/cd_sm_doc
+		"$FLOW" | sort -u >"$T"/cd_sm_doc
 	# The Go map: `StatusX: {` opens a source state, `StatusY: {...}` inside it
 	# is one arrow. Both sides are printed as the Korean labels the constants
 	# hold, so the comparison does not depend on the Go identifier names.
@@ -1140,18 +1146,18 @@ else
 		if (/^\t\},?$/)              { $from = undef; next }
 		if ($from && /^\t\tStatus(\w+):\s*\{/) {
 			print "$from>" . ($label{$1} // "?$1");
-		}' "$SM" | sort -u >/tmp/cd_sm_go
+		}' "$SM" | sort -u >"$T"/cd_sm_go
 
-	if [ ! -s /tmp/cd_sm_doc ] || [ ! -s /tmp/cd_sm_go ]; then
+	if [ ! -s "$T"/cd_sm_doc ] || [ ! -s "$T"/cd_sm_go ]; then
 		err "$FLOW 또는 $SM 에서 전이를 하나도 읽지 못했다 (검사가 헛돌았다)"
 	fi
-	for l in $(comm -23 /tmp/cd_sm_go /tmp/cd_sm_doc); do
+	for l in $(comm -23 "$T"/cd_sm_go "$T"/cd_sm_doc); do
 		err "$SM 에 있는데 $FLOW 다이어그램에 없는 전이: $(echo "$l" | tr '>' ' ')"
 	done
-	for l in $(comm -13 /tmp/cd_sm_go /tmp/cd_sm_doc); do
+	for l in $(comm -13 "$T"/cd_sm_go "$T"/cd_sm_doc); do
 		err "$FLOW 다이어그램에 있는데 $SM 에 없는 전이: $(echo "$l" | tr '>' ' ')"
 	done
-	done_ "주문 상태 전이 $(wc -l </tmp/cd_sm_doc | tr -d ' ') 건이 $FLOW 와 $SM 에서 일치 (FR-604)"
+	done_ "주문 상태 전이 $(wc -l <"$T"/cd_sm_doc | tr -d ' ') 건이 $FLOW 와 $SM 에서 일치 (FR-604)"
 fi
 
 # --- 20. D80's planning-completeness table counts match the documents -------
@@ -1170,20 +1176,20 @@ else
 		printf '10-requirements.md\t%s %s\n' \
 			"$(perl -nle 'print $1 if /^\| (FR-\d{3}) /' "$REQ" | sort -u | wc -l | tr -d ' ')" \
 			"$(perl -nle 'print $1 if /^\| (NFR-\d{3}) /' "$REQ" | sort -u | wc -l | tr -d ' ')"
-		printf '11-screens.md\t%s\n' "$(wc -l </tmp/cd_def_scr_u | tr -d ' ')"
+		printf '11-screens.md\t%s\n' "$(wc -l <"$T"/cd_def_scr_u | tr -d ' ')"
 		printf '15-access-control.md\t%s %s\n' \
 			"$(perl -nle 'if (/^### 1\.1 /) { $in = 1; next } if ($in && /^#{2,3} /) { $in = 0 }
 				print $1 if $in && /^\|\s*`([a-z_]+)`\s*\|/' "$ACL" | sort -u | wc -l | tr -d ' ')" \
-			"$(wc -l </tmp/cd_perm_def | tr -d ' ')"
-		printf '16-data-coverage.md\t%s\n' "$(wc -l </tmp/cd_tbl_cov | tr -d ' ')"
+			"$(wc -l <"$T"/cd_perm_def | tr -d ' ')"
+		printf '16-data-coverage.md\t%s\n' "$(wc -l <"$T"/cd_tbl_cov | tr -d ' ')"
 		printf '17-theme-contract.md\t%s\n' \
 			"$(perl -nle 'print $1 if /^\|\s*`([a-z][a-z0-9\/._-]*\.(?:html|xml|txt))`\s*\|/' "$THEME" |
 				sort -u | wc -l | tr -d ' ')"
-		printf '19-screen-io.md\t%s\n' "$(wc -l </tmp/cd_io_spec | tr -d ' ')"
+		printf '19-screen-io.md\t%s\n' "$(wc -l <"$T"/cd_io_spec | tr -d ' ')"
 		printf '81-work-breakdown.md\t%s\n' \
 			"$(perl -nle 'print $1 if /^\|\s*(W\d-\d+)\s*\|/' "$WBS" | sort -u | wc -l | tr -d ' ')"
 		printf '90-conventions.md\t%s\n' "$(ls docs/*.md .ai/*.md | wc -l | tr -d ' ')"
-	} >/tmp/cd_rm_want
+	} >"$T"/cd_rm_want
 
 	# Rows of the 기획 완결성 table only. Phase sections link to the same
 	# documents but their numbers are requirement IDs and section numbers, so
@@ -1198,7 +1204,7 @@ else
 		next unless @doc;
 		(my $bare = $_) =~ s/\[[^\]]*\]\([^)]*\)//g;
 		my @num = $bare =~ /(\d+)/g;
-		print "$_\t$.\t@num" for @doc' "$ROADMAP" >/tmp/cd_rm_have
+		print "$_\t$.\t@num" for @doc' "$ROADMAP" >"$T"/cd_rm_have
 
 	# Compared as an ordered sequence, not as a set. `(FR 80 / NFR 31)` and
 	# `(FR 31 / NFR 80)` contain the same two numbers, and set membership called
@@ -1207,12 +1213,12 @@ else
 	n_rm=0
 	while IFS="$(printf '\t')" read -r doc ln nums; do
 		[ -z "$doc" ] && continue
-		want=$(grep "^$doc$(printf '\t')" /tmp/cd_rm_want | cut -f2)
+		want=$(grep "^$doc$(printf '\t')" "$T"/cd_rm_want | cut -f2)
 		[ -z "$want" ] && continue # a row for a document that states no count
 		n_rm=$((n_rm + 1))
 		[ "$nums" = "$want" ] ||
 			err "$ROADMAP:$ln $doc 행의 숫자가 문서에서 센 값과 다르다: [${nums:-없음}] vs [$want]"
-	done </tmp/cd_rm_have
+	done <"$T"/cd_rm_have
 	[ "$n_rm" -gt 0 ] || err "$ROADMAP 기획 완결성 표에서 숫자를 가진 행을 하나도 읽지 못했다 (검사가 헛돌았다)"
 	done_ "$ROADMAP 기획 완결성 $n_rm 행의 숫자가 각 문서에서 센 값과 일치"
 fi
@@ -1256,20 +1262,20 @@ else
 	err "$CL 이 없다"
 fi
 
-rm -f /tmp/cd_rm_want /tmp/cd_rm_have /tmp/cd_def_req /tmp/cd_def_req_u /tmp/cd_use_req /tmp/cd_def_dec \
-	/tmp/cd_use_dec /tmp/cd_def_mis /tmp/cd_use_mis /tmp/cd_stale \
-	/tmp/cd_def_scr /tmp/cd_def_scr_u /tmp/cd_use_scr /tmp/cd_scr_issues \
-	/tmp/cd_scr_bad /tmp/cd_scr_stateful /tmp/cd_perm_map /tmp/cd_perm_def \
-	/tmp/cd_perm_used /tmp/cd_scr_perm /tmp/cd_perm_seed /tmp/cd_fr_cited \
-	/tmp/cd_io_spec /tmp/cd_io_want /tmp/cd_io_have \
-	/tmp/cd_open_inline /tmp/cd_open_cited /tmp/cd_open_def \
-	/tmp/cd_wbs_cov /tmp/cd_wbs_done /tmp/cd_wbs_gap \
-	/tmp/cd_sch_doc /tmp/cd_sch_sql \
-	/tmp/cd_io_want_s /tmp/cd_io_have_s \
-	/tmp/cd_fr_exempt /tmp/cd_fr_ok /tmp/cd_fr_must /tmp/cd_req_nocrit /tmp/cd_req_vague \
-	/tmp/cd_tbl_d30 /tmp/cd_tbl_cov /tmp/cd_cov_blank \
-	/tmp/cd_mod_all /tmp/cd_mod_shop /tmp/cd_mod_core \
-	/tmp/cd_tpl_get /tmp/cd_tpl_named /tmp/cd_dep_mod /tmp/cd_dep_doc
+rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_use_req "$T"/cd_def_dec \
+	"$T"/cd_use_dec "$T"/cd_def_mis "$T"/cd_use_mis "$T"/cd_stale \
+	"$T"/cd_def_scr "$T"/cd_def_scr_u "$T"/cd_use_scr "$T"/cd_scr_issues \
+	"$T"/cd_scr_bad "$T"/cd_scr_stateful "$T"/cd_perm_map "$T"/cd_perm_def \
+	"$T"/cd_perm_used "$T"/cd_scr_perm "$T"/cd_perm_seed "$T"/cd_fr_cited \
+	"$T"/cd_io_spec "$T"/cd_io_want "$T"/cd_io_have \
+	"$T"/cd_open_inline "$T"/cd_open_cited "$T"/cd_open_def \
+	"$T"/cd_wbs_cov "$T"/cd_wbs_done "$T"/cd_wbs_gap \
+	"$T"/cd_sch_doc "$T"/cd_sch_sql \
+	"$T"/cd_io_want_s "$T"/cd_io_have_s \
+	"$T"/cd_fr_exempt "$T"/cd_fr_ok "$T"/cd_fr_must "$T"/cd_req_nocrit "$T"/cd_req_vague \
+	"$T"/cd_tbl_d30 "$T"/cd_tbl_cov "$T"/cd_cov_blank \
+	"$T"/cd_mod_all "$T"/cd_mod_shop "$T"/cd_mod_core \
+	"$T"/cd_tpl_get "$T"/cd_tpl_named "$T"/cd_dep_mod "$T"/cd_dep_doc
 
 if [ "$fail" -ne 0 ]; then
 	printf '\ncheckdocs 실패 — 규칙은 docs/90-conventions.md\n'
