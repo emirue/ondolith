@@ -409,7 +409,15 @@ a:focus-visible {
 
 /* ═══ 배지·칩 ═══════════════════════════════════════════════════════════════ */
 .badge {
-  display: inline-block;
+  /* **inline-block 이 아니라 inline-flex 다.** flex 컨테이너의 자식이 되면
+     inline-block 은 stretch 돼 가로로 늘어난다 — 상품 카드(.product-list li)가
+     세로 flex 라서 「품절」 배지가 칩이 아니라 막대로 그려지고 있었다.
+     align-self 로 함께 고정한다: 바깥이 어떤 정렬을 쓰든 배지는 내용만큼만
+     차지해야 한다. */
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  width: fit-content;
   padding: 2px 9px;
   border-radius: 99px;
   background: var(--badge-bg);
