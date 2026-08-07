@@ -57,6 +57,13 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-108", Method: "POST", Pattern: "/me", Class: SC3, Handler: acc.updateProfile})
 	r.Add(Route{Screen: "P-109", Method: "GET", Pattern: "/me/password", Class: SC3, Handler: acc.passwordForm})
 	r.Add(Route{Screen: "P-109", Method: "POST", Pattern: "/me/password", Class: SC3, Handler: acc.changePassword})
+	// P-110 회원 탈퇴 (FR-212). GET 은 폼만 그린다 — 상태를 바꾸는 것은 POST 다.
+	r.Add(Route{Screen: "P-110", Method: "GET", Pattern: "/me/delete", Class: SC3, Handler: acc.deleteForm})
+	r.Add(Route{Screen: "P-110", Method: "POST", Pattern: "/me/delete", Class: SC3, Handler: acc.deleteAccount})
+	// P-113 인증 메일 재발송 (FR-214). **POST 전용이다** — GET 이면 링크
+	// 프리페치와 크롤러가 메일을 발송시킨다.
+	r.Add(Route{Screen: "P-113", Method: "POST", Pattern: "/verify/resend", Class: SC2,
+		Handler: acc.resendVerification})
 	// P-106 은 **POST 다.** 시작이 세션에 state 를 심으므로 GET 이면 P5
 	// 위반이고, 링크 프리페치가 로그인 흐름을 시작시킨다.
 	r.Add(Route{Screen: "P-106", Method: "POST", Pattern: "/auth/{provider}", Class: SC2,

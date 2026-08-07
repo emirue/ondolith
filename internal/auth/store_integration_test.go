@@ -480,3 +480,41 @@ func TestAnonymousGetsScopedGrantsToo(t *testing.T) {
 		t.Error("익명의 스코프 부여가 다른 게시판에도 먹는다")
 	}
 }
+
+// **주문 이력이 있는 계정은 지울 수 없다** (FR-212, D30 3-1).
+//
+// DeleteUser 는 이것을 데이터베이스에 맡기고 23503 을 ErrUserInUse 로 옮긴다 —
+// 주석에도 "orders are RESTRICT" 라고 적혀 있었다. 그런데 00012 는 그 외래키를
+// `ON DELETE SET NULL` 로 만들었다. 그래서 삭제는 **거부되지 않고** 주문의
+// 주인만 조용히 사라졌다: FR-212 가 막으려던 상태(주문 주체 없음)를 정확히
+// 만들어 낸 것이다. 코드·문서·스키마 셋 중 스키마만 달랐고 확인하는 테스트가
+// 없었다. 00018 이 RESTRICT 로 돌린다.
+func TestDeletingAUserWithOrdersIsRefused(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "buyer@example.com")
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO orders (order_no, user_id, status, total_amount,
+		                    receiver_name, receiver_phone, postcode, address1,
+		                    orderer_email, orderer_phone)
+		VALUES ('ORD-0001', $1, '결제대기', 1000, '받는이', '01000000000', '00000', '주소',
+		        'buyer@example.com', '01000000000')`,
+		u); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteUser(ctx, u); !errors.Is(err, ErrUserInUse) {
+		t.Fatalf("삭제가 거부되지 않았다 (err=%v) — 주문의 주체가 사라진다", err)
+	}
+	// 거부가 주문을 건드리지 않았는지도 본다. SET NULL 이면 에러 없이
+	// user_id 만 비워지므로, 「에러가 났다」만으로는 구별되지 않는다.
+	var owner *string
+	if err := pool.QueryRow(ctx,
+		`SELECT user_id::text FROM orders WHERE order_no = 'ORD-0001'`).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if owner == nil || *owner != u {
+		t.Errorf("주문의 주인이 %v 로 바뀌었다 — SET NULL 이 그대로다", owner)
+	}
+}

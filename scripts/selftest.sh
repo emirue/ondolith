@@ -460,6 +460,18 @@ inject "시드 매트릭스에서만 권한 한 줄 누락" docs/15-access-contr
 	'perl -ni -e "print unless /^\| \`log\.view\` \|(\s*\|)+\s*\$/ || /^\| \`log\.view\` \|[ ●|]*\$/" docs/15-access-control.md' \
 	'권한이 2.5 시드 매트릭스에 없다: log.view'
 
+# docs/schema.sql 이 마이그레이션보다 뒤처지면 잡아야 한다. 이 파일은 손으로
+# 유지하는 사본이고, 사본이 조용히 어긋나는 것이 바로 이 검사를 만든 이유다.
+inject "재생성 안 된 schema.sql" docs/schema.sql \
+	'perl -0ni -e "s/^CREATE TABLE public\\.settings/CREATE TABLE public.settings_renamed/m; print" docs/schema.sql' \
+	'docs/schema.sql 에 없는 테이블: settings'
+
+# 검사가 헛도는 경우 — 파일이 통째로 없으면 「전부 담고 있다」가 아니라 실패다.
+cp "$REPO/docs/schema.sql" "$TMP/schema-backup"
+rm -f "$REPO/docs/schema.sql"
+detected "schema.sql 없음" "docs/schema.sql 이 없다"
+cp "$TMP/schema-backup" "$REPO/docs/schema.sql"
+
 # The legacy-id marker must exempt exactly the line it is on — no more.
 cp "$REPO/docs/40-theme.md" "$TMP/backup"
 printf '\n옛 형식 D3.1 인용 <!-- checkdocs:allow-legacy-id -->\n' >>"$REPO/docs/40-theme.md"

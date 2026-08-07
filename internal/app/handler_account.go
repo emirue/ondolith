@@ -136,6 +136,109 @@ func (d *accountDeps) sendVerification(ctx contextLike, userID, email string) {
 		"아래 링크로 인증을 완료하세요:\n"+d.baseURL+"/verify/"+raw)
 }
 
+// P-110 GET — the withdrawal form.
+func (d *accountDeps) deleteForm(w http.ResponseWriter, r *http.Request) {
+	if !ActorFrom(r.Context()).IsAuthenticated() {
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
+		return
+	}
+	d.render(w, r, "account/delete.html", http.StatusOK, nil)
+}
+
+// P-110 POST — 회원 탈퇴 (FR-212).
+//
+// **비활성화지 삭제가 아니다** (D19 P-110 「성공 후」). 주문의 주체가 사라지면
+// 정산과 분쟁 대응이 불가능해지므로, 계정 행은 남기고 로그인만 끊는다. 물리
+// 삭제는 관리자 화면(A-402)의 별개 동작이고 그쪽도 주문 이력이 있으면
+// 데이터베이스가 거부한다 (00018).
+//
+// 재인증을 **최근에 했더라도 생략하지 않는다** (D19 P-110): 되돌릴 수 없는
+// 작업이고, 열린 채로 자리를 뜬 세션 하나가 계정을 끝낼 수 있어서는 안 된다.
+//
+// `confirm` 체크박스와 `hard_delete` 부재가 이 화면의 입력 전부다. 비활성이냐
+// 삭제냐를 폼이 고르게 하면 FR-212 의 판단이 클라이언트로 넘어간다.
+func (d *accountDeps) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	a := ActorFrom(r.Context())
+	if !a.IsAuthenticated() {
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	bad := func(msg string) {
+		d.render(w, r, "account/delete.html", http.StatusBadRequest,
+			map[string]any{"Error": msg})
+	}
+	if r.PostFormValue("confirm") == "" {
+		bad("되돌릴 수 없습니다. 확인란을 체크해 주세요.")
+		return
+	}
+	if _, err := d.store.Authenticate(ctx, a.User.Email, r.PostFormValue("password")); err != nil {
+		bad("비밀번호가 올바르지 않습니다.")
+		return
+	}
+
+	// SetActive holds every superuser row FOR UPDATE while it counts, so two
+	// administrators withdrawing at the same moment cannot both read "2 left"
+	// and leave the site with nobody who can let anyone back in (D15 5.2).
+	err := d.store.SetActive(ctx, a.User.ID, false)
+	if errors.Is(err, auth.ErrLastSuperuser) {
+		bad("마지막 관리자 계정은 탈퇴할 수 없습니다.")
+		return
+	}
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// 다른 기기의 세션까지 끝낸다. withActor 가 비활성 계정의 세션을 다음
+	// 요청에서 파기하지만, 그것은 그 세션이 다시 요청을 보낼 때다 — 컷오프를
+	// 옮겨 두면 지금 끝난다 (D15 5.4).
+	if err := d.store.InvalidateSessions(ctx, a.User.ID); err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	if err := d.sm.Destroy(ctx); err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// P-113 POST /verify/resend — 인증 메일 재발송 (FR-214).
+//
+// **수신 주소를 입력으로 받지 않는다.** 받으면 우리 도메인에서 임의 주소로
+// 메일을 쏘는 릴레이가 되고, `user_id` 를 받으면 남의 계정에 메일 폭탄을
+// 보내는 경로가 된다 (D19 P-113 「받지 않는 필드」). 주소는 세션 사용자의
+// 저장된 것뿐이다.
+//
+// 이미 인증된 계정에도 **성공과 같은 응답**을 준다. 다르게 답하면 이 화면이
+// "이 계정이 인증됐는지" 를 알려주는 조회 도구가 된다.
+func (d *accountDeps) resendVerification(w http.ResponseWriter, r *http.Request) {
+	a := ActorFrom(r.Context())
+	if !a.IsAuthenticated() {
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
+		return
+	}
+	// 계정당 3회/시간 (D15 4.3-2). IP 가 아니라 계정으로 센다 — 막으려는 것은
+	// 한 수신함에 쌓이는 메일이고, 그 수신함은 계정에 달려 있다.
+	if !d.limiter.Allow("verify-resend:acct:"+a.User.ID, d.limits.VerifyMailAccount) {
+		w.Header().Set("Retry-After", "3600")
+		d.render(w, r, "auth/signup-sent.html", http.StatusTooManyRequests,
+			map[string]any{"Error": "잠시 후 다시 시도해 주세요."})
+		return
+	}
+	if a.User.EmailVerifiedAt == nil {
+		// sendVerification 이 기존 미사용 토큰을 무효화하고 새로 발급한다.
+		// 발송은 비동기이고, 실패해도 이 요청은 실패하지 않는다 (W1-27).
+		d.sendVerification(r.Context(), a.User.ID, a.User.Email)
+	}
+	d.render(w, r, "auth/signup-sent.html", http.StatusOK,
+		map[string]any{"Email": a.User.Email})
+}
+
 // contextLike keeps the signature honest without importing context here twice.
 type contextLike = interface {
 	Deadline() (time.Time, bool)

@@ -1,15 +1,21 @@
 {{define "body"}}
 <h1>회원 탈퇴</h1>
-{{/* **되돌릴 수 없다.** 주문 이력은 `orders.user_id` 가 SET NULL 이라 남고
-     (D30), 그 주문은 더 이상 어느 계정에도 연결되지 않는다 — 탈퇴 뒤에는
-     주문 조회를 비회원 경로로만 할 수 있다 (FR-212). */}}
+{{/* **비활성화지 삭제가 아니다** (D19 P-110 「성공 후」). 주문의 주체가
+     사라지면 정산·분쟁 대응이 불가능하므로 계정 행은 남기고 로그인만 끊는다.
+     이 문구가 「삭제된다」였을 때 화면은 서버가 하지 않는 일을 약속하고
+     있었다 — 주문 이력이 어떻게 되는지도 반대로 적혀 있었다. */}}
 {{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
-<p>탈퇴하면 계정이 삭제되고 로그인할 수 없습니다. <strong>되돌릴 수 없습니다.</strong></p>
-<p>이미 하신 주문의 이력은 남지만, 더 이상 회원 주문 조회로 볼 수 없습니다.
-   주문번호로 비회원 조회를 이용하세요.</p>
+<p>탈퇴하면 계정이 <strong>비활성화되어 더 이상 로그인할 수 없습니다.</strong></p>
+<p>주문 이력은 그대로 남습니다. 다시 이용하시려면 관리자에게 문의해 주세요.</p>
 <form method="post" class="form">
   <label>비밀번호 확인
     <input name="password" type="password" required autocomplete="current-password">
+  </label>
+  {{/* 되돌릴 수 없는 작업의 확인 단계 (D19 P-110). 비밀번호만 받으면
+       비밀번호 관리자가 채운 폼에서 버튼 한 번으로 끝난다. */}}
+  <label class="checkbox">
+    <input name="confirm" type="checkbox" value="1" required>
+    위 내용을 확인했으며 탈퇴합니다
   </label>
   <button type="submit" class="danger">탈퇴</button>
 </form>

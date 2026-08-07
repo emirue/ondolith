@@ -44,6 +44,8 @@
 | D80 | [80-roadmap.md](80-roadmap.md) | Phase별 범위와 완료 기준 | 다음에 뭘 할지 정할 때 |
 | D81 | [81-work-breakdown.md](81-work-breakdown.md) | **작업 분해.** Phase별 작업·선행 관계·완료 기준·임계 경로 | 무엇부터 만들지 정할 때 |
 | D82 | [82-execution-loop.md](82-execution-loop.md) | **실행 루프.** 종료 신호·진행 표시·재개 절차 (`scripts/next-task.sh`) | 작업을 실제로 돌릴 때 |
+| D83 | [83-browser-test.md](83-browser-test.md) | **브라우저 수동 테스트 시나리오.** 설치부터 커머스 한 바퀴 | 화면을 직접 확인할 때 |
+| D84 | [84-logo-brief.md](84-logo-brief.md) | **로고 제작 요청서.** 외부 도구에 붙여 넣는 요청문 + 검수 항목 | 로고를 만들거나 교체할 때 |
 | D90 | [90-conventions.md](90-conventions.md) | **문서 작성 규칙.** 번호·ID·추가 절차·기계 검증 | 문서를 쓰기 전 |
 
 ## 작업 지침 (`.ai/`)
@@ -52,8 +54,22 @@
 |---|---|
 | [.ai/CLAUDE.md](../.ai/CLAUDE.md) | 루트 `CLAUDE.md`로 가는 포인터 (규칙 본문 없음) |
 | [.ai/DECISIONS.md](../.ai/DECISIONS.md) | **확정 스택 + 배제된 선택지.** 되살리지 말 것 |
+| [.ai/ENGINEERING.md](../.ai/ENGINEERING.md) | **공통화·리팩터링·간결함.** 코드를 어떤 모습으로 남길지 |
+| [.ai/KARPATHY.md](../.ai/KARPATHY.md) | 코딩 행동 지침 (외부 원문) |
 | [.ai/PATTERNS.md](../.ai/PATTERNS.md) | 이 저장소의 코드 관례 |
 | [.ai/MISTAKES.md](../.ai/MISTAKES.md) | 반복된 실수 기록 |
+
+## 생성물 — **손으로 고치지 않는다**
+
+만드는 명령이 있고, 고치면 다음 생성에서 사라진다. 내용을 바꾸려면 **원본**을
+바꾸고 다시 만든다.
+
+| 파일 | 무엇 | 원본 | 다시 만들기 |
+|---|---|---|---|
+| [schema.sql](schema.sql) | 통합 DDL — ERD 도구(erdmates 등)에 올리는 파일. 테이블 37개 | `internal/migrations/*.sql` | `make schema` |
+
+DB **설계 의도**(정규화 근거·외래키 정책·JSONB 커스텀 필드)는 [D30](30-data-model.md)이
+설명한다. `schema.sql` 은 그 결과물이지 설명이 아니다 — 둘 다 읽어야 한다.
 
 ## 저장소 루트
 
@@ -74,7 +90,16 @@
 |---|---|---|
 | `D##` | 문서 | 이 인덱스 |
 | `FR-###` / `NFR-###` | 기능 / 비기능 요구사항 | [D10](10-requirements.md) |
+| `P-###` / `A-###` | 공개 화면 / 관리자 화면 | [D11](11-screens.md) — 상세는 [D12](12-screens-public.md)·[D13](13-screens-admin.md), 입력 명세는 [D19](19-screen-io.md) |
+| `SC-#` | 화면 보안 등급 (1~8) | [D15](15-access-control.md) 4.4 |
+| `W#-##` | 작업 항목 (Phase-번호) | [D81](81-work-breakdown.md) |
+| `OPEN-##` | 미결 결정 | [D18](18-open-decisions.md) |
 | `DEC-#` / `DEC-#.#` | 확정·배제 결정 | [.ai/DECISIONS.md](../.ai/DECISIONS.md) |
 | `M#` | 기록된 실수 | [.ai/MISTAKES.md](../.ai/MISTAKES.md) |
+
+**ID 는 문서 사이의 연결선이다.** 어느 문서에서든 `FR-212` 를 보면 D10 의 그
+행으로, `P-110` 을 보면 D11 의 그 행으로 갈 수 있다 — 문서가 늘어나도 훑어야
+할 양이 늘지 않는 이유가 이것이다. `make check` 가 **정의되지 않은 ID 인용을
+빌드 실패로 만든다**(D90 5절), 그래서 이 연결은 끊어진 채로 남지 않는다.
 
 커밋 메시지 본문에 요구사항 ID를 적는다. 예: `install: 관리자 계정 생성 (FR-104)`

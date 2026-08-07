@@ -349,7 +349,11 @@ func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 	return s.withLastSuperuserGuard(ctx, userID, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		// 23503 은 FK 위반, **23001 은 RESTRICT 위반**이다. 둘은 다른 코드다 —
+		// `orders.user_id` 가 RESTRICT 이므로(00018) 여기서 오는 것은 23001 이고,
+		// 23503 만 보면 「주문 이력이 있어 지울 수 없다」가 통째로 500 이 된다.
+		// commerce.DeleteProduct 는 같은 함정을 이미 알고 둘 다 본다.
+		if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "23001") {
 			return ErrUserInUse
 		}
 		if err != nil {

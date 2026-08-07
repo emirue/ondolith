@@ -80,10 +80,29 @@ func (s *Store) IssueToken(ctx context.Context, kind TokenKind, userID string) (
 		return "", err
 	}
 
-	_, err = s.pool.Exec(ctx,
-		`INSERT INTO `+kind.table()+` (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-		userID, hashToken(raw), time.Now().Add(kind.ttl()))
+	// 같은 사용자의 **미사용 토큰을 먼저 태운다** (D19 P-104·P-113 「기존 토큰」).
+	// 유효한 링크가 여러 개 살아 있을 이유가 없고, 살아 있으면 재발송이 공격
+	// 표면을 넓히는 동작이 된다 — 메일함 하나가 새면 그 안의 오래된 링크도
+	// 전부 쓸 수 있다. 재발송 화면(P-113)이 있는 이상 이것은 선택이 아니다.
+	//
+	// 발급과 같은 트랜잭션이어야 한다. 지우고 나서 넣기 사이에 실패하면
+	// 사용자는 링크를 하나도 갖지 못한 채 "보냈습니다" 를 보게 된다.
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // 커밋됐으면 무의미하다
+	if _, err := tx.Exec(ctx,
+		`UPDATE `+kind.table()+` SET used_at = now()
+		 WHERE user_id = $1 AND used_at IS NULL`, userID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO `+kind.table()+` (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+		userID, hashToken(raw), time.Now().Add(kind.ttl())); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
 	return raw, nil

@@ -4,7 +4,7 @@
  * 옮긴 것이다. 관리자 화면과 같은 토큰 이름을 쓰되 값은 프론트 팔레트를 따른다
  * (frontBg / heroBg / heroInk / heroLine).
  *
- * 기본은 1a 클래식 실무형. 다크 선호 시 1c 값으로 덮는다 (핸드오프 README
+ * 기본은 1b 모던 소프트. 다크 선호 시 1c 값으로 덮는다 (핸드오프 README
  * 「Dark Mode」 — 구조는 그대로 두고 토큰만 바꾼다).
  *
  * 이 파일은 폴백이다. 디스크 테마가 style.css 를 두면 그쪽이 쓰인다 (FR-302).
@@ -12,15 +12,22 @@
 :root {
   --font-sans: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
 
-  --bg: #eceef1;        --panel: #fff;        --ink: #1f2632;      --line: #d8dde4;
-  --accent: #1d4a8f;    --accent-ink: #fff;
-  --hero-bg: #fff;      --hero-ink: #1f2632;  --hero-line: #d8dde4;
-  --thead-bg: #f0f2f5;  --input-bg: #fff;     --badge-bg: #e8eef7; --badge-ink: #1d4a8f;
-  --radius: 3px;        --chip-radius: 3px;   --shadow: none;
-  --pad: 26px;          --gap: 18px;
+  /* 「1b 모던 소프트」의 값이다 — 관리자 화면의 기본과 같은 팔레트를 쓴다
+   * (admin.css 1b, app.defaultAdminTheme). 앞뒤가 다른 사이트로 보이지 않게
+   * 하는 것이 목적이고, 값이 한 벌이면 한쪽만 손보다 어긋날 일이 없다.
+   *
+   * 3px 모서리에 그림자 없는 1a 클래식이 기본이었다. 구조를 바꾼 것이 아니라
+   * 토큰만 옮겼다 — 컴포넌트 규칙은 전부 그대로다. */
+  --bg: #f7f5f2;        --panel: #fff;        --ink: #2b2723;      --line: #e7e2da;
+  --accent: #1f7a63;    --accent-ink: #fff;
+  --hero-bg: #fff;      --hero-ink: #2b2723;  --hero-line: #e7e2da;
+  --thead-bg: #faf8f5;  --input-bg: #fbfaf8;  --badge-bg: #eaf2ef; --badge-ink: #1f7a63;
+  --radius: 16px;       --chip-radius: 10px;
+  --shadow: 0 4px 16px rgba(43, 39, 35, .06);
+  --pad: 34px;          --gap: 24px;
   --err: #b3261e;       --err-bg: #fbeae9;
   --ok: #1f7a63;        --ok-bg: #eaf2ef;
-  --link: #2f5dd6;      --link-hover: #1e40af;
+  --link: #1f7a63;      --link-hover: #17594a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -282,3 +289,56 @@ main { max-width: 1040px; margin: 0 auto; padding: 32px var(--pad) 64px; }
   .site-header { gap: 14px; }
   .account-nav { width: 100%; margin-left: 0; }
 }
+
+/* ---- 상호작용 ------------------------------------------------------------
+ * 「부드럽다」는 모서리와 그림자만으로 만들어지지 않는다. 상태가 순간이동하면
+ * 값이 아무리 부드러워도 화면은 딱딱하게 느껴진다.
+ *
+ * `prefers-reduced-motion` 을 존중한다 — 전정 장애가 있는 사람에게 움직임은
+ * 취향이 아니라 증상이다. */
+a,
+button,
+input,
+select,
+textarea,
+.card,
+.panel {
+  transition: background-color .16s ease, border-color .16s ease,
+              box-shadow .16s ease, color .16s ease, transform .16s ease;
+}
+
+button:not(:disabled):hover { filter: brightness(1.06); }
+button:not(:disabled):active { transform: translateY(1px); }
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  /* 윤곽선을 지우고 그림자로 대신하지 않는다 — 고대비 모드에서 그림자는
+   * 그려지지 않고, 그러면 키보드 사용자는 어디에 있는지 알 수 없게 된다. */
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+  }
+}
+
+/* 체크박스는 라벨과 한 줄에 놓는다. .form label 의 세로 배치를 그대로 쓰면
+ * 상자와 글자가 두 줄로 갈라져 무엇을 체크하는지 읽히지 않는다 (P-110). */
+.form label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  opacity: 1;
+}
+
+.form label.checkbox input { width: 18px; height: 18px; padding: 0; }
+
+/* 되돌릴 수 없는 동작은 색으로 먼저 말한다 (P-110 탈퇴). */
+.form button.danger { background: var(--err); }

@@ -1,0 +1,26 @@
+<!--
+Ondolith 마크.
+
+이름 그대로다 — 온돌(구들) + lith(돌). 아래의 두꺼운 판이 구들장이고, 그 위로
+올라오는 세 줄기가 열이다. ISO 의 「뜨거운 표면」 기호와 같은 구조라 설명 없이
+읽힌다.
+
+앞의 시안은 구들 단면(판 + 고래)이었는데, 16px 로 줄이면 아래 고리가 글자
+꼬리처럼 보여서 버렸다. 작은 크기에서 읽히지 않는 마크는 헤더에서 쓸 수 없다.
+
+래스터가 아니라 SVG 인 이유: 단일 바이너리에 텍스트로 임베드되고, 어느 배율의
+화면에서도 다시 만들 필요가 없다. 색은 currentColor 를 따라가므로 밝은 헤더와
+어두운 헤더 양쪽에서 그대로 쓰인다 — 파일을 두 벌 두지 않는다.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"
+     role="img" aria-label="Ondolith">
+  <!-- 구들장: 열을 머금는 돌판. 가장 두꺼운 획이라 축소해도 마지막까지 남는다 -->
+  <rect x="3" y="23" width="26" height="6" rx="3" fill="currentColor"/>
+  <!-- 올라오는 열. 가운데가 가장 높아 위로 향하는 방향이 한눈에 읽힌다 -->
+  <path d="M9 18c0-3 2.4-3 2.4-6S9 9 9 6" stroke="currentColor"
+        stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M16 18c0-3.6 2.4-3.6 2.4-7.2S16 7.2 16 3.6" stroke="currentColor"
+        stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M23 18c0-3 2.4-3 2.4-6S23 9 23 6" stroke="currentColor"
+        stroke-width="2.6" stroke-linecap="round"/>
+</svg>

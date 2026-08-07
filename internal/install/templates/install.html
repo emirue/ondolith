@@ -7,27 +7,66 @@
 <title>Ondolith 설치</title>
 <style>
   :root { color-scheme: light dark; }
-  body { font: 16px/1.6 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
-         max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-  h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
-  .sub { color: #6b7280; margin: 0 0 2rem; }
-  fieldset { border: 1px solid #d1d5db; border-radius: .5rem; padding: 1rem 1.25rem 1.25rem; margin: 0 0 1.5rem; }
-  legend { padding: 0 .4rem; font-weight: 600; }
-  label { display: block; margin: .9rem 0 .25rem; font-size: .9rem; font-weight: 500; }
-  input, select { width: 100%; padding: .5rem .6rem; font: inherit; font-size: .95rem;
-                  border: 1px solid #9ca3af; border-radius: .375rem; background: Canvas; color: CanvasText; }
+  /* 값은 「1b 모던 소프트」 (admin.css 1b) 를 따른다 — 설치 화면만 다른
+     제품처럼 보이면 첫인상이 거기서 갈린다. 설치 트리는 운영 트리와 자원을
+     공유하지 않으므로(CLAUDE.md 3번) 스타일도 여기 인라인으로 둔다. */
+  :root { color-scheme: light dark;
+          --bg: #f7f5f2; --panel: #fff; --ink: #2b2723; --line: #e7e2da;
+          --accent: #1f7a63; --muted: #8b8378; --input-bg: #fbfaf8;
+          --shadow: 0 4px 16px rgba(43, 39, 35, .06); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171b; --panel: #1b1f25; --ink: #e5e9ee; --line: #2b313a;
+            --accent: #4fbf94; --muted: #98a1ad; --input-bg: #171b20;
+            --shadow: 0 1px 0 rgba(255, 255, 255, .03); }
+  }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.6 "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+         max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 4rem;
+         background: var(--bg); color: var(--ink); }
+  .brand { display: flex; align-items: center; gap: .6rem; margin: 0 0 1.5rem; color: var(--accent); }
+  .brand svg { width: 2rem; height: 2rem; }
+  .brand span { font-weight: 700; letter-spacing: -.02em; font-size: 1.05rem; }
+  h1 { margin: 0 0 .35rem; font-size: 1.7rem; letter-spacing: -.03em; }
+  .sub { color: var(--muted); margin: 0 0 2.25rem; }
+  fieldset { border: 1px solid var(--line); border-radius: 16px; background: var(--panel);
+             box-shadow: var(--shadow); padding: 1.25rem 1.5rem 1.5rem; margin: 0 0 1.5rem; }
+  legend { padding: 0 .5rem; font-weight: 600; font-size: .9rem; color: var(--muted); }
+  label { display: block; margin: 1rem 0 .3rem; font-size: .85rem; font-weight: 500; color: var(--muted); }
+  input, select { width: 100%; padding: .65rem .8rem; font: inherit; font-size: .95rem;
+                  border: 1px solid var(--line); border-radius: 10px;
+                  background: var(--input-bg); color: var(--ink);
+                  transition: border-color .16s ease, box-shadow .16s ease; }
+  input:focus-visible, select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; }
   .row { display: flex; gap: 1rem; }
   .row > div { flex: 1; }
-  .hint { color: #6b7280; font-size: .8rem; margin: .3rem 0 0; }
-  button { font: inherit; font-weight: 600; padding: .65rem 1.4rem; border: 0; border-radius: .375rem;
-           background: #b45309; color: #fff; cursor: pointer; }
+  .hint { color: var(--muted); font-size: .8rem; margin: .35rem 0 0; }
+  button { font: inherit; font-weight: 600; padding: .75rem 1.6rem; border: 0; border-radius: 10px;
+           background: var(--accent); color: #fff; cursor: pointer;
+           transition: filter .16s ease, transform .16s ease; }
+  button:hover { filter: brightness(1.06); }
+  button:active { transform: translateY(1px); }
   .error { border: 1px solid #dc2626; background: #fef2f2; color: #991b1b;
-           padding: .75rem 1rem; border-radius: .375rem; margin: 0 0 1.5rem; }
+           padding: .8rem 1rem; border-radius: 10px; margin: 0 0 1.5rem; }
   @media (prefers-color-scheme: dark) { .error { background: #2a0e0e; color: #fca5a5; } }
+  @media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; } }
 </style>
 </head>
 <body>
-<h1>Ondolith 설치</h1>
+<p class="brand">
+  <!-- 온돌(구들) + lith(돌). 아래 판이 구들장, 위로 올라오는 세 줄기가 열이다.
+       currentColor 를 따르므로 밝은 배경과 어두운 배경 양쪽에서 그대로 쓰인다.
+       admin/logo.svg 와 같은 도형이다 — 설치 트리는 운영 트리의 자원을 쓰지
+       않으므로(CLAUDE.md 3번) 여기에는 인라인으로 둔다. -->
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Ondolith">
+    <rect x="3" y="23" width="26" height="6" rx="3" fill="currentColor"/>
+    <path d="M9 18c0-3 2.4-3 2.4-6S9 9 9 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M16 18c0-3.6 2.4-3.6 2.4-7.2S16 7.2 16 3.6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M23 18c0-3 2.4-3 2.4-6S23 9 23 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+  </svg>
+  <span>Ondolith</span>
+</p>
+<h1>설치</h1>
 <p class="sub">데이터베이스와 관리자 계정을 설정하면 설치가 끝납니다.</p>
 
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}

@@ -16,7 +16,7 @@ import (
 	"github.com/emirue/ondolith/internal/auth"
 )
 
-//go:embed templates/admin/*.html templates/admin/admin.css
+//go:embed templates/admin/*.html templates/admin/admin.css templates/admin/logo.svg
 var adminFS embed.FS
 
 // adminRenderer draws the administrator screens.
@@ -38,26 +38,48 @@ type adminRenderer struct {
 	// that only authenticated administrators ever fetch; one <style> block is
 	// smaller than that whole apparatus.
 	css template.CSS
+	// logo 는 마크의 SVG 원본이다. CSS 와 같은 취급을 받는다 — 우리 파일이고,
+	// 인라인이라 요청이 늘지 않으며, currentColor 를 쓰므로 헤더가 밝든 어둡든
+	// 파일 한 벌로 끝난다.
+	logo template.HTML
 	// theme selects one of the handoff's five directions (1a~1e). Empty means
-	// 1a, the default the stylesheet ships with.
+	// defaultAdminTheme.
 	theme string
 
 	mu    sync.RWMutex
 	cache map[string]*template.Template
 }
 
+// defaultAdminTheme 은 「1b 모던 소프트」다.
+//
+// 스타일시트가 값 없이 실으면 1a 클래식이 되고, 그것은 3px 모서리에 그림자가
+// 없는 딱딱한 화면이다. 다섯 안은 **같은 마크업을 공유하므로** 기본을 옮기는
+// 데 드는 비용이 이 상수 하나다 — 새 CSS 를 쓰는 것이 아니라 이미 있는 안을
+// 고르는 것이다. 다른 안이 필요하면 `admin.theme` 설정이 그대로 덮는다.
+const defaultAdminTheme = "1b"
+
 func newAdminRenderer(site func() string, theme string, shop bool, log *slog.Logger) (*adminRenderer, error) {
+	if theme == "" {
+		theme = defaultAdminTheme
+	}
 	b, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		return nil, err
+	}
+	mark, err := adminFS.ReadFile("templates/admin/logo.svg")
 	if err != nil {
 		return nil, err
 	}
 	// The stylesheet is ours, from the embedded FS — not user input. It is
 	// marked CSS so html/template inlines it instead of escaping every brace.
 	return &adminRenderer{
-		shop:  shop,
-		site:  site,
-		log:   log,
-		css:   template.CSS(b),
+		shop: shop,
+		site: site,
+		log:  log,
+		css:  template.CSS(b),
+		// 임베드된 우리 파일이지 사용자 입력이 아니다 — template.HTML 이
+		// 아니면 html/template 이 SVG 를 통째로 이스케이프해 글자로 그린다.
+		logo:  template.HTML(mark),
 		theme: theme,
 		cache: map[string]*template.Template{},
 	}, nil
@@ -142,6 +164,7 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	view := map[string]any{
 		"Title":      adminScreenTitles[name],
 		"SiteName":   a.site(),
+		"Logo":       a.logo,
 		"Nav":        groups,
 		"Current":    admin.CurrentGroup(groups, r.URL.Path),
 		"CSS":        a.css,

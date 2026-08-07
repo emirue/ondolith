@@ -1262,6 +1262,37 @@ else
 	err "$CL 이 없다"
 fi
 
+# --- 30. docs/schema.sql 이 마이그레이션보다 뒤처지지 않았다 ---------------
+#
+# 이 파일은 ERD 도구에 올리는 통합 DDL 이고 `make schema` 가 만든다. 만드는
+# 데 데이터베이스가 필요하므로 여기서 다시 뽑아 비교할 수는 없다 — 대신
+# **마이그레이션이 만드는 테이블이 전부 들어 있는지**만 본다. 테이블을 추가한
+# 마이그레이션을 넣고 재생성을 잊으면 여기서 걸린다.
+#
+# 이 검사가 필요한 이유는 이미 겪었다: `orders.user_id` 가 문서에는 RESTRICT,
+# 스키마에는 SET NULL 로 갈라져 있었고 아무도 몰랐다. 손으로 맞추는 사본은
+# 반드시 어긋나므로, 사본을 두려면 어긋남을 기계가 잡아야 한다.
+begin
+SCHEMA_SQL=docs/schema.sql
+if [ ! -f "$SCHEMA_SQL" ]; then
+	err "$SCHEMA_SQL 이 없다 — make schema"
+else
+	perl -nle 'print lc $1 while /^CREATE TABLE (?:IF NOT EXISTS )?(\w+)/gi' \
+		internal/migrations/*.sql | sort -u >"$T"/cd_sch_mig
+	perl -nle 'print lc $1 while /^CREATE TABLE (?:public\.)?(\w+)/gi' \
+		"$SCHEMA_SQL" | sort -u >"$T"/cd_sch_dump
+
+	[ -s "$T"/cd_sch_mig ] ||
+		err "마이그레이션에서 CREATE TABLE 을 하나도 읽지 못했다 (검사가 헛돌았다)"
+	[ -s "$T"/cd_sch_dump ] ||
+		err "$SCHEMA_SQL 에서 CREATE TABLE 을 하나도 읽지 못했다 (검사가 헛돌았다)"
+
+	for t in $(comm -23 "$T"/cd_sch_mig "$T"/cd_sch_dump); do
+		err "$SCHEMA_SQL 에 없는 테이블: $t — 재생성이 필요하다 (make schema)"
+	done
+	done_ "$SCHEMA_SQL 이 마이그레이션의 테이블 $(wc -l <"$T"/cd_sch_mig | tr -d ' ')개를 전부 담고 있다"
+fi
+
 rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_use_req "$T"/cd_def_dec \
 	"$T"/cd_use_dec "$T"/cd_def_mis "$T"/cd_use_mis "$T"/cd_stale \
 	"$T"/cd_def_scr "$T"/cd_def_scr_u "$T"/cd_use_scr "$T"/cd_scr_issues \
@@ -1270,7 +1301,7 @@ rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_
 	"$T"/cd_io_spec "$T"/cd_io_want "$T"/cd_io_have \
 	"$T"/cd_open_inline "$T"/cd_open_cited "$T"/cd_open_def \
 	"$T"/cd_wbs_cov "$T"/cd_wbs_done "$T"/cd_wbs_gap \
-	"$T"/cd_sch_doc "$T"/cd_sch_sql \
+	"$T"/cd_sch_doc "$T"/cd_sch_sql "$T"/cd_sch_mig "$T"/cd_sch_dump \
 	"$T"/cd_io_want_s "$T"/cd_io_have_s \
 	"$T"/cd_fr_exempt "$T"/cd_fr_ok "$T"/cd_fr_must "$T"/cd_req_nocrit "$T"/cd_req_vague \
 	"$T"/cd_tbl_d30 "$T"/cd_tbl_cov "$T"/cd_cov_blank \

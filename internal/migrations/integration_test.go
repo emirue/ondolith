@@ -1149,8 +1149,17 @@ func TestOrderedRowsCannotBeDeleted(t *testing.T) {
 	}
 }
 
-// 사용자를 지워도 주문은 남는다. 이메일 스냅샷이 남아 주문서를 보낼 곳이 있다.
-func TestDeletingAUserKeepsTheOrder(t *testing.T) {
+// **주문 이력이 있는 계정은 지워지지 않는다** (FR-212, D30 3-1, D15 5.2,
+// D19 A-402). 주문의 주체가 사라지면 정산과 분쟁 대응이 불가능해지므로, 막는
+// 것은 애플리케이션이 아니라 데이터베이스다 — 본인 탈퇴(P-110)와 관리자
+// 삭제(A-402) 양쪽에 한 번에 걸린다.
+//
+// 이 테스트는 **반대를 단언하고 있었다**: 「사용자를 지워도 주문은 남는다 …
+// user_id 가 NULL 이 되지 않았다」. 00012 가 외래키를 `ON DELETE SET NULL` 로
+// 만들었고 테스트가 그 동작을 고정하고 있었으므로, 문서 다섯 곳이 RESTRICT 를
+// 말하는 동안 스키마와 테스트만 짝을 이뤄 반대편에 서 있었다. 요구사항이
+// 위이므로(D90) 00018 이 스키마를 옮기고 이 테스트가 따라온다.
+func TestDeletingAUserWithAnOrderIsRefused(t *testing.T) {
 	db, pool := testDB(t)
 	if err := Run(context.Background(), db); err != nil {
 		t.Fatal(err)
@@ -1170,18 +1179,22 @@ func TestDeletingAUserKeepsTheOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, uid); err != nil {
-		t.Fatalf("사용자 삭제가 주문 FK 에 막혔다: %v", err)
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, uid); err == nil {
+		t.Fatal("주문 이력이 있는 사용자가 지워졌다 — 주문의 주체가 사라진다")
 	}
+	// 거부가 주문을 건드리지 않았는지도 본다. SET NULL 이면 오류 없이 user_id
+	// 만 비워지므로, 「오류가 났다」만으로는 두 동작이 구별되지 않는다.
 	var email string
 	var userID *string
 	if err := pool.QueryRow(ctx,
 		`SELECT orderer_email, user_id::text FROM orders`).Scan(&email, &userID); err != nil {
 		t.Fatal(err)
 	}
-	if userID != nil {
-		t.Error("user_id 가 NULL 이 되지 않았다")
+	if userID == nil || *userID != uid {
+		t.Errorf("주문의 주인이 %v 로 바뀌었다", userID)
 	}
+	// 이메일 스냅샷은 그대로다. 회원이 탈퇴(비활성)해도 주문서를 보낼 곳이
+	// 남아 있어야 하고, 비회원 조회(P-503)가 이 값을 쓴다.
 	if email != "a@example.com" {
 		t.Errorf("이메일 스냅샷이 사라졌다: %q", email)
 	}

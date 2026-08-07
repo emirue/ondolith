@@ -203,3 +203,61 @@ func TestMarkEmailVerified(t *testing.T) {
 		t.Error("재인증이 시각을 덮어썼다")
 	}
 }
+
+// 새 토큰을 발급하면 **같은 사용자의 미사용 토큰은 죽는다**
+// (D19 P-104·P-113 「기존 토큰」).
+//
+// 유효한 링크가 여러 개 살아 있으면 재발송(P-113)이 공격 표면을 넓히는 동작이
+// 된다 — 메일함 하나가 새면 그 안의 오래된 링크가 전부 아직 쓸 수 있다.
+// 발급이 이것을 안 하고 있었고, 확인하는 테스트가 없어서 두 화면 모두에서
+// 조용히 어긋나 있었다.
+func TestIssuingATokenBurnsTheOldOnes(t *testing.T) {
+	for _, kind := range []TokenKind{KindPasswordReset, KindEmailVerify} {
+		t.Run(kind.table(), func(t *testing.T) {
+			s, _ := testStore(t)
+			ctx := context.Background()
+			u := mkUser(t, s, "a@example.com")
+
+			old, err := s.IssueToken(ctx, kind, u)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh, err := s.IssueToken(ctx, kind, u)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if old == fresh {
+				t.Fatal("두 발급이 같은 토큰을 냈다 — 이 검사가 무의미해진다")
+			}
+
+			if _, err := s.ConsumeToken(ctx, kind, old); !errors.Is(err, ErrTokenInvalid) {
+				t.Errorf("이전 토큰이 아직 살아 있다: %v", err)
+			}
+			// 새 것은 살아 있어야 한다. 전부 죽이면 사용자는 링크를 하나도
+			// 갖지 못한 채 "보냈습니다" 를 본다.
+			if _, err := s.ConsumeToken(ctx, kind, fresh); err != nil {
+				t.Errorf("방금 발급한 토큰이 거부됐다: %v", err)
+			}
+		})
+	}
+}
+
+// 다른 사용자의 토큰까지 태우면 안 된다. 그러면 남의 재설정을 무효화하는
+// 도구가 된다 — 재발송은 로그인만 하면 누구나 부를 수 있다.
+func TestIssuingATokenLeavesOtherUsersAlone(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	mine := mkUser(t, s, "mine@example.com")
+	theirs := mkUser(t, s, "theirs@example.com")
+
+	victim, err := s.IssueToken(ctx, KindPasswordReset, theirs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.IssueToken(ctx, KindPasswordReset, mine); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeToken(ctx, KindPasswordReset, victim); err != nil {
+		t.Errorf("남의 발급이 이 토큰을 태웠다: %v", err)
+	}
+}

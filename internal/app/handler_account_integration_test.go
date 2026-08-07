@@ -39,6 +39,28 @@ func (s *recordingSender) snapshot() []capturedMail {
 	return append([]capturedMail(nil), s.sent...)
 }
 
+// waitMail polls until some recorded mail satisfies want, and returns it.
+//
+// **한 번 찍어 보고 판단하면 안 된다.** 발송은 고루틴이므로 요청이 끝난 직후의
+// 스냅숏에는 아직 아무것도 없을 수 있다 — 한가한 기계에서는 통과하고 바쁜
+// 기계에서는 실패하는, 이유를 알 수 없는 실패가 된다. 고정 시간 sleep 도 같은
+// 문제를 옮기기만 한다: 짧으면 깜빡이고 길면 매 테스트가 느려진다.
+//
+// 없으면 (capturedMail{}, false) 다. 「오지 않아야 한다」를 확인하는 쪽은 이
+// 함수를 쓰지 않는다 — 그 경우 기다림은 실패를 늦출 뿐이다.
+func waitMail(t *testing.T, s *recordingSender, want func(capturedMail) bool) (capturedMail, bool) {
+	t.Helper()
+	for range 500 {
+		for _, m := range s.snapshot() {
+			if want(m) {
+				return m, true
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return capturedMail{}, false
+}
+
 func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handler, *auth.Store, *recordingSender) {
 	t.Helper()
 	store, _, sm := authFixture(t)
@@ -111,20 +133,9 @@ func TestSignupOnExistingAccountNotifiesTheOwner(t *testing.T) {
 		"email": {"taken@example.com"}, "password": {"correct-horse-battery"},
 	}, nil)
 
-	// The mailer is async; drain by polling the recorder a bounded number of
-	// times rather than sleeping a fixed amount.
-	found := false
-	for i := 0; i < 200 && !found; i++ {
-		for _, m := range sender.snapshot() {
-			if m.to == "taken@example.com" && strings.Contains(m.subject, "가입 시도") {
-				found = true
-			}
-		}
-		if !found {
-			time.Sleep(time.Millisecond)
-		}
-	}
-	if !found {
+	if _, ok := waitMail(t, sender, func(m capturedMail) bool {
+		return m.to == "taken@example.com" && strings.Contains(m.subject, "가입 시도")
+	}); !ok {
 		t.Error("기존 계정 소유자에게 알림이 가지 않았다")
 	}
 }
