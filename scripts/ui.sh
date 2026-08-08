@@ -40,6 +40,55 @@ cleanup() {
 }
 [ -n "${UI_KEEP:-}" ] || trap cleanup EXIT INT TERM
 
+# ---- D11 의 라우트 표기를 정규식으로 -----------------------------------------
+#
+# `/admin/boards/{id}` 같은 표기를 실제 주소와 대조할 수 있는 형태로 바꾼다.
+#
+# **한 번에 훑는다.** 규칙을 순서대로 적용하면 앞의 규칙이 뒤의 규칙이 찾을
+# 글자를 먼저 바꿔 버린다 — 점을 먼저 이스케이프하면 `{path...}` 의 `...` 이
+# `[.][.][.]` 이 되어 와일드카드 규칙이 영영 매치되지 않고, 그 자리는 단일
+# 세그먼트(`[^/?]+`)로 잘못 변환된다. 그러면 `/static/css/style.css` 처럼
+# 슬래시가 든 실제 주소가 매치되지 않아 **멀쩡한 화면이 「감사가 재지 않는
+# 화면」으로 오탐된다.** 아래는 세 갈래를 한 패스에서 각자 처리한다.
+route_re() {
+	printf '%s' "$1" | perl -pe '
+		s! (\{[^}]*\.\.\.\}) | (\{[^}]*\}) | ([^{]+) !
+			$1 ? ".*" :
+			$2 ? "[^/?]+" :
+			     ($3 =~ s/([.\[\]^\$()|*+?{}\\])/\\$1/gr)
+		!gex'
+}
+
+# 이 변환이 틀리면 아래 「빠진 화면」 검사가 통째로 헛돈다 — DB 도 브라우저도
+# 필요 없으니 여기서 먼저 확인하고, 틀리면 시작하지 않는다.
+route_re_selfcheck() {
+	# 표기 → 매치돼야 하는 주소 → 매치되면 안 되는 주소
+	printf '%s\n' \
+		'/static/{path...}|/static/css/style.css|/statics/x' \
+		'/shop/p/{slug}|/shop/p/hoodie|/shop/p/a/b' \
+		'/admin/boards/{id}/fields|/admin/boards/9f/fields|/admin/boards/9f' \
+		'/robots.txt|/robots.txt|/robotsatxt' \
+		'/admin/|/admin/|/admin/x' |
+		while IFS='|' read -r pat yes no; do
+			re=$(route_re "$pat")
+			# **중괄호를 뺄 수 없다.** `«$pat»` 로 쓰면 셸이 `»` 의 바이트를
+			# 변수 이름에 붙여 읽어 `$pat»` 라는 없는 변수가 되고, 진단 문구가
+			# 빈칸으로 나온다 — 검사는 물지만 무엇이 틀렸는지 말하지 못한다.
+			printf '%s\n' "$yes" | grep -qE "^$re(\?.*)?\$" ||
+				bad "route_re: «${pat}» → «${re}» 가 «${yes}» 를 놓친다"
+			printf '%s\n' "$no" | grep -qE "^$re(\?.*)?\$" &&
+				bad "route_re: «${pat}» → «${re}» 가 «${no}» 까지 먹는다"
+		done
+	return 0
+}
+if out=$(route_re_selfcheck 2>&1) && [ -z "$out" ]; then
+	ok "라우트 표기를 정규식으로 옮기는 규칙"
+else
+	printf '%s\n' "$out"
+	printf 'ui: 라우트 정규식 변환이 깨졌다 — 「빠진 화면」 검사가 헛돈다\n'
+	exit 1
+fi
+
 . "$(dirname "$0")/lib-seed.sh"
 
 # ---- 회원 자료 --------------------------------------------------------------
@@ -174,6 +223,20 @@ live "$WORK/jar" "$ADMIN_URLS" "$WORK/live-admin"
 live "$WORK/jar-member" "$MEMBER_URLS" "$WORK/live-member"
 live "$WORK/jar-anon" "$ANON_URLS" "$WORK/live-anon"
 
+# **404 화면도 화면이다.** 위 필터는 200 만 남기므로 오류 화면이 통째로 빠진다 —
+# 사용자가 오타 하나로 가장 자주 보는 레이아웃인데(`.error-page`) 아무도 재지
+# 않고 있었다. 없는 주소 하나를 넣어 실제로 404 가 오는지 확인한 뒤 더한다.
+NOT_FOUND=/ondolith-no-such-page-404
+JAR_SAVE=$JAR; JAR=$WORK/jar-anon
+st=$(code GET "$NOT_FOUND")
+JAR=$JAR_SAVE
+if [ "$st" = "404" ]; then
+	printf '%s\n' "$NOT_FOUND" >>"$WORK/live-anon"
+	ok "404 화면을 감사 대상에 넣었다"
+else
+	bad "없는 주소가 404 를 주지 않는다 (HTTP $st) — 404 화면을 재지 못한다"
+fi
+
 [ -n "${UI_LIST:-}" ] && { echo "── 감사 대상(관리자)"; cat "$WORK/live-admin"; }
 L=$(( $(wc -l <"$WORK/live-admin") + $(wc -l <"$WORK/live-member") + $(wc -l <"$WORK/live-anon") ))
 [ "$L" -ge 55 ] && ok "열리는 주소 $L 개" || bad "열리는 주소가 $L 개뿐이다 — 감사가 헛돈다"
@@ -215,7 +278,16 @@ missing=0
 while IFS="$(printf '\t')" read -r id name path methods; do
 	[ -n "$id" ] || continue
 	case "$methods" in *GET*) ;; *) continue ;; esac
-	re=$(printf '%s' "$path" | sed 's|[.]|[.]|g; s|{[^}]*\.\.\.}|.*|g; s|{[^}]*}|[^/?]+|g')
+	# 404 는 **주소로 대조할 수 없다** — 모든 없는 주소가 여기로 온다. 위에서
+	# 넣은 탐침이 목록에 남아 있는지로 확인한다. 스킵 사유로 빼지 않는다:
+	# 그러면 「재고 있다」가 아니라 「안 재기로 했다」가 되어 버린다.
+	if [ "$id" = P-903 ]; then
+		grep -qx "$NOT_FOUND" "$ALL_LIVE" && continue
+		bad "P-903 404 화면 — 404 탐침이 감사 목록에 없다"
+		missing=$((missing + 1))
+		continue
+	fi
+	re=$(route_re "$path")
 	grep -qE "^$re(\?.*)?$" "$ALL_LIVE" && continue
 	why=$(ui_skip_reason "$id")
 	if [ -n "$why" ]; then
