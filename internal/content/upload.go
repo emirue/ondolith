@@ -31,6 +31,11 @@ var (
 	ErrUploadContent  = errors.New("content: 파일 내용이 확장자와 다릅니다")
 	ErrUploadTooLarge = errors.New("content: 파일이 너무 큽니다")
 	ErrUploadEmpty    = errors.New("content: 빈 파일")
+	// ErrUploadNotAllowed 는 **게시판이 첨부 자체를 받지 않는다**는 뜻이다
+	// (D19 P-205: `allow_attachments` 가 false). ErrUploadExt 를 재사용하면
+	// 화면이 「허용하지 않는 확장자」라고 말해서, 파일을 바꿔 다시 올려 보는
+	// 사람을 만든다 — 무엇을 올려도 결과는 같다.
+	ErrUploadNotAllowed = errors.New("content: 이 게시판은 첨부를 받지 않습니다")
 	// ErrUploadTooMany 는 글당 첨부 개수 상한을 넘었다는 뜻이다.
 	ErrUploadTooMany = errors.New("content: 첨부가 너무 많습니다")
 	// ErrUploadSetting 은 A-309 설정값이 올바르지 않다는 뜻이다.

@@ -221,10 +221,16 @@ func TestGuestFormHasNoAccountOrAddressFields(t *testing.T) {
 	if i < 0 {
 		t.Fatalf("조회 폼을 찾지 못했다: %.300s", body)
 	}
+	// **경계를 확인한 뒤에 자른다.** `body[i:]` 를 먼저 쓰면 `<form` 을 못
+	// 찾았을 때 명확한 실패 대신 패닉이 난다 — 그러면 무엇이 왜 틀렸는지
+	// 읽을 수 없다.
 	i = strings.LastIndex(body[:i], "<form")
+	if i < 0 {
+		t.Fatalf("조회 폼의 시작을 찾지 못했다: %.300s", body)
+	}
 	j := strings.Index(body[i:], "</form>")
-	if i < 0 || j < 0 {
-		t.Fatalf("조회 폼의 경계를 찾지 못했다: %.300s", body)
+	if j < 0 {
+		t.Fatalf("조회 폼의 끝을 찾지 못했다: %.300s", body)
 	}
 	form := body[i : i+j]
 	for _, banned := range []string{

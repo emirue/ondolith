@@ -429,8 +429,12 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// **자르는 조건은 길이로 판단한다.** `if hasNext` 로 자르면 그 판정이
+	// 틀리는 날 `users[:userPageSize]` 가 범위를 벗어나 **패닉**이 된다 —
+	// 잘못된 페이지 표시가 500 으로 커지는 것이고, 변이를 심어 보고 알았다.
+	// 길이로 자르면 판정이 무엇이든 이 줄은 안전하다.
 	hasNext := len(users) > userPageSize
-	if hasNext {
+	if len(users) > userPageSize {
 		users = users[:userPageSize]
 	}
 	prev := page - 1

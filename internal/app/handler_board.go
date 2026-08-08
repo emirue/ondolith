@@ -264,7 +264,8 @@ func (d *boardDeps) saveUploads(r *http.Request, b *content.Board, postID string
 		return nil
 	}
 	if !b.AllowAttachments {
-		return content.ErrUploadExt
+		// 확장자 오류가 아니다 — 이 게시판이 첨부를 아예 받지 않는다.
+		return content.ErrUploadNotAllowed
 	}
 	for _, fh := range files {
 		if fh.Size == 0 {

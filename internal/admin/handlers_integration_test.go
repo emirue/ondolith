@@ -1378,3 +1378,59 @@ func mkPage(t *testing.T, d *Deps) string {
 	}
 	return id
 }
+
+// **「다음」은 다음 쪽이 실제로 있을 때만 낸다** (A-401).
+//
+// 앞 판은 조건 없이 그렸다 — 사용자가 한 명뿐인 사이트도 무한히 다음 쪽을
+// 제시했고, 링크를 따라가는 검사가 35쪽까지 걸어가 요청 제한에 걸렸다.
+// 행 수만 보는 검사(TestUserListIsBounded)는 이것을 잡지 못한다: 반환 행 수는
+// `HasNext` 를 늘 true 로 되돌려도 똑같다.
+func TestUserListOffersNextOnlyWhenThereIsOne(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
+	ctx := context.Background()
+
+	var got []bool
+	var rows []int
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		m := data.(map[string]any)
+		got = append(got, m["HasNext"].(bool))
+		rows = append(rows, len(m["Users"].([]auth.UserRow)))
+	}
+
+	// 한 쪽에 딱 맞게 채운다 — 경계다. 다음 쪽은 비어 있으므로 「다음」이
+	// 없어야 한다. `>=` 로 잘못 쓰면 여기서만 틀린다.
+	for i := range userPageSize {
+		if _, err := d.Auth.CreateUser(ctx,
+			fmt.Sprintf("n%02d@example.com", i), "h", "쪽"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.UserList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/users", nil))
+
+	// 한 명 더 넣으면 다음 쪽이 생긴다.
+	if _, err := d.Auth.CreateUser(ctx, "overflow@example.com", "h", "넘침"); err != nil {
+		t.Fatal(err)
+	}
+	d.UserList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/users", nil))
+
+	// 마지막 쪽에서는 다시 없다.
+	d.UserList(httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodGet, "/admin/users?page=1", nil))
+
+	if len(got) != 3 {
+		t.Fatalf("화면이 %d 번 그려졌다 — 검사가 헛돌았다", len(got))
+	}
+	// 행 수도 함께 본다: 한 행 더 읽어 판정하므로, 그 여분이 화면으로 새면
+	// 한 쪽에 51행이 나온다.
+	for i, want := range []int{userPageSize, userPageSize, 1} {
+		if rows[i] != want {
+			t.Errorf("%d번째: %d행, want %d행 — 판정용으로 더 읽은 행이 화면에 샜다",
+				i+1, rows[i], want)
+		}
+	}
+	for i, want := range []bool{false, true, false} {
+		if got[i] != want {
+			t.Errorf("%d번째: HasNext=%v, want %v", i+1, got[i], want)
+		}
+	}
+}
