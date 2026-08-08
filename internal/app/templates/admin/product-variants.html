@@ -10,26 +10,28 @@
        없어서 아무것도 팔 수 없었다. */}}
   <form method="post" action="/admin/products/{{.Product.ID}}/options" class="adm-form">
     <h3>옵션</h3>
-    <table class="adm-table">
-      <thead><tr><th>그룹 이름</th><th>값 (쉼표로 구분)</th></tr></thead>
-      <tbody>
-      {{range $i, $o := .Options}}
-        <tr>
-          <td><input type="text" name="option_name" maxlength="50" value="{{$o.Name}}"></td>
-          <td><input type="text" name="option_values" value="{{.Joined}}"></td>
-        </tr>
-      {{end}}
-      {{/* 늘 빈 줄 두 개를 둔다 — 그룹을 추가하는 데 자바스크립트가 필요 없다. */}}
-        <tr>
-          <td><input type="text" name="option_name" maxlength="50" placeholder="색상"></td>
-          <td><input type="text" name="option_values" placeholder="빨강, 파랑"></td>
-        </tr>
-        <tr>
-          <td><input type="text" name="option_name" maxlength="50" placeholder="사이즈"></td>
-          <td><input type="text" name="option_values" placeholder="S, M, L"></td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead><tr><th>그룹 이름</th><th>값 (쉼표로 구분)</th></tr></thead>
+        <tbody>
+        {{range $i, $o := .Options}}
+          <tr>
+            <td><input type="text" name="option_name" maxlength="50" value="{{$o.Name}}"></td>
+            <td><input type="text" name="option_values" value="{{.Joined}}"></td>
+          </tr>
+        {{end}}
+        {{/* 늘 빈 줄 두 개를 둔다 — 그룹을 추가하는 데 자바스크립트가 필요 없다. */}}
+          <tr>
+            <td><input type="text" name="option_name" maxlength="50" placeholder="색상"></td>
+            <td><input type="text" name="option_values" placeholder="빨강, 파랑"></td>
+          </tr>
+          <tr>
+            <td><input type="text" name="option_name" maxlength="50" placeholder="사이즈"></td>
+            <td><input type="text" name="option_values" placeholder="S, M, L"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <div class="adm-actions" style="justify-content:flex-end">
       <button class="adm-btn adm-btn--primary">옵션 저장 · 조합 생성</button>
     </div>
@@ -42,29 +44,31 @@
 
   <h3>조합</h3>
   <form method="post" action="/admin/products/{{.Product.ID}}/variants">
-    <table class="adm-table">
-      <thead>
-        <tr><th>조합</th><th>SKU</th><th>가격 차액</th><th>현재 재고</th><th>증감</th></tr>
-      </thead>
-      <tbody>
-      {{if not .Variants}}<tr><td colspan="5">옵션을 저장하면 조합이 만들어집니다.</td></tr>{{end}}
-      {{range .Variants}}
-        <tr>
-          <td>
-            <input type="hidden" name="variant_id" value="{{.ID}}">
-            <input type="hidden" name="version_{{.ID}}" value="{{.Stock}}">
-            {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
-          </td>
-          <td><input type="text" name="sku_{{.ID}}" maxlength="64" value="{{.SKU}}"></td>
-          <td><input type="number" name="price_delta_{{.ID}}" step="1" value="{{.PriceDelta}}" required></td>
-          <td>{{.Stock}}</td>
-          <td><input type="number" name="delta_{{.ID}}" step="1" value="0" required></td>
-        </tr>
-      {{else}}
-        <tr><td colspan="5">조합이 없습니다.</td></tr>
-      {{end}}
-      </tbody>
-    </table>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
+          <tr><th>조합</th><th>SKU</th><th>가격 차액</th><th>현재 재고</th><th>증감</th></tr>
+        </thead>
+        <tbody>
+        {{if not .Variants}}<tr><td colspan="5">옵션을 저장하면 조합이 만들어집니다.</td></tr>{{end}}
+        {{range .Variants}}
+          <tr>
+            <td>
+              <input type="hidden" name="variant_id" value="{{.ID}}">
+              <input type="hidden" name="version_{{.ID}}" value="{{.Stock}}">
+              {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
+            </td>
+            <td><input type="text" name="sku_{{.ID}}" maxlength="64" value="{{.SKU}}"></td>
+            <td><input type="number" name="price_delta_{{.ID}}" step="1" value="{{.PriceDelta}}" required></td>
+            <td>{{.Stock}}</td>
+            <td><input type="number" name="delta_{{.ID}}" step="1" value="0" required></td>
+          </tr>
+        {{else}}
+          <tr><td colspan="5">조합이 없습니다.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
     <div class="adm-actions" style="justify-content:flex-end">
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>

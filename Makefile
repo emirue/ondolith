@@ -39,6 +39,9 @@ screens: ## D11 의 모든 GET 화면을 열어 본다 (응답·본문·템플�
 crawl: ## 홈에서 링크를 따라간다 — 화면이 만든 주소가 실제로 열리는지
 	sh scripts/crawl.sh
 
+ui: ## 모든 화면을 375·768·1280px 에 그려 놓고 레이아웃을 잰다
+	sh scripts/ui.sh
+
 e2e: ## D83 시나리오 재실행 — 빌드된 바이너리에 빈 DB 를 붙여 설치부터 한 바퀴
 	sh scripts/e2e.sh
 

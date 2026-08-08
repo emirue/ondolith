@@ -203,6 +203,13 @@ main { max-width: 1040px; margin: 0 auto; padding: 32px var(--pad) 64px; }
   padding: clamp(20px, 3vw, 32px);
 }
 
+/* **그리드 칸이 줄어들 수 있어야 한다.** 그리드 아이템의 기본 `min-width`
+   는 `auto` 라 열이 가장 넓은 아이템의 min-content 아래로 못 내려간다 —
+   파일 선택 칸("파일 선택 · 선택된 파일 없음")이 321px 를 요구해서, 375px
+   화면에서 폼 전체가 상자 밖으로 28px 밀려나 있었다. 브라우저에서 열을 재
+   보고 알았다. */
+.form > * { min-width: 0; max-width: 100%; }
+
 .form label { font-size: 12.5px; opacity: .6; margin-top: 14px; }
 
 /* **입력칸을 감싼 라벨은 세로다.** 마크업이 두 형태로 쓰인다 —
@@ -254,7 +261,10 @@ input[type="radio"] {
 input[type="file"] { padding: 9px 12px; }
 
 button {
-  min-height: 42px;
+  /* **버튼은 한 가지 높이다.** 42 와 44 가 섞여 있어 같은 줄에 선 버튼들의
+     아랫변이 어긋났다 — 좁은 화면의 터치 타깃 기준(44px)에 맞춘다. 크기 위계는
+     `--sm` 같은 변형이 맡고, 기본값이 두 개면 그것은 위계가 아니라 실수다. */
+  min-height: 44px;
   padding: 0 18px;
   border: 1px solid var(--line);
   border-radius: var(--chip-radius);
@@ -262,6 +272,15 @@ button {
   color: inherit;
   font: inherit;
   font-size: 14px;
+  /* **버튼 글자는 줄바꿈하지 않는다.** 좁은 머리글에서 「로그아웃」이 두 줄로
+     접혀 높이가 92px 이 됐다 — 옆의 44px 짜리와 나란히 서서 줄이 어긋났다.
+     자리가 없으면 버튼이 줄을 바꾸는 편이 낫지, 글자가 접히면 안 된다. */
+  white-space: nowrap;
+  /* 인라인 요소는 min-height 가 듣지 않는다. 검색 버튼이 47px 로 혼자 튀던
+     이유이고, 정렬은 세로 가운데로 맞춘다. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
@@ -874,6 +893,19 @@ a:focus-visible {
 
 @media (max-width: 767px) {
   :root { --pad: 16px; --gap: 14px; }
+
+  /* **손가락이 누를 수 있는 크기.** 머리글의 링크는 줄 높이(22px)만큼만 높아서
+     좁은 화면에서 옆 링크를 같이 누르게 된다. 문장 속 링크는 대상이 아니다 —
+     줄 높이를 따라야 글이 읽힌다. */
+  .account-nav a,
+  .site-menu a,
+  .card-list h2 a,
+  .foot-links a,
+  .crumb a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
   main { padding: 20px var(--pad) 48px; }
   .site-header { gap: 14px; }
   .account-nav { width: 100%; margin-left: 0; }

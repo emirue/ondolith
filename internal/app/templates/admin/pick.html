@@ -4,18 +4,20 @@
   {{/* **이 화면은 재고도 주문 상태도 바꾸지 않는다** (FR-623). 재고는 주문
        시점에 이미 차감됐고, 상태는 A-506 이 옮긴다. 여기서 건드리면 이중
        차감과 유령 전이가 생긴다. */}}
-  <table class="adm-table">
-    <thead><tr><th>상품</th><th>조합</th><th>주문</th><th>대조</th></tr></thead>
-    <tbody>
-    {{$s := .Scanned}}
-    {{range .Lines}}
-      <tr>
-        <td>{{.ProductName}}</td><td>{{.OptionLabel}}</td><td>{{.Ordered}}</td>
-        <td>{{index $s .VariantID}}</td>
-      </tr>
-    {{end}}
-    </tbody>
-  </table>
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>상품</th><th>조합</th><th>주문</th><th>대조</th></tr></thead>
+      <tbody>
+      {{$s := .Scanned}}
+      {{range .Lines}}
+        <tr>
+          <td>{{.ProductName}}</td><td>{{.OptionLabel}}</td><td>{{.Ordered}}</td>
+          <td>{{index $s .VariantID}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
 
   <form method="post" action="/admin/orders/{{.OrderNo}}/pick">
     {{range .Lines}}

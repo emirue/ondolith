@@ -2,16 +2,18 @@
 {{/* 「새 상품」이 없어서 A-502 의 만들기 화면에 갈 방법이 주소를 직접 치는
      것뿐이었다 — 게시판·페이지에는 있는 버튼이다. */}}
 <div class="adm-actions"><a class="adm-btn adm-btn--primary" href="/admin/products/new">새 상품</a></div>
-<table class="adm-table">
-  <thead><tr><th>이름</th><th>주소</th><th>가격</th><th>노출</th><th>재고</th></tr></thead>
-  <tbody>
-    {{range .Products}}
-    <tr><td>{{.Name}}</td><td>{{.Slug}}</td><td>{{money .BasePrice}}</td>
-        <td>{{if .Visible}}노출{{else}}숨김{{end}}</td>
-        <td>{{if .InStock}}있음{{else}}품절{{end}}</td></tr>
-    {{else}}
-    <tr><td colspan="5">등록된 상품이 없습니다.</td></tr>
-    {{end}}
-  </tbody>
-</table>
+<div class="adm-table-wrap">
+  <table class="adm-table">
+    <thead><tr><th>이름</th><th>주소</th><th>가격</th><th>노출</th><th>재고</th></tr></thead>
+    <tbody>
+      {{range .Products}}
+      <tr><td>{{.Name}}</td><td>{{.Slug}}</td><td>{{money .BasePrice}}</td>
+          <td>{{if .Visible}}노출{{else}}숨김{{end}}</td>
+          <td>{{if .InStock}}있음{{else}}품절{{end}}</td></tr>
+      {{else}}
+      <tr><td colspan="5">등록된 상품이 없습니다.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
 {{end}}

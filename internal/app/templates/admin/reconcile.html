@@ -14,24 +14,26 @@
   <p class="adm-toast adm-toast--warn">차이 {{.Mismatched}}건 — 아래에서 확인하세요.</p>
   {{end}}
 
-  <table class="adm-table">
-    <thead><tr>
-      <th>주문</th><th>PG</th><th>유형</th><th>우리 기록</th><th>PG 응답</th><th>차이</th>
-    </tr></thead>
-    <tbody>
-    {{range .Rows}}
-      <tr>
-        <td><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
-        <td>{{.PG}}</td><td>{{.Kind}}</td>
-        <td>{{.OurStatus}} · {{money .OurAmount}}</td>
-        <td>{{if .TheirStatus}}{{.TheirStatus}} · {{money .TheirAmount}}{{else}}—{{end}}</td>
-        <td>{{with .Diff}}<strong>{{.}}</strong>{{end}}</td>
-      </tr>
-    {{else}}
-      <tr><td colspan="6">해당 기간의 결제가 없습니다.</td></tr>
-    {{end}}
-    </tbody>
-  </table>
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr>
+        <th>주문</th><th>PG</th><th>유형</th><th>우리 기록</th><th>PG 응답</th><th>차이</th>
+      </tr></thead>
+      <tbody>
+      {{range .Rows}}
+        <tr>
+          <td><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
+          <td>{{.PG}}</td><td>{{.Kind}}</td>
+          <td>{{.OurStatus}} · {{money .OurAmount}}</td>
+          <td>{{if .TheirStatus}}{{.TheirStatus}} · {{money .TheirAmount}}{{else}}—{{end}}</td>
+          <td>{{with .Diff}}<strong>{{.}}</strong>{{end}}</td>
+        </tr>
+      {{else}}
+        <tr><td colspan="6">해당 기간의 결제가 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
   <p class="adm-hint">
     「PG 는 승인, 우리는 대기」가 가장 위험한 줄입니다 — 돈은 나갔는데 주문에
     반영되지 않은 상태입니다. 상태를 옮기는 것은 주문 상세(A-506)에서 합니다.

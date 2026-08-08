@@ -2,6 +2,7 @@ package app
 
 import (
 	"io/fs"
+	"os"
 	"path"
 	"regexp"
 	"slices"
@@ -288,5 +289,70 @@ func TestEveryCSSTokenIsDefined(t *testing.T) {
 					name, m[1])
 			}
 		}
+	}
+}
+
+// **관리자 표는 가로 스크롤 상자 안에 있다.**
+//
+// `.adm-table` 은 `min-width: 660px` 이다 — 열이 여섯 이상이면 그보다 좁은
+// 화면에서 반드시 넘친다. 감싸미(`.adm-table-wrap { overflow-x: auto }`)가
+// 없으면 그 넘침이 **페이지 전체의 가로 스크롤**이 되어, 375px 기기에서 화면이
+// 옆으로 밀린다. 실제로 아홉 화면이 그랬고 `make ui` 가 재서 알았다.
+//
+// 응답은 200 이고 렌더링도 성공하므로 다른 어떤 검사도 울지 않는다.
+func TestEveryAdminTableSitsInAScroller(t *testing.T) {
+	entries, err := adminFS.ReadDir("templates/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		src, err := adminFS.ReadFile("templates/admin/" + e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		tables := strings.Count(string(src), `<table class="adm-table"`)
+		if tables == 0 {
+			continue
+		}
+		checked += tables
+		wraps := strings.Count(string(src), "adm-table-wrap")
+		if wraps < tables {
+			t.Errorf("%s: 표 %d 개 중 %d 개만 스크롤 상자 안에 있다 — "+
+				"좁은 화면에서 페이지가 옆으로 밀린다", e.Name(), tables, wraps)
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("관리자 표를 %d 개밖에 못 찾았다 — 검사가 헛돌았다", checked)
+	}
+}
+
+// **UI 감사 스크립트의 페이지 코드에 백틱이 없다.**
+//
+// `scripts/ui-audit.mjs` 는 브라우저에서 돌 코드를 `String.raw` 템플릿
+// 리터럴로 넘긴다 — 그 안의 백틱은 리터럴을 **끊는다.** 주석에 CSS 속성을
+// 백틱으로 감싸는 습관 때문에 이 세션에서만 세 번 깨졌고, 매번 문법 오류가
+// 나서야 알았다. 파일을 읽는 검사 하나가 그 왕복을 없앤다.
+func TestUIAuditPageCodeHasNoBacktick(t *testing.T) {
+	src, err := os.ReadFile("../../scripts/ui-audit.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const open = "const AUDIT = String.raw`"
+	i := strings.Index(string(src), open)
+	if i < 0 {
+		t.Fatal("AUDIT 리터럴을 찾지 못했다 — 검사가 헛돌았다")
+	}
+	rest := string(src)[i+len(open):]
+	end := strings.Index(rest, "`")
+	if end < 0 {
+		t.Fatal("AUDIT 리터럴이 닫히지 않았다")
+	}
+	body := rest[:end]
+	if len(body) < 500 {
+		t.Fatalf("AUDIT 리터럴이 %d 자뿐이다 — 백틱이 이미 끊었다", len(body))
 	}
 }
