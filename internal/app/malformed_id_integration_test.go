@@ -2,10 +2,14 @@ package app
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,9 +141,13 @@ func TestNoRouteAnswers500ToAMalformedPathValue(t *testing.T) {
 // 22P02 다. 경로는 라우트 관문이 막지만(guardID) 폼 값은 지나가지 못하므로
 // 여기서 따로 본다. 실제로 A-509 의 `parent_id` 와 P-401 의 `variant_id` 가
 // 그랬다.
+// **목록은 소스에서 확인된다** — TestFormIDFieldsCoversEveryHandler 가 핸들러가
+// 실제로 읽는 이름과 대조한다. 손으로 적은 첫 판은 `attachment_id`·`board_id`·
+// `new_variant_id` 를 빠뜨리고 아무도 읽지 않는 `category_id`·`role_id` 를
+// 적어 두었다 — 즉 그 세 필드는 이 스윕이 한 번도 건드리지 않았다.
 var formIDFields = []string{
-	"parent_id", "variant_id", "item_id", "post_id", "comment_id",
-	"category_id", "id", "role_id", "user_id",
+	"attachment_id", "board_id", "comment_id", "id", "item_id",
+	"new_variant_id", "parent_id", "post_id", "user_id", "variant_id",
 }
 
 // endsTheSession 은 **호출하면 이후 요청이 전부 로그인 화면으로 밀리는** 라우트다.
@@ -208,4 +216,183 @@ func TestNoRouteAnswers500ToAMalformedFormID(t *testing.T) {
 			"그 뒤의 라우트는 검사되지 않았다", resp.StatusCode)
 	}
 	t.Logf("POST 라우트 %d 개를 확인했다", checked)
+}
+
+// notAUUIDField 는 이름이 `_id` 로 끝나지만 **행 id 가 아닌** 폼 필드다.
+//
+// 이유를 함께 적는다 — 이름만 늘리면 이 목록이 「검사에서 빼고 싶은 것의
+// 목록」이 되고, 그때부터 아무것도 막지 않는다.
+var notAUUIDField = map[string]string{
+	"client_id": "소셜 제공자가 발급한 문자열 (A-206) — 우리 행의 id 가 아니다",
+}
+
+// idFieldRe 는 핸들러가 읽는 폼 필드 중 이름이 id 로 끝나는 것을 찾는다.
+var idFieldRe = regexp.MustCompile(`PostForm(?:Value)?[\(\[]"([a-z_]*id)"`)
+
+// **위 스윕의 필드 목록이 핸들러가 실제로 읽는 것을 전부 담는다.**
+//
+// 목록을 손으로 적으면 빠진다. 실제로 첫 판은 `attachment_id`·`board_id`·
+// `new_variant_id` 를 빠뜨렸고 아무도 읽지 않는 `category_id`·`role_id` 를
+// 적어 두었다 — **그 세 필드는 스윕이 한 번도 건드리지 않았고, 검사는 그
+// 사실을 말해 주지 않았다.** 새 화면이 새 `_id` 필드를 읽으면 여기서 걸린다.
+func TestFormIDFieldsCoversEveryHandler(t *testing.T) {
+	covered := map[string]bool{}
+	for _, f := range formIDFields {
+		covered[f] = true
+	}
+
+	var missing []string
+	found := 0
+	err := filepath.WalkDir("..", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") ||
+			strings.HasSuffix(p, "_test.go") {
+			return err
+		}
+		src, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for _, m := range idFieldRe.FindAllStringSubmatch(string(src), -1) {
+			found++
+			name := m[1]
+			if covered[name] || notAUUIDField[name] != "" {
+				continue
+			}
+			missing = append(missing, name+" ("+p+")")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found < 8 {
+		t.Fatalf("id 로 끝나는 폼 필드를 %d 개밖에 못 찾았다 — 검사가 헛돌았다", found)
+	}
+	slices.Sort(missing)
+	for _, m := range slices.Compact(missing) {
+		t.Errorf("핸들러가 읽는데 스윕이 보내지 않는 필드: %s — formIDFields 에 넣거나, "+
+			"행 id 가 아니면 notAUUIDField 에 이유와 함께 적을 것", m)
+	}
+
+	// 반대 방향도 본다: 아무도 읽지 않는 이름은 스윕을 **넓어 보이게만** 한다.
+	read := map[string]bool{}
+	_ = filepath.WalkDir("..", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") ||
+			strings.HasSuffix(p, "_test.go") {
+			return err
+		}
+		src, _ := os.ReadFile(p)
+		for _, m := range idFieldRe.FindAllStringSubmatch(string(src), -1) {
+			read[m[1]] = true
+		}
+		return nil
+	})
+	for _, f := range formIDFields {
+		if !read[f] {
+			t.Errorf("formIDFields 의 %q 를 읽는 핸들러가 없다 — 스윕이 넓어 보이기만 한다", f)
+		}
+	}
+}
+
+// pathParamKind 는 라우트가 쓸 수 있는 경로 조각 이름과 그 정체다.
+//
+// **닫힌 집합이다.** 경로 관문(`guardID`)은 `{id}` 라는 **이름**에만 걸리므로,
+// 누군가 `{postID}` 나 `{userId}` 로 uuid 를 받으면 그 라우트는 보호받지 못하고
+// 깨진 값이 22P02 로 500 이 된다. 이름을 여기 적게 해서, 새 이름이 생기면
+// **관문을 늘릴지 결정하도록** 강제한다.
+var pathParamKind = map[string]string{
+	"id":       "행의 uuid — guardID 가 형식을 본다",
+	"slug":     "사람이 읽는 주소. uuid 가 아니다 (게시판·상품·페이지)",
+	"orderNo":  "주문번호. 형식이 다르고 uuid 가 아니다",
+	"no":       "주문번호 (관리자 경로의 짧은 이름)",
+	"returnNo": "반품·교환 번호",
+	"token":    "메일로 보낸 1회용 토큰",
+	"provider": "소셜 제공자 이름 (google·kakao…)",
+	"path...":  "정적 자산 경로",
+}
+
+// **모든 경로 조각 이름이 선언돼 있고, uuid 는 `id` 뿐이다.**
+//
+// 이것이 없으면 `{postID}` 같은 이름이 조용히 생기고, 그 라우트만 관문 밖에
+// 남는다 — 오늘 열두 곳을 고친 부류가 한 곳에서 되살아난다.
+func TestEveryPathParamIsDeclared(t *testing.T) {
+	routes := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler).Routes()
+	seen := map[string]bool{}
+	for _, rt := range routes {
+		for _, m := range regexp.MustCompile(`\{([^}$]+)\}`).FindAllStringSubmatch(rt.Pattern, -1) {
+			name := m[1]
+			seen[name] = true
+			if pathParamKind[name] == "" {
+				t.Errorf("선언되지 않은 경로 조각 {%s} (%s %s) — pathParamKind 에 정체를 적고, "+
+					"uuid 라면 guardID 가 그것도 보게 할 것", name, rt.Method, rt.Pattern)
+			}
+		}
+	}
+	if len(seen) < 5 {
+		t.Fatalf("경로 조각을 %d 종밖에 못 찾았다 — 검사가 헛돌았다", len(seen))
+	}
+	// 반대 방향: 안 쓰는 이름은 목록을 넓어 보이게만 한다.
+	for name := range pathParamKind {
+		if !seen[name] {
+			t.Errorf("pathParamKind 의 {%s} 를 쓰는 라우트가 없다", name)
+		}
+	}
+	// 관문이 보는 이름이 실제로 그 목록에 있는지 — 이름을 바꾸면 여기서 운다.
+	if pathParamKind["id"] == "" {
+		t.Error("guardID 는 {id} 를 보는데 그 이름이 선언돼 있지 않다")
+	}
+}
+
+// missingID 는 **형식은 멀쩡하고 존재하지 않는** 행의 id 다.
+//
+// `malformedID` 와 다른 갈래를 연다: 관문(`guardID`)은 이 값을 통과시키므로
+// 핸들러가 실제로 돌고, 저장소는 0행을 낸다. 그 0행을 404 로 옮기지 않는
+// 핸들러가 500 을 낸다 — 실제로 페이지 저장·발행·삭제와 메뉴 삭제가 그랬다.
+const missingID = "00000000-0000-0000-0000-000000000000"
+
+// **없는 행을 가리켜도 500 이 나오지 않는다.**
+//
+// 「그런 것은 없다」는 404 다. 500 은 운영자에게 서버가 아프다고 말하고,
+// 지운 페이지의 편집 폼을 다시 제출하는 것만으로 경보가 울린다.
+//
+// 서버를 따로 세운다 — 관리자 트리는 분당 60건이라(D15 4.3-2) 위 스윕과 같은
+// 서버를 쓰면 그 상한에 걸려 **이 검사가 아무것도 보지 못한다.**
+func TestNoRouteAnswers500ToAMissingRow(t *testing.T) {
+	srv, _, c := shopAdminSite(t)
+
+	routes := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler).Routes()
+	checked := 0
+	for _, rt := range routes {
+		if !strings.Contains(rt.Pattern, "{id}") ||
+			strings.HasPrefix(rt.Pattern, "/webhooks/") {
+			continue
+		}
+		path := pathParam.ReplaceAllString(rt.Pattern, missingID)
+		if strings.Contains(path, "{") {
+			continue
+		}
+		checked++
+
+		var resp *http.Response
+		var err error
+		if rt.Method == http.MethodGet {
+			resp, err = c.Get(srv.URL + path)
+		} else {
+			// 필수 값은 채운다 — 그 앞에서 422 로 끝나면 「없는 행」까지 가 보지
+			// 못한다.
+			resp, err = c.PostForm(srv.URL+path, url.Values{
+				"title": {"제목"}, "slug": {"slug"}, "name": {"이름"},
+				"status": {"published"}, "quantity": {"1"},
+			})
+		}
+		if err != nil {
+			t.Fatalf("%s %s: %v", rt.Method, path, err)
+		}
+		resp.Body.Close()
+		checkAnswer(t, rt.Method, rt.Pattern, resp.StatusCode)
+	}
+	if checked < 20 {
+		t.Fatalf("`{id}` 라우트를 %d 개밖에 못 찾았다 — 검사가 헛돌았다", checked)
+	}
+	t.Logf("`{id}` 라우트 %d 개를 없는 행으로 확인했다", checked)
 }
