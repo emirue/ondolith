@@ -212,7 +212,7 @@ inject "코드에만 있는 P5 예외" docs/15-access-control.md \
 	'perl -ni -e "print unless /^\| .GET \/checkout\/success. \(P-408\)/" docs/15-access-control.md' \
 	'「P5 예외」에 없다: P-408'
 inject "문서에만 있는 P5 예외" docs/15-access-control.md \
-	'perl -pi -e "s/^\| .GET \/checkout\/success. \(P-408\)/| `GET \/nowhere` (P-999)/" docs/15-access-control.md' \
+	'perl -pi -e "s/^\| .GET \/checkout\/success. \(P-408\)/| \`GET \/nowhere\` (P-999)/" docs/15-access-control.md' \
 	'코드에 없다: P-999'
 
 # 문서가 자기 자신의 낡은 사본을 품는 것. D50 이 153줄짜리 중간 블록을 3벌

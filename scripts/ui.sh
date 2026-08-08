@@ -178,6 +178,57 @@ live "$WORK/jar-anon" "$ANON_URLS" "$WORK/live-anon"
 L=$(( $(wc -l <"$WORK/live-admin") + $(wc -l <"$WORK/live-member") + $(wc -l <"$WORK/live-anon") ))
 [ "$L" -ge 55 ] && ok "열리는 주소 $L 개" || bad "열리는 주소가 $L 개뿐이다 — 감사가 헛돈다"
 
+# ---- 빠진 화면이 없는가 -----------------------------------------------------
+#
+# **주소를 손으로 적으면 화면이 늘 때 빠진다.** `make screens` 는 D11 의 표에서
+# 목록을 뽑는데 여기는 손으로 적었다 — 새 화면이 생기면 이 감사에서 조용히
+# 빠지고, 그 사실을 아무도 말해 주지 않는다. 이 세션에서 같은 모양의 결함이
+# 다섯 번 나왔다. D11 과 대조한다.
+#
+# 재지 않는 것이 정상인 화면은 **이유와 함께** 적는다.
+ui_skip_reason() {
+	case "$1" in
+	P-001) echo "설치 전용 — 설치 뒤 닫힌다" ;;
+	P-002) echo "와일드카드 리다이렉트 — 화면이 아니다" ;;
+	P-105 | P-112) echo "메일의 링크로 들어온다 — 토큰이 있어야 열린다" ;;
+	P-107) echo "소셜 제공자가 되돌려 보낸다" ;;
+	P-209) echo "댓글 수정 — 글 화면에서 눌러 들어간다 (레이아웃은 comment/form 과 같다)" ;;
+	P-211) echo "첨부 다운로드 — 파일을 내려보낸다, 화면이 아니다" ;;
+	P-304) echo "조합 조회 — 상품 화면의 조각이라 홀로 그리지 않는다" ;;
+	P-407 | P-408 | P-409 | P-410) echo "결제창이 되돌려 보낸다" ;;
+	P-502 | P-503) echo "비회원 조회 — 회원 세션으로 이미 잰다" ;;
+	P-514) echo "교환 차액 — 차액이 양수인 교환에만 있다" ;;
+	P-901 | P-902) echo "XML·텍스트 — 그릴 것이 없다" ;;
+	P-904) echo "주소가 없다 — 오류가 났을 때 그려진다" ;;
+	P-906) echo "정적 자산" ;;
+	P-907) echo "헬스체크 — 본문이 한 줄이다" ;;
+	A-102) echo "복구 화면 — 본 트리 밖" ;;
+	A-513) echo "QR 라벨은 상품 화면에서 잰다" ;;
+	A-601 | A-602) echo "운영 감시 — A-603 과 같은 표를 쓴다" ;;
+	*) echo "" ;;
+	esac
+}
+
+ALL_LIVE=$WORK/all-live
+cat "$WORK/live-admin" "$WORK/live-member" "$WORK/live-anon" >"$ALL_LIVE"
+missing=0
+while IFS="$(printf '\t')" read -r id name path methods; do
+	[ -n "$id" ] || continue
+	case "$methods" in *GET*) ;; *) continue ;; esac
+	re=$(printf '%s' "$path" | sed 's|[.]|[.]|g; s|{[^}]*\.\.\.}|.*|g; s|{[^}]*}|[^/?]+|g')
+	grep -qE "^$re(\?.*)?$" "$ALL_LIVE" && continue
+	why=$(ui_skip_reason "$id")
+	if [ -n "$why" ]; then
+		continue
+	fi
+	missing=$((missing + 1))
+	bad "$id $name ($path) — **UI 감사가 재지 않는 화면**"
+done <<EOF
+$(perl -ne 'print "$1\t$2\t$3\t$4\n"
+	if /^\|\s*([PA]-\d{3})\s*\|\s*([^|]+?)\s*\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|/' docs/11-screens.md)
+EOF
+[ "$missing" -eq 0 ] && ok "D11 의 GET 화면이 전부 감사 대상이다"
+
 # **상한 창이 지나가길 기다린다.** 위의 200 확인만으로 관리자 트리의 분당
 # 60건(D15 4.3-2)을 거의 다 쓴다 — 곧바로 브라우저를 돌리면 첫 화면부터 429 를
 # 재게 되고, 오류 문구에는 잴 것이 없어 감사가 조용히 통과한다.

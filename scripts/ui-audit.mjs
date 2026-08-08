@@ -84,6 +84,38 @@ class CDP {
   }
 }
 
+// **브라우저는 이 프로세스와 함께 죽어야 한다.**
+//
+// 감사가 중단되면(타임아웃·Ctrl-C·검사 실패) 브라우저는 부모를 잃고 살아남는다.
+// 몇 번 반복하면 Chrome 프로세스가 수십 개 쌓여 서로 자원을 다투고, 그 다음
+// 실행은 「그냥 느린 것」처럼 보인다 — 실제로 72개까지 쌓여 감사가 40분을
+// 넘겼다. 어떻게 끝나든 반드시 정리한다.
+function killOnExit(proc) {
+  // `detached: true` 로 띄웠으므로 자식은 자기 프로세스 그룹의 리더다.
+  // **그룹을 죽인다** — Chromium 은 렌더러·GPU·유틸리티로 갈라지고, 부모
+  // 하나만 죽이면 그 자식들이 고아로 남는다. 실제로 SIGTERM 으로 부모만
+  // 죽였을 때 28개가 살아남았다.
+  const kill = () => {
+    for (const target of [-proc.pid, proc.pid]) {
+      try {
+        process.kill(target, 'SIGKILL')
+      } catch {}
+    }
+  }
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.once(sig, () => {
+      kill()
+      process.exit(1)
+    })
+  }
+  process.once('exit', kill)
+  process.once('uncaughtException', (e) => {
+    kill()
+    console.error(e)
+    process.exit(1)
+  })
+}
+
 function launch(bin, userDataDir) {
   const proc = spawn(bin, [
     '--headless=new',
@@ -93,7 +125,8 @@ function launch(bin, userDataDir) {
     '--no-default-browser-check',
     '--disable-gpu',
     '--hide-scrollbars',
-  ])
+  ], { detached: true })
+  killOnExit(proc)
   return new Promise((resolve, reject) => {
     let buf = ''
     const t = setTimeout(() => reject(new Error('브라우저가 뜨지 않았다:\n' + buf)), 30000)
