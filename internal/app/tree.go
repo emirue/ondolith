@@ -186,6 +186,18 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 
 	r.Add(Route{Screen: "A-301", Method: "GET", Pattern: "/admin/pages", Class: SC4,
 		Permission: "page.view", Handler: ad.PageList})
+	// **만들기는 `{id}` 가 아니라 자기 주소를 갖는다.**
+	//
+	// 앞 판은 `{id}` 하나로 받고 핸들러가 `id == "new"` 를 검사했다. 그래서
+	// 경로 관문(`guardID`)이 `new` 를 **모든** `{id}` 라우트에서 통과시켜야
+	// 했고, 그 값을 만들기로 다루지 않는 나머지 라우트는 그대로 `uuid` 컬럼과
+	// 비교하다 22P02 로 500 이 났다 — `DELETE /cart/items/new` 는 로그인
+	// 없이도 낼 수 있었다. 주소를 나누면 `{id}` 는 언제나 uuid 이고 예외가
+	// 없다. `/admin/categories/new` 가 이미 이 모양이었다.
+	r.Add(Route{Screen: "A-302", Method: "GET", Pattern: "/admin/pages/new", Class: SC4,
+		Permission: "page.create", Handler: ad.PageForm})
+	r.Add(Route{Screen: "A-302", Method: "POST", Pattern: "/admin/pages/new", Class: SC5,
+		Permission: "page.create", Handler: ad.PageSave})
 	r.Add(Route{Screen: "A-302", Method: "GET", Pattern: "/admin/pages/{id}", Class: SC4,
 		Permission: "page.update", Handler: ad.PageForm})
 	r.Add(Route{Screen: "A-302", Method: "POST", Pattern: "/admin/pages/{id}", Class: SC5,
@@ -201,6 +213,8 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "user.view", Handler: ad.UserList})
 	r.Add(Route{Screen: "A-402", Method: "GET", Pattern: "/admin/users/{id}", Class: SC4,
 		Permission: "user.update", Handler: ad.UserDetail})
+	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/new", Class: SC5,
+		Permission: "user.create", Handler: ad.UserCreate})
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}", Class: SC5,
 		Permission: "user.create", Handler: ad.UserCreate})
 	// The three destructive account operations enforce re-authentication in the
@@ -233,6 +247,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "board.view", Handler: ad.BoardList})
 	r.Add(Route{Screen: "A-305", Method: "GET", Pattern: "/admin/boards/{id}", Class: SC4,
 		Permission: "board.manage", Handler: ad.BoardForm})
+	r.Add(Route{Screen: "A-305", Method: "GET", Pattern: "/admin/boards/new", Class: SC4,
+		Permission: "board.manage", Handler: ad.BoardForm})
+	r.Add(Route{Screen: "A-305", Method: "POST", Pattern: "/admin/boards/new", Class: SC5,
+		Permission: "board.manage", Handler: ad.BoardSave})
 	r.Add(Route{Screen: "A-305", Method: "POST", Pattern: "/admin/boards/{id}", Class: SC5,
 		Permission: "board.manage", Handler: ad.BoardSave})
 	r.Add(Route{Screen: "A-305", Method: "POST", Pattern: "/admin/boards/{id}/delete", Class: SC5,
@@ -381,6 +399,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		// D15 2.2 에 product.create/delete 가 없다 (D19 A-502).
 		r.Add(Route{Screen: "A-502", Method: "GET", Pattern: "/admin/products/{id}", Class: SC4,
 			Permission: "product.manage", Handler: ad.ProductForm})
+		r.Add(Route{Screen: "A-502", Method: "GET", Pattern: "/admin/products/new", Class: SC4,
+			Permission: "product.manage", Handler: ad.ProductForm})
+		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/products/new", Class: SC7,
+			Permission: "product.manage", Handler: ad.ProductSave})
 		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/products/{id}", Class: SC7,
 			Permission: "product.manage", Handler: ad.ProductSave})
 		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/products/{id}/delete", Class: SC7,

@@ -110,14 +110,6 @@ func (r *Registry) Mount(mux *http.ServeMux) {
 	}
 }
 
-// newSentinel 은 `{id}` 자리에 올 수 있는 유일한 비-UUID 값이다.
-//
-// A-302·A-305·A-502 는 생성 폼과 편집 폼이 같은 주소를 쓴다 — `/admin/pages/new`
-// 가 「새 페이지」다. 그래서 이 하나만 통과시킨다. 핸들러 다섯이 각자
-// `id == "new"` 를 검사하고 있고, 그 사실이 여기 한 줄로 드러나 있는 편이
-// 낫다 — 흩어져 있으면 여섯 번째 화면이 그것을 잊는다.
-const newSentinel = "new"
-
 // guardID 는 `{id}` 가 UUID 형식일 때만 핸들러를 부른다.
 //
 // **형식이 깨진 값과 없는 값은 다르다.** 없는 UUID 는 `WHERE id = $1` 이 0행을
@@ -131,6 +123,12 @@ const newSentinel = "new"
 // 그 하나가 남는다. 라우트는 전부 이 함수를 지나므로 새로 만드는 화면도
 // 자동으로 보호된다.
 //
+// **예외가 없다.** 앞 판은 만들기 화면을 위해 `new` 를 통과시켰는데, 그 값을
+// 만들기로 다루는 핸들러는 넷뿐이고 나머지 `{id}` 라우트는 그것을 그대로
+// `uuid` 컬럼과 비교하다 22P02 로 터졌다 — `DELETE /cart/items/new` 는 로그인
+// 없이도 500 을 낼 수 있었다. 만들기는 이제 자기 주소를 갖는다
+// (`/admin/pages/new` 등), 그래서 `{id}` 는 언제나 uuid 다.
+//
 // 404 다. "그런 것은 없다" 는 형식이 깨진 값에 대해서도 참이고, 400 과 달리
 // 존재 여부를 추측할 단서를 주지 않는다 (SC-1 4항).
 func guardID(rt Route) http.HandlerFunc {
@@ -138,7 +136,7 @@ func guardID(rt Route) http.HandlerFunc {
 		return rt.Handler
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if id := r.PathValue("id"); id != newSentinel && !content.IsUUID(id) {
+		if !content.IsUUID(r.PathValue("id")) {
 			http.NotFound(w, r)
 			return
 		}

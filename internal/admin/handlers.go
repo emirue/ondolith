@@ -127,6 +127,13 @@ func (d *Deps) require(w http.ResponseWriter, r *http.Request, perm string) (Cal
 //
 // 도메인 오류(ErrOutOfStock 같은 것)는 화면마다 문구와 코드가 다르므로 여기서
 // 다루지 않는다. 호출자가 먼저 걸러내고, 남은 것만 넘긴다.
+// isCreate reports whether this request is the "make a new one" form.
+//
+// **만들기 화면은 자기 주소를 갖는다** (`/admin/pages/new`), 그래서 `{id}` 는
+// 비어 있다. 옛 주소(`/admin/pages/{id}` 에 `new`)로 오는 요청도 같은 뜻으로
+// 받는다 — 판정이 흩어져 있으면 다섯째 화면이 그것을 잊는다.
+func isCreate(id string) bool { return id == "" || id == "new" }
+
 func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 	switch {
 	case err == nil:
@@ -300,7 +307,7 @@ func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if id == "new" {
+	if isCreate(id) {
 		d.Render(w, r, "admin/page-edit.html", http.StatusOK, nil)
 		return
 	}
@@ -348,7 +355,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	// 부팅 자체 점검이 매 부팅 「어떤 라우트도 쓰지 않는 권한」으로 말하고
 	// 있었지만, 게시판 스코프 권한 6건의 거짓 경고에 묻혀 있었다.
 	perm := "page.update"
-	if id := r.PathValue("id"); id == "" || id == "new" {
+	if isCreate(r.PathValue("id")) {
 		perm = "page.create"
 	}
 	if _, ok := d.require(w, r, perm); !ok {
@@ -373,7 +380,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	// Status is absent on purpose: publishing is page.publish, and letting an
 	// edit carry a status would hand page.update the other permission's power.
 	var err error
-	if id := r.PathValue("id"); id != "" && id != "new" {
+	if id := r.PathValue("id"); !isCreate(id) {
 		err = d.Content.UpdatePage(r.Context(), id, p)
 	} else {
 		_, err = d.Content.CreatePage(r.Context(), p)

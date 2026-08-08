@@ -31,6 +31,15 @@ import (
 // 화면별 테스트가 갖는다.
 const malformedID = "not-a-uuid"
 
+// sentinelID 는 **한때 관문이 통과시키던 값**이다.
+//
+// 만들기 화면이 `{id}` 를 함께 쓰던 동안 관문은 `new` 를 모든 `{id}` 라우트에서
+// 통과시켰고, 그 값을 만들기로 다루지 않는 나머지는 그대로 `uuid` 컬럼과
+// 비교하다 22P02 로 500 이 났다 — `DELETE /cart/items/new` 는 로그인 없이도
+// 낼 수 있었다. 만들기가 자기 주소를 갖게 된 지금은 예외가 없지만, **되살아나면
+// 여기서 운다.** 스윕이 이 값을 한 번도 넣어 보지 않아 그 구멍을 놓쳤다.
+const sentinelID = "new"
+
 // pathParam 은 `{name}` 을 찾는다. `{$}` 와 `{x...}` 는 자리표시자가 아니다.
 var pathParam = regexp.MustCompile(`\{([a-zA-Z]\w*)\}`)
 
@@ -341,6 +350,51 @@ func TestEveryPathParamIsDeclared(t *testing.T) {
 	if pathParamKind["id"] == "" {
 		t.Error("guardID 는 {id} 를 보는데 그 이름이 선언돼 있지 않다")
 	}
+}
+
+// **`{id}` 자리의 `new` 가 500 을 만들지 않는다.**
+//
+// 만들기 화면이 `{id}` 를 함께 쓰던 동안 경로 관문은 `new` 를 **모든** `{id}`
+// 라우트에서 통과시켰다. 그 값을 만들기로 다루는 핸들러는 넷뿐이었고, 나머지는
+// 그대로 `uuid` 컬럼과 비교하다 22P02 로 500 이 났다 — `DELETE /cart/items/new`
+// 는 로그인 없이도 낼 수 있었다. 만들기가 자기 주소를 갖게 되어 관문에 예외가
+// 없어졌지만, **예외가 되살아나면 여기서 운다.**
+//
+// 서버를 따로 세운다 — `{id}` 라우트가 서른 일곱이라 위 스윕과 같은 서버를
+// 쓰면 관리자 트리의 분당 상한(D15 4.3-2)에 걸려 아무것도 보지 못한다.
+func TestNoRouteAnswers500ToTheCreateSentinel(t *testing.T) {
+	srv, _, c := shopAdminSite(t)
+
+	routes := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler).Routes()
+	checked := 0
+	for _, rt := range routes {
+		if !strings.Contains(rt.Pattern, "{id}") ||
+			strings.HasPrefix(rt.Pattern, "/webhooks/") {
+			continue
+		}
+		path := pathParam.ReplaceAllString(rt.Pattern, sentinelID)
+		if strings.Contains(path, "{") {
+			continue
+		}
+		checked++
+
+		var resp *http.Response
+		var err error
+		if rt.Method == http.MethodGet {
+			resp, err = c.Get(srv.URL + path)
+		} else {
+			resp, err = c.PostForm(srv.URL+path, url.Values{})
+		}
+		if err != nil {
+			t.Fatalf("%s %s: %v", rt.Method, path, err)
+		}
+		resp.Body.Close()
+		checkAnswer(t, rt.Method, rt.Pattern, resp.StatusCode)
+	}
+	if checked < 20 {
+		t.Fatalf("`{id}` 라우트를 %d 개밖에 못 찾았다 — 검사가 헛돌았다", checked)
+	}
+	t.Logf("`{id}` 라우트 %d 개를 %q 로 확인했다", checked, sentinelID)
 }
 
 // missingID 는 **형식은 멀쩡하고 존재하지 않는** 행의 id 다.

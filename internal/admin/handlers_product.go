@@ -15,7 +15,7 @@ func (d *Deps) ProductForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if id == "new" || id == "" {
+	if isCreate(id) {
 		d.Render(w, r, "admin/product-edit.html", http.StatusOK,
 			map[string]any{"Product": &commerce.Product{Visible: true}, "New": true})
 		return
@@ -70,7 +70,7 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 	}
 	p.BasePrice = price
 
-	if p.ID == "new" || p.ID == "" {
+	if isCreate(p.ID) {
 		id, err := d.Commerce.CreateProduct(r.Context(), *p)
 		switch {
 		case errors.Is(err, commerce.ErrSlugTaken):

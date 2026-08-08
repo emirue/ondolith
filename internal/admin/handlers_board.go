@@ -52,7 +52,7 @@ func (d *Deps) BoardForm(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	data := map[string]any{"Presets": content.Presets()}
-	if id != "new" {
+	if !isCreate(id) {
 		b, err := d.Content.BoardByID(r.Context(), id)
 		if errors.Is(err, content.ErrNotFound) {
 			http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
@@ -92,7 +92,7 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	if id == "new" {
+	if isCreate(id) {
 		newID, err := d.Content.CreateBoard(ctx, b, content.BoardPreset(r.PostFormValue("preset")))
 		switch {
 		case errors.Is(err, content.ErrSlugTakenBoard):
