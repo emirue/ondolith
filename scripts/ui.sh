@@ -79,6 +79,27 @@ sql "insert into payments (order_id, kind, status, pg, payment_key, approved_amo
      select id,'주문결제','승인','toss','ui_key',total_amount,now() from orders" >/dev/null
 want "결제 기록이 생겼다" 1 "$(sql "select count(*) from payments")"
 
+# **환불 요청이 있어야 A-507 의 표를 잰다.** 리뷰어가 지적한 자리다 — 같은
+# 커밋에서 스크롤 감싸미를 새로 붙여 놓고 정작 빈 표로만 그렸다.
+# 화면을 지나서 만든다: 구매자가 P-506 으로 취소를 넣는다.
+JAR_ADMIN2=$JAR
+JAR=$WORK/jar-member
+ITEM_ID=$(sql "select oi.id from order_items oi join orders o on o.id=oi.order_id
+               where o.order_no='$ORDER_NO' limit 1")
+sql "update orders set status='결제완료' where order_no='$ORDER_NO'" >/dev/null
+code POST "/orders/$ORDER_NO/cancel" --data-urlencode "item_id=$ITEM_ID" \
+	--data-urlencode "qty_$ITEM_ID=1" --data-urlencode "reason=단순 변심" >/dev/null
+sql "update orders set status='배송완료' where order_no='$ORDER_NO'" >/dev/null
+JAR=$JAR_ADMIN2
+want "환불 요청이 생겼다" 1 "$(sql "select count(*) from refunds")"
+
+# 첨부 관리(A-309)·댓글 관리(A-308)·글 관리(A-307) 는 이미 만든 것이 보인다 —
+# 첨부는 lib-seed 의 글쓰기가, 댓글은 위에서, 글은 그 글이 채운다. 관리 화면이
+# 그것을 실제로 집어내는지는 `make ui` 가 빈 표로 알려준다.
+want "첨부가 있다" 1 "$(sql "select count(*) from attachments")"
+want "댓글이 있다" 1 "$(sql "select count(*) from comments")"
+want "댓글이 공지 게시판의 글에 달렸다" 1 "$(sql "select count(*) from comments c join posts p on p.id=c.post_id join boards b on b.id=p.board_id where b.slug='notice'")"
+
 # ---- 볼 주소 ----------------------------------------------------------------
 #
 # **크롤이 닿은 곳을 그대로 본다.** 목록을 손으로 적으면 화면이 늘 때마다
@@ -97,14 +118,19 @@ printf '%s\n' /login /signup /password/reset >"$ANON_URLS"
 {
 	printf '%s\n' / /shop /board/notice /search /shop/search \
 		/admin/ /admin/pages /admin/pages/new \
-		/admin/boards /admin/boards/new /admin/posts /admin/comments \
-		/admin/attachments /admin/menus /admin/users /admin/users/new \
+		/admin/boards /admin/boards/new \
+		/admin/menus /admin/users /admin/users/new \
 		/admin/user-fields /admin/roles /admin/settings /admin/settings/mail \
 		/admin/settings/payment /admin/settings/business /admin/settings/social \
 		/admin/themes /admin/themes/upload /admin/oplog /admin/system \
 		/admin/webhooks /admin/products /admin/products/new /admin/categories \
 		/admin/orders /admin/terms /admin/commerce/policy /admin/reconcile \
 		/admin/scan/lookup /admin/scan/receive /admin/scan/stocktake
+	# **A-307·A-308·A-309 는 게시판을 골라야 목록이 나온다.** 고르지 않은
+	# 화면은 「게시판 주소를 입력하세요」 한 줄이라 잴 것이 없다 — 두 상태를
+	# 모두 본다.
+	printf '%s\n' /admin/posts /admin/comments /admin/attachments
+	printf '/admin/posts?board=notice\n/admin/comments?board=notice\n/admin/attachments?board=notice\n'
 	printf '/board/notice/%s\n' "$POST_ID"
 	printf '/board/notice/%s/edit\n' "$POST_ID"
 	printf '/board/notice/write\n'
@@ -159,6 +185,9 @@ printf '  · 요청 상한 창이 지나가길 기다린다 (60초)\n'
 sleep 61
 
 # ---- 브라우저 ---------------------------------------------------------------
+# **문법부터 본다.** 감사 스크립트가 파싱 실패로 죽으면 결함 0 과 구분되지 않고,
+# 그 실패는 브라우저를 띄운 뒤에야 나온다.
+node --check scripts/ui-audit.mjs || { echo "  ✗ 감사 스크립트 문법 오류"; exit 1; }
 tojson() { python3 -c 'import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' <"$1"; }
 audit=0
 run_audit() {

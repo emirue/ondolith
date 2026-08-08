@@ -299,7 +299,10 @@ func TestEveryCSSTokenIsDefined(t *testing.T) {
 // 없으면 그 넘침이 **페이지 전체의 가로 스크롤**이 되어, 375px 기기에서 화면이
 // 옆으로 밀린다. 실제로 아홉 화면이 그랬고 `make ui` 가 재서 알았다.
 //
-// 응답은 200 이고 렌더링도 성공하므로 다른 어떤 검사도 울지 않는다.
+// **개수가 아니라 위치를 본다.** 앞 판은 파일 안의 `<table class="adm-table"`
+// 등장 횟수와 `adm-table-wrap` 문자열 등장 횟수를 비교했는데, 그러면 표 둘 중
+// 하나만 감싸고 주석에 그 이름이 한 번 더 나오면 개수가 맞아 통과한다 —
+// 「표마다 감싸미가 있다」를 검사한다고 주장하면서 실제로는 검사하지 않는다.
 func TestEveryAdminTableSitsInAScroller(t *testing.T) {
 	entries, err := adminFS.ReadDir("templates/admin")
 	if err != nil {
@@ -314,20 +317,52 @@ func TestEveryAdminTableSitsInAScroller(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tables := strings.Count(string(src), `<table class="adm-table"`)
-		if tables == 0 {
-			continue
-		}
-		checked += tables
-		wraps := strings.Count(string(src), "adm-table-wrap")
-		if wraps < tables {
-			t.Errorf("%s: 표 %d 개 중 %d 개만 스크롤 상자 안에 있다 — "+
-				"좁은 화면에서 페이지가 옆으로 밀린다", e.Name(), tables, wraps)
+		n, bare := tablesOutsideScroller(string(src))
+		checked += n
+		for _, line := range bare {
+			t.Errorf("%s:%d 의 표가 스크롤 상자 밖에 있다 — "+
+				"좁은 화면에서 페이지가 옆으로 밀린다", e.Name(), line)
 		}
 	}
 	if checked < 10 {
 		t.Fatalf("관리자 표를 %d 개밖에 못 찾았다 — 검사가 헛돌았다", checked)
 	}
+}
+
+// tablesOutsideScroller 는 표의 개수와, 그중 감싸미 밖에 있는 것의 줄 번호를 낸다.
+//
+// `<div>` 의 열고 닫힘을 세면서 「지금 열려 있는 div 중에 감싸미가 있는가」를
+// 본다. 정규식 하나로는 판정할 수 없는 성질이다 — 중첩이 답을 정한다.
+func tablesOutsideScroller(src string) (int, []int) {
+	// 템플릿 액션 안의 `<div>` 는 조건부라 열림·닫힘이 짝을 이루지 않을 수
+	// 있다. 액션을 지우고 마크업만 본다.
+	clean := regexp.MustCompile(`(?s)\{\{.*?\}\}`).ReplaceAllString(src, " ")
+	tok := regexp.MustCompile(`<div\b[^>]*>|</div>|<table\b[^>]*>`)
+
+	var stack []bool // 열려 있는 div 마다 「감싸미인가」
+	var bare []int
+	n := 0
+	for _, loc := range tok.FindAllStringIndex(clean, -1) {
+		tag := clean[loc[0]:loc[1]]
+		line := 1 + strings.Count(clean[:loc[0]], "\n")
+		switch {
+		case strings.HasPrefix(tag, "</div"):
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case strings.HasPrefix(tag, "<div"):
+			stack = append(stack, strings.Contains(tag, "adm-table-wrap"))
+		default: // <table ...>
+			if !strings.Contains(tag, "adm-table") {
+				continue
+			}
+			n++
+			if !slices.Contains(stack, true) {
+				bare = append(bare, line)
+			}
+		}
+	}
+	return n, bare
 }
 
 // **UI 감사 스크립트의 페이지 코드에 백틱이 없다.**
@@ -352,7 +387,59 @@ func TestUIAuditPageCodeHasNoBacktick(t *testing.T) {
 		t.Fatal("AUDIT 리터럴이 닫히지 않았다")
 	}
 	body := rest[:end]
-	if len(body) < 500 {
-		t.Fatalf("AUDIT 리터럴이 %d 자뿐이다 — 백틱이 이미 끊었다", len(body))
+	// **길이가 아니라 끝나는 모양을 본다.** 앞 판은 500자 미만이면 실패로
+	// 봤는데, 리터럴 한가운데의 백틱은 그 앞의 수천 자를 남기고 끊는다 —
+	// 길이 검사는 통과하고 브라우저에서 `ReferenceError` 로 죽는다. 실제로
+	// 그렇게 한 번 더 깨졌다. 감사 식은 즉시 실행 함수이므로 반드시 이 꼬리로
+	// 끝난다.
+	if !strings.HasSuffix(strings.TrimSpace(body), "})()") {
+		t.Errorf("AUDIT 리터럴이 %q 로 끝난다 — 중간의 백틱이 끊었다 (길이 %d)",
+			last(strings.TrimSpace(body), 24), len(body))
+	}
+}
+
+func last(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-n:]
+}
+
+// **표의 「없습니다」 줄에는 표지(`.adm-empty`)가 붙는다.**
+//
+// UI 감사(`make ui`)는 그 표지로 「자료가 없다」와 「자료가 있다」를 가른다 —
+// 빈 표는 열이 내용 없이 좁아져 넘치지 않으므로, 그 화면의 반응형 동작이
+// 검사되지 않은 채 통과하기 때문이다.
+//
+// 표지가 없으면 감사는 그 줄을 **자료로 세고**, 빈 표를 채워진 표로 착각한다.
+// 일곱 화면이 그랬고, 그래서 약관·환불 화면이 빈 상태인 것을 감사가 말해 주지
+// 못했다 — 검사의 판정 근거가 마크업에 있으므로 마크업을 강제한다.
+func TestEmptyTableRowsCarryTheMarker(t *testing.T) {
+	entries, err := adminFS.ReadDir("templates/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// `{{else}}` 바로 뒤의 행이 빈 상태다 — `range` 가 아무것도 내지 않았을 때
+	// 그려지는 유일한 줄이다.
+	emptyRow := regexp.MustCompile(`(?s)\{\{else\}\}\s*\n\s*(<tr>.*?</tr>)`)
+	checked := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		src, err := adminFS.ReadFile("templates/admin/" + e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range emptyRow.FindAllStringSubmatch(string(src), -1) {
+			checked++
+			if !strings.Contains(m[1], "adm-empty") {
+				t.Errorf("%s: 빈 상태 줄에 adm-empty 가 없다 — UI 감사가 이 줄을 "+
+					"자료로 세어 빈 표를 채워진 표로 본다: %.60s", e.Name(), m[1])
+			}
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("빈 상태 줄을 %d 개밖에 못 찾았다 — 검사가 헛돌았다", checked)
 	}
 }

@@ -14,7 +14,7 @@
       <tr><td><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
           <td>{{.Status}}</td><td>{{money .Total}}</td><td>{{.OrdererEmail}}</td><td>{{date .CreatedAt "2006-01-02 15:04"}}</td></tr>
       {{else}}
-      <tr><td colspan="5">주문이 없습니다.</td></tr>
+      <tr><td colspan="5" class="adm-empty">주문이 없습니다.</td></tr>
       {{end}}
     </tbody>
   </table>

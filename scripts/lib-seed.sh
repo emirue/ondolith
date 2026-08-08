@@ -106,6 +106,23 @@ code POST "/admin/products/$PROD/variants" --data-urlencode "variant_id=$VAR" \
 
 want "상품에 조합이 생겼다" 2 "$(sql "select count(*) from product_variants where product_id='$PROD'")"
 
+# **표에 행이 있어야 그 화면을 잴 수 있다** (make ui). 빈 표는 열이 내용 없이
+# 좁아져 넘치지 않고, 그 화면의 반응형 동작은 검사되지 않은 채 통과한다.
+# 아래는 화면을 지나서 만든다 — SQL 로 직접 넣으면 그 화면이 정말 만들 수
+# 있는지는 여전히 모른다.
+code POST /admin/menus --data-urlencode "title=상품" --data-urlencode "url=/shop" >/dev/null
+BOARD_ID=$(sql "select id from boards where slug='notice'")
+code POST "/admin/boards/$BOARD_ID/fields" --data-urlencode "key=color" \
+	--data-urlencode "label=색상" --data-urlencode "field_type=select" \
+	--data-urlencode "options=빨강
+파랑" --data-urlencode "sort_order=0" --data-urlencode "show_in_list=1" >/dev/null
+want "게시판 커스텀 필드가 생겼다" 1 "$(sql "select count(*) from board_fields")"
+
+code POST /admin/terms --data-urlencode "kind=service" --data-urlencode "version=1.0" \
+	--data-urlencode "effective_at=$(date -v+30d +%Y-%m-%d 2>/dev/null || date -d '+30 days' +%Y-%m-%d)" --data-urlencode "body=이용약관 본문입니다." \
+	--data-urlencode "is_required=on" >/dev/null
+want "약관이 생겼다" 1 "$(sql "select count(*) from terms")"
+
 # **결제사를 설정한다.** 없으면 주문서(P-405)가 503 이고 — 그것이 옳은 동작이다
 # (D19 P-405) — 주문이 생기지 않아 구매 이후 화면 전부가 크롤 대상에서 빠진다.
 code POST /admin/settings/payment --data-urlencode "pg.provider=toss" \

@@ -236,6 +236,27 @@ const AUDIT = String.raw`(() => {
     out.push('버튼 높이가 ' + btnH.size + ' 종류: ' + [...new Set(who)].join(' | '))
   }
 
+  // 9) **빈 표는 재도 소용없다.** 행이 없으면 열이 내용 없이 좁아져 넘치지
+  //    않고, 그 표의 반응형 동작은 검사되지 않은 채 통과한다 — 감싸미를 새로
+  //    붙인 표가 정작 빈 상태로만 그려지고 있었다.
+  //
+  //    빈 상태는 adm-empty(관리자)·empty(테마) 클래스가 표시한다 — colspan 으로
+  //    판정하면 오탐이 난다: 메뉴 관리처럼 **자료 행도** 한 칸을 가로지르는
+  //    화면이 있다.
+  for (const t of document.querySelectorAll('table')) {
+    if (!vis(t)) continue
+    const rows = [...t.querySelectorAll('tbody tr')]
+    const data = rows.filter((tr) => !tr.querySelector('.adm-empty, .empty'))
+    // 고르기 전 상태는 「무엇을 고르라」는 안내다 — 잴 자료가 없는 것이 맞다.
+    // 그 화면도 함께 열어 두고(ui.sh), 고른 뒤의 표를 재는 것이 목적이다.
+    const prompt = t.querySelector('.adm-empty, .empty')
+    if (data.length === 0 && !/입력하세요|고르세요|선택하세요/.test(prompt?.textContent ?? '')) {
+      out.push('빈 표 — 자료가 없어 레이아웃을 재지 못했다: ' +
+        (t.className || t.tagName.toLowerCase()) + ' «' +
+        [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim()).join('/') + '»')
+    }
+  }
+
   // 6) 누를 수 없는 크기. 좁은 화면에서만 본다 — 손가락이 쓰는 자리다.
   if (vw <= 480) {
     for (const el of document.querySelectorAll('a,button,input[type=submit],select')) {
