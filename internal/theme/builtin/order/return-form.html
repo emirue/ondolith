@@ -1,44 +1,46 @@
 {{define "body"}}
-{{with .Data}}
-<h1>{{.Kind}} 요청</h1>
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
-{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
-{{/* **금액 입력란이 없다** (D19 P-511). 환불액도 반품 배송비도 서버가
-     order_items 스냅샷과 A-512 정책에서 계산한다. 종류는 경로가 정하고
-     hidden 으로 싣지 않는다 — 실으면 반품 URL 로 교환을 접수할 수 있다. */}}
-<form method="post" class="form">
-  <fieldset>
-    <legend>대상 품목</legend>
-    {{range .Order.Items}}
-    <div class="return-line">
-      <label>
-        <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .RemainingQty}} disabled{{end}}>
-        {{.ProductName}} {{.OptionLabel}}
-        <span class="qty">주문 {{.Quantity}}개 · 남은 {{.RemainingQty}}개</span>
-      </label>
-      <input name="qty_{{.ID}}" type="number" min="1" max="{{.RemainingQty}}" value="1"
-             {{if not .RemainingQty}}disabled{{end}}>
-    </div>
-    {{end}}
-  </fieldset>
+<section class="page">
+  {{with .Data}}
+  <h1>{{.Kind}} 요청</h1>
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+  {{/* **금액 입력란이 없다** (D19 P-511). 환불액도 반품 배송비도 서버가
+       order_items 스냅샷과 A-512 정책에서 계산한다. 종류는 경로가 정하고
+       hidden 으로 싣지 않는다 — 실으면 반품 URL 로 교환을 접수할 수 있다. */}}
+  <form method="post" class="form">
+    <fieldset>
+      <legend>대상 품목</legend>
+      {{range .Order.Items}}
+      <div class="return-line">
+        <label>
+          <input type="checkbox" name="item_id" value="{{.ID}}"{{if not .RemainingQty}} disabled{{end}}>
+          {{.ProductName}} {{.OptionLabel}}
+          <span class="qty">주문 {{.Quantity}}개 · 남은 {{.RemainingQty}}개</span>
+        </label>
+        <input name="qty_{{.ID}}" type="number" min="1" max="{{.RemainingQty}}" value="1"
+               {{if not .RemainingQty}}disabled{{end}}>
+      </div>
+      {{end}}
+    </fieldset>
 
-  {{if .Variants}}
-  {{/* 교환은 **같은 상품의 다른 조합**만 고를 수 있다 (FR-618). 목록이 그것만
-       보여주고, 거부하는 것은 여전히 서버다. */}}
-  <label for="new_variant_id">교환할 옵션</label>
-  <select id="new_variant_id" name="new_variant_id" required>
-    {{range .Variants}}
-    <option value="{{.ID}}">
-      {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
-      {{if .PriceDelta}}({{money .PriceDelta}} 차액){{end}}
-    </option>
+    {{if .Variants}}
+    {{/* 교환은 **같은 상품의 다른 조합**만 고를 수 있다 (FR-618). 목록이 그것만
+         보여주고, 거부하는 것은 여전히 서버다. */}}
+    <label for="new_variant_id">교환할 옵션</label>
+    <select id="new_variant_id" name="new_variant_id" required>
+      {{range .Variants}}
+      <option value="{{.ID}}">
+        {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
+        {{if .PriceDelta}}({{money .PriceDelta}} 차액){{end}}
+      </option>
+      {{end}}
+    </select>
     {{end}}
-  </select>
+
+    <label for="reason">사유</label>
+    <input id="reason" name="reason" maxlength="500" required>
+    <button type="submit">{{.Kind}} 요청</button>
+  </form>
   {{end}}
-
-  <label for="reason">사유</label>
-  <input id="reason" name="reason" maxlength="500" required>
-  <button type="submit">{{.Kind}} 요청</button>
-</form>
-{{end}}
+</section>
 {{end}}

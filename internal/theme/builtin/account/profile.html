@@ -10,8 +10,16 @@
   <label for="display_name">표시 이름</label>
   <input id="display_name" name="display_name" type="text" maxlength="100"
          value="{{with .User}}{{.DisplayName}}{{end}}" required>
+  {{/* **항목 목록이 코드에 없다.** 운영자가 A-406 에서 정한 것을 그대로 그린다
+       (FR-215, D14 3절 규칙 1). 타입별 분기는 partials/field.html 한 곳뿐이다. */}}
+  {{with .Data}}{{range .Inputs}}
+    <label for="f-{{.Field.Key}}">{{.Field.Label}}{{if .Field.Required}} *{{end}}</label>
+    {{template "partials/field.html" .}}
+  {{end}}{{end}}
   <button type="submit">저장</button>
 </form>
-<p><a href="/me/password">비밀번호 변경</a> · <a href="/me/delete">회원 탈퇴</a></p>
+{{/* 소셜 연결 관리(P-111)는 이 줄이 유일한 진입점이다. */}}
+<p><a href="/me/password">비밀번호 변경</a> · <a href="/me/connections">소셜 계정 연결</a>
+   · <a href="/me/delete">회원 탈퇴</a></p>
 </div>
 {{end}}

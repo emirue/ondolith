@@ -174,7 +174,7 @@ func (d *shopDeps) variantPick(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	match := commerce.MatchVariant(variants, picked)
-	d.renderPage(w, r, "shop/variant.html", http.StatusOK, d.shopView(r, p.Name, map[string]any{
+	d.renderPartial(w, r, "shop/variant.html", d.shopView(r, p.Name, map[string]any{
 		"Product": p, "Variant": match, "Picked": picked,
 	}))
 }

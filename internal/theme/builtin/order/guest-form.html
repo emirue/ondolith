@@ -1,16 +1,18 @@
 {{define "body"}}
-<h1>비회원 주문 조회</h1>
-{{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
-{{/* 실패는 전부 같은 문장이다 (D19 P-504). 구분하면 주문번호를 훑어 어느
-     것이 존재하는지 알 수 있다. 계좌·배송지 입력란을 두지 않는다 — 조회만
-     으로 그것을 바꿀 수 있으면 안 된다. */}}
-<form method="post" action="/orders/guest" class="form">
-  <label for="order_no">주문번호</label>
-  <input id="order_no" name="order_no" required maxlength="32">
-  <label for="phone">주문자 연락처</label>
-  <input id="phone" name="phone" maxlength="20">
-  <label for="email">또는 주문자 이메일</label>
-  <input id="email" name="email" type="email" maxlength="254">
-  <button type="submit">조회</button>
-</form>
+<section class="page">
+  <h1>비회원 주문 조회</h1>
+  {{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
+  {{/* 실패는 전부 같은 문장이다 (D19 P-504). 구분하면 주문번호를 훑어 어느
+       것이 존재하는지 알 수 있다. 계좌·배송지 입력란을 두지 않는다 — 조회만
+       으로 그것을 바꿀 수 있으면 안 된다. */}}
+  <form method="post" action="/orders/guest" class="form">
+    <label for="order_no">주문번호</label>
+    <input id="order_no" name="order_no" required maxlength="32">
+    <label for="phone">주문자 연락처</label>
+    <input id="phone" name="phone" maxlength="20">
+    <label for="email">또는 주문자 이메일</label>
+    <input id="email" name="email" type="email" maxlength="254">
+    <button type="submit">조회</button>
+  </form>
+</section>
 {{end}}

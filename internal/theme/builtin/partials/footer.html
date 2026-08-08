@@ -1,5 +1,8 @@
 <footer class="site-footer">
   <p>{{.Site.Name}}</p>
+  {{/* 비회원 주문 조회(P-503)의 유일한 진입점이다. 로그인 화면에 두면 「로그인
+       하지 않고 주문한 사람」이 로그인 화면부터 찾아야 한다. */}}
+  {{if eq .Site.Type "shop"}}<p class="foot-links"><a href="/orders/guest">비회원 주문 조회</a></p>{{end}}
   {{/* 전자상거래법 표시 의무 항목이다 (FR-711). 비어 있는 항목은 아예 오지
        않는다 — 빈 자리를 그리면 그것이 오류로 보인다. */}}
   {{if .Site.Business}}<dl class="business">

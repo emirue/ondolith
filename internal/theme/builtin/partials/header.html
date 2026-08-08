@@ -1,10 +1,26 @@
 <header class="site-header">
   <a class="site-name" href="/">{{.Site.Name}}</a>
   {{template "partials/menu.html" .}}
+
+  {{/* **검색은 사이트 유형을 따른다** (FR-710). 쇼핑몰의 머리글 검색이 글을
+       찾아 주면 아무도 두 번 쓰지 않는다. 글 검색(P-212)은 게시판 목록에서
+       잇는다 — 거기가 글을 찾으려는 사람이 있는 자리다. */}}
+  <form class="site-search" method="get"
+        action="{{if eq .Site.Type "shop"}}/shop/search{{else}}/search{{end}}">
+    <input type="search" name="q" aria-label="검색"
+           placeholder="{{if eq .Site.Type "shop"}}상품 검색{{else}}검색{{end}}">
+    <button type="submit">검색</button>
+  </form>
+
   <nav class="account-nav">
+    {{if eq .Site.Type "shop"}}<a href="/cart">장바구니</a>{{end}}
     {{if .User}}
       <span class="who">{{.User.DisplayName}}</span>
+      {{if eq .Site.Type "shop"}}<a href="/orders">주문 내역</a>{{end}}
       <a href="/me">내 정보</a>
+      {{/* 관리자에게만 보인다. **판정은 서버가 하고 여기서는 그 결과만 읽는다** —
+           트리 관문(admin.access)이 실제 방어이고 이 링크는 안내다. */}}
+      {{if index .Can "admin.access"}}<a href="/admin/">관리</a>{{end}}
       <form method="post" action="/logout" class="inline"><button type="submit">로그아웃</button></form>
     {{else}}
       <a href="/login">로그인</a>

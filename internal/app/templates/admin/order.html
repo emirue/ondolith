@@ -35,5 +35,11 @@
   {{range .Shipments}}<li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{date .ShippedAt "2006-01-02 15:04"}})</li>
   {{else}}<li>발송 정보가 없습니다.</li>{{end}}
 </ul>
-<p><a href="/admin/orders/{{.Order.OrderNo}}/shipping">송장 입력</a></p>
+{{/* 환불(A-507)·반품 처리(A-511) 화면은 만들어져 있었지만 관리자 주문 상세가
+     송장만 가리켜, 나머지 둘은 주소를 직접 쳐야 닿았다. */}}
+<div class="adm-actions">
+  <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/shipping">송장 입력</a>
+  <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/refund">환불 처리</a>
+  <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/returns">반품·교환 처리</a>
+</div>
 {{end}}

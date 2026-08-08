@@ -1,0 +1,14 @@
+{{/* 고른 옵션 조합. **상품 화면(P-303)이 처음 그릴 때와 htmx 가 갈아 끼울
+     때(P-304)가 같은 조각을 쓴다** — 두 벌이면 「고르기 전」과 「고른 뒤」의
+     모습이 갈라지고, 갈라진 쪽은 아무도 보지 않아 조용히 낡는다.
+
+     기대하는 데이터: {Variant} — 고른 것이 없으면 nil 이다. */}}
+{{with .Variant}}
+  {{/* **조합 ID 는 서버가 고른 것만 나간다.** 사용자가 임의 ID 를 적어 넣으면
+       다른 상품의 조합 가격이 이 상품에 붙는다. */}}
+  <input type="hidden" name="variant_id" value="{{.ID}}">
+  <p class="price">{{if .PriceDelta}}옵션 추가 {{money .PriceDelta}}{{else}}추가 금액 없음{{end}}</p>
+  <p class="stock">{{if gt .Stock 0}}재고 {{.Stock}}개{{else}}품절{{end}}</p>
+{{else}}
+  <p class="stock">옵션을 모두 선택하세요.</p>
+{{end}}

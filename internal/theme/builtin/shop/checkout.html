@@ -1,51 +1,53 @@
 {{define "body"}}
-<h1>주문서</h1>
-{{with .Data}}
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
-<ul class="cart">
-  {{range .Items}}
-  <li>{{.Name}} <span class="option">{{range $k, $v := .Option}}{{$k}}: {{$v}} {{end}}</span>
-      <span class="price">{{money .UnitPrice}} × {{.Quantity}}</span></li>
-  {{end}}
-</ul>
-<dl class="totals">
-  <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
-  <dt>배송비</dt><dd>{{money .Fee}}</dd>
-  <dt>결제 예정</dt><dd>{{money .Total}}</dd>
-</dl>
-{{/* 금액 필드가 없다. 있으면 클라이언트 값이 계산에 닿고 FR-607 의 대조가
-     자기 자신과의 대조가 된다 (D19 P-406 「받지 않는 필드」). */}}
-<form method="post" action="/checkout" class="form">
-  <label for="receiver_name">받는 분</label>
-  <input id="receiver_name" name="receiver_name" required maxlength="100">
-  <label for="receiver_phone">연락처</label>
-  <input id="receiver_phone" name="receiver_phone" required maxlength="20">
-  <label for="postcode">우편번호</label>
-  <input id="postcode" name="postcode" required maxlength="10">
-  <label for="address1">주소</label>
-  <input id="address1" name="address1" required maxlength="200">
-  <label for="address2">상세 주소</label>
-  <input id="address2" name="address2" maxlength="200">
-  <label for="delivery_memo">배송 메모</label>
-  <input id="delivery_memo" name="delivery_memo" maxlength="200">
-  <label for="orderer_email">주문자 이메일</label>
-  <input id="orderer_email" name="orderer_email" type="email" required maxlength="254"
-         value="{{.Email}}">
-  <label for="orderer_phone">주문자 연락처</label>
-  <input id="orderer_phone" name="orderer_phone" required maxlength="20">
-  <p class="hint">주문자 연락처는 비회원 주문 조회에 씁니다.</p>
-
-  <fieldset class="terms">
-    <legend>약관</legend>
-    {{range .Terms}}
-    <label>
-      <input type="checkbox" name="agreed_terms" value="{{.ID}}"{{if .Required}} required{{end}}>
-      {{.Kind}} ({{.Version}}){{if .Required}} <em>필수</em>{{end}}
-    </label>
+<section class="page">
+  <h1>주문서</h1>
+  {{with .Data}}
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <ul class="cart">
+    {{range .Items}}
+    <li>{{.Name}} <span class="option">{{range $k, $v := .Option}}{{$k}}: {{$v}} {{end}}</span>
+        <span class="price">{{money .UnitPrice}} × {{.Quantity}}</span></li>
     {{end}}
-  </fieldset>
+  </ul>
+  <dl class="totals">
+    <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
+    <dt>배송비</dt><dd>{{money .Fee}}</dd>
+    <dt>결제 예정</dt><dd>{{money .Total}}</dd>
+  </dl>
+  {{/* 금액 필드가 없다. 있으면 클라이언트 값이 계산에 닿고 FR-607 의 대조가
+       자기 자신과의 대조가 된다 (D19 P-406 「받지 않는 필드」). */}}
+  <form method="post" action="/checkout" class="form">
+    <label for="receiver_name">받는 분</label>
+    <input id="receiver_name" name="receiver_name" required maxlength="100">
+    <label for="receiver_phone">연락처</label>
+    <input id="receiver_phone" name="receiver_phone" required maxlength="20">
+    <label for="postcode">우편번호</label>
+    <input id="postcode" name="postcode" required maxlength="10">
+    <label for="address1">주소</label>
+    <input id="address1" name="address1" required maxlength="200">
+    <label for="address2">상세 주소</label>
+    <input id="address2" name="address2" maxlength="200">
+    <label for="delivery_memo">배송 메모</label>
+    <input id="delivery_memo" name="delivery_memo" maxlength="200">
+    <label for="orderer_email">주문자 이메일</label>
+    <input id="orderer_email" name="orderer_email" type="email" required maxlength="254"
+           value="{{.Email}}">
+    <label for="orderer_phone">주문자 연락처</label>
+    <input id="orderer_phone" name="orderer_phone" required maxlength="20">
+    <p class="hint">주문자 연락처는 비회원 주문 조회에 씁니다.</p>
 
-  <button type="submit">결제하기</button>
-</form>
-{{end}}
+    <fieldset class="terms">
+      <legend>약관</legend>
+      {{range .Terms}}
+      <label>
+        <input type="checkbox" name="agreed_terms" value="{{.ID}}"{{if .Required}} required{{end}}>
+        {{.Kind}} ({{.Version}}){{if .Required}} <em>필수</em>{{end}}
+      </label>
+      {{end}}
+    </fieldset>
+
+    <button type="submit">결제하기</button>
+  </form>
+  {{end}}
+</section>
 {{end}}

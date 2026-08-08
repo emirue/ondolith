@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -177,6 +178,9 @@ type UserRow struct {
 	IsActive    bool
 	Verified    bool
 	Roles       []string
+	// Custom 은 A-406 이 정의한 회원 항목의 값이다 (FR-215). 목록에 보일지는
+	// `show_in_list` 가 정하고, 그 판단은 화면이 한다 — 저장소는 값만 낸다.
+	Custom map[string]any
 }
 
 // ListUsers reads one page of the user list.
@@ -188,7 +192,8 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]UserRow, er
 	const q = `
 		SELECT u.id, u.email, u.display_name, u.is_active,
 		       u.email_verified_at IS NOT NULL,
-		       coalesce(array_agg(r.key ORDER BY r.key) FILTER (WHERE r.key IS NOT NULL), '{}')
+		       coalesce(array_agg(r.key ORDER BY r.key) FILTER (WHERE r.key IS NOT NULL), '{}'),
+		       u.custom_fields
 		FROM users u
 		LEFT JOIN user_roles ur ON ur.user_id = u.id
 		LEFT JOIN roles r ON r.id = ur.role_id
@@ -203,7 +208,12 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]UserRow, er
 	var out []UserRow
 	for rows.Next() {
 		var u UserRow
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.IsActive, &u.Verified, &u.Roles); err != nil {
+		var raw []byte
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.IsActive,
+			&u.Verified, &u.Roles, &raw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &u.Custom); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -366,14 +376,23 @@ func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 	})
 }
 
-// UpdateDisplayName changes the one profile field P-108 accepts.
+// UpdateProfile changes the fields P-109 accepts: the display name and the
+// profile items an operator defined (FR-215).
 //
 // The predicate is the session's user id. There is no id in the form, so there
 // is nothing to tamper with — SC-3's ownership rule expressed as an absence
 // rather than as a check somebody has to remember.
-func (s *Store) UpdateDisplayName(ctx context.Context, userID, name string) error {
+//
+// **custom 은 이미 검증된 것만 온다.** 이 패키지는 항목의 정의를 모른다 —
+// 스키마와 검증은 content 가 갖고 있고(DEC-3.9), 여기로는 그것을 통과한
+// map 만 넘어온다. 그래서 auth 가 content 를 알 필요가 없다.
+func (s *Store) UpdateProfile(ctx context.Context, userID, name string, custom map[string]any) error {
+	if custom == nil {
+		custom = map[string]any{}
+	}
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1`, userID, name)
+		`UPDATE users SET display_name = $2, custom_fields = $3, updated_at = now()
+		 WHERE id = $1`, userID, name, custom)
 	if err != nil {
 		return err
 	}
@@ -381,6 +400,24 @@ func (s *Store) UpdateDisplayName(ctx context.Context, userID, name string) erro
 		return ErrNoUser
 	}
 	return nil
+}
+
+// CustomFields reads one user's profile item values.
+func (s *Store) CustomFields(ctx context.Context, userID string) (map[string]any, error) {
+	var raw []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT custom_fields FROM users WHERE id = $1`, userID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNoUser
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // HoldsSuperuser reports whether the user holds the superuser role.

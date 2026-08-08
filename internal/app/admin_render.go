@@ -98,7 +98,9 @@ func newAdminRenderer(site func() string, theme string, shop bool, log *slog.Log
 var adminFuncs = func() template.FuncMap {
 	all := theme.FuncMap(theme.Deps{})
 	out := template.FuncMap{}
-	for _, name := range []string{"date", "dateAgo", "money", "number", "filesize"} {
+	// `field` 는 JSONB 맵에서 키 하나를 꺼낸다 — A-401 이 A-406 이 정한 열을
+	// 그리는 데 쓴다. 목록이 코드에 없다는 것이 그 화면의 요점이다.
+	for _, name := range []string{"date", "dateAgo", "money", "number", "filesize", "field"} {
 		out[name] = all[name]
 	}
 	return out
@@ -134,6 +136,7 @@ var adminScreenTitles = map[string]string{
 	"admin/page-edit.html":        "페이지 편집",
 	"admin/menus.html":            "메뉴",
 	"admin/users.html":            "사용자",
+	"admin/user-fields.html":      "회원 항목",
 	"admin/user-detail.html":      "사용자 상세",
 	"admin/roles.html":            "역할·권한",
 	"admin/themes.html":           "테마",

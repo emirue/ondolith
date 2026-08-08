@@ -1,24 +1,35 @@
 {{define "body"}}
-<h1>반품·교환 내역</h1>
-{{with .Data}}
-{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
-<ul class="returns">
-  {{range .Returns}}
-  <li>
-    <strong>{{.ReturnNo}}</strong> · {{.Kind}} · {{.Status}} · {{date .CreatedAt "2006-01-02 15:04"}}
-    <ul>
-      {{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}
-    </ul>
-    {{with .Reason}}<p class="reason">사유: {{.}}</p>{{end}}
-    {{with .RejectReason}}<p class="reason">거부 사유: {{.}}</p>{{end}}
-    {{/* 배송비는 수거 확인 시점에 찍힌 스냅샷이다 — A-512 를 나중에 바꿔도
-         이 값은 달라지지 않는다. */}}
-    {{if .Fault}}<p>귀책 {{.Fault}} · 배송비 {{money .FeeAmount}} ({{.FeePolicy}})</p>{{end}}
-    {{if .PriceDiff}}<p>교환 차액 {{money .PriceDiff}}</p>{{end}}
-  </li>
-  {{else}}
-  <li class="empty">반품·교환 내역이 없습니다.</li>
+<section class="page">
+  <h1>반품·교환 내역</h1>
+  {{with .Data}}
+  {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+  <ul class="returns">
+    {{range .Returns}}
+    <li>
+      <strong>{{.ReturnNo}}</strong> · {{.Kind}} · {{.Status}} · {{date .CreatedAt "2006-01-02 15:04"}}
+      <ul>
+        {{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}
+      </ul>
+      {{with .Reason}}<p class="reason">사유: {{.}}</p>{{end}}
+      {{with .RejectReason}}<p class="reason">거부 사유: {{.}}</p>{{end}}
+      {{/* 배송비는 수거 확인 시점에 찍힌 스냅샷이다 — A-512 를 나중에 바꿔도
+           이 값은 달라지지 않는다. */}}
+      {{if .Fault}}<p>귀책 {{.Fault}} · 배송비 {{money .FeeAmount}} ({{.FeePolicy}})</p>{{end}}
+      {{/* **차액이 양수인 교환에만 결제할 것이 있다** (D19 P-514). 이 링크가
+           없는 동안 차액결제대기 상태의 교환은 진행할 방법이 없었다 — 결제
+           화면은 있는데 그리로 가는 길이 어디에도 없었다. */}}
+      {{if .PriceDiff}}
+        <p>교환 차액 {{money .PriceDiff}}
+          {{if and (gt .PriceDiff 0) (eq .Status "차액결제대기")}}
+            <a class="btn" href="/orders/{{$.Data.Order.OrderNo}}/exchange/{{.ReturnNo}}/pay">차액 결제</a>
+          {{end}}
+        </p>
+      {{end}}
+    </li>
+    {{else}}
+    <li class="empty">반품·교환 내역이 없습니다.</li>
+    {{end}}
+  </ul>
   {{end}}
-</ul>
-{{end}}
+</section>
 {{end}}

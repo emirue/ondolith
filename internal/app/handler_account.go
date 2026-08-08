@@ -1,8 +1,10 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
@@ -13,6 +15,10 @@ import (
 type accountDeps struct {
 	loginDeps
 	mailer *auth.Mailer
+	// userFields 는 운영자가 정의한 회원 프로필 항목이다 (FR-215, A-406).
+	// 함수인 이유는 `social` 과 같다 — 이 타입이 content 저장소 전체를 알
+	// 필요가 없고, 정의는 A-406 에서 언제든 바뀐다.
+	userFields func(context.Context) ([]content.FieldSchema, error)
 	// verifyRequired mirrors the auth.email_verification_required setting
 	// (FR-214). Sites that cannot send mail — an intranet — turn it off.
 	verifyRequired func() bool
@@ -73,6 +79,21 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// **가입할 때 받는 항목도 운영자가 정한다** (FR-215). 여기서 검증하지 않고
+	// 나중에 「내 정보」에서만 받으면, 필수로 지정한 항목이 필수가 아니게 된다.
+	fields, _, err := d.profileFields(r, "")
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	custom, err := content.ValidateCustomFields(fields, accountCustomValues(r, fields), nil)
+	if err != nil {
+		d.render(w, r, "auth/signup.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": err.Error(), "Form": f,
+				"Inputs": content.FieldInputs(fields, nil)})
+		return
+	}
+
 	userID, err := d.store.CreateUser(ctx, email, hash, f.DisplayName)
 	if errors.Is(err, auth.ErrEmailTaken) {
 		// FR-210: the answer must not reveal that this address has an account.
@@ -87,6 +108,14 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
+	}
+	// 항목 값은 계정이 생긴 뒤에 쓴다 — CreateUser 는 항목의 존재를 모르고,
+	// 알게 하면 auth 가 content 의 스키마를 알아야 한다.
+	if len(custom) > 0 {
+		if err := d.store.UpdateProfile(ctx, userID, f.DisplayName, custom); err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if !d.verifyRequired() {
@@ -280,7 +309,13 @@ func (d *accountDeps) signupForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/me", http.StatusSeeOther)
 		return
 	}
-	d.render(w, r, "auth/signup.html", http.StatusOK, nil)
+	fields, _, err := d.profileFields(r, "")
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.render(w, r, "auth/signup.html", http.StatusOK,
+		map[string]any{"Inputs": content.FieldInputs(fields, nil)})
 }
 
 // P-108 GET — own profile. The subject is the session, so there is no id.
@@ -290,9 +325,53 @@ func (d *accountDeps) profileForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, loginPath, http.StatusSeeOther)
 		return
 	}
+	fields, values, err := d.profileFields(r, a.User.ID)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
 	d.render(w, r, "account/profile.html", http.StatusOK, map[string]any{
 		"DisplayName": a.User.DisplayName, "Email": a.User.Email,
+		"Inputs": content.FieldInputs(fields, values),
 	})
+}
+
+// profileFields loads the operator-defined items and this user's answers.
+func (d *accountDeps) profileFields(r *http.Request, userID string) (
+	[]content.FieldSchema, map[string]any, error,
+) {
+	if d.userFields == nil {
+		return nil, nil, nil
+	}
+	fields, err := d.userFields(r.Context())
+	if err != nil {
+		return nil, nil, err
+	}
+	if userID == "" {
+		return fields, nil, nil
+	}
+	values, err := d.store.CustomFields(r.Context(), userID)
+	return fields, values, err
+}
+
+// accountCustomValues is the form reduced to the keys an operator defined.
+//
+// **정의되지 않은 키는 조용히 버린다** (D19 P-205 「받지 않는 필드」 — 게시판
+// 글과 같은 규칙). 값이 어디에도 닿지 않는다는 것이 방어이고, 거부까지 하면
+// 폼에 무엇이 더 실려 있느냐에 따라 정상 요청이 422 가 된다 — `/me` 에
+// `is_admin` 을 끼워 보내는 요청이 실제로 그렇다. 그것은 무시돼야지 저장을
+// 막아서는 안 된다.
+//
+// 계정 자신의 필드는 애초에 스키마에 없으므로 여기서 따로 거를 필요가 없다:
+// A-406 이 `email` 같은 예약 키를 거부한다.
+func accountCustomValues(r *http.Request, fields []content.FieldSchema) url.Values {
+	out := url.Values{}
+	for _, f := range fields {
+		if v, ok := r.PostForm[f.Key]; ok {
+			out[f.Key] = v
+		}
+	}
+	return out
 }
 
 // P-109 GET — the password form.
@@ -320,14 +399,31 @@ func (d *accountDeps) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PostFormValue("display_name")
+	fields, prev, err := d.profileFields(r, a.User.ID)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	redraw := func(code int, msg string) {
+		d.render(w, r, "account/profile.html", code, map[string]any{
+			"DisplayName": name, "Email": a.User.Email,
+			"Inputs": content.FieldInputs(fields, prev), "Error": msg,
+		})
+	}
 	if name == "" {
-		d.render(w, r, "account/profile.html", http.StatusBadRequest,
-			map[string]any{"Error": "표시 이름을 입력하세요."})
+		redraw(http.StatusBadRequest, "표시 이름을 입력하세요.")
+		return
+	}
+	// **스키마에 없는 키는 거부된다** (D14 3절 규칙 2). 폼에서 온 것을 그대로
+	// JSONB 에 넣으면 그것이 곧 대량 할당이다.
+	custom, err := content.ValidateCustomFields(fields, accountCustomValues(r, fields), prev)
+	if err != nil {
+		redraw(http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// Ownership is the session's user id, never a form field: SC-3 says the
 	// subject comes from the session, so there is no id to tamper with.
-	if err := d.store.UpdateDisplayName(r.Context(), a.User.ID, name); err != nil {
+	if err := d.store.UpdateProfile(r.Context(), a.User.ID, name, custom); err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}

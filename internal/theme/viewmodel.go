@@ -27,6 +27,17 @@ type View struct {
 	Data any
 }
 
+// CanKeys is the closed set of permissions a theme may ask about.
+//
+// **닫힌 집합이다.** 액터가 가진 권한을 통째로 넘기면 그 순간 테마가 권한
+// 모델의 모양을 읽게 되고, 복사된 테마는 다르게 설정된 사이트로 그 가정을
+// 들고 간다 (위 규약). 그래서 테마가 실제로 묻는 것만 여기 적고, 늘릴 때는
+// 「어느 화면이 무엇을 그릴지 정하는 데 쓰는가」를 함께 적는다.
+//
+//   - admin.access — 머리글의 「관리」 링크. 이것이 없던 동안 관리자는 사이트
+//     어디에서도 관리 화면으로 갈 수 없었다.
+var CanKeys = []string{"admin.access"}
+
 // Site is the site-wide chrome. Only what a template draws: no DSN, no SMTP
 // credentials, no secrets — those live in settings rows the handlers read
 // directly and never pass on.

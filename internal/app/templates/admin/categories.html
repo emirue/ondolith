@@ -1,22 +1,78 @@
 {{define "content"}}
 {{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
-<table class="adm-table">
-  <thead><tr><th>이름</th><th>주소</th><th>상위</th></tr></thead>
-  <tbody>
-    {{range .Categories}}
-    <tr><td>{{.Name}}</td><td>{{.Slug}}</td><td>{{.ParentID}}</td></tr>
-    {{else}}
-    <tr><td colspan="3">카테고리가 없습니다.</td></tr>
-    {{end}}
-  </tbody>
-</table>
-{{/* 순환 지정은 서버가 거부한다 (A-509). DB 는 못 잡는다 — FK 는 순환을 보지
-     못하고 `parent_id <> id` 는 직접 자기 참조만 잡는다. */}}
-<form method="post" class="adm-form">
-  <label for="id">카테고리 ID</label>
-  <input id="id" name="id" required>
-  <label for="parent_id">새 상위 ID (비우면 최상위)</label>
-  <input id="parent_id" name="parent_id">
-  <button type="submit">이동</button>
-</form>
+
+{{$cats := .Categories}}
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>이름</th><th>주소</th><th>상위</th><th>순서</th><th>동작</th></tr></thead>
+      <tbody>
+      {{range .Categories}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td><a href="/shop/c/{{.Slug}}">{{.Slug}}</a></td>
+          {{/* 상위를 이름으로 보인다. 앞 판은 UUID 를 그대로 냈는데, 화면에
+               UUID 가 없으니 그것을 골라 옮길 방법도 없었다. */}}
+          <td>{{$p := .ParentID}}{{range $cats}}{{if eq .ID $p}}{{.Name}}{{end}}{{end}}</td>
+          <td>{{.SortOrder}}</td>
+          <td>
+            <span class="adm-actions">
+              <form method="post" action="/admin/categories/{{.ID}}/delete">
+                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+              </form>
+            </span>
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="5" class="adm-empty">카테고리가 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="adm-card">
+  <h2>카테고리 추가</h2>
+  <form method="post" action="/admin/categories/new">
+    <div class="adm-field-row">
+      <label class="adm-field"><span>이름</span>
+        <input type="text" name="name" required maxlength="100"></label>
+      <label class="adm-field"><span>주소</span>
+        <input type="text" name="slug" required maxlength="100" pattern="[a-z0-9][a-z0-9-]*"></label>
+      <label class="adm-field"><span>상위</span>
+        <select name="parent_id">
+          <option value="">(최상위)</option>
+          {{range .Categories}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select></label>
+      <label class="adm-field"><span>순서</span>
+        <input type="number" name="sort_order" value="0"></label>
+    </div>
+    <p class="adm-hint">주소가 공개 URL 이 됩니다 — <code>/shop/c/&lt;주소&gt;</code></p>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">추가</button>
+    </div>
+  </form>
+</div>
+
+<div class="adm-card">
+  <h2>상위 바꾸기</h2>
+  {{/* 순환 지정은 서버가 거부한다 (A-509). DB 는 못 잡는다 — FK 는 순환을 보지
+       못하고 `parent_id <> id` 는 직접 자기 참조만 잡는다. */}}
+  <form method="post" action="/admin/categories">
+    <div class="adm-field-row">
+      <label class="adm-field"><span>옮길 카테고리</span>
+        <select name="id" required>
+          {{range .Categories}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select></label>
+      <label class="adm-field"><span>새 상위</span>
+        <select name="parent_id">
+          <option value="">(최상위)</option>
+          {{range .Categories}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select></label>
+    </div>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn">이동</button>
+    </div>
+  </form>
+</div>
 {{end}}

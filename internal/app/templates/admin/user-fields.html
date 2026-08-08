@@ -1,0 +1,58 @@
+{{define "content"}}
+{{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
+<p class="muted">
+  회원가입(P-103)과 내 정보(P-109)에서 받을 항목입니다. <strong>개수 제한이 없습니다.</strong>
+</p>
+<div class="adm-card" style="padding:0">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>키</th><th>라벨</th><th>타입</th><th>필수</th><th>목록</th><th>순서</th><th>동작</th></tr></thead>
+      <tbody>
+      {{range .Fields}}
+        <tr>
+          <td class="muted">{{.Key}}</td><td>{{.Label}}</td><td>{{.Type}}</td>
+          <td>{{if .Required}}✔{{end}}</td><td>{{if .ShowInList}}✔{{end}}</td><td>{{.Sort}}</td>
+          <td>
+            <form method="post" action="/admin/user-fields">
+              <input type="hidden" name="delete" value="{{.Key}}">
+              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+            </form>
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="7" class="adm-empty">항목이 없습니다. 이메일·이름·비밀번호만 받습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="adm-card">
+  <h2>항목 추가 · 수정</h2>
+  <form method="post" action="/admin/user-fields">
+    <div class="adm-field-row">
+      <label class="adm-field"><span>키 (영문 소문자)</span>
+        <input type="text" name="key" pattern="[a-z][a-z0-9_]*" required></label>
+      <label class="adm-field"><span>라벨</span><input type="text" name="label" required></label>
+      <label class="adm-field"><span>타입</span>
+        <select name="field_type">{{range .Types}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+      <label class="adm-field"><span>순서</span><input type="number" name="sort_order" value="0"></label>
+    </div>
+    <label class="adm-field"><span>선택지 (select · multiselect, 한 줄에 하나)</span>
+      <textarea name="options" style="min-height:6rem"></textarea></label>
+    <div class="adm-field-row">
+      <label class="adm-field"><span>필수</span>
+        <select name="is_required"><option value="">아니오</option><option value="1">예</option></select></label>
+      <label class="adm-field"><span>사용자 목록에 표시</span>
+        <select name="show_in_list"><option value="">아니오</option><option value="1">예</option></select></label>
+    </div>
+    <div class="adm-actions" style="justify-content:flex-end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+    <p class="adm-hint">
+      같은 키로 저장하면 갱신입니다. 항목을 지워도 회원이 이미 적어 낸 값은 남습니다 —
+      실수로 지웠을 때 사람들의 입력까지 잃지 않도록.
+    </p>
+  </form>
+</div>
+{{end}}

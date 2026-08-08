@@ -28,6 +28,9 @@ type CartItem struct {
 	ID        string
 	VariantID string
 	ProductID string
+	// Slug 는 상품 화면(P-303)의 주소다. ProductID 로 링크를 그리면 라우트가
+	// `/shop/p/{slug}` 이므로 눌렀을 때 404 가 난다 — 실제로 그랬다.
+	Slug      string
 	Name      string
 	Option    map[string]string
 	UnitPrice int
@@ -121,7 +124,7 @@ func (s *Store) CartItems(ctx context.Context, o CartOwner) ([]CartItem, error) 
 		return nil, ErrCartOwner
 	}
 	const q = `
-		SELECT ci.id, ci.variant_id, p.id, p.name, v.option_values,
+		SELECT ci.id, ci.variant_id, p.id, p.slug, p.name, v.option_values,
 		       p.base_price + v.price_delta, ci.quantity, v.stock,
 		       (p.is_visible AND v.is_visible AND v.stock >= ci.quantity)
 		FROM cart_items ci
@@ -141,7 +144,7 @@ func (s *Store) CartItems(ctx context.Context, o CartOwner) ([]CartItem, error) 
 	for rows.Next() {
 		var it CartItem
 		var raw []byte
-		if err := rows.Scan(&it.ID, &it.VariantID, &it.ProductID, &it.Name, &raw,
+		if err := rows.Scan(&it.ID, &it.VariantID, &it.ProductID, &it.Slug, &it.Name, &raw,
 			&it.UnitPrice, &it.Quantity, &it.Stock, &it.Sellable); err != nil {
 			return nil, err
 		}

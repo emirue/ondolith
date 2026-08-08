@@ -4,9 +4,11 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/commerce"
+	"github.com/emirue/ondolith/internal/content"
 )
 
 // OrderList is A-504.
@@ -190,6 +192,81 @@ func (d *Deps) CategoryList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Render(w, r, "admin/categories.html", http.StatusOK, map[string]any{"Categories": cats})
+}
+
+// categoryError re-renders A-509 with the message. 세 핸들러가 같은 화면으로
+// 돌아가므로 한 곳에 둔다.
+func (d *Deps) categoryError(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	cats, _ := d.Commerce.Categories(r.Context())
+	d.Render(w, r, "admin/categories.html", code,
+		map[string]any{"Categories": cats, "Error": msg})
+}
+
+// CategoryCreate is A-509 POST /admin/categories/new.
+//
+// **이것이 없어서 카테고리를 만들 수 없었다.** A-509 는 「이동」만 있었고,
+// 그래서 P-302 는 어떤 주소로도 열리지 않는 화면이었다 — 만들 수 없는 것의
+// 목록 화면이었다.
+func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "product.manage")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	cat := commerce.Category{
+		Name:     strings.TrimSpace(r.PostFormValue("name")),
+		Slug:     strings.TrimSpace(r.PostFormValue("slug")),
+		ParentID: strings.TrimSpace(r.PostFormValue("parent_id")),
+	}
+	cat.SortOrder, _ = strconv.Atoi(r.PostFormValue("sort_order"))
+	if cat.Name == "" {
+		d.categoryError(w, r, http.StatusUnprocessableEntity, "이름을 입력하세요.")
+		return
+	}
+	// 슬러그는 URL 이 된다 — 형식과 예약어를 게시판·페이지와 **같은 함수**로
+	// 검사한다 (D19 A-509). 여기서 따로 정규식을 쓰면 그 둘과 갈라진다.
+	if err := content.ValidateSlug(cat.Slug); err != nil {
+		d.categoryError(w, r, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	switch _, err := d.Commerce.CreateCategory(r.Context(), cat); {
+	case errors.Is(err, commerce.ErrSlugTaken), errors.Is(err, commerce.ErrCategoryMissing):
+		d.categoryError(w, r, http.StatusUnprocessableEntity, err.Error())
+		return
+	case err != nil:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.log(r, c, "category.create", "category", cat.Slug, "카테고리 생성")
+	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
+}
+
+// CategoryDelete is A-509 POST /admin/categories/{id}/delete.
+//
+// 브라우저 폼은 DELETE 를 보낼 수 없다 — 메뉴·페이지 삭제와 같은 규약이다.
+func (d *Deps) CategoryDelete(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "product.manage")
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	switch err := d.Commerce.DeleteCategory(r.Context(), id); {
+	case errors.Is(err, commerce.ErrCategoryInUse):
+		// 409 다. 요청은 올바르고 지금 상태가 거부한 것이다 (D19 A-509).
+		d.categoryError(w, r, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, commerce.ErrNotFound):
+		d.categoryError(w, r, http.StatusNotFound, "없는 카테고리입니다.")
+		return
+	case err != nil:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.log(r, c, "category.delete", "category", id, "카테고리 삭제")
+	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
 }
 
 // CategoryReparent is A-509 POST.

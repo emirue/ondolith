@@ -186,6 +186,12 @@ func (d *shopDeps) orderConfirm(w http.ResponseWriter, r *http.Request) {
 func readRefundLines(r *http.Request) []commerce.RefundLine {
 	var out []commerce.RefundLine
 	for _, id := range r.PostForm["item_id"] {
+		// **빈 값은 거른다.** 빈 문자열이 그대로 내려가면 `uuid` 컬럼과
+		// 비교하다 22P02 로 터져 500 이 된다 — 잘못 만든 폼 하나가 서버
+		// 오류가 되는 자리이고, 이것은 사용자 입력이므로 422 로 끝나야 한다.
+		if id == "" {
+			continue
+		}
 		qty, err := strconv.Atoi(r.PostFormValue("qty_" + id))
 		if err != nil || qty < 1 {
 			continue

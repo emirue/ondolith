@@ -174,7 +174,7 @@ func TestAllMigrationsApply(t *testing.T) {
 		"product_categories", "product_options", "product_variants", "products",
 		"refund_items", "refunds", "return_items", "returns", "role_permissions",
 		"roles", "sessions", "settings", "shipments", "social_accounts", "terms",
-		"user_roles", "users", "webhook_events",
+		"user_fields", "user_roles", "users", "webhook_events",
 	}
 	got := tableNames(t, pool)
 	if len(got) != len(want) {

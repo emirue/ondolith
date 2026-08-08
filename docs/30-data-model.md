@@ -20,6 +20,19 @@ posts         board_id로 구분. 공통 컬럼 + custom_fields JSONB
 템플릿이 그 스키마를 읽어 폼과 목록을 동적으로 렌더링한다 (FR-502, FR-503).
 이것이 "설정으로 게시판 뚝딱" 경험의 핵심이다.
 
+**회원 프로필도 같은 구조다** (FR-215):
+
+```
+user_fields   회원 프로필 항목 스키마 (이름, 타입, 필수, 선택지, 순서)
+users         공통 컬럼 + custom_fields JSONB
+```
+
+`board_fields`와 나란한 표를 따로 두는 이유: 하나로 합치면 `(scope, scope_id)`
+같은 다형 키가 생겨 FK를 걸 수 없다. 모양이 같을 뿐 참조 대상이 다르다.
+**개수 제한이 없다** — 여분 칸을 고정 개수로 만들어 두는 방식(그누보드가 10개)은
+그 개수를 넘는 순간 `ALTER TABLE`을 요구하고, 그것이 [DEC-3.9](../.ai/DECISIONS.md)가
+피하려는 바로 그 상태다.
+
 ### 2. PostgreSQL 고정
 
 MySQL 동시 지원은 배제됐다 ([DEC-0](../.ai/DECISIONS.md)). JSONB 없이는 위 설계가 성립하지 않는다.
@@ -141,6 +154,8 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `boards.slug` · `boards.skin` | 64 | URL 한 세그먼트 / 템플릿 파일명이 된다 |
 | `boards.name` · `board_fields.label` | 100 | `display_name`과 같은 상한 — 새 상수를 늘리지 않는다 |
 | `board_fields.key` | 32 | 폼 필드명이자 **모든 글의 JSONB 키**라 행 크기에 직접 들어간다 |
+| `user_fields.key` | 32 | `board_fields.key`와 같은 이유·같은 상한 — 모든 회원 행의 JSONB 키가 된다 |
+| `user_fields.label` | 100 | `board_fields.label`과 같은 상한 |
 | `board_fields.options` | 4,096 바이트 | 항목당 100자 × 최대 50개. **항목 수·길이는 핸들러가, 총량은 DB가** 막는다 |
 | `posts.title` | 200 | 메타·OG 제목 + 목록 한 열 |
 | `posts.body` | 50,000 | 한글 5만 자 ≈ 146 KiB. 더 큰 문서는 첨부의 몫이다 |
@@ -264,6 +279,7 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `is_active` | boolean | NOT NULL DEFAULT true | 삭제보다 비활성이 기본 ([D15](15-access-control.md) 5.3) |
 | `sessions_valid_from` | timestamptz | NOT NULL DEFAULT now() | 이 시각보다 오래된 세션을 다음 요청에서 거부 (D15 5.4) |
 | `email_verified_at` | timestamptz | NULL | NULL이면 미인증 (FR-214) |
+| `custom_fields` | jsonb | NOT NULL DEFAULT `'{}'` | A-406이 정의한 회원 항목의 값 (FR-215). 정의를 지워도 여기 남은 값은 지우지 않는다 |
 
 `sessions_valid_from`을 NULL 허용으로 두면 "컷오프 없음"이 NULL이 되어 비교가 **fail-open**이
 된다. NOT NULL + 기본값이면 판정이 언제나 단순 비교 하나다.
@@ -345,6 +361,25 @@ CREATE INDEX role_permissions_board_id_idx ON role_permissions (board_id)
 >
 > `board_id`를 Phase 1에 둘 수 없다: `boards`가 Phase 2 테이블이고, 3절이 FK에 `REFERENCES`
 > 명시를 요구한다. 존재하지 않는 테이블을 가리킬 수 없다.
+
+**`user_fields`** — 회원 프로필 항목 스키마 (FR-215)
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `key` | text | NOT NULL **UNIQUE**, `^[a-z][a-z0-9_]*$`, 32자 이하 |
+| `label` | text | NOT NULL, 1~100자 |
+| `field_type` | text | NOT NULL CHECK 8종 (`board_fields`와 **같은 목록**) |
+| `is_required` | boolean | NOT NULL DEFAULT false |
+| `show_in_list` | boolean | NOT NULL DEFAULT false |
+| `options` | jsonb | NOT NULL DEFAULT `'[]'` |
+| `sort_order` | integer | NOT NULL DEFAULT 0 |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+`board_fields`와 나란한 표다. `field_type`의 목록이 **같아야** 한다 —
+`partials/field.html` 하나가 두 곳의 폼을 다 그리므로, 한쪽에만 타입을 늘리면
+그 타입은 그려지지 않는다. 값은 `users.custom_fields`에 들어가고, 정의를 지워도
+남는다 ([D14](14-screen-flows.md) 3절 규칙 4).
 
 **`user_roles`**
 

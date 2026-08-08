@@ -12,6 +12,9 @@ var (
 	ErrCategoryDepth = errors.New("commerce: 카테고리 깊이 상한을 넘었습니다")
 	// ErrCategoryMissing is a parent that does not exist.
 	ErrCategoryMissing = errors.New("commerce: 존재하지 않는 상위 카테고리입니다")
+	// ErrCategoryInUse is 소속 상품이나 하위 카테고리가 있어서 지울 수 없는
+	// 경우다. DB 의 RESTRICT 가 판정하고 이 값은 그것을 옮긴다 (D19 A-509).
+	ErrCategoryInUse = errors.New("commerce: 소속 상품이나 하위 카테고리가 있어 지울 수 없습니다")
 )
 
 // MaxCategoryDepth 는 설계 제약이 아니라 폭주 방지턱이다 (D30).

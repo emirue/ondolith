@@ -49,6 +49,7 @@ var nav = []NavItem{
 	{Screen: "A-309", Title: "첨부 관리", Path: "/admin/attachments", Group: "콘텐츠", Permission: "post.moderate", Order: 18},
 	{Screen: "A-204", Title: "메뉴", Path: "/admin/menus", Group: "콘텐츠", Permission: "menu.manage", Order: 20},
 	{Screen: "A-401", Title: "사용자", Path: "/admin/users", Group: "사용자", Permission: "user.view", Order: 30},
+	{Screen: "A-406", Title: "회원 항목", Path: "/admin/user-fields", Group: "사용자", Permission: "user.update", Order: 31},
 	{Screen: "A-403", Title: "역할·권한", Path: "/admin/roles", Group: "사용자", Permission: "role.view", Order: 40},
 	{Screen: "A-201", Title: "사이트 설정", Path: "/admin/settings", Group: "설정", Permission: "settings.update", Order: 50},
 	{Screen: "A-205", Title: "메일", Path: "/admin/settings/mail", Group: "설정", Permission: "settings.update", Order: 60},

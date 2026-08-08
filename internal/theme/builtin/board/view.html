@@ -20,10 +20,33 @@
 
   <div class="page-body">{{nl2br .Post.Body}}</div>
 
-  <p class="actions">
+  {{/* 첨부 목록. 이것이 없는 동안 목록의 📎 배지는 영영 켜지지 않았고,
+       `/attachments/{id}` 는 어느 화면도 가리키지 않는 라우트였다. */}}
+  {{if .Attachments}}
+  <ul class="attachments">
+    {{range .Attachments}}
+    <li><a href="/attachments/{{.ID}}">{{.OriginalName}}</a>
+        <span class="meta">{{filesize .ByteSize}}</span></li>
+    {{end}}
+  </ul>
+  {{end}}
+
+  {{/* **삭제 버튼이 없어서 P-207 은 라우트도 핸들러도 있는데 누를 자리가
+       없었다** — 글을 쓰면 고칠 수는 있어도 지울 수 없었다. 되돌릴 수 없는
+       작업이라 확인을 한 번 받는다. */}}
+  {{/* **`<p>` 가 아니라 `<div>` 다.** `<p>` 의 내용 모델은 phrasing content 라
+       파서가 `<form>` 을 만나면 문단을 먼저 닫는다 — 삭제 버튼이 이 줄 밖으로
+       밀려나 홀로 떨어져 그려졌다. 브라우저에서 재 보고 알았다. */}}
+  <div class="actions">
     {{if .CanEdit}}<a class="btn" href="/board/{{.Board.Slug}}/{{.Post.ID}}/edit">수정</a>{{end}}
+    {{if or .CanEdit .CanModerate}}
+      <form method="post" action="/board/{{.Board.Slug}}/{{.Post.ID}}/delete" class="inline"
+            onsubmit="return confirm('이 글을 삭제할까요?')">
+        <button type="submit" class="btn btn--danger">삭제</button>
+      </form>
+    {{end}}
     <a class="btn" href="/board/{{.Board.Slug}}">목록</a>
-  </p>
+  </div>
 </article>
 
 <section class="comments">
@@ -34,6 +57,18 @@
         {{if .DeletedAt.IsZero}}
           <p class="meta">{{if .AuthorName}}{{.AuthorName}}{{else}}(탈퇴){{end}} · {{dateAgo .CreatedAt}}</p>
           <p>{{nl2br .Body}}</p>
+          {{/* 자기 댓글에만 낸다. **판정은 서버가 다시 한다** (P-209·P-210 은
+               「본인」) — 이 조건은 안내이고 방어가 아니다. 이것이 없는 동안
+               두 화면 모두 주소를 직접 치지 않으면 닿을 수 없었다. */}}
+          {{if and $.User (eq .AuthorID $.User.ID)}}
+          <div class="actions">
+            <a class="btn btn--sm" href="/comments/{{.ID}}/edit">수정</a>
+            <form method="post" action="/comments/{{.ID}}/delete" class="inline"
+                  onsubmit="return confirm('이 댓글을 삭제할까요?')">
+              <button type="submit" class="btn btn--sm btn--danger">삭제</button>
+            </form>
+          </div>
+          {{end}}
         {{else}}
           {{/* 툼스톤. 본문은 DB 에서 이미 비어 있다 — 테마의 if 에 기대지 않는다 */}}
           <p class="deleted">삭제된 댓글입니다.</p>

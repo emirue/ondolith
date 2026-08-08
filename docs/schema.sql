@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict cwogs9jeW5gQXXmwNscUAnB9GmABBrcfug0jbQU7Vbqn5dw1vfEImqOcywUCvzq
+\restrict kJreQqB0giBxICodnWSieT4Qj8pOOAntyHccyOQ1oiIZ8Rcgia0A3S9zmEZLY57
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -707,6 +707,27 @@ CREATE TABLE public.terms (
 
 
 --
+-- Name: user_fields; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_fields (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    key text NOT NULL,
+    label text NOT NULL,
+    field_type text NOT NULL,
+    is_required boolean DEFAULT false NOT NULL,
+    show_in_list boolean DEFAULT false NOT NULL,
+    options jsonb DEFAULT '[]'::jsonb NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_fields_field_type_check CHECK ((field_type = ANY (ARRAY['text'::text, 'textarea'::text, 'number'::text, 'select'::text, 'checkbox'::text, 'multiselect'::text, 'date'::text, 'url'::text]))),
+    CONSTRAINT user_fields_key_check CHECK (((key ~ '^[a-z][a-z0-9_]*$'::text) AND (length(key) <= 32))),
+    CONSTRAINT user_fields_label_check CHECK (((length(label) >= 1) AND (length(label) <= 100)))
+);
+
+
+--
 -- Name: user_roles; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -733,7 +754,8 @@ CREATE TABLE public.users (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
     sessions_valid_from timestamp with time zone DEFAULT now() NOT NULL,
-    email_verified_at timestamp with time zone
+    email_verified_at timestamp with time zone,
+    custom_fields jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 
@@ -1204,6 +1226,22 @@ ALTER TABLE ONLY public.terms
 
 ALTER TABLE ONLY public.terms
     ADD CONSTRAINT terms_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_fields user_fields_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_fields
+    ADD CONSTRAINT user_fields_key_key UNIQUE (key);
+
+
+--
+-- Name: user_fields user_fields_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_fields
+    ADD CONSTRAINT user_fields_pkey PRIMARY KEY (id);
 
 
 --
@@ -1981,5 +2019,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict cwogs9jeW5gQXXmwNscUAnB9GmABBrcfug0jbQU7Vbqn5dw1vfEImqOcywUCvzq
+\unrestrict kJreQqB0giBxICodnWSieT4Qj8pOOAntyHccyOQ1oiIZ8Rcgia0A3S9zmEZLY57
 

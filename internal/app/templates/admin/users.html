@@ -3,13 +3,15 @@
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead>
-        <tr><th>이메일</th><th>이름</th><th>역할</th><th>상태</th></tr>
+        {{/* 열은 A-406 이 정한다 — 코드에 항목 목록이 없다 (D14 3절 규칙 1). */}}
+        <tr><th>이메일</th><th>이름</th>{{range .Columns}}<th>{{.Label}}</th>{{end}}<th>역할</th><th>상태</th></tr>
       </thead>
       <tbody>
       {{range .Users}}
         <tr>
           <td><a href="/admin/users/{{.ID}}">{{.Email}}</a></td>
           <td>{{.DisplayName}}</td>
+          {{$u := .}}{{range $.Columns}}<td class="muted">{{field $u.Custom .Key}}</td>{{end}}
           <td class="muted">{{range .Roles}}{{.}} {{end}}</td>
           <td>
             {{if .IsActive}}<span class="adm-badge">활성</span>
@@ -18,7 +20,7 @@
           </td>
         </tr>
       {{else}}
-        <tr><td colspan="4" class="adm-empty">사용자가 없습니다.</td></tr>
+        <tr><td colspan="9" class="adm-empty">사용자가 없습니다.</td></tr>
       {{end}}
       </tbody>
     </table>
@@ -27,7 +29,7 @@
     <span class="adm-count">{{len .Users}}명 · {{.PageNo}}쪽</span>
     {{if gt .Page 0}}<a href="/admin/users?page={{.PrevPage}}" aria-label="이전">‹</a>{{end}}
     <span class="adm-page adm-page--current">{{.PageNo}}</span>
-    <a href="/admin/users?page={{.NextPage}}" aria-label="다음">›</a>
+    {{if .HasNext}}<a href="/admin/users?page={{.NextPage}}" aria-label="다음">›</a>{{end}}
   </div>
 </div>
 

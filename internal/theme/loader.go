@@ -232,6 +232,20 @@ func (l *Loader) Render(w io.Writer, name string, data any) error {
 	return t.ExecuteTemplate(w, "base.html", data)
 }
 
+// RenderPartial draws only the screen's own block, without the page chrome.
+//
+// **조각은 조각이어야 한다.** P-304 는 htmx 가 상품 화면의 한 조각만 갈아
+// 끼우려고 부르는데, `Render` 로 그리면 `<!doctype html>` 부터 머리글·바닥글까지
+// 통째로 돌아와 그 조각 자리에 페이지가 통째로 박힌다. 아무도 그것을 부르지
+// 않아서 지금까지 드러나지 않았을 뿐이다.
+func (l *Loader) RenderPartial(w io.Writer, name string, data any) error {
+	t, err := l.Template(name)
+	if err != nil {
+		return err
+	}
+	return t.ExecuteTemplate(w, "body", data)
+}
+
 // HasBuiltin reports whether the built-in theme carries name. A-202 uses this
 // before activating a theme: a name the built-in lacks can never be a fallback,
 // so requesting it is a core bug rather than a theme error.

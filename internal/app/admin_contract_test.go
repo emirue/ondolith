@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 // **관리자 템플릿은 값을 최상위에서 읽는다.**
@@ -242,6 +244,49 @@ func TestAdminStylesheetStylesBareFormElements(t *testing.T) {
 	for _, el := range []string{"fieldset", "legend", "label", "dl"} {
 		if !regexp.MustCompile(`(?m)^` + el + `[ ,{]`).Match(css) {
 			t.Errorf("`%s` 에 요소 규칙이 없다 — 클래스를 안 붙이는 자리는 기본 모양으로 남는다", el)
+		}
+	}
+}
+
+// **`var()` 로 쓰는 토큰은 전부 정의돼 있다.**
+//
+// 정의되지 않은 토큰은 조용히 「값 없음」이 되고, 그 속성은 상속값이나 초깃값으로
+// 그려진다 — 배경이 사라지거나 테두리가 검게 나오는데 오류는 없다. 실제로 첨부
+// 목록의 배경이 `var(--surface-2, transparent)` 였고, 그런 토큰은 없어서 늘
+// 투명이었다. 대체값이 있으면 더 조용하다.
+//
+// **두 스타일시트를 한 검사가 본다.** 관리자 화면과 테마는 팔레트를 공유하되
+// 파일이 다르고, 판정을 두 벌로 두면 한쪽만 고쳐진다. 이 패키지가 양쪽을 다
+// 읽을 수 있어 여기 있다.
+func TestEveryCSSTokenIsDefined(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := regexp.MustCompile(`(--[a-z0-9-]+)\s*:`)
+	use := regexp.MustCompile(`var\((--[a-z0-9-]+)`)
+
+	for name, src := range map[string]string{
+		"admin/admin.css":   string(adminCSS),
+		"builtin/style.css": string(themeCSS),
+	} {
+		defined := map[string]bool{}
+		for _, m := range def.FindAllStringSubmatch(src, -1) {
+			defined[m[1]] = true
+		}
+		uses := use.FindAllStringSubmatch(src, -1)
+		if len(uses) < 20 {
+			t.Fatalf("%s: var() 를 %d 개밖에 못 찾았다 — 검사가 헛돌았다", name, len(uses))
+		}
+		for _, m := range uses {
+			if !defined[m[1]] {
+				t.Errorf("%s: %s 를 쓰는데 정의가 없다 — 그 속성은 조용히 빈 값이 된다",
+					name, m[1])
+			}
 		}
 	}
 }

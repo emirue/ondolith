@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -117,6 +118,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	authStore := auth.NewStore(pool)
 	contentStore := content.NewStore(pool)
+
+	// **업로드 디렉터리를 만든다.** 아무도 만들지 않아서 `os.OpenRoot` 가 없는
+	// 경로에서 실패했고, 그래서 첨부는 화면을 붙여도 저장될 수 없었다 —
+	// 설치도 부팅도 이 디렉터리를 만들지 않았다 (FR-506).
+	//
+	// 여기서 하는 이유: 경로는 설정값이고(NFR-304) 운영자가 옮길 수 있으므로,
+	// 설치 한 번이 아니라 **뜰 때마다** 확인해야 한다.
+	if err := os.MkdirAll(cfg.Uploads(), 0o755); err != nil {
+		return fail(fmt.Errorf("업로드 디렉터리를 만들 수 없다 (%s): %w", cfg.Uploads(), err))
+	}
 
 	// Settings are read per request, not cached: A-201 changes them from the
 	// running server and FR-303 says the next request reflects it.
@@ -227,6 +238,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: "",
+		userFields: contentStore.UserFields,
 		verifyRequired: func() bool {
 			return setting("auth.email_verification_required")["auth.email_verification_required"] != ""
 		}}

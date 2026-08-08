@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -151,6 +152,11 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	files, err := d.attachments.List(ctx, p.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 
 	// SC-1 3항 allows this write on a GET because it carries no permission
 	// decision. The session remembers what it has counted so a refresh does not
@@ -160,6 +166,7 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, p.Title, firstLine(p.Body))
 	v.Data = map[string]any{
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
+		"Attachments": files,
 		"CanComment":  b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID)),
 		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments"},
 		"CanEdit":     p.AuthorID != "" && p.AuthorID == actorID(a),
@@ -222,7 +229,59 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	// **글이 먼저 있어야 첨부를 붙일 수 있다.** 첨부가 거부되면 글은 이미
+	// 저장돼 있으므로, 없던 일로 하지 않고 수정 화면으로 보내 이유를 말한다 —
+	// 여기서 글을 지우면 사용자가 쓴 본문이 파일 하나 때문에 사라진다.
+	if err := d.saveUploads(r, b, id); err != nil {
+		d.renderUploadError(w, r, b, id, err)
+		return
+	}
 	http.Redirect(w, r, "/board/"+b.Slug+"/"+id, http.StatusSeeOther)
+}
+
+// maxPostBodyBytes bounds one write request. 첨부 여러 개가 함께 오므로 파일
+// 하나의 상한(A-309 설정)보다 넉넉하되, 무한은 아니다.
+const maxPostBodyBytes = 64 << 20
+
+// postFormMemory is how much of a multipart body stays in memory; the rest
+// spools to a temp file that the runtime removes.
+const postFormMemory = 8 << 20
+
+// saveUploads stores the files that came with the form (FR-506).
+//
+// **게시판이 첨부를 허용할 때만 받는다** (D19 P-205). 허용하지 않는 게시판의
+// 폼에는 파일 칸이 없고, 그래도 실려 온 것은 폼을 고쳐 보낸 것이다.
+//
+// 검증은 하지 않는다 — 확장자 허용목록·매직바이트·웹루트 밖 저장·파일명 재생성
+// 네 겹은 전부 content.StoreUpload 안에 있다 (D60 3절). 여기서 한 겹이라도
+// 다시 쓰면 두 벌이 되고, 갈라진 쪽은 조용히 약해진다.
+func (d *boardDeps) saveUploads(r *http.Request, b *content.Board, postID string) error {
+	if r.MultipartForm == nil {
+		return nil
+	}
+	files := r.MultipartForm.File["attachments"]
+	if len(files) == 0 {
+		return nil
+	}
+	if !b.AllowAttachments {
+		return content.ErrUploadExt
+	}
+	for _, fh := range files {
+		if fh.Size == 0 {
+			// 파일 칸을 비워 두면 브라우저가 빈 항목을 보낸다.
+			continue
+		}
+		f, err := fh.Open()
+		if err != nil {
+			return err
+		}
+		_, err = d.attachments.Save(r.Context(), postID, fh.Filename, f)
+		f.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // P-206 GET — the edit form. SC-3: the owner comes from the session.
@@ -270,6 +329,10 @@ func (d *boardDeps) postUpdate(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	if err := d.saveUploads(r, b, p.ID); err != nil {
+		d.renderUploadError(w, r, b, p.ID, err)
+		return
+	}
 	http.Redirect(w, r, "/board/"+b.Slug+"/"+p.ID, http.StatusSeeOther)
 }
 
@@ -301,7 +364,19 @@ func (d *boardDeps) ownPost(w http.ResponseWriter, r *http.Request, b *content.B
 
 // readPostForm reads the fields P-205 accepts and nothing else.
 func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *content.Board) (content.Post, []content.FieldSchema, bool) {
-	if err := r.ParseForm(); err != nil {
+	// **첨부가 있는 폼은 multipart 다.** `ParseForm` 은 그 본문을 읽지 않아
+	// 제목까지 빈 값이 된다 — 첨부를 붙이는 순간 글이 안 써지는 자리다.
+	//
+	// 본문 크기를 먼저 막는다. 파싱이 먼저면 상한을 넘긴 요청이 이미 메모리와
+	// 임시 파일을 쓴 뒤가 된다 (D60 NFR-206, 테마 업로드와 같은 규칙).
+	var err error
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, maxPostBodyBytes)
+		err = r.ParseMultipartForm(postFormMemory)
+	} else {
+		err = r.ParseForm()
+	}
+	if err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return content.Post{}, nil, false
 	}
@@ -335,6 +410,30 @@ func (d *boardDeps) renderFormError(w http.ResponseWriter, r *http.Request,
 	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), http.StatusUnprocessableEntity, v)
 }
 
+// renderUploadError draws the edit form of a post that saved but whose
+// attachment did not.
+//
+// 목록으로 돌려보내지 않는다 — 첨부가 거부된 이유를 말할 자리가 거기에는
+// 없고, 사용자는 「저장은 됐는데 파일이 없다」만 보게 된다.
+func (d *boardDeps) renderUploadError(w http.ResponseWriter, r *http.Request,
+	b *content.Board, postID string, err error,
+) {
+	ctx := r.Context()
+	p, perr := d.content.PostByID(ctx, postID, "", true)
+	fields, ferr := d.content.BoardFields(ctx, b.ID)
+	if perr != nil || ferr != nil {
+		d.serverError(w, r, cmp.Or(perr, ferr))
+		return
+	}
+	v := d.view(r, p.Title+" 수정", "")
+	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": p,
+		"Inputs":    content.FieldInputs(fields, p.CustomFields),
+		"CanSecret": b.AllowSecret,
+		"Error":     "글은 저장했지만 첨부를 받지 못했습니다: " + err.Error()}
+	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"),
+		http.StatusUnprocessableEntity, v)
+}
+
 // customValues is the form minus the post's own fields, so a custom field can
 // never be named `title` and quietly win. ValidateCustomFields refuses unknown
 // keys, and these are known keys that are not custom fields.
@@ -342,7 +441,7 @@ func customValues(r *http.Request) map[string][]string {
 	out := map[string][]string{}
 	for k, v := range r.PostForm {
 		switch k {
-		case "title", "body", "is_secret":
+		case "title", "body", "is_secret", "attachments":
 			continue
 		}
 		out[k] = v

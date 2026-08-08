@@ -1,13 +1,15 @@
 {{define "body"}}
-<h1>배송 조회</h1>
-{{with .Data}}
-{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
-<ul class="shipments">
-  {{range .Shipments}}
-  <li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{date .ShippedAt "2006-01-02 15:04"}})</li>
-  {{else}}
-  <li class="empty">아직 발송 정보가 없습니다.</li>
+<section class="page">
+  <h1>배송 조회</h1>
+  {{with .Data}}
+  {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+  <ul class="shipments">
+    {{range .Shipments}}
+    <li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{date .ShippedAt "2006-01-02 15:04"}})</li>
+    {{else}}
+    <li class="empty">아직 발송 정보가 없습니다.</li>
+    {{end}}
+  </ul>
   {{end}}
-</ul>
-{{end}}
+</section>
 {{end}}

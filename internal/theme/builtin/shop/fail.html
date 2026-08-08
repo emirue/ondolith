@@ -1,9 +1,11 @@
 {{define "body"}}
-<h1>결제가 완료되지 않았습니다</h1>
-{{/* PG 가 붙인 message 를 그리지 않는다. 임의 문자열이라 그대로 렌더링하면
-     반사형 XSS·피싱 문구 주입 표면이 된다 (D19 P-409). 우리 쪽 사유 코드
-     매핑에서 고른 문장만 나온다. */}}
-{{with .Data}}<p class="error" role="alert">{{.Message}}</p>{{end}}
-<p>주문은 그대로 있습니다. 다시 결제하실 수 있습니다.</p>
-<p><a href="/checkout/pay">다시 결제하기</a> · <a href="/cart">장바구니</a></p>
+<section class="page">
+  <h1>결제가 완료되지 않았습니다</h1>
+  {{/* PG 가 붙인 message 를 그리지 않는다. 임의 문자열이라 그대로 렌더링하면
+       반사형 XSS·피싱 문구 주입 표면이 된다 (D19 P-409). 우리 쪽 사유 코드
+       매핑에서 고른 문장만 나온다. */}}
+  {{with .Data}}<p class="error" role="alert">{{.Message}}</p>{{end}}
+  <p>주문은 그대로 있습니다. 다시 결제하실 수 있습니다.</p>
+  <p><a href="/checkout/pay">다시 결제하기</a> · <a href="/cart">장바구니</a></p>
+</section>
 {{end}}

@@ -8,6 +8,12 @@
 {{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
 <h1>확인 메일을 보냈습니다</h1>
 <p>{{with .Data}}{{.Email}}{{end}} 로 안내를 보냈습니다. 메일함을 확인하세요.</p>
-<p>도착하지 않으면 스팸함을 확인하고, 그래도 없으면 다시 시도하세요.</p>
+<p>도착하지 않으면 스팸함을 확인하고, 그래도 없으면 아래에서 다시 보내세요.</p>
+{{/* 받는 주소를 입력받지 않는다 (P-113) — 입력받으면 이 화면이 「그 주소로
+     계정이 있는가」를 알려주는 도구가 된다. 서버가 세션의 계정으로 보낸다.
+     이 버튼이 없는 동안 `POST /verify/resend` 는 누를 자리가 없었다. */}}
+<form method="post" action="/verify/resend" class="form">
+  <button type="submit">인증 메일 다시 보내기</button>
+</form>
 </div>
 {{end}}

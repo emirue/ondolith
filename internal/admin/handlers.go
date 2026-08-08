@@ -420,17 +420,38 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
 		page = n
 	}
-	users, err := d.Auth.ListUsers(r.Context(), userPageSize, page*userPageSize)
+	// **한 행 더 읽어 다음 쪽이 있는지 본다.** 앞 판은 「다음」을 조건 없이
+	// 그려서, 사용자가 한 명뿐인 사이트도 무한히 다음 쪽을 제시했다 — 링크를
+	// 따라가는 검사가 35쪽까지 걸어가 요청 제한에 걸렸다. 전체 개수를 세는
+	// COUNT 를 따로 치지 않는 이유는 그 값이 화면에 필요하지 않기 때문이다.
+	users, err := d.Auth.ListUsers(r.Context(), userPageSize+1, page*userPageSize)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
+	}
+	hasNext := len(users) > userPageSize
+	if hasNext {
+		users = users[:userPageSize]
 	}
 	prev := page - 1
 	if prev < 0 {
 		prev = 0
 	}
+	// **목록에 보이기로 한 항목만 열이 된다** (A-406 `show_in_list`). 이것이
+	// 없는 동안 그 체크박스는 아무 일도 하지 않는 스위치였다.
+	fields, err := d.Content.UserFields(r.Context())
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	var columns []content.FieldSchema
+	for _, f := range fields {
+		if f.ShowInList {
+			columns = append(columns, f)
+		}
+	}
 	d.Render(w, r, "admin/users.html", http.StatusOK, map[string]any{
-		"Users": users, "Page": page,
+		"Users": users, "Page": page, "HasNext": hasNext, "Columns": columns,
 		// Pre-computed rather than arithmetic in the template: html/template has
 		// no maths, and adding an `add` function to the map is a function the
 		// next screen will also reach for something it should not compute.
@@ -708,4 +729,71 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 		"PageNo": page + 1, "PrevPage": prev, "NextPage": page + 1,
 		"HasPrev": page > 0, "HasNext": int64((page+1)*oplogPageSize) < total,
 	})
+}
+
+// ---- A-406 회원 프로필 항목 (FR-215) ---------------------------------------
+//
+// **게시판 커스텀 필드(A-306)와 같은 기계를 쓴다** (DEC-3.9). 정의는 행이고
+// 값은 JSONB 이므로 **개수 제한이 없다** — 여분 칸을 열 개 만들어 두는 방식은
+// 열한 번째에서 ALTER TABLE 을 요구한다.
+
+// UserFieldList is A-406 GET.
+func (d *Deps) UserFieldList(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "user.update"); !ok {
+		return
+	}
+	fields, err := d.Content.UserFields(r.Context())
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/user-fields.html", http.StatusOK, map[string]any{
+		"Fields": fields, "Types": content.FieldTypes(),
+	})
+}
+
+// UserFieldSave is A-406 POST — 저장과 삭제가 한 화면이다.
+func (d *Deps) UserFieldSave(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "user.update")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+
+	if key := r.PostFormValue("delete"); key != "" {
+		if err := d.Content.DeleteUserField(ctx, key); err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		// 값은 남는다 (D14 3절 규칙 4) — 운영자가 곧 궁금해할 것이므로 적어 둔다.
+		d.log(r, c, "user.update", "user_field", key,
+			"회원 항목 '"+key+"' 정의 삭제 (회원이 적은 값은 보존)")
+		http.Redirect(w, r, "/admin/user-fields", http.StatusSeeOther)
+		return
+	}
+
+	f := content.FieldSchema{
+		Key:        strings.TrimSpace(r.PostFormValue("key")),
+		Label:      strings.TrimSpace(r.PostFormValue("label")),
+		Type:       content.FieldType(r.PostFormValue("field_type")),
+		Required:   r.PostFormValue("is_required") != "",
+		ShowInList: r.PostFormValue("show_in_list") != "",
+		Options:    splitOptions(r.PostFormValue("options")),
+	}
+	if n, err := strconv.Atoi(r.PostFormValue("sort_order")); err == nil {
+		f.Sort = n
+	}
+	if err := d.Content.SaveUserField(ctx, f); err != nil {
+		fields, _ := d.Content.UserFields(ctx)
+		d.Render(w, r, "admin/user-fields.html", http.StatusUnprocessableEntity,
+			map[string]any{"Fields": fields, "Types": content.FieldTypes(),
+				"Error": "항목을 저장하지 못했습니다: " + err.Error()})
+		return
+	}
+	d.log(r, c, "user.update", "user_field", f.Key, "회원 항목 '"+f.Key+"' 저장")
+	http.Redirect(w, r, "/admin/user-fields", http.StatusSeeOther)
 }

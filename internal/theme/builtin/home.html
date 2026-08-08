@@ -47,7 +47,10 @@
       {{range .}}
       <li>
         <a href="/board/{{.BoardSlug}}/{{.ID}}">{{.Title}}</a>
-        <span class="meta">{{date .CreatedAt "01-02"}}</span>
+        {{/* 게시판 이름이 곧 그 게시판으로 가는 링크다. 「전체 보기」 하나를
+             두면 어느 게시판을 뜻하는지 정할 수 없고 — 최근 글은 여러 게시판을
+             가로지른다 — 게시판 목록 화면은 D11 에 없다. */}}
+        <span class="meta"><a href="/board/{{.BoardSlug}}">{{.BoardName}}</a> · {{date .CreatedAt "01-02"}}</span>
       </li>
       {{end}}
     </ul>

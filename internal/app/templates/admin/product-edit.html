@@ -34,7 +34,11 @@
   </form>
 
   {{if not .New}}
-  <p><a href="/admin/products/{{.Product.ID}}/variants">옵션·재고 편집</a></p>
+  {{/* QR 라벨(A-513)은 이 링크가 없는 동안 닿을 수 없는 화면이었다. */}}
+  <div class="adm-actions">
+    <a class="adm-btn" href="/admin/products/{{.Product.ID}}/variants">옵션·재고 편집</a>
+    <a class="adm-btn" href="/admin/products/{{.Product.ID}}/labels">QR 라벨 인쇄</a>
+  </div>
   {{/* 주문된 상품은 FK 가 막는다 (409). 판매 중단은 위의 공개 체크를 끄는
        것이고, 소프트 삭제 컬럼을 따로 두지 않는다 — "안 보이는 상태" 가
        둘이 되면 조회에서 한쪽을 빠뜨리는 순간 지운 상품이 되살아난다. */}}

@@ -1,6 +1,7 @@
 package content
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -234,4 +235,73 @@ func FieldTypes() []FieldType {
 		FieldText, FieldTextarea, FieldNumber, FieldSelect,
 		FieldCheckbox, FieldMultiselect, FieldDate, FieldURL,
 	}
+}
+
+// ---- 회원 프로필 항목 (FR-215) ----------------------------------------------
+//
+// **게시판 커스텀 필드와 같은 기계를 쓴다** (DEC-3.9). 스키마·검증·폼 생성이
+// 이미 여기 있으므로, 회원 항목을 위해 그것을 한 벌 더 만들면 두 벌이 되고
+// 갈라진 쪽은 조용히 낡는다. 다른 것은 「어디에 정의가 있고 값이 어디 있는가」
+// 뿐이다: 게시판은 board_fields·posts.custom_fields, 회원은
+// user_fields·users.custom_fields.
+
+// UserFields lists the profile fields an operator defined, in display order.
+func (s *Store) UserFields(ctx context.Context) ([]FieldSchema, error) {
+	const q = `
+		SELECT key, label, field_type, is_required, show_in_list, options, sort_order
+		FROM user_fields ORDER BY sort_order, key`
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FieldSchema
+	for rows.Next() {
+		var f FieldSchema
+		var opts []string
+		if err := rows.Scan(&f.Key, &f.Label, &f.Type, &f.Required,
+			&f.ShowInList, &opts, &f.Sort); err != nil {
+			return nil, err
+		}
+		f.Options = opts
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// SaveUserField inserts or updates one definition.
+//
+// 예약어 검사는 여기서도 한다 — 저장 직전이 마지막 방어선이고, 화면이 하나
+// 늘 때마다 그 화면이 검사를 빠뜨릴 수 있다 (SaveBoardField 와 같은 이유).
+func (s *Store) SaveUserField(ctx context.Context, f FieldSchema) error {
+	if err := ValidateFieldKey(f.Key); err != nil {
+		return err
+	}
+	opts := f.Options
+	if opts == nil {
+		opts = []string{}
+	}
+	const q = `
+		INSERT INTO user_fields (key, label, field_type, is_required, show_in_list, options, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (key) DO UPDATE SET
+			label = EXCLUDED.label, field_type = EXCLUDED.field_type,
+			is_required = EXCLUDED.is_required, show_in_list = EXCLUDED.show_in_list,
+			options = EXCLUDED.options, sort_order = EXCLUDED.sort_order, updated_at = now()`
+	_, err := s.pool.Exec(ctx, q, f.Key, f.Label, f.Type,
+		f.Required, f.ShowInList, opts, f.Sort)
+	return err
+}
+
+// DeleteUserField removes a definition. **회원이 적어 낸 값은 남는다**
+// (D14 3절 규칙 4) — 항목을 잘못 지운 운영자가 사람들의 입력까지 잃지 않도록.
+func (s *Store) DeleteUserField(ctx context.Context, key string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM user_fields WHERE key = $1`, key)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

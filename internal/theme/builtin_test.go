@@ -268,7 +268,7 @@ func payloadFor(name string) any {
 	case "shop/cart.html":
 		return map[string]any{
 			"Items": []cartItemLike{{ID: "ci1", VariantID: "v1", ProductID: "p1",
-				Name: "티셔츠", Option: map[string]string{"크기": "L"},
+				Slug: "tee", Name: "티셔츠", Option: map[string]string{"크기": "L"},
 				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true}},
 			"Goods": 26000, "Fee": 3000, "Total": 29000,
 			"Error": "수량이 재고를 넘습니다",
@@ -297,12 +297,15 @@ func payloadFor(name string) any {
 	case "board/view.html":
 		return map[string]any{
 			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
+			// 첨부가 있는 글이다 — 목록이 비면 첨부 절이 통째로 안 그려져
+			// 그 조각은 렌더링 검사를 지나가지 않는다.
+			"Attachments": []attachmentLike{{ID: "a1", OriginalName: "설명서.pdf", ByteSize: 20480}},
 			"Post": postLike{ID: "p1", Title: "첫 글", Body: "본문\n둘째 줄",
 				AuthorName: "홍길동", ViewCount: 12,
 				CustomFields: map[string]any{"color": "빨강"},
 				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)},
 			"Comments": []commentLike{
-				{ID: "c1", AuthorName: "홍길동", Body: "댓글",
+				{ID: "c1", AuthorID: "u1", AuthorName: "홍길동", Body: "댓글",
 					CreatedAt: time.Date(2026, 8, 5, 9, 30, 0, 0, time.UTC)},
 				{ID: "c2", ParentID: "c1", Body: "",
 					DeletedAt: time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC),
@@ -328,7 +331,9 @@ func payloadFor(name string) any {
 		}
 	case "board/form.html":
 		return map[string]any{
-			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판"},
+			// 첨부를 허용하는 게시판이다 — false 면 파일 칸과 enctype 이
+			// 그려지지 않아 그 분기가 검사되지 않는다 (FR-506).
+			"Board": boardLike{ID: "b1", Slug: "free", Name: "자유게시판", AllowAttachments: true},
 			"Post": &postLike{Title: "고칠 글", Body: "본문",
 				CustomFields: map[string]any{"color": "빨강"}},
 			"Inputs": []inputLike{
@@ -419,8 +424,11 @@ func TestHtmxVersionFileMatchesTheVendoredFile(t *testing.T) {
 // 움직인다. 필드 이름이 어긋나면 이 테스트가 렌더링에서 실패한다.
 type boardLike struct {
 	ID, Slug, Name, Skin string
-	AllowComments        bool
-	PerPage              int
+	// AllowAttachments 는 글쓰기 폼이 파일 칸과 enctype 을 낼지 정한다
+	// (FR-506). 픽스처에 없던 동안 그 조건은 렌더링 검사를 통과하지 못했다.
+	AllowAttachments bool
+	AllowComments    bool
+	PerPage          int
 }
 
 type postLike struct {
@@ -433,8 +441,15 @@ type postLike struct {
 }
 
 type commentLike struct {
-	ID, PostID, ParentID, AuthorName, Body string
-	DeletedAt, CreatedAt                   time.Time
+	// AuthorID 는 「내 댓글인가」를 화면이 판단하는 근거다 (P-209·P-210).
+	ID, PostID, ParentID, AuthorID, AuthorName, Body string
+	DeletedAt, CreatedAt                             time.Time
+}
+
+// attachmentLike 는 글에 딸린 파일 하나다 (FR-506).
+type attachmentLike struct {
+	ID, OriginalName string
+	ByteSize         int64
 }
 
 type fieldLike struct {
@@ -472,10 +487,12 @@ type optionGroupLike struct {
 }
 
 type cartItemLike struct {
-	ID, VariantID, ProductID, Name string
-	Option                         map[string]string
-	UnitPrice, Quantity, Stock     int
-	Sellable                       bool
+	// Slug 는 상품 화면의 주소다. ProductID 로 링크를 그리면 라우트가
+	// `/shop/p/{slug}` 이므로 눌렀을 때 404 가 난다 — 실제로 그랬다.
+	ID, VariantID, ProductID, Slug, Name string
+	Option                               map[string]string
+	UnitPrice, Quantity, Stock           int
+	Sellable                             bool
 }
 
 type termLike struct {

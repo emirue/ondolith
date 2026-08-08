@@ -1301,6 +1301,60 @@ else
 	done_ "D11 의 라우트 $(wc -l <"$T"/cd_scr_want2 | tr -d ' ')개가 전부 구현과 일치"
 fi
 
+# --- 28c. 모든 라우트를 어떤 화면이 가리킨다 --------------------------------
+#
+# **만들어 두고 잇지 않으면 없는 것과 같다.** 라우트가 있고 핸들러가 있고
+# 화면까지 있는데 그 주소를 가리키는 링크나 폼이 하나도 없으면, 사용자는 주소를
+# 직접 치지 않는 한 그 기능에 닿을 수 없다. 부팅 자체 점검도 28b 도 「라우트가
+# 있는가」만 보므로 이것을 통과시킨다.
+#
+# 이 검사를 처음 돌렸을 때 나온 것: 글 삭제(P-207)·댓글 수정과 삭제(P-209·210)·
+# 구매확정(P-510)·인증 메일 재발송(P-113)·교환 차액 결제(P-514)·메뉴 삭제·
+# 카테고리 생성·관리자 환불과 반품 처리·QR 라벨. 전부 코드가 있는데 누를 자리가
+# 없었다.
+#
+# **모양으로만 대조한다.** `{x}` 를 한 조각으로 치환해 맞추므로 `/verify/{token}`
+# 은 `/verify/resend` 에 맞을 수 있다 — 그래서 그런 화면은 아래 목록에 이유와
+# 함께 적는다. 실행 시점의 도달 가능성은 `make crawl` 이 본다.
+begin
+route_unlinked_reason() {
+	case "$1 $2" in
+	"GET /admin") echo "308 리다이렉트 — 화면이 아니다" ;;
+	"GET /auth/{provider}/callback") echo "소셜 제공자가 되돌려 보낸다" ;;
+	"GET /checkout/complete" | "GET /checkout/fail") echo "결제창이 되돌려 보낸다" ;;
+	"GET /healthz") echo "운영 감시가 부른다" ;;
+	"GET /robots.txt" | "GET /sitemap.xml") echo "크롤러가 읽는다" ;;
+	"GET /static/{path...}") echo "문서가 자산을 건다" ;;
+	"GET /shop/p/{slug}/variant") echo "htmx 가 부른다" ;;
+	"GET /verify/{token}" | "GET /password/reset/{token}") echo "메일의 링크로 들어온다" ;;
+	"POST /board/{slug}/{id}/comments") echo "폼 action 을 핸들러가 넘긴다 (CommentForm.Action)" ;;
+	*) echo "" ;;
+	esac
+}
+
+find internal/theme/builtin internal/app/templates -name '*.html' -exec cat {} + >"$T"/cd_tpl 2>/dev/null
+cat internal/admin/shell.go >>"$T"/cd_tpl
+perl -0ne 'print "$1\t$2\n"
+	while /Screen:\s*"[PA]-\d{3}",\s*Method:\s*"([A-Z]+)",\s*\n?\s*Pattern:\s*"([^"]+)"/gs' \
+	internal/app/tree.go | sort -u >"$T"/cd_routes
+
+if [ ! -s "$T"/cd_routes ] || [ ! -s "$T"/cd_tpl ]; then
+	err "라우트 또는 템플릿을 읽지 못했다 (검사가 헛돌았다)"
+else
+	linked=0
+	while IFS="$(printf '\t')" read -r meth pat; do
+		[ -n "$pat" ] || continue
+		re=$(printf '%s' "$pat" | sed 's|{\$}||; s|{[^}]*\.\.\.}|.*|g; s|{[^}]*}|[^"/]*|g')
+		if grep -qE "(action|href|Path:)[ =]*\"$re\"" "$T"/cd_tpl; then
+			linked=$((linked + 1))
+			continue
+		fi
+		why=$(route_unlinked_reason "$meth" "$pat")
+		[ -n "$why" ] || err "어느 화면도 가리키지 않는 라우트: $meth $pat"
+	done <"$T"/cd_routes
+	done_ "라우트 $linked 개를 화면이 가리킨다"
+fi
+
 # --- 29. handlerJudged 에 적힌 권한은 실제로 핸들러가 판정한다 --------------
 #
 # 이 목록에 적힌 권한은 부팅 자체 점검의 「어떤 라우트도 쓰지 않는 권한」 경고에서

@@ -1,30 +1,39 @@
 {{define "body"}}
-<h1>{{.Meta.Title}}</h1>
-{{with .Data}}
-{{with .Categories}}
-<nav class="categories"><a href="/shop">전체</a>
-  {{range .}} · <a href="/shop/c/{{.Slug}}">{{.Name}}</a>{{end}}
-</nav>
-{{end}}
-<form method="get" class="sort">
-  <label for="sort">정렬</label>
-  <select id="sort" name="sort" onchange="this.form.submit()">
-    <option value="new"{{if eq .Sort "new"}} selected{{end}}>최신순</option>
-    <option value="price"{{if eq .Sort "price"}} selected{{end}}>낮은 가격순</option>
-    <option value="price_desc"{{if eq .Sort "price_desc"}} selected{{end}}>높은 가격순</option>
-    <option value="name"{{if eq .Sort "name"}} selected{{end}}>이름순</option>
-  </select>
-</form>
-<ul class="product-list">
-  {{range .Products}}
-  <li>
-    <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
-    <span class="price">{{money .BasePrice}}{{if .MinDelta}}~{{end}}</span>
-    {{if not .InStock}}<span class="badge">품절</span>{{end}}
-  </li>
-  {{else}}
-  <li class="empty">등록된 상품이 없습니다.</li>
+<section class="listing">
+  <h1>{{.Meta.Title}}</h1>
+  {{with .Data}}
+  {{with .Categories}}
+  <nav class="categories"><a href="/shop">전체</a>
+    {{range .}} · <a href="/shop/c/{{.Slug}}">{{.Name}}</a>{{end}}
+  </nav>
   {{end}}
-</ul>
-{{end}}
+  {{/* 상품 검색(P-305)의 진입점. 쇼핑몰이면 머리글 검색이 여기로 오지만,
+       cms 사이트에 켜 둔 상점에서는 머리글이 글을 찾으므로 여기가 유일하다. */}}
+  <form method="get" action="/shop/search" class="shop-search">
+    <label for="shop-q">상품 검색</label>
+    <input id="shop-q" name="q" type="search" placeholder="상품 이름">
+    <button type="submit">검색</button>
+  </form>
+  <form method="get" class="sort">
+    <label for="sort">정렬</label>
+    <select id="sort" name="sort" onchange="this.form.submit()">
+      <option value="new"{{if eq .Sort "new"}} selected{{end}}>최신순</option>
+      <option value="price"{{if eq .Sort "price"}} selected{{end}}>낮은 가격순</option>
+      <option value="price_desc"{{if eq .Sort "price_desc"}} selected{{end}}>높은 가격순</option>
+      <option value="name"{{if eq .Sort "name"}} selected{{end}}>이름순</option>
+    </select>
+  </form>
+  <ul class="product-list">
+    {{range .Products}}
+    <li>
+      <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
+      <span class="price">{{money .BasePrice}}{{if .MinDelta}}~{{end}}</span>
+      {{if not .InStock}}<span class="badge">품절</span>{{end}}
+    </li>
+    {{else}}
+    <li class="empty">등록된 상품이 없습니다.</li>
+    {{end}}
+  </ul>
+  {{end}}
+</section>
 {{end}}

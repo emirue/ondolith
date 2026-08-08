@@ -13,6 +13,12 @@
   <input id="password" name="password" type="password" required minlength="10"
          autocomplete="new-password">
   <p class="hint">10자 이상</p>
+  {{/* 운영자가 A-406 에서 정한 항목 (FR-215). 목록이 코드에 없다 — 이 사이트가
+       무엇을 더 받는지는 설정이지 빌드가 아니다. */}}
+  {{with .Data}}{{range .Inputs}}
+    <label for="f-{{.Field.Key}}">{{.Field.Label}}{{if .Field.Required}} *{{end}}</label>
+    {{template "partials/field.html" .}}
+  {{end}}{{end}}
   <button type="submit">가입</button>
 </form>
 </div>

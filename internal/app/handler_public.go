@@ -84,17 +84,23 @@ func (d *publicDeps) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(posts) > 0 {
-		name := map[string]string{}
+		// **글이 속한 게시판이 그 게시판으로 가는 링크가 된다.** 이것이
+		// 없는 동안 새로 설치한 사이트에서는 게시판에 갈 방법이 메뉴를 직접
+		// 만드는 것뿐이었다 — 홈에 글은 뜨는데 목록으로는 갈 수 없었다.
+		type board struct{ slug, name string }
+		of := map[string]board{}
 		for _, b := range boards {
-			name[b.ID] = b.Slug
+			of[b.ID] = board{b.Slug, b.Name}
 		}
 		type postView struct {
 			content.Post
 			BoardSlug string
+			BoardName string
 		}
 		views := make([]postView, 0, len(posts))
 		for _, p := range posts {
-			views = append(views, postView{Post: p, BoardSlug: name[p.BoardID]})
+			views = append(views, postView{
+				Post: p, BoardSlug: of[p.BoardID].slug, BoardName: of[p.BoardID].name})
 		}
 		data["Posts"] = views
 	}
@@ -158,6 +164,12 @@ func (d *publicDeps) view(r *http.Request, title, desc string) theme.View {
 			ID: a.User.ID, Email: a.User.Email, DisplayName: a.User.DisplayName,
 		}
 	}
+	// **Can 은 테마가 그릴지 말지를 정하는 데만 쓴다.** 역할도 권한 행도 넘기지
+	// 않는다 (D17) — 여기 담기는 것은 테마가 실제로 묻는 열쇠뿐이다. 이것이
+	// 비어 있는 동안 관리자는 사이트 어디에서도 /admin/ 으로 갈 수 없었다.
+	for _, perm := range theme.CanKeys {
+		v.Can[perm] = a.CanOn(perm, auth.Global)
+	}
 	if items, err := d.content.MenuItems(r.Context()); err == nil {
 		if tree, terr := content.BuildMenu(items, func(perm, board string) bool {
 			return a.CanOn(perm, auth.BoardID(board))
@@ -177,6 +189,14 @@ func (d *publicDeps) renderPage(w http.ResponseWriter, r *http.Request, name str
 		// The status line is already sent, so this cannot become a 500 — log it
 		// and let the truncated page speak for itself.
 		d.log.Error("템플릿 렌더링 실패", "template", name, "err", err)
+	}
+}
+
+// renderPartial writes a screen's block with no page chrome — for htmx swaps.
+func (d *publicDeps) renderPartial(w http.ResponseWriter, r *http.Request, name string, v theme.View) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := d.loader().RenderPartial(w, name, v); err != nil {
+		d.log.Error("조각 렌더링 실패", "template", name, "err", err)
 	}
 }
 

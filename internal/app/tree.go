@@ -216,6 +216,12 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/reset-password", Class: SC5,
 		Permission: "user.reset_password", Handler: ad.UserResetPassword})
 
+	// A-406 은 user.update 다 — 항목 정의를 바꾸는 것은 회원 정보를 바꾸는
+	// 것과 같은 문턱이고, D15 2.2 에 그보다 좁은 권한이 없다.
+	r.Add(Route{Screen: "A-406", Method: "GET", Pattern: "/admin/user-fields", Class: SC4,
+		Permission: "user.update", Handler: ad.UserFieldList})
+	r.Add(Route{Screen: "A-406", Method: "POST", Pattern: "/admin/user-fields", Class: SC5,
+		Permission: "user.update", Handler: ad.UserFieldSave})
 	r.Add(Route{Screen: "A-403", Method: "GET", Pattern: "/admin/roles", Class: SC4,
 		Permission: "role.view", Handler: ad.RoleList})
 	r.Add(Route{Screen: "A-404", Method: "POST", Pattern: "/admin/roles/{id}/permissions", Class: SC5,
@@ -389,6 +395,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "product.manage", Handler: ad.VariantSave})
 		r.Add(Route{Screen: "A-509", Method: "GET", Pattern: "/admin/categories", Class: SC4,
 			Permission: "product.manage", Handler: ad.CategoryList})
+		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories/new", Class: SC5,
+			Permission: "product.manage", Handler: ad.CategoryCreate})
+		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories/{id}/delete",
+			Class: SC5, Permission: "product.manage", Handler: ad.CategoryDelete})
 		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories", Class: SC5,
 			Permission: "product.manage", Handler: ad.CategoryReparent})
 		r.Add(Route{Screen: "A-504", Method: "GET", Pattern: "/admin/orders", Class: SC4,

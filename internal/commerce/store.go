@@ -357,16 +357,17 @@ var ErrUnknownSort = errors.New("commerce: 알 수 없는 정렬")
 
 // Category is one row of categories.
 type Category struct {
-	ID       string
-	ParentID string
-	Name     string
-	Slug     string
+	ID        string
+	ParentID  string
+	Name      string
+	Slug      string
+	SortOrder int
 }
 
 // Categories lists them all, in display order. 수십 행이라 전부 읽는다.
 func (s *Store) Categories(ctx context.Context) ([]Category, error) {
 	const q = `
-		SELECT id, COALESCE(parent_id::text, ''), name, slug
+		SELECT id, COALESCE(parent_id::text, ''), name, slug, sort_order
 		FROM categories ORDER BY sort_order, name, id`
 	rows, err := s.pool.Query(ctx, q)
 	if err != nil {
@@ -376,7 +377,7 @@ func (s *Store) Categories(ctx context.Context) ([]Category, error) {
 	var out []Category
 	for rows.Next() {
 		var c Category
-		if err := rows.Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug); err != nil {
+		if err := rows.Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug, &c.SortOrder); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -388,12 +389,59 @@ func (s *Store) Categories(ctx context.Context) ([]Category, error) {
 func (s *Store) CategoryBySlug(ctx context.Context, slug string) (*Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, COALESCE(parent_id::text, ''), name, slug FROM categories WHERE slug = $1`,
-		slug).Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug)
+		`SELECT id, COALESCE(parent_id::text, ''), name, slug, sort_order
+		 FROM categories WHERE slug = $1`,
+		slug).Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug, &c.SortOrder)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return &c, err
+}
+
+// CreateCategory is A-509's write (D19 A-509 「입력 필드」).
+//
+// **이것이 없어서 카테고리를 만들 방법이 없었다.** A-509 는 「이동」만 구현돼
+// 있었고, 그래서 P-302 `/shop/c/{slug}` 는 어떤 주소로도 열 수 없는 화면이었다.
+// 카테고리가 하나도 없으니 P-301 의 카테고리 줄도 영영 그려지지 않았다.
+//
+// 상위는 여기서 검사하지 않는다 — 새로 만드는 행은 자손이 없으므로 순환이
+// 성립하지 않고, 존재 확인은 FK 가 한다.
+func (s *Store) CreateCategory(ctx context.Context, c Category) (string, error) {
+	const q = `
+		INSERT INTO categories (parent_id, name, slug, sort_order)
+		VALUES (NULLIF($1,'')::uuid, $2, $3, $4) RETURNING id`
+	var id string
+	err := s.pool.QueryRow(ctx, q, c.ParentID, c.Name, c.Slug, c.SortOrder).Scan(&id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			return "", ErrSlugTaken
+		case "23503":
+			return "", ErrCategoryMissing
+		}
+	}
+	return id, err
+}
+
+// DeleteCategory is A-509's delete.
+//
+// 소속 상품이나 하위 카테고리가 있으면 거부한다 — 그 판정은 DB 의 RESTRICT 가
+// 하고 여기서는 그 코드를 옮긴다 (D19 A-509 「거부 조건」). 사전 조회로 세면
+// 세는 것과 지우는 것 사이에 다른 요청이 상품을 붙일 수 있다.
+func (s *Store) DeleteCategory(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "23001") {
+		return ErrCategoryInUse
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SearchProducts is P-305 (FR-614).

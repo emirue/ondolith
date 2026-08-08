@@ -102,7 +102,7 @@ superuser가 없을 경우 모든 설치처가 "관리자에게 새 권한을 �
 | `menu.manage` | 메뉴 트리 편집 | – | 1 | A-204 |
 | `user.view` | 사용자 조회 | – | 1 | A-401 |
 | `user.create` | 사용자 생성 | – | 1 | A-402 |
-| `user.update` | 사용자 정보·활성 상태 변경 | – | 1 | A-402 |
+| `user.update` | 사용자 정보·활성 상태 변경 | – | 1 | A-402, A-406 |
 | `user.delete` | 사용자 삭제 | – | 1 | A-402 |
 | `user.reset_password` | 타인의 비밀번호 재설정 강제 | – | 1 | A-402 |
 | `role.view` | 역할·권한 구성 조회 | – | 1 | A-403 |

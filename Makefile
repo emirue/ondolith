@@ -36,6 +36,9 @@ test: ## 테스트 (경합 탐지 포함). DB 불필요
 screens: ## D11 의 모든 GET 화면을 열어 본다 (응답·본문·템플릿 오류)
 	sh scripts/screens.sh
 
+crawl: ## 홈에서 링크를 따라간다 — 화면이 만든 주소가 실제로 열리는지
+	sh scripts/crawl.sh
+
 e2e: ## D83 시나리오 재실행 — 빌드된 바이너리에 빈 DB 를 붙여 설치부터 한 바퀴
 	sh scripts/e2e.sh
 

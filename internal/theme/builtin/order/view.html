@@ -1,20 +1,45 @@
 {{define "body"}}
-{{with .Data}}{{with .Order}}
-<h1>주문 {{.OrderNo}}</h1>
-<p>상태 {{.Status}} · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
-{{/* 스냅샷만 그린다 (FR-612). 상품 표를 조인해 현재 이름·가격을 보여주면
-     상품이 바뀐 뒤 주문서가 달라진다. */}}
-<table class="order-items">
-  <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
-  <tbody>
-    {{range .Items}}
-    <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-        <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
-    {{end}}
-  </tbody>
-</table>
-<dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
-<address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
-<p><a href="/orders/{{.OrderNo}}/shipping">배송 조회</a></p>
-{{end}}{{end}}
+<section class="page">
+  {{with .Data}}{{with .Order}}
+  <h1>주문 {{.OrderNo}}</h1>
+  <p>상태 {{.Status}} · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
+  {{/* 스냅샷만 그린다 (FR-612). 상품 표를 조인해 현재 이름·가격을 보여주면
+       상품이 바뀐 뒤 주문서가 달라진다. */}}
+  <table class="order-items">
+    <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
+    <tbody>
+      {{range .Items}}
+      <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
+          <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+  <dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
+  <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
+
+  {{/* **구매 이후의 화면과 동작은 전부 여기서만 갈 수 있다.** 영수증·취소·환불·
+       반품·교환·구매확정은 만들어져 있었지만 어느 화면도 그것을 가리키지 않아,
+       주문한 사람이 주소를 직접 치지 않는 한 닿을 수 없었다.
+
+       상태를 옮기는 것(구매확정·반품·교환)은 **상태 기계가 허락할 때만** 낸다
+       (D14 5절). 아직 배송도 안 된 주문에 「반품 요청」을 내면 누를 때마다 422 가
+       난다 — 고를 수 있는 것이 전부 실패하는 화면을 만들지 않는 것이 그 표가
+       있는 이유다. */}}
+  {{if $.Data.CanConfirm}}
+  <form method="post" action="/orders/{{.OrderNo}}/confirm" class="form"
+        onsubmit="return confirm('구매를 확정할까요? 확정하면 반품·교환을 요청할 수 없습니다.')">
+    <button type="submit">구매확정</button>
+  </form>
+  {{end}}
+
+  <nav class="order-actions">
+    <a class="btn" href="/orders/{{.OrderNo}}/shipping">배송 조회</a>
+    <a class="btn" href="/orders/{{.OrderNo}}/receipt">주문서·영수증</a>
+    <a class="btn" href="/orders/{{.OrderNo}}/refunds">취소·환불</a>
+    <a class="btn" href="/orders/{{.OrderNo}}/returns">반품·교환 내역</a>
+    {{if $.Data.CanReturn}}<a class="btn" href="/orders/{{.OrderNo}}/return">반품 요청</a>{{end}}
+    {{if $.Data.CanExchange}}<a class="btn" href="/orders/{{.OrderNo}}/exchange">교환 요청</a>{{end}}
+  </nav>
+  {{end}}{{end}}
+</section>
 {{end}}

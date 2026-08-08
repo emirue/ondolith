@@ -16,6 +16,13 @@
                 <button class="adm-btn adm-btn--sm">수정</button>
               </span>
             </form>
+            {{/* 삭제 버튼이 없어서 `MenuDelete` 는 라우트도 핸들러도 있는데
+                 누를 자리가 없었다 — 메뉴를 한번 만들면 지울 수 없었다.
+                 폼 밖에 두는 이유는 위 폼이 「수정」이기 때문이다. */}}
+            <form method="post" action="/admin/menus/{{.ID}}/delete"
+                  style="padding:0 22px 12px;text-align:right">
+              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+            </form>
           </td>
         </tr>
       {{else}}

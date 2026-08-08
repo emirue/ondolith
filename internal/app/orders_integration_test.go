@@ -211,14 +211,22 @@ func TestGuestFormHasNoAccountOrAddressFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := readAll(t, resp)
-	// 폼 안만 본다. 레이아웃에는 `/me` 같은 링크가 있고, 그것을 잡으면 검사가
-	// 화면 전체의 단어 검사가 되어 곧 꺼진다.
-	i := strings.Index(body, "<form")
-	j := strings.Index(body, "</form>")
-	if i < 0 || j < i {
+	// **조회 폼만 본다.** 레이아웃에는 `/me` 같은 링크가 있고, 그것을 잡으면
+	// 검사가 화면 전체의 단어 검사가 되어 곧 꺼진다.
+	//
+	// 「첫 `<form`」으로 자르지 않는다 — 머리글에 검색 폼이, 로그인 상태면
+	// 로그아웃 폼이 먼저 온다. 실제로 머리글에 검색을 붙이자 이 검사가 그
+	// 폼을 잘라 보고 있었다. 자를 기준은 **이 폼의 action** 이다.
+	i := strings.Index(body, `action="/orders/guest"`)
+	if i < 0 {
 		t.Fatalf("조회 폼을 찾지 못했다: %.300s", body)
 	}
-	form := body[i:j]
+	i = strings.LastIndex(body[:i], "<form")
+	j := strings.Index(body[i:], "</form>")
+	if i < 0 || j < 0 {
+		t.Fatalf("조회 폼의 경계를 찾지 못했다: %.300s", body)
+	}
+	form := body[i : i+j]
 	for _, banned := range []string{
 		"account", "bank", "예금주", "계좌", "refund",
 		"receiver_name", "receiver_phone", "address1", "address2", "postcode", "status",

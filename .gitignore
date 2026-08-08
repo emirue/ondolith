@@ -37,3 +37,4 @@ go.work.sum
 
 # Local install config — contains the database password
 /ondolith.json
+.playwright-mcp/

@@ -4,7 +4,11 @@
   <h1>{{.Board.Name}} {{if .Post.ID}}글 수정{{else}}글쓰기{{end}}</h1>
   {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
+  {{/* **enctype 이 없으면 파일이 실리지 않는다.** 첨부를 허용하는 게시판에만
+       파일 칸을 두므로 enctype 도 같은 조건에 건다 — 늘 multipart 로 보내면
+       첨부 없는 게시판의 글쓰기까지 큰 본문 경로를 타게 된다. */}}
   <form class="form form--wide" method="post"
+        {{if .Board.AllowAttachments}}enctype="multipart/form-data"{{end}}
         action="/board/{{.Board.Slug}}{{if .Post.ID}}/{{.Post.ID}}/edit{{else}}/write{{end}}">
     <label for="title">제목</label>
     <input type="text" id="title" name="title" value="{{.Post.Title}}" required>
@@ -18,6 +22,11 @@
 
     <label for="body">본문</label>
     <textarea id="body" name="body">{{.Post.Body}}</textarea>
+
+    {{if .Board.AllowAttachments}}
+      <label for="attachments">첨부파일</label>
+      <input id="attachments" name="attachments" type="file" multiple>
+    {{end}}
 
     {{if .CanSecret}}
       <label for="is_secret">비밀글</label>

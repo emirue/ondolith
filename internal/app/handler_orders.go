@@ -56,8 +56,16 @@ func (d *shopDeps) orderDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	// **상태를 옮기는 버튼은 상태 기계가 정한다** (D14 5절). 화면이 스스로
+	// 「배송완료면」 이라고 판단하면 그 조건이 표와 갈라지고, 갈라진 쪽은
+	// 누를 때마다 422 가 나는 버튼이 된다.
 	d.renderPage(w, r, "order/view.html", http.StatusOK,
-		d.shopView(r, "주문 "+order.OrderNo, map[string]any{"Order": order}))
+		d.shopView(r, "주문 "+order.OrderNo, map[string]any{
+			"Order":       order,
+			"CanConfirm":  len(commerce.Next(order.Status, "P-510")) > 0,
+			"CanReturn":   len(commerce.Next(order.Status, "P-511")) > 0,
+			"CanExchange": len(commerce.Next(order.Status, "P-512")) > 0,
+		}))
 }
 
 // P-505 GET /orders/{orderNo}/shipping — tracking.
