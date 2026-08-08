@@ -139,3 +139,20 @@ func CanTransition(from, to PageStatus) error {
 	}
 	return nil
 }
+
+// uuidPattern 은 형식만 본다. 존재 여부는 저장소가 답한다.
+var uuidPattern = regexp.MustCompile(
+	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// IsUUID reports whether s could be a row id.
+//
+// **형식이 깨진 값과 없는 값은 다르다.** 없는 UUID 는 `WHERE id = $1` 이 0행을
+// 내고 핸들러가 404 로 옮긴다. 형식이 깨진 값은 `uuid` 컬럼과 비교되는 순간
+// PostgreSQL 이 **22P02** 로 터지고, 그 오류는 어느 도메인 오류와도 일치하지
+// 않아 500 이 된다 — 잘못된 입력이 서버 고장으로 보고되고, 로그와 경보를
+// 오염시킨다.
+//
+// 이 저장소에서 같은 부류가 세 번 나왔다: 반품 폼의 빈 `item_id`, 그것을 고친
+// **바로 그 커밋에서 새로 만든** 카테고리 삭제, 그리고 장바구니의 `variant_id`.
+// 판정을 한 곳에 두는 이유가 그것이다.
+func IsUUID(s string) bool { return uuidPattern.MatchString(s) }

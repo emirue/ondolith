@@ -10,6 +10,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
+	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/theme"
 )
 
@@ -194,7 +195,14 @@ func (d *shopDeps) cartAdd(w http.ResponseWriter, r *http.Request) {
 	if qty == 0 {
 		qty = 1
 	}
-	err = d.store.AddToCart(r.Context(), owner, r.PostFormValue("variant_id"), qty)
+	// **형식이 깨진 조합 ID 는 없는 것과 같다.** 그대로 내려가면 `uuid` 컬럼과
+	// 비교하다 22P02 로 터져 500 이 된다 — 공개 라우트라 누구나 낼 수 있다.
+	variantID := r.PostFormValue("variant_id")
+	if !content.IsUUID(variantID) {
+		d.notFound(w, r)
+		return
+	}
+	err = d.store.AddToCart(r.Context(), owner, variantID, qty)
 	switch {
 	case errors.Is(err, commerce.ErrOutOfStock), errors.Is(err, commerce.ErrNotSellable),
 		errors.Is(err, commerce.ErrQuantityRange):

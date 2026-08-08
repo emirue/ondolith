@@ -254,6 +254,11 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	postID := r.PostFormValue("post_id")
+	// 형식이 깨진 값은 없는 것과 같다 — 그대로 내려가면 22P02 로 500 이 된다.
+	if !content.IsUUID(postID) {
+		http.NotFound(w, r)
+		return
+	}
 
 	b, err := d.Content.BoardByPost(ctx, postID)
 	if errors.Is(err, content.ErrNotFound) {
@@ -309,6 +314,10 @@ func (d *Deps) CommentModerate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	commentID := r.PostFormValue("comment_id")
+	if !content.IsUUID(commentID) {
+		http.NotFound(w, r)
+		return
+	}
 
 	cm, err := d.Content.CommentByID(ctx, commentID)
 	if errors.Is(err, content.ErrNotFound) {
@@ -470,6 +479,10 @@ func (d *Deps) AttachmentDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	id := r.PostFormValue("attachment_id")
+	if !content.IsUUID(id) {
+		http.NotFound(w, r)
+		return
+	}
 
 	at, err := d.Attachments.ByID(ctx, id)
 	if errors.Is(err, content.ErrNotFound) {

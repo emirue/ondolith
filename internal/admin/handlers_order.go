@@ -222,6 +222,13 @@ func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
 		ParentID: strings.TrimSpace(r.PostFormValue("parent_id")),
 	}
 	cat.SortOrder, _ = strconv.Atoi(r.PostFormValue("sort_order"))
+	// 상위는 선택 입력이다 — 비어 있으면 최상위. 값이 있는데 형식이 깨졌으면
+	// 없는 상위와 같다 (그대로 내려가면 `::uuid` 캐스트가 22P02 로 터진다).
+	if cat.ParentID != "" && !content.IsUUID(cat.ParentID) {
+		d.categoryError(w, r, http.StatusUnprocessableEntity,
+			commerce.ErrCategoryMissing.Error())
+		return
+	}
 	if cat.Name == "" {
 		d.categoryError(w, r, http.StatusUnprocessableEntity, "이름을 입력하세요.")
 		return
@@ -279,7 +286,13 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return
 	}
-	err := d.Commerce.Reparent(r.Context(), r.PostFormValue("id"), r.PostFormValue("parent_id"))
+	id, parent := r.PostFormValue("id"), r.PostFormValue("parent_id")
+	if !content.IsUUID(id) || (parent != "" && !content.IsUUID(parent)) {
+		d.categoryError(w, r, http.StatusUnprocessableEntity,
+			commerce.ErrCategoryMissing.Error())
+		return
+	}
+	err := d.Commerce.Reparent(r.Context(), id, parent)
 	switch {
 	case errors.Is(err, commerce.ErrCategoryCycle), errors.Is(err, commerce.ErrCategoryDepth),
 		errors.Is(err, commerce.ErrCategoryMissing):
@@ -291,7 +304,7 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.log(r, c, "category.reparent", "category", r.PostFormValue("id"), "상위 카테고리 변경")
+	d.log(r, c, "category.reparent", "category", id, "상위 카테고리 변경")
 	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
 }
 

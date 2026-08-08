@@ -180,8 +180,8 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// FR-710: the site type is a closed vocabulary. An unknown value would
 	// leave the router assembling a tree nobody described.
 	if t, ok := kv["site.type"]; ok && t != "cms" && t != "shop" {
-		d.Render(w, r, "admin/settings.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "사이트 유형은 cms 또는 shop 이어야 합니다."})
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "사이트 유형은 cms 또는 shop 이어야 합니다.")
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
@@ -208,11 +208,21 @@ var mailSettingKeys = []string{
 	"mail.tls_mode", "mail.from_address", "mail.from_name",
 }
 
-func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "settings.update"); !ok {
-		return
-	}
-	kv, err := d.Content.Settings(r.Context(), mailSettingKeys...)
+// renderSettings draws a settings screen — **정상 경로와 오류 경로가 같은
+// 함수를 쓴다.**
+//
+// 앞 판은 갈라져 있었다: 정상 경로는 `Settings` 와 `SecretSaved` 를 넘기고
+// 오류 경로는 `{"Error": …}` 만 넘겼는데, 화면은 `{{index .Settings "…"}}` 로
+// 값을 그리므로 템플릿이 nil 맵을 색인하다 터졌다 — **검증에 걸릴 때마다
+// 422 대신 500** 이 나갔다. 오류 경로는 정상 경로보다 훨씬 덜 지나가므로
+// 이런 것이 오래 남는다. 한 함수로 두면 갈라질 자리가 없다.
+//
+// 비밀값은 **설정됐는지만** 나간다. 화면이 그 값을 보여 줄 수 없으므로 빈 칸이
+// 정상 상태이고, 빈 칸을 저장으로 받으면 지워진다 (MailSettingsSave).
+func (d *Deps) renderSettings(w http.ResponseWriter, r *http.Request,
+	screen string, keys []string, code int, msg string,
+) {
+	kv, err := d.Content.Settings(r.Context(), keys...)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
@@ -221,14 +231,20 @@ func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
 	saved := map[string]bool{}
 	for k, v := range kv {
 		if secretKeys[k] {
-			// Only whether it is set, never the value.
 			saved[k] = v != ""
 			continue
 		}
 		shown[k] = v
 	}
-	d.Render(w, r, "admin/mail.html", http.StatusOK,
-		map[string]any{"Settings": shown, "SecretSaved": saved})
+	d.Render(w, r, screen, code,
+		map[string]any{"Settings": shown, "SecretSaved": saved, "Error": msg})
+}
+
+func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
+	if _, ok := d.require(w, r, "settings.update"); !ok {
+		return
+	}
+	d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusOK, "")
 }
 
 func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
@@ -251,8 +267,8 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 		kv[k] = v
 	}
 	if m, ok := kv["mail.tls_mode"]; ok && m != "none" && m != "starttls" && m != "tls" {
-		d.Render(w, r, "admin/mail.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "TLS 모드 값이 올바르지 않습니다."})
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys,
+			http.StatusUnprocessableEntity, "TLS 모드 값이 올바르지 않습니다.")
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
@@ -367,8 +383,9 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"Error": "이미 사용 중인 슬러그입니다."})
 		return
 	}
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	// **없는 페이지를 고치려 한 것은 404 다.** `d.fail` 이 그 판정을 갖고 있는데
+	// 여기서는 쓰지 않아, 지운 페이지의 편집 폼을 다시 제출하면 500 이 났다.
+	if d.fail(w, r, err) {
 		return
 	}
 	http.Redirect(w, r, "/admin/pages", http.StatusSeeOther)
@@ -386,7 +403,7 @@ func (d *Deps) PagePublish(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "허용되지 않는 상태 전이입니다.", http.StatusUnprocessableEntity)
 			return
 		}
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.fail(w, r, err)
 		return
 	}
 	http.Redirect(w, r, "/admin/pages", http.StatusSeeOther)
@@ -397,8 +414,7 @@ func (d *Deps) PageDelete(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "page.delete"); !ok {
 		return
 	}
-	if err := d.Content.DeletePage(r.Context(), r.PathValue("id")); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	if err := d.Content.DeletePage(r.Context(), r.PathValue("id")); d.fail(w, r, err) {
 		return
 	}
 	http.Redirect(w, r, "/admin/pages", http.StatusSeeOther)
@@ -790,6 +806,15 @@ func (d *Deps) UserFieldSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if n, err := strconv.Atoi(r.PostFormValue("sort_order")); err == nil {
 		f.Sort = n
+	}
+	// 화면에서도 먼저 거른다 — 저장소가 마지막 방어선이고, 여기서 걸러야
+	// 운영자가 무엇이 왜 거부됐는지 그 화면에서 본다.
+	if err := content.ValidateUserFieldKey(f.Key); err != nil {
+		fields, _ := d.Content.UserFields(ctx)
+		d.Render(w, r, "admin/user-fields.html", http.StatusUnprocessableEntity,
+			map[string]any{"Fields": fields, "Types": content.FieldTypes(),
+				"Error": err.Error()})
+		return
 	}
 	if err := d.Content.SaveUserField(ctx, f); err != nil {
 		fields, _ := d.Content.UserFields(ctx)

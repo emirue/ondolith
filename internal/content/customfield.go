@@ -63,10 +63,34 @@ var reservedFieldKeys = map[string]bool{
 	"created_at": true, "updated_at": true, "custom_fields": true,
 }
 
-// ValidateFieldKey is A-306's check on a new field name.
+// reservedUserFieldKeys are the account's own columns and the names the signup
+// and profile forms already use.
+//
+// **글의 목록을 그대로 쓸 수 없다.** 회원 화면이 쓰는 이름은 `email`·
+// `display_name`·`password` 이고, 글의 목록에는 그중 하나도 없다. 값이 별도
+// JSONB 컬럼에 들어가므로 실제 컬럼을 덮어쓰지는 못하지만, 폼 이름이 겹치면
+// 가입 폼의 이메일 입력이 그대로 항목 값으로 복사된다 — 운영자가 의도한 적
+// 없는 저장이고, 화면에는 같은 이름의 칸이 둘 그려진다.
+var reservedUserFieldKeys = map[string]bool{
+	"id": true, "email": true, "password": true, "password_confirm": true,
+	"password_hash": true, "display_name": true, "is_admin": true,
+	"is_active": true, "sessions_valid_from": true, "email_verified_at": true,
+	"created_at": true, "updated_at": true, "custom_fields": true,
+	"confirm": true,
+}
+
+// ValidateFieldKey is A-306's check on a new field name (게시판 커스텀 필드).
 func ValidateFieldKey(key string) error {
 	if reservedFieldKeys[key] {
 		return fmt.Errorf("%w: %q 는 글의 기본 항목 이름입니다", ErrFieldType, key)
+	}
+	return nil
+}
+
+// ValidateUserFieldKey is A-406's check (회원 프로필 항목).
+func ValidateUserFieldKey(key string) error {
+	if reservedUserFieldKeys[key] {
+		return fmt.Errorf("%w: %q 는 계정의 기본 항목 이름입니다", ErrFieldType, key)
 	}
 	return nil
 }
@@ -274,7 +298,9 @@ func (s *Store) UserFields(ctx context.Context) ([]FieldSchema, error) {
 // 예약어 검사는 여기서도 한다 — 저장 직전이 마지막 방어선이고, 화면이 하나
 // 늘 때마다 그 화면이 검사를 빠뜨릴 수 있다 (SaveBoardField 와 같은 이유).
 func (s *Store) SaveUserField(ctx context.Context, f FieldSchema) error {
-	if err := ValidateFieldKey(f.Key); err != nil {
+	// **회원용 예약어를 쓴다.** 글의 목록에는 `email`·`display_name` 이 없어서,
+	// 그것을 쓰면 가입 폼의 이름과 겹치는 항목을 만들 수 있었다.
+	if err := ValidateUserFieldKey(f.Key); err != nil {
 		return err
 	}
 	opts := f.Options

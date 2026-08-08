@@ -309,3 +309,48 @@ func TestShowInListAddsAColumnToTheUserList(t *testing.T) {
 		t.Error("목록에 내지 않기로 한 항목의 값이 나왔다")
 	}
 }
+
+// **계정의 기본 항목 이름은 회원 항목으로 쓸 수 없다** (A-406 예약어).
+//
+// 값이 별도 JSONB 컬럼에 들어가므로 실제 컬럼을 덮어쓰지는 못한다. 하지만 폼
+// 이름이 겹치면 **가입 폼의 이메일 입력이 그대로 항목 값으로 복사되고**, 화면에는
+// 같은 이름의 칸이 둘 그려진다 — 운영자가 의도한 적 없는 저장이다.
+//
+// 글의 예약어 목록(`title`·`body`…)에는 `email`·`display_name` 이 없어서, 그
+// 목록을 그대로 쓰던 동안 이 이름들이 통과했다.
+func TestUserFieldKeysCannotShadowAccountColumns(t *testing.T) {
+	srv, pool := liveSite(t)
+	_, post := adminSession(t, srv, pool)
+	ctx := context.Background()
+
+	for _, key := range []string{"email", "display_name", "password", "id", "is_admin"} {
+		t.Run(key, func(t *testing.T) {
+			resp := post("/admin/user-fields", url.Values{
+				"key": {key}, "label": {"겹치는 이름"}, "field_type": {"text"},
+				"sort_order": {"0"},
+			})
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusUnprocessableEntity {
+				t.Errorf("예약어 %q = HTTP %d, want 422", key, resp.StatusCode)
+			}
+		})
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_fields`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("예약어로 항목이 %d 개 만들어졌다", n)
+	}
+
+	// 헛돌기 방지: 겹치지 않는 이름은 통과한다.
+	defineUserField(t, post, url.Values{
+		"key": {"nickname"}, "label": {"별명"}, "field_type": {"text"}, "sort_order": {"0"},
+	})
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_fields`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("멀쩡한 이름이 저장되지 않았다 (%d개) — 위 단언들이 헛돌았다", n)
+	}
+}

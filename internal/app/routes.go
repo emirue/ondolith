@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/emirue/ondolith/internal/content"
 )
 
 // Route registration forces a permission declaration (D15 4.4).
@@ -104,7 +106,43 @@ func (r *Registry) Routes() []Route { return slices.Clone(r.routes) }
 // Mount writes the registry into a mux. Call Check first.
 func (r *Registry) Mount(mux *http.ServeMux) {
 	for _, rt := range r.routes {
-		mux.HandleFunc(rt.Method+" "+rt.Pattern, rt.Handler)
+		mux.HandleFunc(rt.Method+" "+rt.Pattern, guardID(rt))
+	}
+}
+
+// newSentinel 은 `{id}` 자리에 올 수 있는 유일한 비-UUID 값이다.
+//
+// A-302·A-305·A-502 는 생성 폼과 편집 폼이 같은 주소를 쓴다 — `/admin/pages/new`
+// 가 「새 페이지」다. 그래서 이 하나만 통과시킨다. 핸들러 다섯이 각자
+// `id == "new"` 를 검사하고 있고, 그 사실이 여기 한 줄로 드러나 있는 편이
+// 낫다 — 흩어져 있으면 여섯 번째 화면이 그것을 잊는다.
+const newSentinel = "new"
+
+// guardID 는 `{id}` 가 UUID 형식일 때만 핸들러를 부른다.
+//
+// **형식이 깨진 값과 없는 값은 다르다.** 없는 UUID 는 `WHERE id = $1` 이 0행을
+// 내고 핸들러가 404 로 옮긴다. 형식이 깨진 값은 `uuid` 컬럼과 비교되는 순간
+// PostgreSQL 이 **22P02** 로 터지고, 그 오류는 어느 도메인 오류와도 일치하지
+// 않아 500 이 된다 — 잘못된 입력이 서버 고장으로 보고되고 로그와 경보를
+// 오염시킨다.
+//
+// **여기서 막는다.** 저장소에서 22P02 를 옮기려면 `pgx.ErrNoRows` 를 다루는
+// 60곳과 `RowsAffected` 를 보는 29곳을 전부 고쳐야 하고, 그중 하나를 빠뜨리면
+// 그 하나가 남는다. 라우트는 전부 이 함수를 지나므로 새로 만드는 화면도
+// 자동으로 보호된다.
+//
+// 404 다. "그런 것은 없다" 는 형식이 깨진 값에 대해서도 참이고, 400 과 달리
+// 존재 여부를 추측할 단서를 주지 않는다 (SC-1 4항).
+func guardID(rt Route) http.HandlerFunc {
+	if !strings.Contains(rt.Pattern, "{id}") {
+		return rt.Handler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if id := r.PathValue("id"); id != newSentinel && !content.IsUUID(id) {
+			http.NotFound(w, r)
+			return
+		}
+		rt.Handler(w, r)
 	}
 }
 

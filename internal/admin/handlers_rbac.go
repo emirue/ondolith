@@ -127,8 +127,8 @@ func (d *Deps) MenuDelete(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "menu.manage"); !ok {
 		return
 	}
-	if err := d.Content.DeleteMenuItem(r.Context(), r.PathValue("id")); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	// 없는 메뉴를 지우려 한 것은 404 다 — `d.fail` 이 그 판정을 갖고 있다.
+	if err := d.Content.DeleteMenuItem(r.Context(), r.PathValue("id")); d.fail(w, r, err) {
 		return
 	}
 	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
