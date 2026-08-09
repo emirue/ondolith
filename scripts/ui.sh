@@ -375,6 +375,14 @@ run_role() {
 			UI_URLS="$(tojson "$4")" node scripts/ui-audit.mjs || audit=1
 	fi
 }
+# **지난 실행의 사진을 남겨 두지 않는다.** 주소가 하나 빠지거나 시드의 UUID 가
+# 바뀌면 낡은 파일이 그대로 남고, 그것을 열어 보고 「고쳤다」고 말하게 된다 —
+# 이 세션에서 실제로 그럴 뻔했다. 역할 셋이 같은 디렉터리를 쓰므로 부르기
+# **전에 한 번만** 지운다. 지우는 것은 PNG 뿐이다: SHOT_DIR 은 부르는 쪽이
+# 정하는 값이라 디렉터리를 통째로 지우지 않는다.
+if [ -n "${UI_SHOTS:-}" ]; then
+	find "${SHOT_DIR:-shots}" -maxdepth 1 -name '*.png' -delete 2>/dev/null
+fi
 run_role admin admin@example.com "$ADMIN_PW" "$WORK/live-admin"
 run_role member member@example.com "$MEMBER_PW" "$WORK/live-member"
 run_role anon "" "" "$WORK/live-anon"

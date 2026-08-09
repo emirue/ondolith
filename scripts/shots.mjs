@@ -10,7 +10,7 @@
 // 실행: make shots
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { findChrome, launch, CDP, WIDTHS } from './lib-browser.mjs'
+import { findChrome, launch, WIDTHS } from './lib-browser.mjs'
 
 const BASE = process.env.SHOT_BASE ?? 'http://127.0.0.1:8102'
 const EMAIL = process.env.SHOT_EMAIL ?? ''
@@ -52,6 +52,9 @@ async function main() {
     console.error('찍을 주소가 없다')
     process.exit(1)
   }
+  // **여기서 지우지 않는다.** 역할 셋이 같은 디렉터리에 차례로 찍으므로,
+  // 이 안에서 비우면 두 번째 역할이 첫 번째의 사진을 지운다. 지난 실행을
+  // 치우는 것은 ui.sh 가 세 번 부르기 **전에** 한 번 한다.
   mkdirSync(OUT, { recursive: true })
 
   let n = 0

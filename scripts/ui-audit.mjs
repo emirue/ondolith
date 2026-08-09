@@ -172,7 +172,10 @@ const AUDIT = String.raw`(() => {
   //     좁은 화면(본문이 화면을 다 쓰는 폭)에서는 셋이 같은 여백이라 이 규칙이
   //     저절로 만족된다. 어긋남은 넓은 화면에서만 생긴다.
   {
-    const m = document.querySelector('main')
+    // **테마 화면일 때만 본다.** 관리자 트리는 사이드바가 있는 다른 레이아웃
+    // 이라(main.adm-main) 띠가 없는 것이 정상이다 — 구분하지 않으면 관리자
+    // 화면마다 「띠를 못 찾았다」가 뜬다. 실제로 그렇게 나왔다.
+    const m = document.querySelector('main:not(.adm-main)')
     const bands = ['header.site-header', 'footer.site-footer']
     if (m && vw > 1040) {
       // 본문의 기준선은 카드가 아니라 main 의 내용 상자다.
@@ -180,7 +183,14 @@ const AUDIT = String.raw`(() => {
       const mLeft = m.getBoundingClientRect().left + parseFloat(ms.paddingLeft)
       for (const sel of bands) {
         const b = document.querySelector(sel)
-        if (!b || !vis(b)) continue
+        // **못 찾은 것과 어긋나지 않은 것은 다르다.** 하나라도 빠지면 그만큼
+        // 이 규칙은 덜 재는 것이고, 조용히 통과하면 아무도 그것을 모른다 —
+        // 이 세션에서 헛도는 검사가 여러 번 나왔다. 둘 다 없을 때만 말하면
+        // 띠 하나가 사라지는 것은 그대로 지나간다 (실제로 그랬다).
+        if (!b || !vis(b)) {
+          out.push('세로축을 잴 띠가 없다: ' + sel + ' — 그만큼 규칙이 헛돈다')
+          continue
+        }
         const bs = getComputedStyle(b)
         const bLeft = b.getBoundingClientRect().left + parseFloat(bs.paddingLeft)
         if (Math.abs(bLeft - mLeft) > 2) {

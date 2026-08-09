@@ -211,3 +211,19 @@ func TestInstallTreeSetsSecurityHeaders(t *testing.T) {
 			rec.Header().Get("Content-Security-Policy"))
 	}
 }
+
+// NFR-212. **기본값만 고치면 절반이다.** 표시 이름 칸을 열어 두면 운영자는
+// 주소를 붙여넣고, 그 값이 글·댓글 작성자 줄에 그대로 걸린다 — 폼의 안내
+// 문구는 막지 못한다.
+func TestInstallRefusesEmailAsDisplayName(t *testing.T) {
+	f := validForm()
+	f.AdminName = "admin@example.com"
+	if err := f.validate(); err == nil {
+		t.Fatal("표시 이름에 이메일을 넣었는데 통과했다")
+	}
+
+	f.AdminName = "온돌 운영자"
+	if err := f.validate(); err != nil {
+		t.Errorf("멀쩡한 이름이 거부됐다: %v", err)
+	}
+}

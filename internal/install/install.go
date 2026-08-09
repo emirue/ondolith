@@ -282,6 +282,12 @@ func (f *form) validate() error {
 	if _, err := mail.ParseAddress(f.AdminEmail); err != nil {
 		return errors.New("관리자 이메일 형식이 올바르지 않습니다.")
 	}
+	// **표시 이름에 이메일을 받지 않는다** (NFR-212). 기본값만 고쳐서는 절반이다 —
+	// 칸을 열어 두면 운영자는 주소를 붙여넣고, 그 값이 글·댓글 작성자 줄에 그대로
+	// 걸린다. 안내 문구는 막지 못한다.
+	if strings.Contains(f.AdminName, "@") {
+		return errors.New("표시 이름에 이메일을 쓰지 마세요. 글·댓글에 그대로 보입니다.")
+	}
 	if len([]rune(f.AdminPW)) < minPasswordLen {
 		return fmt.Errorf("관리자 비밀번호는 %d자 이상이어야 합니다.", minPasswordLen)
 	}

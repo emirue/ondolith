@@ -86,6 +86,7 @@ func installForm(dsn string) url.Values {
 		"db_sslmode":             {sslmode},
 		"site_name":              {"온돌 통합 테스트"},
 		"admin_email":            {"Admin@Example.COM"},
+		"admin_name":             {"온돌 운영자"},
 		"admin_password":         {"correct-horse-battery"},
 		"admin_password_confirm": {"correct-horse-battery"},
 	}
@@ -158,6 +159,21 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 	}
 	if !isAdmin {
 		t.Error("is_admin = false, want true")
+	}
+
+	// NFR-212. **폼의 칸 이름과 핸들러가 읽는 이름은 다른 것이다.** 한쪽만
+	// 고치면 운영자가 적은 이름은 조용히 버려지고 기본값이 저장되는데, 화면은
+	// 아무 말도 하지 않는다. 여기까지 와야 배선이 확인된다.
+	var display string
+	if err := pool.QueryRow(ctx,
+		"SELECT display_name FROM users WHERE email = 'admin@example.com'").Scan(&display); err != nil {
+		t.Fatalf("표시 이름 조회 실패: %v", err)
+	}
+	if display != "온돌 운영자" {
+		t.Errorf("display_name = %q, want 온돌 운영자 — 폼의 admin_name 이 닿지 않았다", display)
+	}
+	if strings.Contains(display, "@") {
+		t.Errorf("표시 이름에 이메일이 들어갔다: %q — 글·댓글 작성자 줄에 그대로 나간다", display)
 	}
 
 	// **FR-104 는 "관리자 계정" 이지 "is_admin 이 켜진 행" 이 아니다.**
