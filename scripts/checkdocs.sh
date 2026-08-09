@@ -464,8 +464,13 @@ if [ ! -f "$GAPS" ]; then
 	err "$GAPS 가 없다 — 결함·미검증 대장은 한 곳에 있어야 한다"
 else
 	perl -nle 'print $1 if /^\|\s*((?:GAP|BUG)-\d{2})\s*\|/' "$GAPS" | sort -u >"$T"/cd_gap_def
-	for f in docs/*.md; do
-		[ "$f" = "$GAPS" ] && continue
+	# **문서만 보면 안 된다.** `BUG-01` 이 설명하는 자리는 나중에 고칠 코드이고,
+	# 그 코드 옆에 `// BUG-01` 을 남기는 것이 이 ID 의 쓰임새다 — OPEN-## 은
+	# 실제로 .go 에 열일곱 곳 인용돼 있다. 문서만 훑으면 대장에서 행을 지운 뒤
+	# 코드 주석이 이미 메운 구멍을 열린 것으로 계속 말하고, 그것이 바로 이
+	# 대장이 존재하는 이유다 (M9, M11). FR/NFR 인용 검사와 같은 헬퍼를 쓴다.
+	id_files | while read -r f; do
+		[ "$f" = "./$GAPS" ] && continue
 		perl -nle 'print "$ARGV\t$.\t$1" while /\b((?:GAP|BUG)-\d{2})\b/g' "$f"
 	done | sort -u >"$T"/cd_gap_cited
 	while IFS="$(printf '\t')" read -r f ln id; do

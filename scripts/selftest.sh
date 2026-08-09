@@ -214,6 +214,15 @@ inject "대장에 없는 GAP 번호를 인용" docs/80-roadmap.md \
 inject "대장에 없는 BUG 번호를 인용" docs/80-roadmap.md \
 	'printf "\n무언가 (BUG-97) 를 참고.\n" >> docs/80-roadmap.md' \
 	'대장에 없는 결함·공백 번호를 인용한다'
+# **코드에서의 인용이 진짜 위험한 자리다.** BUG-01 이 설명하는 곳은 나중에 고칠
+# 코드이고, 그 옆에 `// BUG-01` 을 남기는 것이 이 ID 의 쓰임새다 — 위의 두 주입은
+# .md 만 건드리므로 코드 경로가 열려 있어도 전부 통과한다. 실제로 그랬다.
+inject "코드 주석이 대장에 없는 번호를 인용" internal/app/tree.go \
+	'printf "\n// 나중에 여기서 고친다 (BUG-97).\n" >> internal/app/tree.go' \
+	'대장에 없는 결함·공백 번호를 인용한다'
+inject "마이그레이션이 대장에 없는 번호를 인용" internal/migrations/00012_order.sql \
+	'printf "\n-- GAP-97 참고\n" >> internal/migrations/00012_order.sql' \
+	'대장에 없는 결함·공백 번호를 인용한다'
 inject "결함 대장이 비어 읽히지 않음" docs/85-gaps.md \
 	'perl -pi -e "s/^\| GAP-/| XAP-/; s/^\| BUG-/| XUG-/" docs/85-gaps.md' \
 	'GAP-/BUG- 항목을 하나도 읽지 못했다'
