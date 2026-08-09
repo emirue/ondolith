@@ -206,6 +206,24 @@ inject "미결 대장이 비어 읽히지 않음" docs/18-open-decisions.md \
 	'perl -pi -e "s/^\| OPEN-/| XPEN-/" docs/18-open-decisions.md' \
 	'OPEN- 항목을 하나도 읽지 못했다'
 
+# 결함·미검증 대장 (D85). 닫힌 항목을 가리키는 인용이 가장 위험하다 — 그 문서는
+# 이미 메운 구멍을 열린 것으로 말한다. 미결 대장에서 두 번 일어났다 (M9, M11).
+inject "대장에 없는 GAP 번호를 인용" docs/80-roadmap.md \
+	'printf "\n무언가 (GAP-97) 를 참고.\n" >> docs/80-roadmap.md' \
+	'대장에 없는 결함·공백 번호를 인용한다'
+inject "대장에 없는 BUG 번호를 인용" docs/80-roadmap.md \
+	'printf "\n무언가 (BUG-97) 를 참고.\n" >> docs/80-roadmap.md' \
+	'대장에 없는 결함·공백 번호를 인용한다'
+inject "결함 대장이 비어 읽히지 않음" docs/85-gaps.md \
+	'perl -pi -e "s/^\| GAP-/| XAP-/; s/^\| BUG-/| XUG-/" docs/85-gaps.md' \
+	'GAP-/BUG- 항목을 하나도 읽지 못했다'
+inject "결함·공백 ID 중복" docs/85-gaps.md \
+	'perl -ne "print; print if /^\| GAP-01 \|/" -i docs/85-gaps.md' \
+	'결함·공백 ID 중복'
+inject "닫는 방법이 없는 GAP 행" docs/85-gaps.md \
+	'perl -ni -e "if (/^\| GAP-01 \|/) { s/[^|]*\|[ \t]*\$/ |/ } print" docs/85-gaps.md' \
+	'닫는 방법이 없다'
+
 # P5 예외 (안전 메서드가 상태를 바꾸는 라우트). 아무도 검토하지 않은 예외는
 # 규칙이 없는 것과 같다 — 목록이 D15 에 있고 코드와 대조된다.
 inject "코드에만 있는 P5 예외" docs/15-access-control.md \

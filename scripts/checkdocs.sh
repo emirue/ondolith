@@ -452,6 +452,49 @@ else
 	done_ "미결 $n_open 건 · 대장 한 곳에만 존재"
 fi
 
+# --- 14-5b. the gap/defect ledger stays the single place --------------------
+#
+# **닫힌 항목을 가리키는 인용이 가장 위험하다.** 대장의 목적은 「무엇이 확인되지
+# 않았는가」를 한 곳에서 읽는 것인데, 행을 지운 뒤 다른 문서의 인용이 남으면
+# 그 문서는 이미 닫힌 구멍을 열린 것으로 말한다 — OPEN-## 에서 실제로 두 번
+# 일어났다 (M9, M11). 같은 검사를 GAP/BUG 에도 건다.
+begin
+GAPS=docs/85-gaps.md
+if [ ! -f "$GAPS" ]; then
+	err "$GAPS 가 없다 — 결함·미검증 대장은 한 곳에 있어야 한다"
+else
+	perl -nle 'print $1 if /^\|\s*((?:GAP|BUG)-\d{2})\s*\|/' "$GAPS" | sort -u >"$T"/cd_gap_def
+	for f in docs/*.md; do
+		[ "$f" = "$GAPS" ] && continue
+		perl -nle 'print "$ARGV\t$.\t$1" while /\b((?:GAP|BUG)-\d{2})\b/g' "$f"
+	done | sort -u >"$T"/cd_gap_cited
+	while IFS="$(printf '\t')" read -r f ln id; do
+		[ -z "$id" ] && continue
+		grep -q "^$id\$" "$T"/cd_gap_def ||
+			err "대장에 없는 결함·공백 번호를 인용한다 (닫히면서 인용이 남았다): $f:$ln $id"
+	done <"$T"/cd_gap_cited
+
+	n_gap=$(wc -l <"$T"/cd_gap_def | tr -d ' ')
+	[ "$n_gap" -gt 0 ] || err "$GAPS 에서 GAP-/BUG- 항목을 하나도 읽지 못했다"
+	dupes=$(perl -nle 'print $1 if /^\|\s*((?:GAP|BUG)-\d{2})\s*\|/' "$GAPS" | sort | uniq -d)
+	for id in $dupes; do err "결함·공백 ID 중복: $id"; done
+
+	# **닫는 방법이 없는 행은 대장이 아니라 비목표다.** 칸이 비면 그 행은
+	# 영원히 남고, 남은 행이 늘면 대장은 읽히지 않는 목록이 된다.
+	# **마지막 칸을 본다.** 열 번호로 세면 셀 안의 파이프 하나에 어긋난다.
+	# 바깥 파이프를 먼저 떼고 나눈다 — 「끝의 빈 칸을 지운 뒤 끝을 본다」는
+	# 찾으려는 그 칸을 먼저 지워서 영영 매치되지 않았다 (직접 주입해 보고 알았다).
+	perl -nle 'next unless /^\|\s*GAP-\d{2}\s*\|/;
+		my $r = $_; $r =~ s/^\|//; $r =~ s/\|\s*$//;
+		my @c = split /\|/, $r, -1;
+		print "$.: $_" if @c < 2 || $c[-1] =~ /^\s*$/' "$GAPS" >"$T"/cd_gap_noclose
+	while read -r line; do
+		[ -n "$line" ] && err "$GAPS 의 GAP 행에 닫는 방법이 없다: $line"
+	done <"$T"/cd_gap_noclose
+
+	done_ "결함·미검증 $n_gap 건 · 대장 한 곳에만 존재"
+fi
+
 # --- 14-6. the dependency table matches go.mod ------------------------------
 # D21 states versions that were checked by querying, not remembered (M1). A
 # table that drifts from go.mod is worse than no table: it is a wrong answer

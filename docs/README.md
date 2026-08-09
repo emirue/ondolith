@@ -46,6 +46,7 @@
 | D82 | [82-execution-loop.md](82-execution-loop.md) | **실행 루프.** 종료 신호·진행 표시·재개 절차 (`scripts/next-task.sh`) | 작업을 실제로 돌릴 때 |
 | D83 | [83-browser-test.md](83-browser-test.md) | **브라우저 수동 테스트 시나리오.** 설치부터 커머스 한 바퀴 | 화면을 직접 확인할 때 |
 | D84 | [84-logo-brief.md](84-logo-brief.md) | **로고 제작 요청서.** 외부 도구에 붙여 넣는 요청문 + 검수 항목 | 로고를 만들거나 교체할 때 |
+| D85 | [85-gaps.md](85-gaps.md) | **결함·미검증 대장.** 게이트가 초록이어도 확인되지 않은 것 (`GAP-##`) · 알려진 결함 (`BUG-##`) | 무엇이 확인되지 않았는지 볼 때 |
 | D90 | [90-conventions.md](90-conventions.md) | **문서 작성 규칙.** 번호·ID·추가 절차·기계 검증 | 문서를 쓰기 전 |
 
 ## 작업 지침 (`.ai/`)
