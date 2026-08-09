@@ -17,6 +17,8 @@ const EMAIL = process.env.SHOT_EMAIL ?? ''
 const PASSWORD = process.env.SHOT_PASSWORD ?? ''
 const OUT = process.env.SHOT_DIR ?? 'shots'
 const ROLE = process.env.SHOT_ROLE ?? 'anon'
+// 라이트/다크. 파일 이름에 들어가므로 두 벌이 서로를 덮지 않는다.
+const SCHEME = process.env.SHOT_SCHEME ?? 'light'
 
 async function main() {
   const bin = findChrome()
@@ -40,6 +42,9 @@ async function main() {
     if (exceptionDetails) throw new Error(exceptionDetails.text)
     return result.value
   }
+
+  await cdp.send('Emulation.setEmulatedMedia',
+    { features: [{ name: 'prefers-color-scheme', value: SCHEME }] }, sessionId)
 
   await go(BASE + '/login')
   if (EMAIL) {
@@ -86,12 +91,12 @@ async function main() {
         sessionId,
       )
       const slug = path.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'home'
-      const file = join(OUT, `${ROLE}-${width}-${slug}.png`)
+      const file = join(OUT, `${ROLE}-${SCHEME}-${width}-${slug}.png`)
       writeFileSync(file, Buffer.from(data, 'base64'))
       n++
     }
   }
-  console.log(`  ✓ ${ROLE}: ${n} 장 (${OUT})`)
+  console.log(`  ✓ ${ROLE}(${SCHEME}): ${n} 장 (${OUT})`)
   process.exit(0)
 }
 

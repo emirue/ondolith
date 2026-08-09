@@ -12,6 +12,9 @@ const BASE = process.env.UI_BASE ?? 'http://127.0.0.1:8099'
 const EMAIL = process.env.UI_EMAIL ?? ''
 const PASSWORD = process.env.UI_PASSWORD ?? ''
 const ROLE = process.env.UI_ROLE ?? '?'
+// 라이트/다크. 두 벌의 값이 CSS 에 있는데 한쪽만 재면 나머지 절반은
+// 아무도 본 적이 없는 화면이다.
+const SCHEME = process.env.UI_SCHEME ?? 'light'
 
 // ---- 페이지 안에서 도는 감사 ------------------------------------------------
 //
@@ -243,6 +246,11 @@ async function main() {
   }
 
   // 역할의 세션을 만든다. 익명은 로그인하지 않는다 — 그 상태가 곧 그 역할이다.
+  // **CSS 가 두 벌이면 검사도 두 벌이어야 한다.** 색 대비는 좌표에 안 나오지만
+  // 다크에서만 생기는 넘침·겹침은 나온다 — 값이 다르면 글자 폭도 여백도 달라진다.
+  await cdp.send('Emulation.setEmulatedMedia',
+    { features: [{ name: 'prefers-color-scheme', value: SCHEME }] }, sessionId)
+
   await go(BASE + '/login')
   if (EMAIL) {
     await evaluate(`fetch('/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
@@ -308,7 +316,7 @@ async function main() {
   }
 
   // 브라우저와 임시 디렉터리 정리는 lib-browser 가 프로세스 종료에 맞춰 한다.
-  console.log(`  ${ROLE}: ${checked} 조합 확인 · 결함 ${bad} 건`)
+  console.log(`  ${ROLE}(${SCHEME}): ${checked} 조합 확인 · 결함 ${bad} 건`)
   process.exit(bad === 0 ? 0 : 1)
 }
 

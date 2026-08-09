@@ -51,18 +51,18 @@ type adminRenderer struct {
 	cache map[string]*template.Template
 }
 
-// defaultAdminTheme 은 「1b 모던 소프트」다.
+// defaultAdminTheme 은 「1b 모던 소프트」이고, **스타일시트가 그것을 안다.**
 //
-// 스타일시트가 값 없이 실으면 1a 클래식이 되고, 그것은 3px 모서리에 그림자가
-// 없는 딱딱한 화면이다. 다섯 안은 **같은 마크업을 공유하므로** 기본을 옮기는
-// 데 드는 비용이 이 상수 하나다 — 새 CSS 를 쓰는 것이 아니라 이미 있는 안을
-// 고르는 것이다. 다른 안이 필요하면 `admin.theme` 설정이 그대로 덮는다.
+// 여기서 채워 넣지 않는다. 값이 비었을 때 기본값을 `data-admin-theme` 로 찍으면
+// 「고르지 않았다」와 「1b 를 골랐다」가 같은 모양이 되고, 그러면 admin.css 의
+// `:root:not([data-admin-theme])` 다크 블록이 영원히 매치되지 않는다 — 20줄짜리
+// 다크 콘솔이 죽은 코드였다. 값 없는 `:root` 가 곧 1b 이므로 비워 두면 된다.
+//
+// 상수는 남는다: 무엇이 기본인지 코드에서 읽을 수 있어야 하고, 테스트가 CSS 와
+// 대조한다.
 const defaultAdminTheme = "1b"
 
 func newAdminRenderer(site func() string, theme string, shop bool, log *slog.Logger) (*adminRenderer, error) {
-	if theme == "" {
-		theme = defaultAdminTheme
-	}
 	b, err := adminFS.ReadFile("templates/admin/admin.css")
 	if err != nil {
 		return nil, err

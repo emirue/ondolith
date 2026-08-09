@@ -2,6 +2,7 @@ package app
 
 import (
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"regexp"
@@ -441,5 +442,47 @@ func TestEmptyTableRowsCarryTheMarker(t *testing.T) {
 	}
 	if checked < 10 {
 		t.Fatalf("빈 상태 줄을 %d 개밖에 못 찾았다 — 검사가 헛돌았다", checked)
+	}
+}
+
+// 관리자 콘솔의 **기본 배색은 값 없는 `:root` 가 진다.**
+//
+// 서버가 기본값을 `data-admin-theme` 로 찍어 채우면 「고르지 않았다」와 「1b 를
+// 골랐다」가 같은 모양이 되고, admin.css 의 `:root:not([data-admin-theme])`
+// 다크 블록이 **영원히 매치되지 않는다** — 20줄짜리 다크 콘솔이 죽은 코드였고,
+// 관리자 화면을 어둡게 만들 방법이 없었다 (`admin.theme` 을 저장하는 화면도
+// 없다). 브라우저로 다크를 찍어 보고 알았다: 파일 이름만 dark 고 화면은 밝았다.
+func TestAdminDefaultThemeIsUnstamped(t *testing.T) {
+	// 값이 비면 비운 채로 둔다 — 여기서 채우면 위의 구분이 사라진다.
+	r, err := newAdminRenderer(func() string { return "s" }, "", false,
+		slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("렌더러: %v", err)
+	}
+	if r.theme != "" {
+		t.Errorf("고르지 않았는데 theme = %q 로 채워졌다 — 다크 블록이 죽는다", r.theme)
+	}
+	// 고른 값은 그대로 간다.
+	r2, err := newAdminRenderer(func() string { return "s" }, "1c", false,
+		slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("렌더러: %v", err)
+	}
+	if r2.theme != "1c" {
+		t.Errorf("고른 값이 %q 로 바뀌었다", r2.theme)
+	}
+
+	// CSS 쪽 절반: 값 없는 `:root` 가 기본안의 값을 지고, 다크 블록이 그것을
+	// 덮을 수 있어야 한다. 둘 중 하나만 있으면 이 검사는 헛돈다.
+	raw, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatalf("admin.css: %v", err)
+	}
+	css := string(raw)
+	if !strings.Contains(css, ":root,\n:root[data-admin-theme=\""+defaultAdminTheme+"\"] {") {
+		t.Errorf("값 없는 :root 가 기본안(%s)을 지지 않는다", defaultAdminTheme)
+	}
+	if !strings.Contains(css, ":root:not([data-admin-theme])") {
+		t.Error("다크 블록의 선택자가 사라졌다")
 	}
 }

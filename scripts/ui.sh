@@ -367,12 +367,20 @@ audit=0
 # 「잰 화면」이 서로 다른 상태가 되고, 눈으로 본 것이 증거가 되지 않는다.
 run_role() {
 	if [ -n "${UI_SHOTS:-}" ]; then
-		SHOT_BASE="$BASE" SHOT_ROLE="$1" SHOT_EMAIL="$2" SHOT_PASSWORD="$3" \
-			SHOT_DIR="${SHOT_DIR:-shots}" SHOT_URLS="$(tojson "$4")" \
-			node scripts/shots.mjs || audit=1
+		for scheme in light dark; do
+			SHOT_BASE="$BASE" SHOT_ROLE="$1" SHOT_EMAIL="$2" SHOT_PASSWORD="$3" \
+				SHOT_DIR="${SHOT_DIR:-shots}" SHOT_SCHEME="$scheme" \
+				SHOT_URLS="$(tojson "$4")" node scripts/shots.mjs || audit=1
+		done
 	else
-		UI_BASE="$BASE" UI_ROLE="$1" UI_EMAIL="$2" UI_PASSWORD="$3" \
-			UI_URLS="$(tojson "$4")" node scripts/ui-audit.mjs || audit=1
+		# **두 배색을 다 잰다.** CSS 에 다크 값이 한 벌 더 있는데 라이트만
+		# 재면 나머지 절반은 아무도 본 적이 없는 화면이다. 값이 다르면
+		# 글자 폭도 여백도 달라지고, 넘침은 거기서도 생긴다.
+		for scheme in light dark; do
+			UI_BASE="$BASE" UI_ROLE="$1" UI_EMAIL="$2" UI_PASSWORD="$3" \
+				UI_SCHEME="$scheme" UI_URLS="$(tojson "$4")" \
+				node scripts/ui-audit.mjs || audit=1
+		done
 	fi
 }
 # **지난 실행의 사진을 남겨 두지 않는다.** 주소가 하나 빠지거나 시드의 UUID 가
