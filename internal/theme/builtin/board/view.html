@@ -8,9 +8,14 @@
     {{date .Post.CreatedAt "2006-01-02 15:04"}} · 조회 {{number .Post.ViewCount}}
   </p>
 
-  {{if .Fields}}
+  {{/* **정의가 아니라 값이 있을 때 그린다.** 정의만 보고 열면 값이 하나도
+       없는 글에서 빈 회색 막대가 본문 위에 뜬다 — 브라우저로 찍어 보고 알았다.
+       좌표로는 안 잡힌다: 빈 상자도 넘치지 않고 잘리지 않는다. */}}
+  {{$p := .Post}}
+  {{$shown := false}}
+  {{range .Fields}}{{if field $p.CustomFields .Key}}{{$shown = true}}{{end}}{{end}}
+  {{if $shown}}
   <dl class="custom-fields">
-    {{$p := .Post}}
     {{range .Fields}}
       {{$v := field $p.CustomFields .Key}}
       {{if $v}}<dt>{{.Label}}</dt><dd>{{$v}}</dd>{{end}}

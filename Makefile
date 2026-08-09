@@ -3,7 +3,7 @@ PKG     := ./cmd/ondolith
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help build run check test test-integration schema e2e screens test-db-down vet fmt docs selftest vuln release verify-release measure verify-upgrade test-toss clean
+.PHONY: help build run check test test-integration schema e2e screens shots test-db-down vet fmt docs selftest vuln release verify-release measure verify-upgrade test-toss clean
 
 help:
 	@# 숫자를 포함한 대상(e2e)도 나와야 한다 — 목록에 없으면 없는 명령이다.
@@ -41,6 +41,9 @@ crawl: ## 홈에서 링크를 따라간다 — 화면이 만든 주소가 실제
 
 ui: ## 모든 화면을 375·768·1280px 에 그려 놓고 레이아웃을 잰다
 	sh scripts/ui.sh
+
+shots: ## 화면을 실제 브라우저로 찍어 shots/ 에 남긴다 — 눈으로 보기 위한 것
+	UI_SHOTS=1 UI_PORT=8102 UI_DB=ondolith_shots sh scripts/ui.sh
 
 e2e: ## D83 시나리오 재실행 — 빌드된 바이너리에 빈 DB 를 붙여 설치부터 한 바퀴
 	sh scripts/e2e.sh

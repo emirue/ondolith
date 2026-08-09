@@ -1,8 +1,10 @@
 package install
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -157,5 +159,55 @@ func TestConnectFailureNeverShowsDatabasePassword(t *testing.T) {
 	}
 	if strings.Contains(body, adminPassword) {
 		t.Errorf("관리자 비밀번호가 화면에 노출됐다 (C5 위반). 본문: %s", body)
+	}
+}
+
+// NFR-212. 관리자의 공개 표시 이름에 **이메일이 새면 안 된다.**
+//
+// 설치가 `display_name` 에 관리자 이메일을 그대로 넣고 있었다. 그러면 관리자가
+// 쓴 첫 글의 작성자 줄에 주소가 걸리고, 방문자 누구나 그것을 읽는다 — 브라우저
+// 스크린샷의 게시물 화면에 `admin@example.com` 이 그대로 찍혀 있었다. 로그인
+// 응답이 계정의 존재를 감추는 것(FR-201)도 그 줄 하나로 무의미해진다.
+func TestAdminDisplayNameNeverLeaksTheEmail(t *testing.T) {
+	f := validForm()
+	f.AdminName = ""
+	if got := f.displayName(); got == "" {
+		t.Fatal("표시 이름이 비었다 — 화면에 이름 없는 작성자가 나온다")
+	}
+	if got := f.displayName(); strings.Contains(got, "@") ||
+		strings.Contains(got, f.AdminEmail) {
+		t.Errorf("표시 이름에 이메일이 들어갔다: %q", got)
+	}
+
+	f.AdminName = "온돌 운영자"
+	if got := f.displayName(); got != "온돌 운영자" {
+		t.Errorf("입력한 이름을 쓰지 않았다: %q", got)
+	}
+}
+
+// NFR-211. 설치 화면도 **프레임에 들어가면 안 된다.**
+//
+// DB 비밀번호와 관리자 비밀번호를 받는 폼이다 — 클릭재킹의 대가가 운영 트리보다
+// 크지, 작지 않다. 코드를 공용(httpsec)으로 옮겨도 **배선은 트리마다 따로**라
+// 한쪽만 감기는 일이 생긴다. 그래서 트리마다 자기 검사를 둔다.
+func TestInstallTreeSetsSecurityHeaders(t *testing.T) {
+	h, err := New(t.TempDir()+"/ondolith.json", slog.New(slog.DiscardHandler), nil)
+	if err != nil {
+		t.Fatalf("설치 핸들러를 만들지 못했다: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/install", nil))
+
+	for _, c := range []struct{ header, want string }{
+		{"X-Frame-Options", "DENY"},
+		{"X-Content-Type-Options", "nosniff"},
+	} {
+		if got := rec.Header().Get(c.header); got != c.want {
+			t.Errorf("%s = %q, want %q", c.header, got, c.want)
+		}
+	}
+	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors") {
+		t.Errorf("CSP 에 frame-ancestors 가 없다: %q",
+			rec.Header().Get("Content-Security-Policy"))
 	}
 }

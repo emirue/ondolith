@@ -173,3 +173,44 @@ func TestSessionLifetimeIsNotZero(t *testing.T) {
 		t.Fatalf("sessionLifetime = %v", time.Duration(sessionLifetime))
 	}
 }
+
+// NFR-211. **CSRF 는 클릭재킹을 막지 못한다.**
+//
+// `CrossOriginProtection` 은 요청의 `Sec-Fetch-Site` 를 본다. 공격자가 이 사이트를
+// iframe 에 넣고 그 위에 투명한 미끼를 얹으면, 사용자가 누르는 것은 **이 사이트
+// 안의 진짜 버튼**이다 — 그 요청은 프레임 자신에게서 나오므로 same-origin 이고
+// CSRF 검사를 그대로 통과한다. 막는 것은 프레임에 들어가지 않는 것뿐이다.
+//
+// 세 헤더를 함께 본다. 하나만 두면 나머지가 조용히 빠진 채로 배포된다.
+func TestSecurityHeadersAreSet(t *testing.T) {
+	rec := serve(t, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	for _, c := range []struct{ header, want string }{
+		// 프레임 금지. 클릭재킹의 유일한 방어다.
+		{"X-Frame-Options", "DENY"},
+		// 콘텐츠 타입을 브라우저가 다시 추측하지 않는다.
+		{"X-Content-Type-Options", "nosniff"},
+	} {
+		if got := rec.Header().Get(c.header); got != c.want {
+			t.Errorf("%s = %q, want %q", c.header, got, c.want)
+		}
+	}
+
+	// 재설정 토큰은 **주소에** 있다 (`/password/reset/<토큰>`). Referer 를 그대로
+	// 흘리면 그 화면의 바깥 링크·이미지 하나가 토큰을 남의 서버에 넘긴다.
+	if got := rec.Header().Get("Referrer-Policy"); got == "" {
+		t.Error("Referrer-Policy 가 없다 — 재설정 토큰이 Referer 로 샌다")
+	}
+
+	// CSP 는 XSS 가 하나 뚫렸을 때의 두 번째 문이다. frame-ancestors 는
+	// X-Frame-Options 의 현대판이라 함께 둔다.
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("Content-Security-Policy 가 없다")
+	}
+	for _, want := range []string{"frame-ancestors", "object-src", "base-uri"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP 에 %s 가 없다: %q", want, csp)
+		}
+	}
+}

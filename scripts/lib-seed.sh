@@ -118,13 +118,41 @@ code POST "/admin/boards/$BOARD_ID/fields" --data-urlencode "key=color" \
 파랑" --data-urlencode "sort_order=0" --data-urlencode "show_in_list=1" >/dev/null
 want "게시판 커스텀 필드가 생겼다" 1 "$(sql "select count(*) from board_fields")"
 
-code POST /admin/terms --data-urlencode "kind=service" --data-urlencode "version=1.0" \
+code POST /admin/terms --data-urlencode "kind=이용약관" --data-urlencode "version=1.0" \
 	--data-urlencode "effective_at=$(date -v+30d +%Y-%m-%d 2>/dev/null || date -d '+30 days' +%Y-%m-%d)" --data-urlencode "body=이용약관 본문입니다." \
 	--data-urlencode "is_required=on" >/dev/null
 want "약관이 생겼다" 1 "$(sql "select count(*) from terms")"
+
+# **시행 중인 약관이 하나도 없으면 결제 화면의 약관 칸은 늘 비어 있다.**
+# 위의 것은 시행일이 30일 뒤라 아직 효력이 없다 — 그래서 결제 화면(P-405)은
+# 약관이 붙은 상태로 한 번도 그려진 적이 없었다. 빈 표가 결함을 숨기는 것과
+# 같은 모양이다. 오늘 시행하는 것을 하나 더 넣는다: A-506 은 오늘을
+# 「지금부터」로 읽어 받아 준다 (`sameDay` + `GREATEST(…, now())`).
+code POST /admin/terms --data-urlencode "kind=개인정보 처리방침" --data-urlencode "version=1.0" \
+	--data-urlencode "effective_at=$(date +%Y-%m-%d)" \
+	--data-urlencode "body=개인정보 처리방침 본문입니다." \
+	--data-urlencode "is_required=on" >/dev/null
+want "시행 중인 약관이 있다" 1 \
+	"$(sql "select count(*) from terms where effective_at <= now()")"
 
 # **결제사를 설정한다.** 없으면 주문서(P-405)가 503 이고 — 그것이 옳은 동작이다
 # (D19 P-405) — 주문이 생기지 않아 구매 이후 화면 전부가 크롤 대상에서 빠진다.
 code POST /admin/settings/payment --data-urlencode "pg.provider=toss" \
 	--data-urlencode "pg.client_key=crawl_ck" --data-urlencode "pg.secret_key=crawl_sk" >/dev/null
 
+
+# **필수 약관에 동의하지 않으면 주문이 만들어지지 않는다** (FR-619).
+#
+# 이 시드가 시행 중인 약관을 만들기 시작하자 세 곳의 `POST /checkout` 이 전부
+# 거부됐고, 그 뒤로 구매 이후 화면 열한 개가 통째로 감사에서 빠졌다 — 강제가
+# 실제로 걸려 있다는 좋은 신호지만, 세 곳에 동의 항목을 손으로 적으면 하나가
+# 어긋난다. 여기서 한 번 만든다.
+#
+# `checkout_args` 는 `--data-urlencode ...` 를 늘어놓은 문자열을 낸다. 값이 아니라
+# 인자를 만드는 것이므로 호출부에서 따옴표 없이 펼쳐 쓴다.
+checkout_args() {
+	sql "select id from terms where effective_at <= now() and is_required" |
+		while read -r tid; do
+			[ -n "$tid" ] && printf -- '--data-urlencode\nagreed_terms=%s\n' "$tid"
+		done
+}

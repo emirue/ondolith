@@ -749,7 +749,11 @@ dl { margin: 0 0 var(--s20); }
     gap: var(--s12);
     padding: var(--s12) var(--s16);
   }
-  .adm-navgroup-label { display: none; }
+  /* **제목을 숨기지 않는다.** 접힌 사이드바는 링크 스물다섯 개가 한 덩어리로
+   * 깔리는데, 그 상태에서 「주문」을 찾으려면 전부 읽어야 한다 — 375px 스크린샷
+   * 에서 보고 알았다. 그룹은 이미 `<div>` 단위로 줄바꿈되므로 제목 한 줄만
+   * 되살리면 덩어리가 넷으로 갈린다. */
+  .adm-navgroup-label { margin-bottom: var(--s6); }
   .adm-sidebar nav { display: flex; flex-wrap: wrap; gap: var(--s6); }
 }
 

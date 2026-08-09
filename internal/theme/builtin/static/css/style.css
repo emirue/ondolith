@@ -24,7 +24,7 @@
   --thead-bg: #faf8f5;  --input-bg: #fbfaf8;  --badge-bg: #eaf2ef; --badge-ink: #1f7a63;
   --radius: 16px;       --chip-radius: 10px;
   --shadow: 0 4px 16px rgba(43, 39, 35, .06);
-  --pad: 34px;          --gap: 24px;
+  --pad: 34px;          --gap: 24px;    --shell: 1040px;
   --err: #b3261e;       --err-bg: #fbeae9;
   --ok: #1f7a63;        --ok-bg: #eaf2ef;
   --link: #1f7a63;      --link-hover: #17594a;
@@ -62,7 +62,9 @@ a:hover { color: var(--link-hover); }
   gap: 26px;
   align-items: center;
   flex-wrap: wrap;
-  padding: 16px var(--pad);
+  /* 가로 여백은 아래 「한 축」 규칙이 정한다 — 여기서 단축 속성으로 쓰면
+     그 규칙이 덮이거나 덮어, 순서에 따라 헤더·푸터 중 한쪽만 맞는다. */
+  padding-block: 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
@@ -94,7 +96,22 @@ a:hover { color: var(--link-hover); }
 .inline { display: inline; }
 
 /* ---- 본문 --------------------------------------------------------------- */
-main { max-width: 1040px; margin: 0 auto; padding: 32px var(--pad) 64px; }
+main { max-width: var(--shell); margin: 0 auto; padding: 32px var(--pad) 64px; }
+
+/* **헤더·플래시·본문·푸터가 한 축에 선다.**
+ *
+ * `main` 만 가운데로 모으고 헤더·푸터는 화면 전체 폭이면, 넓은 화면에서 사이트
+ * 이름은 왼쪽 끝(x=34)에 붙고 본문 카드는 한참 안쪽(x=154)에서 시작한다 —
+ * 세로줄이 두 개 생겨 어느 쪽이 이 페이지의 왼쪽인지 눈이 못 고른다.
+ * 브라우저로 찍어 보고 알았다: 좌표 검사는 넘치지 않는 어긋남을 재지 않는다.
+ *
+ * 띠의 배경·구분선은 화면 전체를 덮어야 하므로 폭을 줄이지 않고 **안쪽 여백**
+ * 으로 맞춘다. 화면이 `--shell` 보다 좁으면 여느 때의 여백으로 돌아간다. */
+.site-header,
+.site-footer,
+.flash li {
+  padding-inline: max(var(--pad), calc((100% - var(--shell)) / 2 + var(--pad)));
+}
 
 /* ---- 히어로 ------------------------------------------------------------- */
 .hero {
@@ -309,7 +326,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px var(--pad);
+  padding-block: 14px;
   font-size: 13px;
   background: var(--ok-bg);
   color: var(--ok);
@@ -329,7 +346,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 /* ---- 푸터 --------------------------------------------------------------- */
 .site-footer {
   border-top: 1px solid var(--line);
-  padding: 24px var(--pad);
+  padding-block: 24px;
   font-size: 13px;
   opacity: .55;
 }
@@ -626,7 +643,6 @@ a:focus-visible {
 .refunds,
 .returns,
 .connections,
-.terms,
 .search-results {
   list-style: none;
   margin: 0 0 20px;
@@ -635,13 +651,39 @@ a:focus-visible {
   gap: 12px;
 }
 
+/* 약관 동의는 **목록이 아니라 폼 묶음**이다 (`<fieldset>`).
+ *
+ * 목록 규칙(`.terms > li`)에 얹어 두었더니 `label` 에는 아무것도 닿지 않고
+ * `fieldset` 의 브라우저 기본 테두리만 남아, 결제 화면 맨 아래에 「약관」이라고
+ * 적힌 얇은 상자 하나가 다른 폼과 전혀 다른 모양으로 떠 있었다. 375px 스크린샷
+ * 에서 보고 알았다. */
+.terms {
+  border: 0;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.terms > legend { padding: 0; font-size: 12.5px; opacity: .6; }
+
+.terms label {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 0;
+  font-size: 14px;
+  opacity: 1;
+}
+
+.terms em { font-style: normal; color: var(--err); font-size: 12px; }
+
 .cart > li,
 .order-items > li,
 .shipments > li,
 .refunds > li,
 .returns > li,
 .connections > li,
-.terms > li,
 .search-results > li {
   display: flex;
   gap: 14px;

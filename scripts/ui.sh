@@ -138,7 +138,7 @@ code POST /signup --data-urlencode "email=member@example.com" \
 code POST /cart/items --data-urlencode "variant_id=$VAR" --data-urlencode "quantity=2" >/dev/null
 POST_ID=$(sql "select id from posts limit 1")
 code POST "/board/notice/$POST_ID/comments" --data-urlencode "body=댓글 예시입니다." >/dev/null
-code POST /checkout --data-urlencode "receiver_name=받는이" \
+code POST /checkout $(checkout_args) --data-urlencode "receiver_name=받는이" \
 	--data-urlencode "receiver_phone=01012345678" --data-urlencode "postcode=06236" \
 	--data-urlencode "address1=서울특별시 강남구 테헤란로 123" \
 	--data-urlencode "address2=온돌빌딩 4층 401호" --data-urlencode "delivery_memo=부재 시 경비실" \
@@ -193,16 +193,29 @@ ADMIN_URLS=$WORK/urls-admin
 MEMBER_URLS=$WORK/urls-member
 ANON_URLS=$WORK/urls-anon
 
+# **공개 화면은 세 역할이 다 본다.** 홈·상품·게시판·검색을 관리자 세션으로만
+# 재면, 방문자가 실제로 보는 화면은 한 번도 재지 않는 것이 된다 — 로그인 링크
+# 자리, 관리 버튼이 빠진 자리, 「글쓰기」가 사라진 자리는 관리자 화면에 없다.
+# 사이트에 처음 오는 사람이 밟는 경로(홈 → 상품·글)가 바로 여기다.
+PUBLIC_URLS=$WORK/urls-public
+{
+	printf '%s\n' / /shop /board/notice /search /shop/search
+	printf '/board/notice/%s\n' "$POST_ID"
+	printf '/shop/p/%s\n' "$(sql "select slug from products limit 1")"
+	printf '/shop/c/%s\n' "$(sql "select slug from categories limit 1")"
+} >"$PUBLIC_URLS"
+
 # 회원·익명만 볼 수 있는 화면이 있다 — 관리자 세션으로 열면 303 이라 재지 못한다.
 printf '%s\n' /cart /checkout /orders /me /me/password /me/connections \
 	/me/delete /orders/guest >"$MEMBER_URLS"
+cat "$PUBLIC_URLS" >>"$MEMBER_URLS"
 printf '/orders/%s\n/orders/%s/shipping\n/orders/%s/receipt\n/orders/%s/refunds\n/orders/%s/returns\n/orders/%s/return\n/orders/%s/exchange\n' \
 	"$ORDER_NO" "$ORDER_NO" "$ORDER_NO" "$ORDER_NO" "$ORDER_NO" "$ORDER_NO" "$ORDER_NO" >>"$MEMBER_URLS"
 printf '%s\n' /login /signup /password/reset >"$ANON_URLS"
+cat "$PUBLIC_URLS" >>"$ANON_URLS"
 
 {
-	printf '%s\n' / /shop /board/notice /search /shop/search \
-		/admin/ /admin/pages /admin/pages/new \
+	printf '%s\n' /admin/pages /admin/pages/new \
 		/admin/boards /admin/boards/new \
 		/admin/menus /admin/users /admin/users/new \
 		/admin/user-fields /admin/roles /admin/settings /admin/settings/mail \
@@ -216,11 +229,8 @@ printf '%s\n' /login /signup /password/reset >"$ANON_URLS"
 	# 모두 본다.
 	printf '%s\n' /admin/posts /admin/comments /admin/attachments
 	printf '/admin/posts?board=notice\n/admin/comments?board=notice\n/admin/attachments?board=notice\n'
-	printf '/board/notice/%s\n' "$POST_ID"
 	printf '/board/notice/%s/edit\n' "$POST_ID"
 	printf '/board/notice/write\n'
-	printf '/shop/p/%s\n' "$(sql "select slug from products limit 1")"
-	printf '/shop/c/%s\n' "$(sql "select slug from categories limit 1")"
 	printf '/admin/orders/%s\n' "$ORDER_NO"
 	printf '/admin/orders/%s/shipping\n' "$ORDER_NO"
 	printf '/admin/orders/%s/refund\n' "$ORDER_NO"
@@ -234,8 +244,9 @@ printf '%s\n' /login /signup /password/reset >"$ANON_URLS"
 	printf '/admin/pages/%s\n' "$(sql "select id from pages limit 1")"
 	printf '/admin/users/%s\n' "$(sql "select id from users where email='member@example.com'")"
 } >"$ADMIN_URLS"
-# `/` 와 `/admin/` 은 끝이 슬래시라 위 목록에서 함께 적기 어렵다 — 따로 넣는다.
-printf '/\n/admin/\n' >>"$ADMIN_URLS"
+# `/admin/` 은 끝이 슬래시라 위 목록에서 함께 적기 어렵다 — 따로 넣는다.
+printf '/admin/\n' >>"$ADMIN_URLS"
+cat "$PUBLIC_URLS" >>"$ADMIN_URLS"
 
 N=$(( $(wc -l <"$ADMIN_URLS") + $(wc -l <"$MEMBER_URLS") + $(wc -l <"$ANON_URLS") ))
 [ "$N" -ge 60 ] && ok "볼 주소 $N 개" || bad "볼 주소가 $N 개뿐이다 — 감사가 헛돈다"
@@ -347,16 +358,32 @@ sleep 61
 # **문법부터 본다.** 감사 스크립트가 파싱 실패로 죽으면 결함 0 과 구분되지 않고,
 # 그 실패는 브라우저를 띄운 뒤에야 나온다.
 node --check scripts/ui-audit.mjs || { echo "  ✗ 감사 스크립트 문법 오류"; exit 1; }
+node --check scripts/shots.mjs || { echo "  ✗ 촬영 스크립트 문법 오류"; exit 1; }
 tojson() { python3 -c 'import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' <"$1"; }
 audit=0
-run_audit() {
-	UI_BASE="$BASE" UI_ROLE="$1" UI_EMAIL="$2" UI_PASSWORD="$3" \
-		UI_URLS="$(tojson "$4")" node scripts/ui-audit.mjs || audit=1
+
+# **찍기와 재기는 같은 사이트를 봐야 한다.** 여기까지의 시드·로그인·주소
+# 목록을 그대로 쓰고 마지막 한 걸음만 가른다 — 두 벌로 두면 「찍은 화면」과
+# 「잰 화면」이 서로 다른 상태가 되고, 눈으로 본 것이 증거가 되지 않는다.
+run_role() {
+	if [ -n "${UI_SHOTS:-}" ]; then
+		SHOT_BASE="$BASE" SHOT_ROLE="$1" SHOT_EMAIL="$2" SHOT_PASSWORD="$3" \
+			SHOT_DIR="${SHOT_DIR:-shots}" SHOT_URLS="$(tojson "$4")" \
+			node scripts/shots.mjs || audit=1
+	else
+		UI_BASE="$BASE" UI_ROLE="$1" UI_EMAIL="$2" UI_PASSWORD="$3" \
+			UI_URLS="$(tojson "$4")" node scripts/ui-audit.mjs || audit=1
+	fi
 }
-run_audit 관리자 admin@example.com "$ADMIN_PW" "$WORK/live-admin"
-run_audit 회원 member@example.com "$MEMBER_PW" "$WORK/live-member"
-run_audit 익명 "" "" "$WORK/live-anon"
+run_role admin admin@example.com "$ADMIN_PW" "$WORK/live-admin"
+run_role member member@example.com "$MEMBER_PW" "$WORK/live-member"
+run_role anon "" "" "$WORK/live-anon"
 
 echo
-printf 'ui: %d 통과 · %d 실패 (감사 exit %d)\n' "$pass" "$fail" "$audit"
+if [ -n "${UI_SHOTS:-}" ]; then
+	printf 'shots: %d 통과 · %d 실패 · %d 장\n' "$pass" "$fail" \
+		"$(find "${SHOT_DIR:-shots}" -name '*.png' | wc -l | tr -d ' ')"
+else
+	printf 'ui: %d 통과 · %d 실패 (감사 exit %d)\n' "$pass" "$fail" "$audit"
+fi
 [ "$fail" -eq 0 ] && [ "$audit" -eq 0 ]

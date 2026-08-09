@@ -36,6 +36,10 @@
     <input id="orderer_phone" name="orderer_phone" required maxlength="20">
     <p class="hint">주문자 연락처는 비회원 주문 조회에 씁니다.</p>
 
+    {{/* 시행 중인 약관이 없으면 상자도 오지 않는다. 빈 「약관」 상자는 무언가
+         못 불러온 것처럼 보이고, 결제 직전 화면에서 그 인상은 비싸다.
+         푸터의 사업자 정보와 같은 규칙이다. */}}
+    {{if .Terms}}
     <fieldset class="terms">
       <legend>약관</legend>
       {{range .Terms}}
@@ -45,6 +49,7 @@
       </label>
       {{end}}
     </fieldset>
+    {{end}}
 
     <button type="submit">결제하기</button>
   </form>

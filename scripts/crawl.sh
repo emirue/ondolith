@@ -126,7 +126,7 @@ code POST "/board/notice/$POST_ID/comments" --data-urlencode "body=크롤 댓글
 want "댓글이 달렸다" 1 "$(sql "select count(*) from comments")"
 
 # 주문이 있어야 구매 이후 화면(P-502·505·508·509·511·512·513)이 그려진다.
-code POST /checkout --data-urlencode "receiver_name=받는이" \
+code POST /checkout $(checkout_args) --data-urlencode "receiver_name=받는이" \
 	--data-urlencode "receiver_phone=01012345678" --data-urlencode "postcode=06236" \
 	--data-urlencode "address1=서울시 강남구" --data-urlencode "address2=101호" \
 	--data-urlencode "delivery_memo=" --data-urlencode "orderer_email=member@example.com" \
@@ -143,7 +143,7 @@ code POST /cart/items --data-urlencode "variant_id=$VAR" --data-urlencode "quant
 # **주문을 하나 더 만든다.** 교환을 걸면 그 주문은 배송완료를 벗어나 반품·교환
 # 요청 버튼이 사라지므로(그것이 옳은 동작이다), 두 화면을 함께 검사하려면
 # 배송완료로 남는 주문이 따로 있어야 한다.
-code POST /checkout --data-urlencode "receiver_name=받는이" \
+code POST /checkout $(checkout_args) --data-urlencode "receiver_name=받는이" \
 	--data-urlencode "receiver_phone=01012345678" --data-urlencode "postcode=06236" \
 	--data-urlencode "address1=서울시 강남구" --data-urlencode "address2=101호" \
 	--data-urlencode "delivery_memo=" --data-urlencode "orderer_email=member@example.com" \

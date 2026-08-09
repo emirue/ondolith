@@ -67,6 +67,7 @@ func (r *root) ServeHTTP(w, req)      { r.t.Load().handler.ServeHTTP(w, req) }
 cmd/ondolith/          main. 플래그, 부팅 분기, 핸들러 교체, graceful shutdown
 internal/
   config/              설정 파일 읽기·쓰기. 파일 존재 = 설치 완료 플래그
+  httpsec/             모든 응답이 지는 보안 헤더. 설치·운영 **양 트리**가 같은 것을 쓴다
   install/             설치 트리 — 라우트 + 폼 검증 + 프로비저닝 + 템플릿(embed)
   app/                 운영 트리 — 풀·세션·라우트 조립
   migrations/          goose 마이그레이션 (embed.FS) + Run()

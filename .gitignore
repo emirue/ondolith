@@ -38,3 +38,6 @@ go.work.sum
 # Local install config — contains the database password
 /ondolith.json
 .playwright-mcp/
+
+# 브라우저 스크린샷 — 눈으로 보기 위한 산출물이지 소스가 아니다
+/shots/

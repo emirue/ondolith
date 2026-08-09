@@ -117,6 +117,11 @@
     <legend>관리자 계정</legend>
     <label for="admin_email">이메일</label>
     <input id="admin_email" name="admin_email" type="email" value="{{.AdminEmail}}" autocomplete="off" required>
+
+    <label for="admin_name">표시 이름</label>
+    <input id="admin_name" name="admin_name" type="text" value="{{.AdminName}}"
+           maxlength="100" autocomplete="off" placeholder="관리자">
+    <p class="hint">글·댓글에 보이는 이름입니다. 이메일은 쓰지 마세요 — 방문자에게 그대로 보입니다.</p>
     <div class="row">
       <div>
         <label for="admin_password">비밀번호</label>

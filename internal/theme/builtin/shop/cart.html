@@ -12,8 +12,17 @@
       {{if not .Sellable}}<span class="badge">구매 불가</span>{{end}}
       <form method="post" action="/cart/items/{{.ID}}" class="inline">
         <input type="hidden" name="_method" value="PATCH">
-        <input name="quantity" type="number" min="0" max="{{.Stock}}" value="{{.Quantity}}">
+        <input name="quantity" type="number" min="0" max="{{.Stock}}" value="{{.Quantity}}"
+               aria-label="수량">
         <button type="submit">변경</button>
+      </form>
+      {{/* **P-404 는 라우트도 핸들러도 있는데 누를 자리가 없었다.** 수량을 0 으로
+           바꾸면 빠지긴 하지만 그것을 아는 사람은 이 폼을 만든 사람뿐이다 —
+           브라우저로 찍어 보고 알았다. 글 삭제(P-207)와 같은 결함이다. */}}
+      <form method="post" action="/cart/items/{{.ID}}" class="inline"
+            onsubmit="return confirm('장바구니에서 뺄까요?')">
+        <input type="hidden" name="_method" value="DELETE">
+        <button type="submit" class="btn btn--sm btn--danger">빼기</button>
       </form>
     </li>
     {{else}}
@@ -26,7 +35,10 @@
     <dt>배송비</dt><dd>{{money .Fee}}</dd>
     <dt>결제 예정</dt><dd>{{money .Total}}</dd>
   </dl>
-  <p><a href="/checkout">주문하기</a></p>
+  {{/* 이 화면에서 다음으로 갈 유일한 길이다. 밑줄 친 링크로 두면 상품 화면의
+       「장바구니에 담기」·결제 화면의 「결제하기」와 모양이 달라, 같은 흐름의
+       한 걸음인데 혼자 눈에 띄지 않는다. */}}
+  <p class="actions"><a class="btn btn--primary" href="/checkout">주문하기</a></p>
   {{end}}
   {{end}}
 </section>

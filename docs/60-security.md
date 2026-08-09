@@ -39,6 +39,31 @@
 - GET·HEAD·OPTIONS는 통과한다 → **안전 메서드로 상태를 바꾸지 말 것.**
   `GET /post/123/delete` 같은 라우트는 금지다
 
+**CSRF 검사는 클릭재킹을 막지 못한다.** 공격자가 이 사이트를 iframe에 넣고 위에
+투명한 미끼를 얹으면, 사용자가 누르는 것은 이 사이트 안의 진짜 버튼이다 — 그 요청은
+프레임 자신에게서 나오므로 `Sec-Fetch-Site: same-origin`이고 그대로 통과한다.
+막는 것은 아래의 응답 헤더뿐이다.
+
+## 응답 헤더 (NFR-211)
+
+`internal/httpsec` 한 곳에 있고 **설치 트리와 운영 트리 양쪽**이 같은 것을 쓴다.
+두 벌로 적으면 한쪽만 고쳐진다 — 설치 화면은 DB 비밀번호를 받는 폼이라
+클릭재킹의 대가가 더 크지, 덜하지 않다.
+
+| 헤더 | 값 | 막는 것 |
+|---|---|---|
+| `X-Frame-Options` | `DENY` | 클릭재킹. CSP를 모르는 브라우저용 |
+| `Content-Security-Policy` | `frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'` | 클릭재킹 · 플러그인 · `<base>` 주입 · 폼이 남의 서버로 제출되는 것 |
+| `X-Content-Type-Options` | `nosniff` | 브라우저가 타입을 다시 추측하는 것 |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | 재설정 토큰(`/password/reset/{토큰}`)이 `Referer`로 새는 것 |
+
+**`script-src`·`style-src`는 잠그지 않았다.** 테마가 인라인 스타일과 `onsubmit`
+확인창을 쓰고, 그것을 막으려면 테마 작성자마다 nonce를 다뤄야 한다 — 재컴파일 없이
+테마를 갈아 끼운다는 전제([DEC-3.1](../.ai/DECISIONS.md))와 맞지 않는다. `default-src`도
+두지 않는다: 테마가 외부 폰트나 이미지를 쓰는 것은 정상 사용이고, 여기서 막으면
+테마가 깨진 채로 배포된다. XSS의 1차 방어는 `html/template`의 자동 이스케이프이고
+(NFR-203), CSP는 그것이 뚫렸을 때의 두 번째 문이다.
+
 ## 세션 (NFR-204)
 
 | 항목 | 값 |

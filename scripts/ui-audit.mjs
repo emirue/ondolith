@@ -3,144 +3,15 @@
 // `make screens` 는 응답과 본문 길이를, `make crawl` 은 링크를 본다. 둘 다
 // 200 을 받으면 통과하므로 **글자가 상자 밖으로 나가든 표가 화면을 넘든 초록**
 // 이다. 여기서는 브라우저에 그려 놓고 좌표를 잰다 — 눈으로 보는 확인을 대신할
-// 수는 없지만, 눈이 놓치는 것을 숫자로 잡는다.
-//
-// **의존성을 늘리지 않는다.** Playwright 가 받아 둔 Chromium 을 CDP 로 직접
-// 몰고, WebSocket 은 Node 22 내장을 쓴다 — npm 설치가 없다.
+// 수는 없지만(그쪽은 `make shots`), 눈이 놓치는 것을 숫자로 잡는다.
 //
 // 실행: make ui
-import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, readdirSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { findChrome, launch, WIDTHS } from './lib-browser.mjs'
 
 const BASE = process.env.UI_BASE ?? 'http://127.0.0.1:8099'
 const EMAIL = process.env.UI_EMAIL ?? ''
 const PASSWORD = process.env.UI_PASSWORD ?? ''
 const ROLE = process.env.UI_ROLE ?? '?'
-// 좁은 폭·태블릿·데스크톱. 좁은 쪽이 결함을 가장 많이 드러낸다.
-const WIDTHS = [375, 768, 1280]
-
-// Playwright 가 받아 둔 브라우저를 찾는다. 이름과 배치가 버전마다 달라서
-// (`Chromium.app` 과 `Google Chrome for Testing.app`, arm64 와 x64) 후보를
-// 훑는다 — 하나로 박아 두면 다음 버전에서 조용히 「없다」가 된다.
-function findChrome() {
-  const root = join(process.env.HOME, 'Library/Caches/ms-playwright')
-  if (!existsSync(root)) return null
-  const dirs = readdirSync(root)
-    .filter((d) => d.startsWith('chromium-'))
-    .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))
-  const apps = ['Google Chrome for Testing', 'Chromium']
-  const arches = ['chrome-mac-arm64', 'chrome-mac', 'chrome-linux']
-  for (const d of dirs) {
-    for (const arch of arches) {
-      for (const app of apps) {
-        const p = join(root, d, arch, app + '.app/Contents/MacOS/' + app)
-        if (existsSync(p)) return p
-      }
-      const linux = join(root, d, arch, 'chrome')
-      if (existsSync(linux)) return linux
-    }
-  }
-  return null
-}
-
-// ---- CDP ------------------------------------------------------------------
-
-class CDP {
-  constructor(ws) {
-    this.ws = ws
-    this.id = 0
-    this.waiting = new Map()
-    this.listeners = []
-    ws.addEventListener('message', (e) => {
-      const msg = JSON.parse(e.data)
-      if (msg.id && this.waiting.has(msg.id)) {
-        const { resolve, reject } = this.waiting.get(msg.id)
-        this.waiting.delete(msg.id)
-        msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result)
-        return
-      }
-      for (const l of this.listeners) l(msg)
-    })
-  }
-  send(method, params = {}, sessionId) {
-    const id = ++this.id
-    return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject })
-      this.ws.send(JSON.stringify({ id, method, params, sessionId }))
-    })
-  }
-  once(method, sessionId) {
-    return new Promise((resolve) => {
-      const l = (msg) => {
-        if (msg.method === method && (!sessionId || msg.sessionId === sessionId)) {
-          this.listeners = this.listeners.filter((x) => x !== l)
-          resolve(msg.params)
-        }
-      }
-      this.listeners.push(l)
-    })
-  }
-}
-
-// **브라우저는 이 프로세스와 함께 죽어야 한다.**
-//
-// 감사가 중단되면(타임아웃·Ctrl-C·검사 실패) 브라우저는 부모를 잃고 살아남는다.
-// 몇 번 반복하면 Chrome 프로세스가 수십 개 쌓여 서로 자원을 다투고, 그 다음
-// 실행은 「그냥 느린 것」처럼 보인다 — 실제로 72개까지 쌓여 감사가 40분을
-// 넘겼다. 어떻게 끝나든 반드시 정리한다.
-function killOnExit(proc) {
-  // `detached: true` 로 띄웠으므로 자식은 자기 프로세스 그룹의 리더다.
-  // **그룹을 죽인다** — Chromium 은 렌더러·GPU·유틸리티로 갈라지고, 부모
-  // 하나만 죽이면 그 자식들이 고아로 남는다. 실제로 SIGTERM 으로 부모만
-  // 죽였을 때 28개가 살아남았다.
-  const kill = () => {
-    for (const target of [-proc.pid, proc.pid]) {
-      try {
-        process.kill(target, 'SIGKILL')
-      } catch {}
-    }
-  }
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    process.once(sig, () => {
-      kill()
-      process.exit(1)
-    })
-  }
-  process.once('exit', kill)
-  process.once('uncaughtException', (e) => {
-    kill()
-    console.error(e)
-    process.exit(1)
-  })
-}
-
-function launch(bin, userDataDir) {
-  const proc = spawn(bin, [
-    '--headless=new',
-    '--remote-debugging-port=0',
-    `--user-data-dir=${userDataDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-gpu',
-    '--hide-scrollbars',
-  ], { detached: true })
-  killOnExit(proc)
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    const t = setTimeout(() => reject(new Error('브라우저가 뜨지 않았다:\n' + buf)), 30000)
-    proc.stderr.on('data', (d) => {
-      buf += d
-      const m = buf.match(/ws:\/\/\S+/)
-      if (m) {
-        clearTimeout(t)
-        resolve({ proc, wsURL: m[0] })
-      }
-    })
-    proc.on('exit', (c) => reject(new Error(`브라우저가 종료됐다 (code ${c}):\n` + buf)))
-  })
-}
 
 // ---- 페이지 안에서 도는 감사 ------------------------------------------------
 //
@@ -290,6 +161,35 @@ const AUDIT = String.raw`(() => {
     }
   }
 
+  // 10) **머리·본문·바닥이 한 축에 서는가.**
+  //
+  //     main 만 가운데로 모으고 머리·바닥은 화면 전체 폭이면, 넓은 화면에서
+  //     사이트 이름은 왼쪽 끝에 붙고 본문 카드는 한참 안쪽에서 시작한다 —
+  //     세로줄이 두 개 생긴다. 넘치지도 잘리지도 않으므로 위의 어느 규칙도
+  //     재지 않는다. 브라우저로 **찍어 보고** 알았고, 고친 뒤에도 푸터만
+  //     남았다 — 단축 속성 padding 이 뒤에서 덮고 있었다.
+  //
+  //     좁은 화면(본문이 화면을 다 쓰는 폭)에서는 셋이 같은 여백이라 이 규칙이
+  //     저절로 만족된다. 어긋남은 넓은 화면에서만 생긴다.
+  {
+    const m = document.querySelector('main')
+    const bands = ['header.site-header', 'footer.site-footer']
+    if (m && vw > 1040) {
+      // 본문의 기준선은 카드가 아니라 main 의 내용 상자다.
+      const ms = getComputedStyle(m)
+      const mLeft = m.getBoundingClientRect().left + parseFloat(ms.paddingLeft)
+      for (const sel of bands) {
+        const b = document.querySelector(sel)
+        if (!b || !vis(b)) continue
+        const bs = getComputedStyle(b)
+        const bLeft = b.getBoundingClientRect().left + parseFloat(bs.paddingLeft)
+        if (Math.abs(bLeft - mLeft) > 2) {
+          out.push('본문과 세로축이 어긋남 ' + px(bLeft - mLeft) + 'px: ' + sel)
+        }
+      }
+    }
+  }
+
   // 6) 누를 수 없는 크기. 좁은 화면에서만 본다 — 손가락이 쓰는 자리다.
   if (vw <= 480) {
     for (const el of document.querySelectorAll('a,button,input[type=submit],select')) {
@@ -315,16 +215,7 @@ async function main() {
     console.error('Chromium 을 찾지 못했다 (Playwright 캐시). UI 감사를 건너뛰지 않고 중단한다.')
     process.exit(1)
   }
-  const dir = mkdtempSync(join(tmpdir(), 'ui-audit-'))
-  const { proc, wsURL } = await launch(bin, dir)
-  const ws = new WebSocket(wsURL)
-  await new Promise((r) => ws.addEventListener('open', r))
-  const cdp = new CDP(ws)
-
-  const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' })
-  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true })
-  await cdp.send('Page.enable', {}, sessionId)
-  await cdp.send('Runtime.enable', {}, sessionId)
+  const { cdp, sessionId } = await launch(bin)
 
   const go = async (url) => {
     const loaded = cdp.once('Page.loadEventFired', sessionId)
@@ -406,10 +297,7 @@ async function main() {
     }
   }
 
-  ws.close()
-  proc.kill()
-  try { rmSync(dir, { recursive: true, force: true, maxRetries: 3 }) } catch {}
-
+  // 브라우저와 임시 디렉터리 정리는 lib-browser 가 프로세스 종료에 맞춰 한다.
   console.log(`  ${ROLE}: ${checked} 조합 확인 · 결함 ${bad} 건`)
   process.exit(bad === 0 ? 0 : 1)
 }

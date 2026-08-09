@@ -28,6 +28,7 @@ import (
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
+	"github.com/emirue/ondolith/internal/httpsec"
 	"github.com/emirue/ondolith/internal/migrations"
 	"github.com/emirue/ondolith/internal/theme"
 )
@@ -71,13 +72,13 @@ func newSessionManager(store scs.Store, secureCookies bool) *scs.SessionManager 
 	return s
 }
 
-// withMiddleware wraps the route tree in the three layers the architecture
-// allows, outermost first: CSRF, then session load/save, then the routes
+// withMiddleware wraps the route tree in the layers the architecture allows,
+// outermost first: security headers, CSRF, session load/save, then the routes
 // (docs/20-architecture.md). Split out for the same reason as above — the CSRF
 // layer is NFR-205 and must be testable without a database.
 func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
 	h = sessions.LoadAndSave(h)
-	return http.NewCrossOriginProtection().Handler(h)
+	return httpsec.Headers(http.NewCrossOriginProtection().Handler(h))
 }
 
 // New brings up the operating tree: connection pool, session store, and the

@@ -27,6 +27,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/emirue/ondolith/internal/config"
+	"github.com/emirue/ondolith/internal/httpsec"
 	"github.com/emirue/ondolith/internal/migrations"
 )
 
@@ -37,6 +38,10 @@ var templatesFS embed.FS
 // modest: this is a self-hosted product and a wizard that rejects the
 // operator's password three times gets a weaker password, not a stronger one.
 const minPasswordLen = 10
+
+// defaultAdminName is what the admin is called in public when the installer
+// left the name blank. Anything is better than the address they log in with.
+const defaultAdminName = "관리자"
 
 // connectTimeout bounds the database connection attempt so a wrong host does
 // not hang the wizard.
@@ -72,7 +77,7 @@ func New(configPath string, log *slog.Logger, onInstalled func(*config.Config) e
 
 	// Even the installer gets CSRF protection: without it a page the operator
 	// happens to be visiting could POST this form and claim the site.
-	return http.NewCrossOriginProtection().Handler(mux), nil
+	return httpsec.Headers(http.NewCrossOriginProtection().Handler(mux)), nil
 }
 
 // sslModes are libpq's sslmode values, in increasing order of strictness.
@@ -88,10 +93,24 @@ type form struct {
 	DBSSLMode  string
 	SiteName   string
 	AdminEmail string
+	AdminName  string
 	AdminPW    string
 	AdminPW2   string
 
 	Error string
+}
+
+// displayName is the name shown wherever the admin writes something public —
+// a post, a comment.
+//
+// **이메일을 쓰지 않는다.** 여기에 이메일을 넣으면 게시판·댓글에 관리자 주소가
+// 그대로 걸리고, 방문자 누구나 그것을 읽는다. 로그인 실패 응답이 계정의 존재를
+// 감추는 것(FR-201)도 같이 무의미해진다 — 목록 한 줄이 이미 알려 준 뒤다.
+func (f *form) displayName() string {
+	if f.AdminName != "" {
+		return f.AdminName
+	}
+	return defaultAdminName
 }
 
 // SSLModes is called from the template to render the sslmode <select>.
@@ -129,6 +148,7 @@ func (h *handler) submit(w http.ResponseWriter, r *http.Request) {
 		DBSSLMode:  strings.TrimSpace(r.PostFormValue("db_sslmode")),
 		SiteName:   strings.TrimSpace(r.PostFormValue("site_name")),
 		AdminEmail: strings.ToLower(strings.TrimSpace(r.PostFormValue("admin_email"))),
+		AdminName:  strings.TrimSpace(r.PostFormValue("admin_name")),
 		AdminPW:    r.PostFormValue("admin_password"),
 		AdminPW2:   r.PostFormValue("admin_password_confirm"),
 	}
@@ -228,7 +248,7 @@ func (h *handler) provision(ctx context.Context, cfg *config.Config, f *form) er
 	           )
 	           INSERT INTO user_roles (user_id, role_id)
 	           SELECT created.id, r.id FROM created, roles r WHERE r.key = 'admin'`
-	tag, err := pool.Exec(ctx, q, f.AdminEmail, string(hash), f.AdminEmail)
+	tag, err := pool.Exec(ctx, q, f.AdminEmail, string(hash), f.displayName())
 	if err != nil {
 		return fmt.Errorf("관리자 계정을 만들지 못했습니다: %w", err)
 	}
