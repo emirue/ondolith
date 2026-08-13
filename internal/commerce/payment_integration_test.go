@@ -20,6 +20,11 @@ type fakeGateway struct {
 	err      error
 	// onConfirm 은 승인 API 왕복 중에 일어나는 일을 흉내낸다.
 	onConfirm func()
+	// Get 이 돌려줄 것. 기본값 (nil, nil) 은 예전 그대로다 — 대사(A-508)만
+	// 이 답을 정한다.
+	getResponse *Payment
+	getErr      error
+	getCalls    int
 }
 
 func (g *fakeGateway) Confirm(_ context.Context, req ConfirmRequest) (*Payment, error) {
@@ -40,7 +45,12 @@ func (g *fakeGateway) Confirm(_ context.Context, req ConfirmRequest) (*Payment, 
 	return &res, nil
 }
 func (g *fakeGateway) Cancel(context.Context, CancelRequest) (*Payment, error) { return nil, nil }
-func (g *fakeGateway) Get(context.Context, string) (*Payment, error)           { return nil, nil }
+func (g *fakeGateway) Get(context.Context, string) (*Payment, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.getCalls++
+	return g.getResponse, g.getErr
+}
 func (g *fakeGateway) VerifyWebhook(context.Context, []byte) (*WebhookEvent, error) {
 	return nil, nil
 }

@@ -1275,6 +1275,61 @@ func TestReconcileReportsNoDiffWhenTheyAgree(t *testing.T) {
 	}
 }
 
+// **PG 를 「사용 안 함」으로 바꾼 뒤에도 A-508 이 열려야 한다.**
+//
+// `pgAdapterFor` 는 등록되지 않은 제공자에 `("", nil)` 을 돌려준다. 예전 가드는
+// `d.Gateway != nil` 로 **클로저**를 봤는데 그 클로저는 배선상 절대 nil 이
+// 아니었다 — nil 인 것은 반환값이고, `gw.Get` 이 nil 인터페이스에서 패닉했다.
+// 저장소에 `recover` 가 없어 응답이 중간에 끊긴다.
+//
+// 위 두 검사는 전부 동작하는 게이트웨이를 주입하므로 이 경로를 지나지 않는다.
+func TestReconcileWithPGTurnedOff(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		wire  func(d *Deps)
+		about string
+	}{
+		{"반환값이 nil (PG 사용 안 함)",
+			func(d *Deps) { d.Gateway = func() commerce.Gateway { return nil } },
+			"운영자가 A-209 에서 PG 를 껐다"},
+		{"클로저 자체가 nil (배선 전)",
+			func(d *Deps) { d.Gateway = nil },
+			"Deps 가 Gateway 없이 조립됐다"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &fakeCaller{perms: map[string]bool{"payment.view": true}, id: "u1"}
+			d, pool := fixture(t, caller)
+			paidAdminOrder(t, d, pool)
+			tc.wire(d)
+
+			var rows []commerce.ReconcileRow
+			code := 0
+			d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, c int, data any) {
+				code = c
+				if m, ok := data.(map[string]any); ok {
+					rows, _ = m["Rows"].([]commerce.ReconcileRow)
+				}
+			}
+			// 패닉하면 여기서 테스트가 죽는다 — 그것이 이 검사의 본체다.
+			d.Reconcile(httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodGet, "/admin/reconcile", nil))
+
+			if code != http.StatusOK {
+				t.Fatalf("%s: HTTP %d — 화면이 열리지 않았다", tc.about, code)
+			}
+			if len(rows) != 1 {
+				t.Fatalf("%s: 대사 행 %d개 — 조회를 못 한다고 행을 지우면 안 보이는 결제가 생긴다",
+					tc.about, len(rows))
+			}
+			// **조회하지 않은 것을 「일치」로 그리지 않는다.** 차이가 비면
+			// 화면은 그 행을 정상으로 표시한다.
+			if rows[0].Diff == "" {
+				t.Errorf("%s: PG 를 묻지 않았는데 차이가 비었다 (일치로 보인다)", tc.about)
+			}
+		})
+	}
+}
+
 // A-603 은 **처리되지 않은 웹훅을 상단에** 올린다. 자동 재처리를 두지 않기로
 // 했으므로 (D50) 사람이 그것을 봐야 한다.
 func TestWebhookLogPutsUnprocessedFirst(t *testing.T) {

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/emirue/ondolith/internal/commerce"
 )
 
 // reconcileDefaultDays·reconcileMaxDays 는 D50 의 값이다. 상한이 있는 이유는
@@ -42,9 +44,13 @@ func (d *Deps) Reconcile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// 클로저가 nil 인 경우(배선 전)와 반환값이 nil 인 경우(PG 「사용 안 함」)를
+	// 한 경로로 모은다. Reconcile 이 nil 을 「조회하지 않았다」로 표시한다.
+	var gw commerce.Gateway
 	if d.Gateway != nil {
-		rows = d.Commerce.Reconcile(r.Context(), d.Gateway(), rows)
+		gw = d.Gateway()
 	}
+	rows = d.Commerce.Reconcile(r.Context(), gw, rows)
 	mismatched := 0
 	for _, row := range rows {
 		if row.Diff != "" {

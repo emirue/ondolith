@@ -199,9 +199,24 @@ func (s *Store) PaymentsToReconcile(ctx context.Context, since, until time.Time)
 //
 // **자동으로 고치지 않는다.** 조회 결과를 우리 행에 그대로 쓰면 PG 의 일시적
 // 응답 하나가 우리 장부를 바꾼다 — 사람이 보고 A-506 으로 옮긴다 (D50).
+// **PG 를 끈 상태에서도 이 함수가 불린다.** `pgAdapterFor` 는 등록되지 않은
+// 제공자에 `("", nil)` 을 돌려주므로(handler_shop.go), 운영자가 PG 를 「사용 안
+// 함」으로 바꾼 뒤 예전 `payments` 행이 조회 구간에 남아 있으면 gw 가 nil 로
+// 들어온다. 호출자 쪽 `if d.Gateway != nil` 은 **클로저**를 보는데 그 클로저는
+// 절대 nil 이 아니었다 — nil 인 것은 반환값이고, 그래서 가드가 한 번도 걸리지
+// 않은 채 `gw.Get` 이 nil 인터페이스에서 패닉했다. 가드는 호출자마다가 아니라
+// 모든 호출자가 지나는 여기 하나로 둔다.
+//
+// 조회하지 않은 것을 「일치」로 그리지 않는다 — 대사의 목적은 우리 장부와 PG 가
+// 다른 자리를 찾는 것이고, 묻지 않은 것은 같다는 뜻이 아니다.
 func (s *Store) Reconcile(ctx context.Context, gw Gateway, rows []ReconcileRow) []ReconcileRow {
 	out := make([]ReconcileRow, 0, len(rows))
 	for _, r := range rows {
+		if gw == nil {
+			r.Diff = "PG 가 설정되어 있지 않아 조회하지 않았다"
+			out = append(out, r)
+			continue
+		}
 		got, err := gw.Get(ctx, r.PaymentKey)
 		switch {
 		case err != nil:
