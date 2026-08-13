@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/alexedwards/scs/v2"
 
@@ -243,8 +244,13 @@ func (d *shopDeps) cartView(w http.ResponseWriter, r *http.Request) {
 
 // P-403 PATCH /cart/items/{id} · P-404 DELETE — change or remove.
 //
-// 두 화면이 한 함수인 이유: 수량 0 이 삭제다. 나누면 "0 으로 바꾸기" 와
-// "삭제" 가 서로 다른 소유권 검사를 갖게 된다.
+// 두 화면이 한 함수인 이유는 **소유권 검사가 하나여야 하기 때문**이다. 나누면
+// 「남의 항목인가」를 두 곳에서 판정하게 되고, 한쪽만 고쳐진다.
+//
+// **삭제는 DELETE 만 한다.** 예전에는 수량 0 도 삭제였고 파싱 오류를 `_` 로
+// 삼켰다 — `quantity=abc` 가 0 이 되어 그대로 삭제 경로로 갔다. 오타 한 번에
+// 항목이 사라지는데 화면은 성공으로 보인다. D19 P-403 은 0 이하·비정수를 400
+// 으로 못 박는다.
 func (d *shopDeps) cartUpdate(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
@@ -257,7 +263,13 @@ func (d *shopDeps) cartUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	qty := 0
 	if r.Method != http.MethodDelete {
-		qty, _ = strconv.Atoi(r.PostFormValue("quantity"))
+		n, convErr := strconv.Atoi(strings.TrimSpace(r.PostFormValue("quantity")))
+		if convErr != nil || n < 1 {
+			d.renderPage(w, r, "shop/cart.html", http.StatusBadRequest,
+				d.shopView(r, "장바구니", map[string]any{"Error": "수량은 1 이상의 정수여야 합니다."}))
+			return
+		}
+		qty = n
 	}
 	err = d.store.UpdateCartItem(r.Context(), owner, r.PathValue("id"), qty)
 	switch {
