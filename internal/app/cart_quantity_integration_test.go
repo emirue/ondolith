@@ -141,6 +141,11 @@ func TestCartDeleteStillRemovesTheItem(t *testing.T) {
 
 // 재고 초과는 파싱이 아니라 재고 판정이다 — 새 가드가 그 경로를 가로채
 // 삼키면 「재고가 부족합니다」가 사라진다.
+//
+// **400 과 422 의 경계가 여기서 갈린다** (D19 0.3): `abc` 는 읽지 못하므로 400,
+// `999` 는 읽었는데 재고가 5 라 받아들일 수 없으므로 422 다. D19 P-403 의 재고
+// 행은 오래 `400` 으로 적혀 있었고 구현은 네 화면 모두 422 였다 — 표가 0.3 의
+// 규약을 어긴 쪽이었고, 이제 checkdocs 30-1 이 그 어긋남을 잡는다.
 func TestCartQuantityOverStockStillReportsStock(t *testing.T) {
 	srv, pool, variant := shopSite(t)
 	c := client()

@@ -1485,6 +1485,43 @@ else
 	done_ "$SCHEMA_SQL 이 마이그레이션의 테이블 $(wc -l <"$T"/cd_sch_mig | tr -d ' ')개를 전부 담고 있다"
 fi
 
+# --- 30-1. D19 오류표가 쓰는 상태코드는 0.3 규약에 선언돼 있다 --------------
+#
+# **규약이 문서 안에서만 살아 있으면 표가 하나씩 어긋난다.** 0.3 은 코드 여섯
+# 개를 선언했는데 오류표는 400·413·500·502 를 백 번 가까이 썼다 — 선언에 없는
+# 코드는 무엇을 뜻하는지 합의된 적이 없다는 뜻이고, 실제로 재고 네 행이 400
+# 으로 적힌 채 구현은 전부 422 였다. 상황 칸은 기계가 못 읽지만 **코드 칸은
+# 읽는다** — 읽을 수 있는 만큼은 잡는다.
+begin
+IO=docs/19-screen-io.md
+if [ ! -f "$IO" ]; then
+	err "$IO 가 없다"
+else
+	# 0.3 의 표는 첫 칸이 백틱에 싸인 코드다.
+	perl -nle 'if (/^### 0\.3 HTTP 코드 규약/) { $in = 1; next } if ($in && /^### /) { $in = 0 }
+		next unless $in;
+		print $1 if /^\|\s*`(\d{3})`\s*\|/' "$IO" | sort -u >"$T"/cd_io_codes_def
+	# 오류표는 둘째 칸이 코드다. 굵게 쓴 것(**400**)도 같은 칸이다.
+	perl -nle 'print "$.\t$1" if /^\|[^|]+\|\s*\*{0,2}(\d{3})\*{0,2}\s*\|/' "$IO" \
+		| sort -u >"$T"/cd_io_codes_use
+
+	[ -s "$T"/cd_io_codes_def ] ||
+		err "$IO 0.3 절에서 코드 규약을 하나도 읽지 못했다 (검사가 헛돌았다)"
+	[ -s "$T"/cd_io_codes_use ] ||
+		err "$IO 오류표에서 상태코드를 하나도 읽지 못했다 (검사가 헛돌았다)"
+
+	n_bad=0
+	while IFS="$(printf '\t')" read -r ln code; do
+		[ -z "$code" ] && continue
+		grep -q "^$code\$" "$T"/cd_io_codes_def || {
+			err "$IO:$ln 오류표가 0.3 에 없는 상태코드를 쓴다: $code"
+			n_bad=$((n_bad + 1))
+		}
+	done <"$T"/cd_io_codes_use
+	[ "$n_bad" -eq 0 ] &&
+		done_ "$IO 오류표의 상태코드가 0.3 규약 $(wc -l <"$T"/cd_io_codes_def | tr -d ' ')종 안에 있다"
+fi
+
 # --- 31. D80 의 Phase 표시가 D81 의 완료 상태와 일치한다 --------------------
 #
 # **이 저장소가 네 Phase 동안 「Phase 0 진행 중」이라고 말한 채 초록이었다.**
@@ -1509,7 +1546,10 @@ else
 		# 셀 것이 없으므로 건너뛴다. 표가 생기면 그때부터 대조된다.
 		total=$(grep -cE "^\| W$n-[0-9]+ \|" "$WBS")
 		[ "$total" -eq 0 ] && continue
-		done_n=$(grep -E "^\| W$n-[0-9]+ \|" "$WBS" | grep -c '완료')
+		# **부분 문자열로 세지 않는다.** `완료` 만 찾으면 「미완료」가 완료로
+		# 집계된다 — 이 저장소는 같은 부류(BRE 의 `\(`, BSD sort 의 collation)로
+		# 이미 두 번 당했다. 표기는 언제나 `**(완료)**` 또는 `**(완료 — …)**` 다.
+		done_n=$(grep -E "^\| W$n-[0-9]+ \|" "$WBS" | grep -cE '\*\*\(완료')
 
 		if [ "$done_n" -eq "$total" ]; then
 			want='✅ 완료'

@@ -253,6 +253,16 @@ inject "결함 대장이 비어 읽히지 않음" docs/85-gaps.md \
 inject "결함·공백 ID 중복" docs/85-gaps.md \
 	'perl -ne "print; print if /^\| GAP-01 \|/" -i docs/85-gaps.md' \
 	'결함·공백 ID 중복'
+# D19 오류표의 상태코드는 0.3 규약 안에 있어야 한다. 규약이 문서 안에서만 살아
+# 있으면 표가 하나씩 어긋난다 — 재고 네 행이 400 으로 적힌 채 구현은 전부 422 였다.
+inject "오류표가 규약에 없는 상태코드를 쓴다" docs/19-screen-io.md \
+	'printf "\n| 어떤 실패 | 418 | 안내 | 남기지 않음 |\n" >> docs/19-screen-io.md' \
+	'0.3 에 없는 상태코드를 쓴다: 418'
+# **규약 표가 비면 무엇과도 어긋나지 않는다** — 읽지 못한 것을 통과로 읽는 것이
+# 이 저장소가 두 번 당한 모양이다 (BRE 의 `\(`, BSD sort).
+inject "0.3 규약 표를 읽지 못함" docs/19-screen-io.md \
+	'perl -pi -e "s/^### 0\.3 HTTP 코드 규약/### 0.3 HTTP 코드/" docs/19-screen-io.md' \
+	'0.3 절에서 코드 규약을 하나도 읽지 못했다'
 inject "닫는 방법이 없는 GAP 행" docs/85-gaps.md \
 	'perl -ni -e "if (/^\| GAP-01 \|/) { s/[^|]*\|[ \t]*\$/ |/ } print" docs/85-gaps.md' \
 	'닫는 방법이 없다'
@@ -271,8 +281,14 @@ inject "Phase 표시가 실제보다 앞섬" docs/80-roadmap.md \
 # 바꾸는 것만 잡는다 — 아무 표시도 없으면 무엇과도 「다르지 않다」로 통과할 소지가
 # 있어 따로 넣는다.
 inject "Phase 표시가 아예 없음" docs/80-roadmap.md \
-	'perl -pi -e "s/^## Phase 3 — 커머스 ✅ 완료/## Phase 3 — 커머스/" docs/80-roadmap.md' \
-	'Phase 3 표시가 docs/81-work-breakdown.md 와 다르다'
+	'perl -pi -e "s/^## Phase 1 — 코어 ✅ 완료/## Phase 1 — 코어/" docs/80-roadmap.md' \
+	'Phase 1 표시가 docs/81-work-breakdown.md 와 다르다'
+# **「미완료」가 완료로 집계되면 안 된다.** 세는 쪽을 부분 문자열로 두면 한 작업을
+# 미완료로 되돌려도 숫자가 그대로라 표시가 계속 ✅ 다 — 검사가 도는데 아무것도
+# 보지 않는 상태다. 이 주입은 세는 쪽이 마커를 보는지를 가른다.
+inject "완료를 부분 문자열로 세면 미완료가 완료가 된다" docs/81-work-breakdown.md \
+	'perl -pi -e "s/\*\*\(완료/**(미완료/ if /^\| W1-04 \|/" docs/81-work-breakdown.md' \
+	'Phase 1 표시가 docs/81-work-breakdown.md 와 다르다'
 
 # P5 예외 (안전 메서드가 상태를 바꾸는 라우트). 아무도 검토하지 않은 예외는
 # 규칙이 없는 것과 같다 — 목록이 D15 에 있고 코드와 대조된다.
