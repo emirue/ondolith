@@ -55,11 +55,40 @@ export class CDP {
       }
       for (const l of this.listeners) l(msg)
     })
+    // **연결이 끊기면 기다리던 것을 전부 깨운다.** 소켓이 닫혀도 대기 중인
+    // 프라미스는 아무도 풀어 주지 않아 그대로 매달린다.
+    const abort = (why) => {
+      for (const [id, { reject }] of this.waiting) {
+        this.waiting.delete(id)
+        reject(new Error('CDP 연결이 끊겼다: ' + why))
+      }
+    }
+    ws.addEventListener('close', () => abort('close'))
+    ws.addEventListener('error', () => abort('error'))
   }
-  send(method, params = {}, sessionId) {
+
+  // **답이 안 오면 기다리지 않고 죽는다.**
+  //
+  // 타임아웃이 없으면 브라우저가 응답을 멈추는 순간(렌더러 정지·소켓 유실)
+  // 프라미스가 영영 풀리지 않고 게이트가 그대로 멈춘다 — 실측으로 감사 하나가
+  // CPU 0% 로 한 시간을 매달려 있었고, 로그는 마지막 줄에서 멈춘 채였다.
+  // **멈추는 게이트는 실패하는 게이트보다 나쁘다**: 신호를 주지 않으면서 CI
+  // 잡의 시간을 통째로 쓴다.
+  //
+  // 값은 넉넉하다 — 느린 화면을 오탐으로 죽이는 것이 목적이 아니라, 영원히
+  // 매달리는 것을 막는 것이 목적이다.
+  send(method, params = {}, sessionId, timeoutMs = 60000) {
     const id = ++this.id
     return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject })
+      const t = setTimeout(() => {
+        this.waiting.delete(id)
+        reject(new Error(`CDP 무응답 ${timeoutMs}ms: ${method}`))
+      }, timeoutMs)
+      const done = (fn) => (v) => {
+        clearTimeout(t)
+        fn(v)
+      }
+      this.waiting.set(id, { resolve: done(resolve), reject: done(reject) })
       this.ws.send(JSON.stringify({ id, method, params, sessionId }))
     })
   }
