@@ -37,15 +37,19 @@ class FakeWS {
 const timers = () =>
   process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length
 
-// **깨우는 쪽을 시험할 때는 테스트에 시간 제한을 건다.**
+// **이 파일의 모든 테스트에 시간 제한을 건다.**
 //
-// 깨우지 않으면 프라미스는 CDP 타임아웃(길게 준다)까지 매달리고, 그러면 이
-// 테스트는 실패하는 대신 **멈춘다** — 고치려는 병과 같은 모양이다. 실제로
-// abort 를 지운 변이가 `not ok` 대신 무응답을 냈다. 짧은 제한을 걸면 몇 초
-// 안에 실패로 드러난다.
+// 여기서 지키는 것이 「무한 대기」이므로, 그 대상을 깨뜨렸을 때 검사가 실패
+// 대신 **멈추면 안 된다** — 고치려는 병과 같은 모양이다. abort 를 지운 변이가
+// 실제로 `not ok` 대신 무응답을 냈다.
+//
+// 타임아웃 시험도 예외가 아니다: `send()` 안의 타이머가 깨지면 그 프라미스는
+// 영영 안 풀린다. Node 는 이벤트 루프가 비면 취소해 주지만 **타이머가 하나라도
+// 살아 있으면 그 방어는 돌지 않는다.** Makefile 의 `--test-timeout` 이 바깥
+// 그물이고, 이것이 안쪽 그물이다.
 const FAST = { timeout: 2000 }
 
-test('답이 오지 않으면 타임아웃으로 죽는다', async () => {
+test('답이 오지 않으면 타임아웃으로 죽는다', FAST, async () => {
   const ws = new FakeWS()
   const cdp = new CDP(ws)
   await assert.rejects(
@@ -55,7 +59,7 @@ test('답이 오지 않으면 타임아웃으로 죽는다', async () => {
   )
 })
 
-test('답이 오면 풀리고, **타이머가 남지 않는다**', async () => {
+test('답이 오면 풀리고, **타이머가 남지 않는다**', FAST, async () => {
   const ws = new FakeWS()
   const cdp = new CDP(ws)
   const before = timers()
@@ -70,7 +74,7 @@ test('답이 오면 풀리고, **타이머가 남지 않는다**', async () => {
   assert.equal(cdp.waiting.size, 0, '풀린 요청이 대기 목록에 남았다')
 })
 
-test('CDP 오류 응답은 reject 되고, 타이머가 남지 않는다', async () => {
+test('CDP 오류 응답은 reject 되고, 타이머가 남지 않는다', FAST, async () => {
   const ws = new FakeWS()
   const cdp = new CDP(ws)
   const before = timers()
@@ -115,4 +119,42 @@ test('끊긴 뒤에도 타이머가 남지 않는다', FAST, async () => {
   ws.emit('close', {})
   await assert.rejects(p)
   assert.equal(timers(), before, '끊긴 요청의 타이머가 남았다 — 10분간 프로세스를 붙잡는다')
+})
+
+test('**`once()` 대기자도** 연결이 끊기면 깨어난다', FAST, async () => {
+  const ws = new FakeWS()
+  const cdp = new CDP(ws)
+  // `once` 는 `waiting` 이 아니라 `listeners` 에 있다. 요청만 깨우면 이쪽은
+  // 그대로 매달리고, 호출부가 레이스 타임아웃을 걸어 둔 덕에 「지금은」
+  // 괜찮은 상태로 남는다 — 그 방어를 잊은 다음 호출부에서 되살아난다.
+  const loaded = cdp.once('Page.loadEventFired', 's')
+  ws.emit('close', {})
+  await assert.rejects(loaded, /연결이 끊겼다: close/)
+  assert.equal(cdp.listeners.length, 0,
+    '끊긴 뒤에도 죽은 리스너가 남았다 — 배열에 영구히 쌓인다')
+})
+
+test('끊긴 뒤의 `send()`·`once()`는 **기다리지 않고** 바로 실패한다', FAST, async () => {
+  const ws = new FakeWS()
+  const cdp = new CDP(ws)
+  ws.emit('error', {})
+
+  const before = timers()
+  // 「무응답 60초」로 끝나면 읽는 사람은 브라우저가 느린 줄 안다. 소켓이 죽은
+  // 것과는 다른 진단이고, 60초를 기다릴 이유도 없다.
+  await assert.rejects(cdp.send('A', {}, 's'), /연결이 끊겼다: error/)
+  await assert.rejects(cdp.once('Page.loadEventFired', 's'), /연결이 끊겼다: error/)
+  assert.equal(timers(), before, '끊긴 뒤의 요청이 새 타이머를 걸었다')
+})
+
+test('정상 흐름에서는 `once()`가 이벤트로 풀리고 리스너가 빠진다', FAST, async () => {
+  const ws = new FakeWS()
+  const cdp = new CDP(ws)
+  const loaded = cdp.once('Page.loadEventFired', 's')
+  assert.equal(cdp.listeners.length, 1)
+  ws.emit('message', {
+    data: JSON.stringify({ method: 'Page.loadEventFired', sessionId: 's', params: { t: 1 } }),
+  })
+  assert.deepEqual(await loaded, { t: 1 })
+  assert.equal(cdp.listeners.length, 0, '이벤트로 풀린 리스너가 남았다')
 })

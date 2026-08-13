@@ -30,6 +30,10 @@ async function main() {
 
   const go = async (url) => {
     const loaded = cdp.once('Page.loadEventFired', sessionId)
+    // `once` 는 연결이 끊기면 reject 한다. 아래 send 가 먼저 실패하면 이
+    // 프라미스는 아무도 기다리지 않은 채 남아 unhandled rejection 이 되고,
+    // 깨끗한 오류 대신 낯선 크래시로 끝난다 — 붙잡아만 둔다.
+    loaded.catch(() => {})
     await cdp.send('Page.navigate', { url }, sessionId)
     await Promise.race([loaded, new Promise((r) => setTimeout(r, 8000))])
   }

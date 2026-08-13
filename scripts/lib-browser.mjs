@@ -45,6 +45,8 @@ export class CDP {
     this.id = 0
     this.waiting = new Map()
     this.listeners = []
+    // 끊긴 뒤라는 표시. 값은 끊긴 이유다.
+    this.dead = null
     ws.addEventListener('message', (e) => {
       const msg = JSON.parse(e.data)
       if (msg.id && this.waiting.has(msg.id)) {
@@ -57,11 +59,24 @@ export class CDP {
     })
     // **연결이 끊기면 기다리던 것을 전부 깨운다.** 소켓이 닫혀도 대기 중인
     // 프라미스는 아무도 풀어 주지 않아 그대로 매달린다.
+    //
+    // 「전부」에는 `once()` 대기자도 든다. 그쪽은 `waiting` 이 아니라 `listeners`
+    // 에 있어서, 요청만 깨우면 이벤트를 기다리던 프라미스는 그대로 매달리고
+    // 죽은 클로저가 배열에 영구히 쌓인다 — 호출부가 스스로 레이스 타임아웃을
+    // 걸어 두어 지금은 드러나지 않을 뿐이고, 그 방어를 잊은 다음 호출부에서
+    // 같은 무한 대기가 조용히 되살아난다.
     const abort = (why) => {
+      const err = () => new Error('CDP 연결이 끊겼다: ' + why)
+      // **다시 보내지 못하게 먼저 표시한다.** 이 뒤의 send 는 60초를 기다린 뒤
+      // 「무응답」이라고 말하는데, 응답이 없는 것이 아니라 소켓이 이미 죽었다.
+      this.dead ??= why
       for (const [id, { reject }] of this.waiting) {
         this.waiting.delete(id)
-        reject(new Error('CDP 연결이 끊겼다: ' + why))
+        reject(err())
       }
+      const pending = this.listeners
+      this.listeners = []
+      for (const l of pending) l.abort?.(err())
     }
     ws.addEventListener('close', () => abort('close'))
     ws.addEventListener('error', () => abort('error'))
@@ -78,6 +93,11 @@ export class CDP {
   // 값은 넉넉하다 — 느린 화면을 오탐으로 죽이는 것이 목적이 아니라, 영원히
   // 매달리는 것을 막는 것이 목적이다.
   send(method, params = {}, sessionId, timeoutMs = 60000) {
+    // 이미 끊긴 뒤라면 기다릴 것이 없다. 60초를 세고 「무응답」이라고 말하면
+    // 읽는 사람은 브라우저가 느린 줄 안다 — 소켓이 죽은 것과는 다른 진단이다.
+    if (this.dead) {
+      return Promise.reject(new Error('CDP 연결이 끊겼다: ' + this.dead))
+    }
     const id = ++this.id
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
@@ -92,14 +112,21 @@ export class CDP {
       this.ws.send(JSON.stringify({ id, method, params, sessionId }))
     })
   }
+  // 이벤트 하나를 기다린다. **연결이 끊기면 이쪽도 깨어난다** — 그러지 않으면
+  // 이 프라미스는 영원히 매달리고, 호출부가 레이스 타임아웃을 걸어 둔 덕에
+  // 「지금은」 괜찮은 상태로 남는다.
   once(method, sessionId) {
-    return new Promise((resolve) => {
+    if (this.dead) {
+      return Promise.reject(new Error('CDP 연결이 끊겼다: ' + this.dead))
+    }
+    return new Promise((resolve, reject) => {
       const l = (msg) => {
         if (msg.method === method && (!sessionId || msg.sessionId === sessionId)) {
           this.listeners = this.listeners.filter((x) => x !== l)
           resolve(msg.params)
         }
       }
+      l.abort = reject
       this.listeners.push(l)
     })
   }
