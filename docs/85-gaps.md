@@ -33,7 +33,7 @@
 | GAP-03 | **실제 PG(토스)로 결제 한 바퀴를 돈 적이 없다** | `make e2e`는 어댑터를 가짜로 두고 돈다. 승인·취소·웹훅의 실제 응답 모양은 확인되지 않았다 | `ONDOLITH_TOSS_TEST_SECRET`으로 `make test-toss` ([D73](73-toss-verification.md)) |
 | GAP-04 | **`golang.org/x/crypto@v0.54.0`에 수정 없는 취약점이 하나 있다** (GO-2026-5932, `openpgp` 미유지보수) | 우리 코드가 그 패키지를 **호출하지 않아** `govulncheck`가 통과시킨다. 의존성 그래프에는 남아 있다 | 상위 의존성이 `openpgp`를 떼거나 x/crypto가 갈라질 때까지 대기. `make vuln`을 릴리즈마다 돌려 상태를 다시 읽는다 (NFR-209) |
 | GAP-05 | **제3자 테마는 어느 검사도 보지 않는다** | 게이트는 내장 테마 하나만 띄운다. 세로축 규칙도 `header.site-header`/`footer.site-footer`를 전제한다 | [D17](17-theme-contract.md) 계약을 검사로 옮긴다 — 테마가 지켜야 할 클래스·템플릿을 기계가 대조 |
-| GAP-06 | **`make ui`·`make shots`는 `make check`에 없다** | 브라우저와 DB가 필요해 오프라인 게이트에 넣을 수 없다. 누가 안 돌리면 UI 결함은 그대로 지나간다 | CI에서 별도 잡으로 돌린다 ([D70](70-operations.md) 배포 절차에 편입) |
+| GAP-06 | **`make ui`·`make shots`는 어디서도 자동으로 돌지 않는다** | 브라우저가 필요해 오프라인 게이트에 넣을 수 없다. 누가 안 돌리면 UI 결함은 그대로 지나간다 | `.github/workflows/ci.yml`에 브라우저 잡을 추가한다. **DB 쪽은 닫혔다** — 같은 파일의 `integration` 잡이 PostgreSQL을 붙여 `make test-integration`을 돌리므로, DSN이 없어 건너뛰던 444건(46%)은 이제 CI에서 실행된다. 남은 것은 `ui.sh`가 쓰는 `docker exec` 경로를 서비스 컨테이너에 맞추는 일이다 |
 
 ### 의도적으로 재지 않는 화면
 

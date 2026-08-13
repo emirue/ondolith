@@ -1,0 +1,65 @@
+name: release
+
+# 태그를 미는 것이 릴리즈다. 브랜치 푸시로는 아무것도 나가지 않는다 —
+# 릴리즈가 우연히 일어나면 무엇이 나갔는지 나중에 셀 수 없다.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # 릴리즈 생성
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # VERSION 이 git describe 다
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # **게이트가 릴리즈의 일부다.** 별도 잡으로 두면 급할 때 건너뛰는 단계가
+      # 되고, 건너뛴 릴리즈와 거친 릴리즈를 나중에 구분할 수 없다 (Makefile 의
+      # release: vuln 과 같은 이유).
+      - run: make check
+
+      - run: make release
+
+      # 체크섬이 없으면 받는 쪽은 받은 것이 우리가 낸 것인지 확인할 방법이 없다.
+      - name: checksums
+        run: cd dist && sha256sum ondolith-* > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ondolith-linux-amd64
+            dist/ondolith-linux-arm64
+            dist/SHA256SUMS
+          generate_release_notes: true
+
+  # 커뮤니티(비공개) 저장소에 「새 코어가 나왔다」를 알린다. 저쪽이 PR 을 연다 —
+  # 여기서 직접 밀지 않는 이유는 공개 저장소의 워크플로가 비공개 저장소에
+  # 쓰기를 하면, 공개 쪽 워크플로를 고칠 수 있는 사람이 곧 비공개 쪽에 쓸 수
+  # 있는 사람이 되기 때문이다. 알림만 보내고 판단은 저쪽에서 한다.
+  notify-community:
+    needs: release
+    runs-on: ubuntu-latest
+    # 시크릿이 없는 포크에서는 조용히 건너뛴다 — 실패로 보이면 안 된다.
+    if: ${{ github.repository_owner == 'emirue' }}
+    steps:
+      - name: dispatch
+        env:
+          TOKEN: ${{ secrets.COMMUNITY_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "COMMUNITY_DISPATCH_TOKEN 없음 — 알림을 건너뛴다"
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ vars.COMMUNITY_REPO }}/dispatches \
+            -d "{\"event_type\":\"core-release\",\"client_payload\":{\"version\":\"${GITHUB_REF_NAME}\"}}"

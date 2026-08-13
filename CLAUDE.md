@@ -72,4 +72,9 @@ make run              # 로컬 실행 (개발)
 
 ## 현재 상태
 
-**Phase 0 — 설치 마법사.** 진행 상황과 다음 할 일: [docs/80-roadmap.md](docs/80-roadmap.md)
+**여기에 Phase 를 적지 않는다.** 적으면 낡는다 — 네 Phase 가 끝난 뒤에도 이 줄은
+「Phase 0 설치 마법사」였고, 그걸 읽고 시작한 작업이 이미 있는 것을 다시 만들었다.
+Phase 표시는 [docs/80-roadmap.md](docs/80-roadmap.md) 한 곳에만 있고 `make check` 가
+[docs/81-work-breakdown.md](docs/81-work-breakdown.md) 의 완료 상태와 대조한다.
+
+지금 무엇을 할지: `sh scripts/next-task.sh` ([D82](docs/82-execution-loop.md))

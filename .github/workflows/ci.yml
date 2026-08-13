@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # 오프라인 게이트. 개발자가 손으로 돌리는 것과 같은 명령이다 —
+  # CI 전용 명령을 두면 둘이 갈라지고, 갈라진 뒤에는 어느 쪽이 진짜인지 모른다.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make check
+
+  # **DB 가 붙어야 도는 단언이 절반이다.** DSN 없이 돌리면 커머스·인증·설치의
+  # 테스트가 통째로 건너뛰고, 그 상태에서도 `make check` 는 초록이다. 돈이 걸린
+  # 경로(결제·환불·반품)를 실제로 실행하는 것은 이 잡뿐이다 (D85 GAP-06).
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: testpw
+          POSTGRES_DB: ondolith
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # integration.sh 는 DSN 이 있으면 컨테이너를 띄우지 않는다.
+      - run: make test-integration
+        env:
+          ONDOLITH_TEST_DSN: postgres://postgres:testpw@127.0.0.1:5432/ondolith?sslmode=disable
+
+  # 취약점 조회는 네트워크가 필요해 `make check` 에 없다 (D21 1절). 여기서 돈다.
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make vuln

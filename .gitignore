@@ -35,9 +35,24 @@ go.work.sum
 /ondolith
 /dist/
 
-# Local install config — contains the database password
-/ondolith.json
+# Local install config — contains the database password.
+# **이름을 하나로 고정하지 않는다.** `-config` 로 다른 경로를 줄 수 있으므로
+# 저장소가 공개되는 순간 `ondolith-운영.json` 같은 이름 하나면 DB 비밀번호가
+# 나간다. 예시 파일만 예외로 둔다.
+/ondolith*.json
+!/ondolith.example.json
 .playwright-mcp/
 
 # 브라우저 스크린샷 — 눈으로 보기 위한 산출물이지 소스가 아니다
 /shots/
+
+# 런타임 데이터. 업로드가 여기 쌓인다 (internal/config 의 UploadDir).
+# 지금은 비어 있어서 git 이 못 보지만, 첨부 하나가 들어오는 순간 `git add -A`
+# 가 사용자 업로드를 공개 저장소로 밀어 넣는다.
+/var/
+
+# 에이전트·에디터의 기계별 상태. settings.local.json 은 지금까지 이 저장소가
+# 아니라 ~/.gitignore_global 로만 막혀 있었다 — 새로 클론한 사람에게는 그
+# 규칙이 없다.
+.claude/settings.local.json
+.claude/dual-loop-state/
