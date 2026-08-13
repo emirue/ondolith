@@ -1,10 +1,10 @@
 package app
 
 import (
+	"io/fs"
 	"net/http"
-	"os/exec"
+	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -151,23 +151,56 @@ func TestMountServesRegisteredRoutes(t *testing.T) {
 
 // D15 4.4's premise: mux.HandleFunc is not called directly anywhere, because a
 // route registered that way carries no screen id and no class, so none of the
-// checks above can see it. Enforced by grep rather than by convention.
+// checks above can see it.
+//
+// **읽기는 이 프로세스 안에서 한다.** 앞선 판은 `grep` 을 띄우고 BRE 를 넘겼는데,
+// `mux\.Handle\(` 의 `\(` 는 BRE 에서 여는 괄호라 grep 이 "parentheses not
+// balanced" 로 죽었다. 죽은 grep 은 빈 출력을 남기고, 바로 아래 `len(out) == 0`
+// 이 그것을 "찾은 게 없다" 로 읽어 통과시켰다 — 이 가드는 한 번도 돈 적이 없고
+// 그동안 실제 위반 한 건이 초록 아래에 있었다 (M4: 통과는 문다는 뜻이 아니다).
+// 하위 프로세스도 정규식 방언도 쓰지 않으면 조용히 죽을 자리가 없다.
 func TestNoDirectMuxRegistrationOutsideRegistry(t *testing.T) {
+	// 각 예외는 이유를 함께 적는다. 이유 없는 예외는 다음 사람이 지우지 못한다.
+	allowed := map[string]string{
+		"internal/app/routes.go":          "Registry.Mount 자신 — 모든 등록이 여기 한 곳을 지난다",
+		"internal/install/install.go":     "설치 트리는 운영 트리와 별개다 (CLAUDE.md 규칙 3)",
+		"internal/app/handler_webhook.go": "P-905 의 별도 서브트리 — 세션·CSRF·액터가 붙지 않는 것이 목적이다 (D15 SC-8 1항)",
+	}
+
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("grep", "-rn", "--include=*.go",
-		`mux\.Handle\(\|mux\.HandleFunc(`, filepath.Join(root, "internal"), filepath.Join(root, "cmd")).Output()
-	if err != nil && len(out) == 0 {
-		return // grep found nothing
-	}
-	allowed := regexp.MustCompile(`internal/app/routes\.go|internal/install/install\.go`)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" || allowed.MatchString(line) {
-			continue
+	found := 0
+	for _, dir := range []string{"internal", "cmd"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			src, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel := strings.TrimPrefix(path, root+"/")
+			for i, line := range strings.Split(string(src), "\n") {
+				if !strings.Contains(line, "mux.Handle(") && !strings.Contains(line, "mux.HandleFunc(") {
+					continue
+				}
+				found++
+				if _, ok := allowed[rel]; !ok {
+					t.Errorf("Registry 를 거치지 않은 라우트 등록: %s:%d: %s", rel, i+1, strings.TrimSpace(line))
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		t.Errorf("Registry 를 거치지 않은 라우트 등록: %s", strings.TrimPrefix(line, root+"/"))
+	}
+	// 한 건도 못 찾았다면 읽는 쪽이 고장 난 것이다 — 예외 목록에 적힌 자리만으로도
+	// 최소 세 건은 있어야 한다. 이 단언이 없으면 위 루프가 통째로 헛돌아도 초록이다.
+	if found < len(allowed) {
+		t.Fatalf("등록 지점을 %d 건밖에 못 찾았다 — 검사가 헛돌았다 (최소 %d)", found, len(allowed))
 	}
 }
 
