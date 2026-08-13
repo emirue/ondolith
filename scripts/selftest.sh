@@ -78,6 +78,25 @@ inject_new() {
 	rm -f "$REPO/$2"
 }
 
+# ignored <name> <file-to-restore> <shell-command>: the inverse of inject —
+# the checker must STAY GREEN. Written exceptions rot the other way: the
+# exception is dropped, everything still passes on a clean tree, and nobody
+# learns until the excluded file suddenly breaks the build. Only a case that
+# fails when the exception disappears keeps it honest.
+ignored() {
+	cp "$REPO/$2" "$TMP/backup"
+	(cd "$REPO" && eval "$3")
+	out=$(sh "$REPO/scripts/checkdocs.sh" 2>&1)
+	code=$?
+	if [ "$code" -eq 0 ]; then
+		ok "예외: $1"
+	else
+		err "예외가 사라졌다 — 통과해야 하는데 exit $code: $1"
+		printf '%s\n' "$out" | grep '✗' | sed 's/^/      /'
+	fi
+	cp "$TMP/backup" "$REPO/$2"
+}
+
 echo "selftest: checkdocs 실패 주입"
 
 if sh "$REPO/scripts/checkdocs.sh" >/dev/null 2>&1; then
@@ -223,6 +242,11 @@ inject "코드 주석이 대장에 없는 번호를 인용" internal/app/tree.go
 inject "마이그레이션이 대장에 없는 번호를 인용" internal/migrations/00012_order.sql \
 	'printf "\n-- GAP-97 참고\n" >> internal/migrations/00012_order.sql' \
 	'대장에 없는 결함·공백 번호를 인용한다'
+# **기록은 대조 대상이 아니다.** docs/learnings/ 는 그날의 리뷰를 굳힌 것이라
+# 고치지 않는다. 대장과 맞추려 들면 GAP 을 닫고 행을 지우는 순간 그 번호를
+# 언급한 기록이 영구히 빌드를 깨고, 고칠 방법이 없다.
+ignored "기록(docs/learnings/)의 인용은 대장과 대조하지 않는다" docs/learnings/INDEX.md \
+	'printf "\n대장에 없는 GAP-97 · BUG-97 을 언급한다.\n" >> docs/learnings/INDEX.md'
 inject "결함 대장이 비어 읽히지 않음" docs/85-gaps.md \
 	'perl -pi -e "s/^\| GAP-/| XAP-/; s/^\| BUG-/| XUG-/" docs/85-gaps.md' \
 	'GAP-/BUG- 항목을 하나도 읽지 못했다'
@@ -232,6 +256,23 @@ inject "결함·공백 ID 중복" docs/85-gaps.md \
 inject "닫는 방법이 없는 GAP 행" docs/85-gaps.md \
 	'perl -ni -e "if (/^\| GAP-01 \|/) { s/[^|]*\|[ \t]*\$/ |/ } print" docs/85-gaps.md' \
 	'닫는 방법이 없다'
+
+# Phase 표시 (D80 ↔ D81). 네 Phase 가 끝난 뒤에도 D80 은 「Phase 0 진행 중」이었고
+# 게이트는 초록이었다. 진입점이 세 단계 낡으면 그걸 읽고 시작하는 사람은 이미
+# 있는 것을 다시 만든다. 양쪽 방향을 다 주입한다 — 표시가 앞서는 것도 뒤처지는
+# 것도 같은 거짓말이다.
+inject "Phase 표시가 실제보다 뒤처짐" docs/80-roadmap.md \
+	'perl -pi -e "s/^## Phase 1 — 코어 ✅ 완료/## Phase 1 — 코어 ⏳ 대기/" docs/80-roadmap.md' \
+	'Phase 1 표시가 docs/81-work-breakdown.md 와 다르다'
+inject "Phase 표시가 실제보다 앞섬" docs/80-roadmap.md \
+	'perl -pi -e "s/^## Phase 2 — 게시판 🔄 진행 중/## Phase 2 — 게시판 ✅ 완료/" docs/80-roadmap.md' \
+	'Phase 2 표시가 docs/81-work-breakdown.md 와 다르다'
+# **표시를 통째로 지우는 것이 가장 흔한 회피다.** 위 두 케이스는 다른 표시로
+# 바꾸는 것만 잡는다 — 아무 표시도 없으면 무엇과도 「다르지 않다」로 통과할 소지가
+# 있어 따로 넣는다.
+inject "Phase 표시가 아예 없음" docs/80-roadmap.md \
+	'perl -pi -e "s/^## Phase 3 — 커머스 ✅ 완료/## Phase 3 — 커머스/" docs/80-roadmap.md' \
+	'Phase 3 표시가 docs/81-work-breakdown.md 와 다르다'
 
 # P5 예외 (안전 메서드가 상태를 바꾸는 라우트). 아무도 검토하지 않은 예외는
 # 규칙이 없는 것과 같다 — 목록이 D15 에 있고 코드와 대조된다.

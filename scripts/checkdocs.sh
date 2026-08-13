@@ -8,6 +8,15 @@
 # together, which is the opposite of aborting on the first non-zero status.
 set -u
 
+# **정렬·비교는 바이트로 한다.** 이 스크립트의 대조는 거의 전부 `sort -u` 로 모으고
+# `comm` 으로 양쪽을 맞추는데, macOS 의 BSD sort 는 en_US.UTF-8 에서 한글을 같은
+# 무게로 정렬해 **서로 다른 문자열을 같은 것으로 접는다.** 주문 상태 전이 24 건이
+# 5 건으로 접힌 채 "5 건 일치" 라고 초록이 났고, 나머지 19 건은 한 번도 대조되지
+# 않았다 — 검사가 도는 것과 검사가 보는 것은 다르다 (M4). comm 도 같은 collation 을
+# 쓰므로 한글이 든 대조는 전부 이 영향을 받는다.
+LC_ALL=C
+export LC_ALL
+
 cd "$(dirname "$0")/.." || exit 1
 
 # 중간 산출물은 실행마다 새 디렉터리에 둔다. 고정된 /tmp 이름을 쓰면 이 스크립트를
@@ -469,8 +478,13 @@ else
 	# 실제로 .go 에 열일곱 곳 인용돼 있다. 문서만 훑으면 대장에서 행을 지운 뒤
 	# 코드 주석이 이미 메운 구멍을 열린 것으로 계속 말하고, 그것이 바로 이
 	# 대장이 존재하는 이유다 (M9, M11). FR/NFR 인용 검사와 같은 헬퍼를 쓴다.
+	# **docs/learnings/ 는 대조하지 않는다.** 그 파일들은 그날의 리뷰를 그대로
+	# 굳힌 기록이라 고치지 않는다 — 살아 있는 대장과 맞추려 들면 GAP 하나를
+	# 닫고 행을 지우는 순간, 그 번호를 언급한 기록이 영구히 빌드를 깨는데
+	# 고칠 방법이 없다. 주입 케이스가 이 예외를 지킨다 (selftest.sh).
 	id_files | while read -r f; do
 		[ "$f" = "./$GAPS" ] && continue
+		case "$f" in ./docs/learnings/*) continue ;; esac
 		perl -nle 'print "$ARGV\t$.\t$1" while /\b((?:GAP|BUG)-\d{2})\b/g' "$f"
 	done | sort -u >"$T"/cd_gap_cited
 	while IFS="$(printf '\t')" read -r f ln id; do
@@ -1469,6 +1483,48 @@ else
 		err "$SCHEMA_SQL 에 없는 테이블: $t — 재생성이 필요하다 (make schema)"
 	done
 	done_ "$SCHEMA_SQL 이 마이그레이션의 테이블 $(wc -l <"$T"/cd_sch_mig | tr -d ' ')개를 전부 담고 있다"
+fi
+
+# --- 31. D80 의 Phase 표시가 D81 의 완료 상태와 일치한다 --------------------
+#
+# **이 저장소가 네 Phase 동안 「Phase 0 진행 중」이라고 말한 채 초록이었다.**
+# D81 의 작업 127 건 중 126 건이 완료였는데 D80 · README · CLAUDE.md 는 전부
+# 설치 마법사를 만들고 있다고 적혀 있었다 — 진입점이 세 단계 낡으면 그것을
+# 읽고 시작하는 사람은 이미 있는 것을 다시 만든다. 상태는 세는 것이지 적는
+# 것이 아니다 (M12 와 같은 부류).
+begin
+ROADMAP=docs/80-roadmap.md
+WBS=docs/81-work-breakdown.md
+if [ ! -f "$ROADMAP" ] || [ ! -f "$WBS" ]; then
+	err "$ROADMAP 또는 $WBS 가 없다"
+else
+	n_phase=0
+	for n in 0 1 2 3 4; do
+		head_line=$(grep -n "^## Phase $n —" "$ROADMAP" | head -1)
+		[ -z "$head_line" ] && continue
+		n_phase=$((n_phase + 1))
+		phase_mark=$(printf '%s' "$head_line" | sed 's/^[0-9]*://')
+
+		# D81 은 Phase 0 을 표로 두지 않는다 (구현이 먼저였다) — 표가 없으면
+		# 셀 것이 없으므로 건너뛴다. 표가 생기면 그때부터 대조된다.
+		total=$(grep -cE "^\| W$n-[0-9]+ \|" "$WBS")
+		[ "$total" -eq 0 ] && continue
+		done_n=$(grep -E "^\| W$n-[0-9]+ \|" "$WBS" | grep -c '완료')
+
+		if [ "$done_n" -eq "$total" ]; then
+			want='✅ 완료'
+		elif [ "$done_n" -eq 0 ]; then
+			want='⏳ 대기'
+		else
+			want='🔄 진행 중'
+		fi
+		case "$phase_mark" in
+		*"$want"*) ;;
+		*) err "$ROADMAP 의 Phase $n 표시가 $WBS 와 다르다 (작업 $done_n/$total 완료 → '$want'): $phase_mark" ;;
+		esac
+	done
+	[ "$n_phase" -gt 0 ] || err "$ROADMAP 에서 Phase 제목을 하나도 읽지 못했다 (검사가 헛돌았다)"
+	done_ "Phase 표시 $n_phase 개가 $WBS 의 완료 상태와 일치"
 fi
 
 rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_use_req "$T"/cd_def_dec \
