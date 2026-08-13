@@ -51,15 +51,20 @@ jobs:
     if: ${{ github.repository_owner == 'emirue' }}
     steps:
       - name: dispatch
+        # **`${{ }}` 를 run 블록 안에 넣지 않는다.** 그 값은 셸이 파싱하기 전에
+        # 그대로 문자열로 박히므로, 값에 든 것이 곧 명령이 된다. 소유자만 고칠
+        # 수 있는 값이라 지금 공격면은 낮지만, 안전한 쪽과 위험한 쪽의 글자 수가
+        # 같다면 안전한 쪽을 쓴다 — env 로 넘기면 셸 변수라 확장되지 않는다.
         env:
           TOKEN: ${{ secrets.COMMUNITY_DISPATCH_TOKEN }}
+          COMMUNITY_REPO: ${{ vars.COMMUNITY_REPO }}
         run: |
-          if [ -z "$TOKEN" ]; then
-            echo "COMMUNITY_DISPATCH_TOKEN 없음 — 알림을 건너뛴다"
+          if [ -z "$TOKEN" ] || [ -z "$COMMUNITY_REPO" ]; then
+            echo "COMMUNITY_DISPATCH_TOKEN 또는 COMMUNITY_REPO 없음 — 알림을 건너뛴다"
             exit 0
           fi
           curl -fsS -X POST \
             -H "Authorization: Bearer $TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ vars.COMMUNITY_REPO }}/dispatches \
+            "https://api.github.com/repos/$COMMUNITY_REPO/dispatches" \
             -d "{\"event_type\":\"core-release\",\"client_payload\":{\"version\":\"${GITHUB_REF_NAME}\"}}"

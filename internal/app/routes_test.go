@@ -159,19 +159,31 @@ func TestMountServesRegisteredRoutes(t *testing.T) {
 // 이 그것을 "찾은 게 없다" 로 읽어 통과시켰다 — 이 가드는 한 번도 돈 적이 없고
 // 그동안 실제 위반 한 건이 초록 아래에 있었다 (M4: 통과는 문다는 뜻이 아니다).
 // 하위 프로세스도 정규식 방언도 쓰지 않으면 조용히 죽을 자리가 없다.
+//
+// **예외는 파일이 아니라 줄이다.** 파일 단위로 열어 두면 그 파일 안에서는
+// 몇 줄이든 통과한다 — handler_webhook.go 에 `mux.HandleFunc("GET /admin/…")`
+// 를 한 줄 더 넣어도 이 가드는 걸리지 않고, 그 라우트는 화면 ID 도 클래스도
+// 권한도 없이 서비스된다. 이 검사는 그 상황을 막는 유일한 백스톱이므로,
+// 백스톱 자신이 "이 파일은 통째로 믿는다" 로 넓어지면 안 된다.
 func TestNoDirectMuxRegistrationOutsideRegistry(t *testing.T) {
-	// 각 예외는 이유를 함께 적는다. 이유 없는 예외는 다음 사람이 지우지 못한다.
+	// 키는 `파일\t등록 줄` 이다. 줄 번호로 잡으면 위쪽을 한 줄 고칠 때마다
+	// 어긋나므로 내용으로 잡는다. 각 예외는 이유를 함께 적는다 — 이유 없는
+	// 예외는 다음 사람이 지우지 못한다.
 	allowed := map[string]string{
-		"internal/app/routes.go":          "Registry.Mount 자신 — 모든 등록이 여기 한 곳을 지난다",
-		"internal/install/install.go":     "설치 트리는 운영 트리와 별개다 (CLAUDE.md 규칙 3)",
-		"internal/app/handler_webhook.go": "P-905 의 별도 서브트리 — 세션·CSRF·액터가 붙지 않는 것이 목적이다 (D15 SC-8 1항)",
+		"internal/app/routes.go\tmux.HandleFunc(rt.Method+\" \"+rt.Pattern, guardID(rt))": "Registry.Mount 자신 — 모든 등록이 여기 한 곳을 지난다",
+
+		"internal/install/install.go\tmux.HandleFunc(\"GET /install\", h.show)":                             "설치 트리는 운영 트리와 별개다 (CLAUDE.md 규칙 3)",
+		"internal/install/install.go\tmux.HandleFunc(\"POST /install\", h.submit)":                          "설치 트리는 운영 트리와 별개다 (CLAUDE.md 규칙 3)",
+		"internal/install/install.go\tmux.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {": "설치 전에는 모든 경로가 /install 로 간다 (FR-101)",
+
+		"internal/app/handler_webhook.go\tmux.HandleFunc(\"POST /webhooks/payment/{pg}\", d.receive)": "P-905 의 별도 서브트리 — 세션·CSRF·액터가 붙지 않는 것이 목적이다 (D15 SC-8 1항)",
 	}
 
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := 0
+	seen := map[string]int{}
 	for _, dir := range []string{"internal", "cmd"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -186,9 +198,12 @@ func TestNoDirectMuxRegistrationOutsideRegistry(t *testing.T) {
 				if !strings.Contains(line, "mux.Handle(") && !strings.Contains(line, "mux.HandleFunc(") {
 					continue
 				}
-				found++
-				if _, ok := allowed[rel]; !ok {
-					t.Errorf("Registry 를 거치지 않은 라우트 등록: %s:%d: %s", rel, i+1, strings.TrimSpace(line))
+				key := rel + "\t" + strings.TrimSpace(line)
+				seen[key]++
+				if _, ok := allowed[key]; !ok {
+					t.Errorf("Registry 를 거치지 않은 라우트 등록: %s:%d: %s\n"+
+						"    허용하려면 이 줄을 사유와 함께 allowed 에 적는다",
+						rel, i+1, strings.TrimSpace(line))
 				}
 			}
 			return nil
@@ -197,10 +212,19 @@ func TestNoDirectMuxRegistrationOutsideRegistry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// 한 건도 못 찾았다면 읽는 쪽이 고장 난 것이다 — 예외 목록에 적힌 자리만으로도
-	// 최소 세 건은 있어야 한다. 이 단언이 없으면 위 루프가 통째로 헛돌아도 초록이다.
-	if found < len(allowed) {
-		t.Fatalf("등록 지점을 %d 건밖에 못 찾았다 — 검사가 헛돌았다 (최소 %d)", found, len(allowed))
+	// **예외 목록도 대조한다.** 정확히 한 번씩 나와야 한다:
+	//   0 회 — 등록이 사라졌거나 읽는 쪽이 고장 났다. 후자면 위 루프가 통째로
+	//          헛돌아도 초록이므로, 이 단언이 그 상태를 잡는 자리다.
+	//   2 회 이상 — 허용된 줄을 복사해 붙여 예외 하나로 여러 라우트를 태웠다.
+	for key, why := range allowed {
+		f, line, _ := strings.Cut(key, "\t")
+		switch seen[key] {
+		case 1:
+		case 0:
+			t.Errorf("예외에 적힌 등록이 없다 — 지웠으면 예외도 지운다 (또는 검사가 헛돌았다): %s: %s", f, line)
+		default:
+			t.Errorf("예외 한 줄에 등록이 %d 건 걸렸다: %s: %s (%s)", seen[key], f, line, why)
+		}
 	}
 }
 
