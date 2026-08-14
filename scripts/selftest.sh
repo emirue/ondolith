@@ -706,6 +706,9 @@ for nd_dir in $PATH; do
 	for nd_f in "$nd_dir"/*; do
 		nd_b=${nd_f##*/}
 		[ "$nd_b" = docker ] && continue
+		# **`-x` 는 디렉터리에도 참이다** (탐색 가능). 파일만 건다 — 아니면
+		# PATH 항목 안의 하위 디렉터리가 명령 이름으로 심링크된다.
+		[ -f "$nd_f" ] || continue
 		[ -x "$nd_f" ] || continue
 		[ -e "$NO_DOCKER/$nd_b" ] && continue
 		ln -s "$nd_f" "$NO_DOCKER/$nd_b" 2>/dev/null
@@ -713,22 +716,32 @@ for nd_dir in $PATH; do
 	IFS=:
 done
 IFS=$nd_ifs
-# **만든 것이 의도대로인지 먼저 확인한다.** 이 디렉터리가 조용히 비거나
-# docker 를 여전히 담고 있으면 아래 두 검사는 엉뚱한 이유로 통과·실패한다 —
-# 그게 앞선 두 판이 CI 에서만 틀렸던 모양이다.
+# **만든 것이 의도대로인지 먼저 확인하고, 아니면 아래를 돌리지 않는다.**
+# 깨진 PATH 로 돌린 검사는 자기만의 ok/err 를 찍는데 그 판정은 무의미하다 —
+# 의도한 검사가 다른 이유로 통과·실패하는 M10 이고, 이 파일이 `run_vr -` 와
+# `detected()` 에서 이미 경계하는 바로 그 모양이다. 전체는 fail=1 로 빨간불이
+# 되지만, 그 옆에 무관한 ✓ 가 함께 찍히면 다음 사람이 무엇이 증명됐는지 읽지
+# 못한다. 실패를 세는 것과 무엇이 증명됐는지 말하는 것은 다른 일이다.
+no_docker_ok=yes
 if PATH=$NO_DOCKER command -v docker >/dev/null 2>&1; then
-	err "docker 없는 PATH 를 만들지 못했다 — 아래 두 검사가 무의미하다"
+	err "docker 없는 PATH 를 만들지 못했다 (docker 가 여전히 보인다)"
+	no_docker_ok=no
 elif ! PATH=$NO_DOCKER command -v sh >/dev/null 2>&1; then
 	err "docker 없는 PATH 에 sh 조차 없다 — 스크립트가 docker 검사에 닿지 못한다"
+	no_docker_ok=no
 else
 	ok "docker 만 없는 PATH 를 만들었다 (sh 는 있다)"
 fi
 
-run_vr "$NO_DOCKER"
-if [ "$vr_code" -ne 0 ] && printf '%s' "$vr_out" | grep -q "docker"; then
-	ok "docker 가 없으면 건너뛰지 않고 거부한다"
+if [ "$no_docker_ok" = no ]; then
+	err "docker 부재 검사 2 건을 돌리지 않았다 — 깨진 PATH 위의 판정은 무의미하다"
 else
-	err "docker 없이 통과했다 (exit $vr_code)"
+	run_vr "$NO_DOCKER"
+	if [ "$vr_code" -ne 0 ] && printf '%s' "$vr_out" | grep -q "docker"; then
+		ok "docker 가 없으면 건너뛰지 않고 거부한다"
+	else
+		err "docker 없이 통과했다 (exit $vr_code)"
+	fi
 fi
 
 echo "selftest: DB 단언 미실행 경고 (report-skips.sh)"
@@ -793,19 +806,26 @@ unset FAKE_GO_EXIT
 # PATH 를 통째로 비우면 안 된다: 스크립트가 docker 검사에 닿기 전에 `dirname`
 # 이 없어 죽고, 그러면 엉뚱한 이유로 통과한다 (M10). 아래에서 어느 분기가
 # 돌았는지를 출력으로 확인하는 것이 그 대비다.
-out=$(unset ONDOLITH_TEST_DSN; PATH=$NO_DOCKER; export PATH;
-	/bin/sh "$ROOT/scripts/integration.sh" 2>&1)
-code=$?
-case "$out" in
-*"docker 가 없다"*) reason=docker ;;
-*) reason=other ;;
-esac
-if [ "$code" -eq 0 ]; then
-	err "integration.sh 가 DB 없이 통과했다"
-elif [ "$reason" != docker ]; then
-	err "integration.sh 가 실패하긴 했으나 docker 부재 때문이 아니다: $out"
+#
+# 위 사전조건이 깨졌으면 여기도 돌리지 않는다 — 깨진 PATH 위에서 나온 ok/err 는
+# 무엇도 증명하지 않는다.
+if [ "$no_docker_ok" = no ]; then
+	err "integration.sh 의 DB 부재 검사를 돌리지 않았다 (docker 없는 PATH 를 만들지 못했다)"
 else
-	ok "integration.sh 는 DB 를 얻지 못하면 거부한다"
+	out=$(unset ONDOLITH_TEST_DSN; PATH=$NO_DOCKER; export PATH;
+		/bin/sh "$ROOT/scripts/integration.sh" 2>&1)
+	code=$?
+	case "$out" in
+	*"docker 가 없다"*) reason=docker ;;
+	*) reason=other ;;
+	esac
+	if [ "$code" -eq 0 ]; then
+		err "integration.sh 가 DB 없이 통과했다"
+	elif [ "$reason" != docker ]; then
+		err "integration.sh 가 실패하긴 했으나 docker 부재 때문이 아니다: $out"
+	else
+		ok "integration.sh 는 DB 를 얻지 못하면 거부한다"
+	fi
 fi
 
 echo "selftest: 작업 선택기 (next-task.sh)"
