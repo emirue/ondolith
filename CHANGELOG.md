@@ -306,6 +306,14 @@
   새는 것으로 오래된 링크까지 전부 쓸 수 있다
 
 ### Fixed
+- **릴리즈 파이프라인이 첫 실행에서 깨졌다.** `verify-release.sh` 는 두 아키텍처
+  산출물을 docker 로 **실제 실행**해 버전을 보고하게 하는데, GitHub 러너는
+  amd64 리눅스라 binfmt 핸들러 없이는 arm64 가 `exec format error` 로 죽는다.
+  개발 기계가 Apple Silicon 이면 arm64 가 네이티브라 **이 차이가 로컬에서 전혀
+  보이지 않는다** — `VERSION=v0.1.0 make release` 가 로컬에서 초록이었다.
+  검사를 약하게 만들지 않고 러너에 능력을 준다 (`docker/setup-qemu-action`):
+  「검증했다」와 「검증할 수 없었다」를 같은 exit 0 으로 두지 않는 것이 그
+  스크립트의 전제다. 남은 비대칭(네이티브 vs 에뮬레이션)은 [GAP-08](docs/85-gaps.md) 이다
 - **selftest 의 docker 부재 검사 두 건이 macOS 배치를 가정하고 있었다.** "docker
   가 없으면 건너뛰지 않고 거부한다" 를 확인하려면 docker 가 안 보이는 PATH 가
   필요한데, 두 판 모두 환경에 기댔다: `PATH=/usr/bin:/bin` 은 docker 가

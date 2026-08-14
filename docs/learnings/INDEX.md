@@ -4,3 +4,4 @@
 - 2026-08-09 2026-08-09-5a523d9a-05b6-4cc8-9875-131c5b0adff4.md: {"confidence": 55} [.gitignore CHANGELOG.md Makefile docs/10-requirements.md docs/20-architecture.md ]
 - 2026-08-10 2026-08-10-5a523d9a-05b6-4cc8-9875-131c5b0adff4.md: ## 검토 결과 [CHANGELOG.md docs/18-open-decisions.md docs/80-roadmap.md docs/83-browser-test.md docs/85-gaps.md ]
 - 2026-08-12 2026-08-12-85e805dd-7933-4082-ae80-ef783ee7fa3d.md: ## 검토 결과 [.gitignore CHANGELOG.md CLAUDE.md README.md docs/80-roadmap.md ]
+- 2026-08-14 2026-08-14-85e805dd-7933-4082-ae80-ef783ee7fa3d.md: ## 검토 결과 [CHANGELOG.md docs/21-tech-stack.md go.mod scripts/selftest.sh ]

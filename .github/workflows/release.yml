@@ -21,6 +21,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # **arm64 산출물을 실제로 실행해 보려면 에뮬레이션이 필요하다.**
+      # `verify-release.sh` 는 두 아키텍처를 docker 로 돌려 버전을 보고하게
+      # 하는데, 러너는 amd64 리눅스라 binfmt 핸들러가 없으면 arm64 가
+      # `exec format error` 로 죽는다. 개발 기계가 Apple Silicon 이면 arm64 가
+      # 네이티브라 이 차이가 로컬에서 보이지 않는다 — 첫 릴리즈가 그렇게 깨졌다.
+      #
+      # 검사를 약하게 만들지 않는다. "검증했다" 와 "검증할 수 없었다" 를 같은
+      # exit 0 으로 두지 않는 것이 그 스크립트의 전제이므로, 대신 러너에 능력을
+      # 준다.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       # **게이트가 릴리즈의 일부다.** 별도 잡으로 두면 급할 때 건너뛰는 단계가
       # 되고, 건너뛴 릴리즈와 거친 릴리즈를 나중에 구분할 수 없다 (Makefile 의
       # release: vuln 과 같은 이유).
