@@ -1,6 +1,6 @@
 module github.com/emirue/ondolith
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/alexedwards/scs/pgxstore v0.0.0-20251002162104-209de6e426de

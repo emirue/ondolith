@@ -688,17 +688,43 @@ fi
 
 # docker 가 없으면 **건너뛰지 않고 실패한다** — "검증했다" 와 "검증할 수
 # 없었다" 를 같은 exit 0 으로 두면 게이트가 아니다.
-# **docker 만 가린다.** PATH 에서 특정 디렉터리를 빼는 방식은 배포판마다
-# docker 위치가 달라 안 통한다 (Ubuntu 는 /usr/bin/docker). 앞자리에 shim
-# 디렉터리를 두고 거기서 docker 를 "없는 명령"으로 만든다.
-VR_SHIM=$TMP/vr-shim
-mkdir -p "$VR_SHIM"
-printf '#!/bin/sh\nexit 127\n' > "$VR_SHIM/docker"
-chmod +x "$VR_SHIM/docker"
-# command -v 가 실행 가능 파일을 찾으므로, 그것까지 막으려면 이름을 지운다.
-rm -f "$VR_SHIM/docker"
-: > "$VR_SHIM/docker"   # 실행 권한 없는 빈 파일 → command -v 가 고르지 않는다
-run_vr "$VR_SHIM:$(dirname "$(command -v sh)"):/usr/bin:/bin"
+#
+# **docker 만 없는 PATH 를 실제로 만든다.** 앞선 두 판이 모두 환경을 가정해
+# CI 에서만 틀렸다:
+#   · `PATH=/usr/bin:/bin` — macOS 는 docker 가 /usr/local/bin 이라 통했지만
+#     Ubuntu 는 /usr/bin/docker 라 그대로 보인다.
+#   · 앞자리에 실행 불가 shim — `command -v` 는 실행 불가 항목을 **건너뛰고
+#     PATH 를 계속 훑어** 진짜 docker 를 찾는다.
+# 그래서 가리는 대신 없앤다: 실행 가능한 것만 심링크로 모으고 docker 만 뺀다.
+NO_DOCKER=$TMP/no-docker
+mkdir -p "$NO_DOCKER"
+nd_ifs=$IFS
+IFS=:
+for nd_dir in $PATH; do
+	IFS=$nd_ifs
+	[ -d "$nd_dir" ] || continue
+	for nd_f in "$nd_dir"/*; do
+		nd_b=${nd_f##*/}
+		[ "$nd_b" = docker ] && continue
+		[ -x "$nd_f" ] || continue
+		[ -e "$NO_DOCKER/$nd_b" ] && continue
+		ln -s "$nd_f" "$NO_DOCKER/$nd_b" 2>/dev/null
+	done
+	IFS=:
+done
+IFS=$nd_ifs
+# **만든 것이 의도대로인지 먼저 확인한다.** 이 디렉터리가 조용히 비거나
+# docker 를 여전히 담고 있으면 아래 두 검사는 엉뚱한 이유로 통과·실패한다 —
+# 그게 앞선 두 판이 CI 에서만 틀렸던 모양이다.
+if PATH=$NO_DOCKER command -v docker >/dev/null 2>&1; then
+	err "docker 없는 PATH 를 만들지 못했다 — 아래 두 검사가 무의미하다"
+elif ! PATH=$NO_DOCKER command -v sh >/dev/null 2>&1; then
+	err "docker 없는 PATH 에 sh 조차 없다 — 스크립트가 docker 검사에 닿지 못한다"
+else
+	ok "docker 만 없는 PATH 를 만들었다 (sh 는 있다)"
+fi
+
+run_vr "$NO_DOCKER"
 if [ "$vr_code" -ne 0 ] && printf '%s' "$vr_out" | grep -q "docker"; then
 	ok "docker 가 없으면 건너뛰지 않고 거부한다"
 else
@@ -761,11 +787,13 @@ unset FAKE_GO_EXIT
 # no docker there is no database to be had, and it must fail rather than report
 # success. The path WITH docker is exercised by `make test-integration` itself.
 #
-# /usr/bin:/bin keeps sh and dirname but drops /usr/local/bin, where docker
-# lives. Emptying PATH entirely would make this pass for the wrong reason — the
-# script would die on a missing `dirname` before ever reaching the docker check
-# (M10), and the output below is asserted to prove which branch ran.
-out=$(unset ONDOLITH_TEST_DSN; PATH=/usr/bin:/bin; export PATH;
+# $NO_DOCKER 는 docker 만 빠진 PATH 다 (위에서 만들고, 실제로 그런지 확인했다).
+# `/usr/bin:/bin` 으로 지우려던 앞선 판은 macOS 에서만 통했다 — Ubuntu 는
+# /usr/bin/docker 라 그대로 보였고, CI 에서 이 검사가 계속 빨간불이었다.
+# PATH 를 통째로 비우면 안 된다: 스크립트가 docker 검사에 닿기 전에 `dirname`
+# 이 없어 죽고, 그러면 엉뚱한 이유로 통과한다 (M10). 아래에서 어느 분기가
+# 돌았는지를 출력으로 확인하는 것이 그 대비다.
+out=$(unset ONDOLITH_TEST_DSN; PATH=$NO_DOCKER; export PATH;
 	/bin/sh "$ROOT/scripts/integration.sh" 2>&1)
 code=$?
 case "$out" in
