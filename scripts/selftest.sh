@@ -274,6 +274,15 @@ inject "오류표가 규약에 없는 상태코드를 쓴다" docs/19-screen-io.
 	'0.3 에 없는 상태코드를 쓴다: 418'
 # **규약 표가 비면 무엇과도 어긋나지 않는다** — 읽지 못한 것을 통과로 읽는 것이
 # 이 저장소가 두 번 당한 모양이다 (BRE 의 `\(`, BSD sort).
+# 오류 식별자를 인용한 행은 구현과 대조된다 (checkdocs 30-2). 재고 네 행이
+# 400 으로 적힌 채 구현이 422 였던 것을 사람이 읽고서야 찾았다 — 그 부류를
+# 기계가 잡는 자리다.
+inject "표의 코드가 구현과 다름" docs/19-screen-io.md \
+	'perl -pi -e "s/\| 재고 초과 \(.ErrOutOfStock.\) \| 422 \|/| 재고 초과 (\x60ErrOutOfStock\x60) | 400 |/" docs/19-screen-io.md' \
+	'ErrOutOfStock 은 표에 400 인데 구현은 422 를 낸다'
+inject "없는 오류 식별자를 인용" docs/19-screen-io.md \
+	'perl -pi -e "s/\(.ErrOutOfStock.\)/(\x60ErrNoSuchThing\x60)/" docs/19-screen-io.md' \
+	'인용한 오류를 핸들러에서 찾지 못했다: ErrNoSuchThing'
 inject "0.3 규약 표를 읽지 못함" docs/19-screen-io.md \
 	'perl -pi -e "s/^### 0\.3 HTTP 코드 규약/### 0.3 HTTP 코드/" docs/19-screen-io.md' \
 	'0.3 절에서 코드 규약을 하나도 읽지 못했다'

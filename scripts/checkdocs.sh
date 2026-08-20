@@ -1534,6 +1534,77 @@ else
 		done_ "$IO 오류표의 상태코드가 0.3 규약 $(wc -l <"$T"/cd_io_codes_def | tr -d ' ')종 안에 있다"
 fi
 
+# --- 30-2. D19 오류표가 인용한 오류 식별자를 구현과 대조한다 ----------------
+#
+# **30-1 은 「규약 안의 코드인가」만 본다.** 어느 행이 어느 핸들러의 어느 분기인지는
+# 상황 칸(자연어)에 있어 기계가 못 읽는다 — 재고 네 행이 `400` 으로 적힌 채
+# 구현이 `422` 였던 것을 사람이 읽고서야 찾았다.
+#
+# 그래서 상황 칸에 **오류 식별자**(`ErrOutOfStock`)를 적을 수 있게 하고, 적힌
+# 행만 구현과 잇는다. 핸들러의 `case errors.Is(err, X): … http.StatusY` 에서
+# (X → Y) 를 뽑아, 그 행의 코드가 **구현이 실제로 내는 코드 집합에 속하는지**
+# 본다. 한 오류가 화면마다 다른 코드를 내는 경우가 있어(ErrNotFound 는 404 와
+# 500 둘 다다) 하나로 못 박지 않는다.
+#
+# **적히지 않은 행은 여전히 대조되지 않는다.** 그 수를 함께 알린다 — 얼마나
+# 이어졌는지 말하지 않으면 이 검사가 전부를 본다고 읽힌다.
+begin
+if [ ! -f "$IO" ]; then
+	err "$IO 가 없다"
+else
+	# (오류 식별자 → 상태코드 이름) — 핸들러의 case 분기에서만 뽑는다.
+	find internal/app internal/admin -name '*.go' ! -name '*_test.go' 2>/dev/null |
+		while read -r f; do
+			perl -0777 -ne '
+			while (/case ((?:\s*errors\.Is\(err, [\w.]+\),?)+)\s*:(.*?)(?=\n\tcase |\n\t\}|\n\}\n)/gs) {
+				my ($cases, $body) = ($1, $2);
+				my ($st) = $body =~ /http\.Status(\w+)/;
+				next unless $st;
+				while ($cases =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\n" }
+			}' "$f"
+		done | sort -u >"$T"/cd_e2s
+
+	[ -s "$T"/cd_e2s ] || err "핸들러에서 (오류 → 상태코드) 를 하나도 뽑지 못했다 (검사가 헛돌았다)"
+
+	# Go 의 상태코드 이름을 숫자로. 여기 없는 이름을 핸들러가 쓰면 그 행은
+	# 대조되지 않으므로, 이름이 늘면 여기도 늘려야 한다.
+	code_of() {
+		case $1 in
+		OK) echo 200 ;; SeeOther) echo 303 ;; BadRequest) echo 400 ;;
+		Forbidden) echo 403 ;; NotFound) echo 404 ;; Conflict) echo 409 ;;
+		RequestEntityTooLarge) echo 413 ;; UnprocessableEntity) echo 422 ;;
+		TooManyRequests) echo 429 ;; InternalServerError) echo 500 ;;
+		BadGateway) echo 502 ;; *) echo "" ;;
+		esac
+	}
+
+	# 오류 식별자를 인용한 오류표 행: `Err...` 를 담고 둘째 칸이 코드인 행.
+	perl -nle 'next unless /^\|([^|]*`(Err\w+)`[^|]*)\|\s*\*{0,2}(\d{3})\*{0,2}\s*\|/;
+		print "$.\t$2\t$3"' "$IO" >"$T"/cd_io_err
+	n_linked=$(wc -l <"$T"/cd_io_err | tr -d ' ')
+
+	while IFS="$(printf '\t')" read -r ln id want; do
+		[ -z "$id" ] && continue
+		got=$(awk -F'\t' -v k="$id" '$1==k {print $2}' "$T"/cd_e2s)
+		if [ -z "$got" ]; then
+			err "$IO:$ln 이 인용한 오류를 핸들러에서 찾지 못했다: $id"
+			continue
+		fi
+		ok_code=no
+		for name in $got; do
+			[ "$(code_of "$name")" = "$want" ] && ok_code=yes
+		done
+		[ "$ok_code" = yes ] || {
+			set -- $got
+			err "$IO:$ln $id 은 표에 $want 인데 구현은 $(for n in $got; do printf '%s ' "$(code_of "$n")"; done)를 낸다"
+		}
+	done <"$T"/cd_io_err
+
+	# **얼마나 이어졌는지 말한다.** 남은 행은 여전히 사람이 읽어야 한다.
+	n_rows=$(grep -cE '^\|[^|]+\|\s*\*{0,2}[0-9]{3}\*{0,2}\s*\|' "$IO")
+	done_ "$IO 오류표 $n_rows 행 중 $n_linked 행이 오류 식별자로 구현과 이어짐 (나머지는 사람이 읽는다)"
+fi
+
 # --- 31. D80 의 Phase 표시가 D81 의 완료 상태와 일치한다 --------------------
 #
 # **이 저장소가 네 Phase 동안 「Phase 0 진행 중」이라고 말한 채 초록이었다.**
