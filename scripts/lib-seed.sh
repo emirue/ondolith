@@ -128,8 +128,17 @@ want "약관이 생겼다" 1 "$(sql "select count(*) from terms")"
 # 약관이 붙은 상태로 한 번도 그려진 적이 없었다. 빈 표가 결함을 숨기는 것과
 # 같은 모양이다. 오늘 시행하는 것을 하나 더 넣는다: A-506 은 오늘을
 # 「지금부터」로 읽어 받아 준다 (`sameDay` + `GREATEST(…, now())`).
+# **서버가 보는 날짜를 쓴다.** `date +%Y-%m-%d` 는 이 셸의 시간대이고 DB 는
+# UTC 다 — KST(+9) 자정부터 아침 아홉 시 사이에는 로컬이 하루 앞서서, 시드가
+# **내일 날짜**로 약관을 넣고 「시행 중인 약관이 있다」가 0 이 된다. 낮에만
+# 돌리면 영영 안 보이는 실패다 (실제로 01:51 에 처음 걸렸다).
+SEED_TODAY=$(sql "select to_char(current_date, 'YYYY-MM-DD')")
+[ -n "$SEED_TODAY" ] || {
+	echo "DB 에서 오늘 날짜를 읽지 못했다" >&2
+	exit 1
+}
 code POST /admin/terms --data-urlencode "kind=개인정보 처리방침" --data-urlencode "version=1.0" \
-	--data-urlencode "effective_at=$(date +%Y-%m-%d)" \
+	--data-urlencode "effective_at=$SEED_TODAY" \
 	--data-urlencode "body=개인정보 처리방침 본문입니다." \
 	--data-urlencode "is_required=on" >/dev/null
 want "시행 중인 약관이 있다" 1 \
