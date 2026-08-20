@@ -36,6 +36,25 @@
       </label>
     </div>
 
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>관리자 배색</span>
+        {{/* **빈 값이 곧 기본(1b)이다.** 여기서 "1b" 를 골라 놓으면 「고르지
+             않았다」와 「1b 를 골랐다」가 같은 모양이 되고, admin.css 의
+             `:root:not([data-admin-theme])` 다크 블록이 영원히 매치되지 않는다 —
+             그렇게 스무 줄짜리 다크 콘솔이 한 번 죽은 적이 있다. */}}
+        <select name="admin.theme">
+          <option value="">기본 (1b 모던 소프트)</option>
+          <option value="1a"{{if eq (index .Settings "admin.theme") "1a"}} selected{{end}}>1a — 클래식</option>
+          <option value="1b"{{if eq (index .Settings "admin.theme") "1b"}} selected{{end}}>1b — 모던 소프트</option>
+          <option value="1c"{{if eq (index .Settings "admin.theme") "1c"}} selected{{end}}>1c — 다크</option>
+          <option value="1d"{{if eq (index .Settings "admin.theme") "1d"}} selected{{end}}>1d — 하이 콘트라스트</option>
+          <option value="1e"{{if eq (index .Settings "admin.theme") "1e"}} selected{{end}}>1e — 컴팩트</option>
+        </select>
+        <span class="adm-hint">관리자 화면에만 적용됩니다. 라이트/다크는 기본값일 때 OS 설정을 따릅니다. 바꾼 뒤 <strong>재시작</strong>해야 반영됩니다.</span>
+      </label>
+    </div>
+
     <div class="adm-actions" style="justify-content:flex-end">
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>

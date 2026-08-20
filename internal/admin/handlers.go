@@ -156,7 +156,18 @@ func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 var siteSettingKeys = []string{
 	"site.name", "site.meta_description", "site.og_image", "site.dev_mode", "site.type",
 	"auth.email_verification_required",
+	// 관리자 콘솔 배색. **부팅 때 읽던 값인데 그것을 저장하는 화면이 없었다** —
+	// 다섯 방향이 스타일시트에 있는데 고를 방법이 없었다.
+	"admin.theme",
 }
+
+// adminThemes 는 admin.css 가 아는 배색이다 (`data-admin-theme="1a"` … `1e`).
+//
+// **빈 값이 곧 기본(1b)이다.** 여기에 "1b" 를 채워 넣으면 「고르지 않았다」와
+// 「1b 를 골랐다」가 같은 모양이 되고, admin.css 의 `:root:not([data-admin-theme])`
+// 다크 블록이 영원히 매치되지 않는다 — 그렇게 스무 줄짜리 다크 콘솔이 한 번
+// 죽은 적이 있다 (app.defaultAdminTheme 주석).
+var adminThemes = map[string]bool{"": true, "1a": true, "1b": true, "1c": true, "1d": true, "1e": true}
 
 func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "settings.update"); !ok {
@@ -189,6 +200,14 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	if t, ok := kv["site.type"]; ok && t != "cms" && t != "shop" {
 		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
 			http.StatusUnprocessableEntity, "사이트 유형은 cms 또는 shop 이어야 합니다.")
+		return
+	}
+	// 배색도 닫힌 어휘다. 모르는 값을 저장하면 `data-admin-theme` 에 그대로
+	// 찍히고, admin.css 의 어느 블록과도 매치되지 않아 콘솔이 기본으로 보인다 —
+	// 저장은 됐는데 아무 일도 안 일어나는 상태다.
+	if t, ok := kv["admin.theme"]; ok && !adminThemes[t] {
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "관리자 배색은 1a~1e 중 하나여야 합니다.")
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {

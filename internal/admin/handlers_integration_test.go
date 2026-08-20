@@ -251,6 +251,39 @@ func TestSiteTypeIsAClosedVocabulary(t *testing.T) {
 	}
 }
 
+// 관리자 배색도 닫힌 어휘다 (A-201). 모르는 값은 `data-admin-theme` 에 그대로
+// 찍히고 admin.css 의 어느 블록과도 매치되지 않아 콘솔이 기본으로 보인다 —
+// **저장은 됐는데 아무 일도 안 일어나는 상태**이고, 화면은 아무 말도 하지 않는다.
+func TestAdminThemeIsAClosedVocabulary(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+		"admin.theme": {"1z"}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("알 수 없는 배색이 HTTP %d 로 통과했다", rec.Code)
+	}
+
+	// **빈 값은 유효하다.** 그것이 「고르지 않았다」이고, 곧 기본(1b)이다 —
+	// 저장 못 하게 막으면 한번 고른 뒤 기본으로 되돌릴 방법이 없어진다.
+	for _, v := range []string{"", "1a", "1b", "1c", "1d", "1e"} {
+		if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+			"admin.theme": {v}}); rec.Code != http.StatusSeeOther {
+			t.Errorf("배색 %q 가 거부됐다: HTTP %d", v, rec.Code)
+		}
+	}
+
+	// **저장이 실제로 남아야 한다.** 이 버그의 원래 모습이 「부팅 때 읽는 키인데
+	// 그것을 쓰는 폼이 없다」였다 — 폼을 붙였는데 값이 안 닿으면 같은 자리다.
+	post(d.SettingsSave, "/admin/settings", url.Values{"admin.theme": {"1d"}})
+	var got string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT value FROM settings WHERE key = 'admin.theme'`).Scan(&got); err != nil {
+		t.Fatalf("배색이 저장되지 않았다: %v", err)
+	}
+	if got != "1d" {
+		t.Errorf("저장된 배색 = %q, want 1d", got)
+	}
+}
+
 // page.update must not be able to publish, or the separation of the two
 // permissions is decorative.
 func TestPublishNeedsItsOwnPermission(t *testing.T) {
