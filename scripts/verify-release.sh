@@ -17,6 +17,33 @@ fail=0
 
 say() { printf '  %s %s\n' "$1" "$2"; }
 
+# **어느 경로로 돌았는지 말한다** (GAP-08).
+#
+# 산출물을 docker 로 실행할 때, 호스트와 같은 아키텍처면 커널이 그냥 exec 하고
+# (네이티브) 다르면 binfmt 핸들러가 받는다 (에뮬레이션). 둘은 실패하는 방식이
+# 다르다 — 에뮬레이션은 핸들러가 없으면 `exec format error` 로 죽고, 네이티브는
+# 그런 실패가 없다. 그래서 **로컬 초록이 CI 초록을 뜻하지 않았다**: Apple
+# Silicon 에서 arm64 는 네이티브라 통과했고, amd64 러너에서는 에뮬레이션이라
+# 죽었다. 첫 릴리즈가 정확히 그렇게 깨졌다.
+#
+# 한 기계에서 amd64·arm64 를 모두 돌리면 **한 쪽은 반드시 네이티브, 다른 쪽은
+# 반드시 에뮬레이션**이다. 즉 두 경로는 늘 함께 실측돼 왔고, 몰랐을 뿐이다.
+# 아래에서 그것을 출력에 남기고 마지막에 둘 다 돌았는지 센다.
+#
+# **이 카운터는 selftest 가 아니라 `make release` 가 실측한다.** selftest 의
+# 사본에는 dist 산출물이 없어 여기까지 오지 못한다(그 앞의 「산출물이 없다」에서
+# 멈춘다). 대신 릴리즈가 두 호스트에서 돈다 — 개발 기계(arm64)와 CI 러너
+# (amd64) — 이고, 두 곳에서 네이티브/에뮬레이션이 서로 뒤바뀐다. 주입 한 번보다
+# 그쪽이 넓다.
+host=$(uname -m)
+case "$host" in
+x86_64 | amd64) host_arch=amd64 ;;
+aarch64 | arm64) host_arch=arm64 ;;
+*) host_arch=$host ;;
+esac
+n_native=0
+n_emul=0
+
 if ! command -v docker >/dev/null 2>&1; then
 	say "✗" "docker 가 없다 — 산출물을 실행해 볼 수 없다"
 	exit 1
@@ -67,11 +94,34 @@ for target in linux/amd64 linux/arm64; do
 	# 커널이 exec 하므로, 네이티브 아키텍처 바이너리는 어떤 --platform 아래서도
 	# 그냥 돈다 — 즉 실행이 성공했다는 사실만으로는 "대상 아키텍처에서 돌았다"
 	# 가 증명되지 않는다. 바이너리에게 직접 물어야 한다.
+	if [ "$arch" = "$host_arch" ]; then
+		path=네이티브
+		n_native=$((n_native + 1))
+	else
+		path=에뮬레이션
+		n_emul=$((n_emul + 1))
+	fi
 	case "$got" in
-	*"linux/$arch"*) say "✓" "$arch 실행 → $got" ;;
+	*"linux/$arch"*) say "✓" "$arch 실행 ($path) → $got" ;;
 	*) say "✗" "$arch 산출물이 [$got] 을 보고했다 — linux/$arch 가 아니다"; fail=1 ;;
 	esac
 done
 
+# **두 경로가 모두 실측됐는지 센다** (GAP-08).
+#
+# 하나로 몰리면 이 실행은 한 경로만 본 것이다. 에뮬레이션 쪽이 0 이면
+# `exec format error` 부류를 애초에 겪을 수 없는 실행이었고, 그 초록은
+# 「검증했다」가 아니라 「그 실패 방식을 지나지 않았다」는 뜻이다.
+if [ "$fail" -eq 0 ]; then
+	if [ "$n_native" -eq 0 ]; then
+		say "✗" "네이티브로 돈 산출물이 없다 (호스트 $host_arch) — 한 경로만 봤다"
+		fail=1
+	fi
+	if [ "$n_emul" -eq 0 ]; then
+		say "✗" "에뮬레이션으로 돈 산출물이 없다 (호스트 $host_arch) — 이 기계는 exec format error 부류를 겪을 수 없다"
+		fail=1
+	fi
+fi
+
 [ "$fail" -eq 0 ] || { echo "release 검증 실패"; exit 1; }
-echo "release 검증 ok  $want"
+echo "release 검증 ok  $want  (네이티브 $n_native · 에뮬레이션 $n_emul · 호스트 $host_arch)"

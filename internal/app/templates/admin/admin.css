@@ -546,6 +546,17 @@ button,
   border: 1px solid var(--line);
   border-radius: var(--chip-radius);
   text-decoration: none;
+}
+
+/* **현재 페이지 칩은 여기서 뺀다.** 위 묶음에 `color`·`opacity` 를 두었더니
+   `span.adm-page`(요소+클래스 둘, 0-2-1)가 아래 `.adm-page--current`
+   (클래스 둘, 0-2-0)를 이겨, 강조색 배경 위에 본문 색이 0.45 투명도로
+   그려졌다 — 대비 1.87:1 (AA 는 4.5:1). 의도한 색이 한 번도 적용된 적이 없다.
+   `:not()` 으로 아예 매치되지 않게 해서 특이성 싸움 자체를 없앤다.
+   공개 테마의 `.page-current` 에도 같은 버그가 있었다 — `make ui` 의 대비
+   규칙이 둘 다 찾았다. */
+.adm-pagination a,
+.adm-pagination span.adm-page:not(.adm-page--current) {
   color: inherit;
   opacity: .45;
 }
@@ -557,7 +568,6 @@ button,
   border-color: var(--accent);
   color: var(--accent-ink);
   font-weight: 600;
-  opacity: 1;
 }
 
 /* ---- 정의 목록 (상세 화면) ------------------------------------------------ */

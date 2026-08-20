@@ -217,6 +217,56 @@ const AUDIT = String.raw`(() => {
       }
     }
   }
+
+  // 7) **색 대비 (WCAG 2.1 AA).** 좌표가 아니라 색이라 눈으로만 재던 자리다
+  //    — 라이트·다크 두 벌인데 어느 쪽도 수치로 확인된 적이 없었다.
+  //
+  //    AA 는 본문 4.5:1, 큰 글자(18.66px 이상 굵게 / 24px 이상) 3:1 이다.
+  const lum = (c) => {
+    const m = c.match(/[\d.]+/g)
+    if (!m || m.length < 3) return null
+    if (m.length > 3 && parseFloat(m[3]) < 1) return null // 반투명은 뒤가 섞인다
+    const f = (v) => {
+      const s = parseInt(v, 10) / 255
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2])
+  }
+  // **배경은 조상까지 올라가며 찾는다.** 대부분의 요소는 transparent 이고,
+  // 실제로 칠해진 것은 위쪽 어딘가다. 못 찾으면 재지 않는다 — 흰색으로
+  // 가정하면 다크 모드에서 전부 오탐이 된다.
+  const bgOf = (el) => {
+    for (let p = el; p; p = p.parentElement) {
+      const b = getComputedStyle(p).backgroundColor
+      const l = lum(b)
+      if (l !== null) return l
+    }
+    return null
+  }
+  for (const el of all) {
+    if (!vis(el)) continue
+    // 자기 자신이 직접 가진 텍스트만 본다. 부모까지 세면 같은 글자를
+    // 조상 수만큼 중복 보고한다.
+    const own = [...el.childNodes]
+      .filter((n) => n.nodeType === 3 && n.textContent.trim())
+      .map((n) => n.textContent.trim()).join(' ')
+    if (!own) continue
+    const cs = getComputedStyle(el)
+    const fg = lum(cs.color)
+    const bg = bgOf(el)
+    if (fg === null || bg === null) continue
+    // 그림자·테두리로 읽히게 만든 경우가 있어 완전히 같은 색만 예외로 두지
+    // 않는다 — 같으면 그것이야말로 결함이다.
+    const ratio = (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05)
+    const size = parseFloat(cs.fontSize)
+    const bold = parseInt(cs.fontWeight, 10) >= 700
+    const large = size >= 24 || (bold && size >= 18.66)
+    const need = large ? 3 : 4.5
+    if (ratio + 0.005 < need) {
+      out.push('대비 ' + (Math.round(ratio * 100) / 100) + ':1 (AA ' + need + ':1 필요, ' +
+        px(size) + 'px' + (bold ? ' 굵게' : '') + '): ' + name(el))
+    }
+  }
   return out
 })()`
 
