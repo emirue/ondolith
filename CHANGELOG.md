@@ -66,10 +66,16 @@
 - **CI** (`.github/workflows/ci.yml`) — `make check` 에 더해 **PostgreSQL 18 을 붙여
   `make test-integration` 을 돌린다.** DSN 없이 돌리면 973 건 중 450 건이
   건너뛰고(46%) 그 상태에서도 게이트가 초록이라, 돈이 걸린 경로(결제·환불·반품)를
-  실제로 실행하는 곳이 어디에도 없었다 ([GAP-06](docs/85-gaps.md)). `make vuln` 도
+  실제로 실행하는 곳이 어디에도 없었다. `make vuln` 도
   여기서 돈다 — 네트워크가 필요해 오프라인 게이트에 넣을 수 없다.
   **첫 실행이 곧바로 두 가지를 찾았다**: 툴체인 취약점 7 건(위 Security 항목)과,
-  아래 selftest 의 환경 가정. 로컬에서 초록이라고 CI 에서 초록인 것이 아니다
+  아래 selftest 의 환경 가정. 로컬에서 초록이라고 CI 에서 초록인 것이 아니다.
+  **브라우저 감사(`make ui`)도 여기서 돈다** — 대장에서 닫혔다. 올리는 데 OS
+  차이로 세 번 걸렸다: Playwright 캐시 경로가 macOS 만(`~/Library/Caches`),
+  아키텍처 디렉터리 이름이 `chrome-linux64`(목록엔 `chrome-linux`만),
+  그리고 Ubuntu 23.10+ 의 AppArmor 가 비특권 user namespace 를 막아 Chrome 이
+  `No usable sandbox!` 로 즉시 죽었다. 셋 다 개발 기계(macOS)에서는 보이지
+  않는 조건이었다. 이제 CI 에서 552 조합이 매 푸시마다 측정된다
 - **릴리즈 파이프라인** (`.github/workflows/release.yml`) — `v*` 태그에 게이트를
   다시 돌리고 linux amd64/arm64 바이너리와 `SHA256SUMS` 를 낸다. 체크섬이 없으면
   받는 쪽은 받은 것이 우리가 낸 것인지 확인할 방법이 없다. 이어서 비공개
