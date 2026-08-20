@@ -10,7 +10,7 @@
 // 실행: make shots
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { findChrome, launch, WIDTHS } from './lib-browser.mjs'
+import { findChrome, searched, launch, WIDTHS } from './lib-browser.mjs'
 
 const BASE = process.env.SHOT_BASE ?? 'http://127.0.0.1:8102'
 const EMAIL = process.env.SHOT_EMAIL ?? ''
@@ -24,6 +24,7 @@ async function main() {
   const bin = findChrome()
   if (!bin) {
     console.error('Chromium 을 찾지 못했다 (Playwright 캐시).')
+    for (const w of searched) console.error('  · ' + w)
     process.exit(1)
   }
   const { cdp, sessionId } = await launch(bin)

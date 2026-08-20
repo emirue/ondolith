@@ -38,11 +38,30 @@ export function findChrome() {
     'chrome-linux', 'chrome-linux-arm64',
     'chrome-win', 'chrome-win64',
   ]
+  // **못 찾았을 때 어디를 봤는지 말한다.** "찾지 못했다" 만 남기면 CI 로그를
+  // 보고도 고칠 수 없다 — 캐시가 비었는지, 경로를 안 봤는지, 그 안의 배치가
+  // 다른지가 구분되지 않는다. 실제로 그 상태로 한 번 돌려 보고 알았다.
+  searched.length = 0
   for (const root of roots) {
-    const dirs = readdirSync(root)
+    let dirs = []
+    try {
+      dirs = readdirSync(root)
+    } catch (e) {
+      searched.push(root + ' — 읽지 못함: ' + e.code)
+      continue
+    }
+    const chromiums = dirs
       .filter((d) => d.startsWith('chromium-'))
       .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))
-    for (const d of dirs) {
+    if (chromiums.length === 0) {
+      searched.push(root + ' — chromium-* 없음 (있는 것: ' + dirs.join(', ') + ')')
+      continue
+    }
+    for (const d of chromiums) {
+      let inner = []
+      try {
+        inner = readdirSync(join(root, d))
+      } catch { /* 아래에서 배치를 적는다 */ }
       for (const arch of arches) {
         for (const app of apps) {
           const mac = join(root, d, arch, app + '.app/Contents/MacOS/' + app)
@@ -53,10 +72,14 @@ export function findChrome() {
           if (existsSync(p)) return p
         }
       }
+      searched.push(join(root, d) + ' — 아는 배치가 없음 (안에 있는 것: ' + inner.join(', ') + ')')
     }
   }
   return null
 }
+
+// findChrome 이 마지막으로 훑은 자리들. 못 찾았을 때 부르는 쪽이 그대로 찍는다.
+export const searched = []
 
 // ---- CDP ------------------------------------------------------------------
 
