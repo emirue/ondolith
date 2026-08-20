@@ -32,12 +32,11 @@ export function findChrome() {
     join(home, 'AppData/Local/ms-playwright'), // Windows
   ].filter((r) => r && existsSync(r))
 
+  // **아키텍처 디렉터리 이름을 열거하지 않는다.** 목록으로 두었더니
+  // `chrome-linux` 는 있고 `chrome-linux64` 는 없어서 CI 에서 못 찾았다 —
+  // Playwright 가 이름을 바꾸면 조용히 「없다」가 되는 자리다. 대신 그 안을
+  // 훑는다: `chromium-NNNN` 아래의 디렉터리는 어차피 그 하나뿐이다.
   const apps = ['Google Chrome for Testing', 'Chromium']
-  const arches = [
-    'chrome-mac-arm64', 'chrome-mac',
-    'chrome-linux', 'chrome-linux-arm64',
-    'chrome-win', 'chrome-win64',
-  ]
   // **못 찾았을 때 어디를 봤는지 말한다.** "찾지 못했다" 만 남기면 CI 로그를
   // 보고도 고칠 수 없다 — 캐시가 비었는지, 경로를 안 봤는지, 그 안의 배치가
   // 다른지가 구분되지 않는다. 실제로 그 상태로 한 번 돌려 보고 알았다.
@@ -62,7 +61,9 @@ export function findChrome() {
       try {
         inner = readdirSync(join(root, d))
       } catch { /* 아래에서 배치를 적는다 */ }
-      for (const arch of arches) {
+      // `chrome-*` 로 시작하는 디렉터리를 전부 본다 — mac·linux·linux64·win64
+      // 무엇이든 같은 규칙으로 걸린다.
+      for (const arch of inner.filter((n) => n.startsWith('chrome-'))) {
         for (const app of apps) {
           const mac = join(root, d, arch, app + '.app/Contents/MacOS/' + app)
           if (existsSync(mac)) return mac
