@@ -143,14 +143,23 @@ func TestSignupDropsFieldsNobodyDefined(t *testing.T) {
 			t.Errorf("정의하지 않은 키 %q 가 저장됐다: %s", banned, raw)
 		}
 	}
-	// 권한도 오르지 않았다.
-	var isAdmin bool
-	if err := pool.QueryRow(context.Background(),
-		`SELECT is_admin FROM users WHERE email = 'attacker@example.com'`).Scan(&isAdmin); err != nil {
+	// **권한도 오르지 않았다 — 권한이 실제로 사는 곳에서 확인한다.**
+	//
+	// 앞선 판은 `SELECT is_admin FROM users` 를 봤다. 그 컬럼은 권한의 근거가
+	// 아니다 (D15: 역할↔권한). 공격자가 어떤 경로로든 `user_roles` 행을
+	// 얻었다면 그 단언은 **그대로 통과했다** — 막으려던 것을 보지 않는
+	// 단언이었고, 00006 이 컬럼을 지우면서 그 사실이 드러났다.
+	//
+	// 이제 역할 부여 자체를 센다. 폼이 무엇을 실어 보내든 이 수는 0 이어야 한다.
+	var roles int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM user_roles ur
+		JOIN users u ON u.id = ur.user_id
+		WHERE u.email = 'attacker@example.com'`).Scan(&roles); err != nil {
 		t.Fatal(err)
 	}
-	if isAdmin {
-		t.Error("폼에 실린 is_admin 이 계정에 반영됐다")
+	if roles != 0 {
+		t.Errorf("폼에 실린 값으로 역할이 %d 개 붙었다 — 권한이 올랐다", roles)
 	}
 }
 

@@ -274,9 +274,14 @@ inject "닫는 방법이 없는 GAP 행" docs/85-gaps.md \
 inject "Phase 표시가 실제보다 뒤처짐" docs/80-roadmap.md \
 	'perl -pi -e "s/^## Phase 1 — 코어 ✅ 완료/## Phase 1 — 코어 ⏳ 대기/" docs/80-roadmap.md' \
 	'Phase 1 표시가 docs/81-work-breakdown.md 와 다르다'
-inject "Phase 표시가 실제보다 앞섬" docs/80-roadmap.md \
-	'perl -pi -e "s/^## Phase 2 — 게시판 🔄 진행 중/## Phase 2 — 게시판 ✅ 완료/" docs/80-roadmap.md' \
-	'Phase 2 표시가 docs/81-work-breakdown.md 와 다르다'
+# **표시를 건드리지 않고 현실을 바꾼다.** 앞선 판은 「🔄 인 Phase 를 ✅ 로 고친다」
+# 였는데, 그 Phase 가 실제로 완료되면 치환 대상이 사라져 주입이 조용히 아무것도
+# 하지 않는다 — W2-01 이 끝나 Phase 2 가 ✅ 가 되자 그대로 일어났다. 대신
+# **✅ 인 Phase 에 미완료 작업을 하나 더한다**: 표시는 그대로 ✅ 인데 현실이
+# 🔄 가 되므로, 어느 Phase 가 어느 상태이든 「표시가 앞선다」가 성립한다.
+inject "Phase 표시가 실제보다 앞섬" docs/81-work-breakdown.md \
+	'printf "| W1-99 | 아직 안 한 작업 | — | — | 검증 가능한 기준 |\n" >> docs/81-work-breakdown.md' \
+	'Phase 1 표시가 docs/81-work-breakdown.md 와 다르다'
 # **표시를 통째로 지우는 것이 가장 흔한 회피다.** 위 두 케이스는 다른 표시로
 # 바꾸는 것만 잡는다 — 아무 표시도 없으면 무엇과도 「다르지 않다」로 통과할 소지가
 # 있어 따로 넣는다.

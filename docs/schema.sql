@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict kJreQqB0giBxICodnWSieT4Qj8pOOAntyHccyOQ1oiIZ8Rcgia0A3S9zmEZLY57
+\restrict hvLJ9HjDe2rmfPDCNPMG7xMADVSVlUaHZuGNxtAaKnw1UlFGhypp29nfXcwc0H7
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -749,7 +749,6 @@ CREATE TABLE public.users (
     email text NOT NULL,
     password_hash text NOT NULL,
     display_name text DEFAULT ''::text NOT NULL,
-    is_admin boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
@@ -2019,5 +2018,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict kJreQqB0giBxICodnWSieT4Qj8pOOAntyHccyOQ1oiIZ8Rcgia0A3S9zmEZLY57
+\unrestrict hvLJ9HjDe2rmfPDCNPMG7xMADVSVlUaHZuGNxtAaKnw1UlFGhypp29nfXcwc0H7
 

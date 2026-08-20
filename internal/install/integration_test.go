@@ -147,18 +147,18 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 	}
 
 	// FR-104: administrator exists, email lower-cased, password only as bcrypt.
+	//
+	// `is_admin` 은 보지 않는다 — 00006 이 지웠다 (W2-01). 관리자인지는 아래
+	// 역할 단언이 정한다. 그 단언이 이 테스트의 본체이고, 불리언은 처음부터
+	// 그것을 대신하지 못했다.
 	var email, hash string
-	var isAdmin bool
 	err := pool.QueryRow(ctx,
-		"SELECT email, password_hash, is_admin FROM users").Scan(&email, &hash, &isAdmin)
+		"SELECT email, password_hash FROM users").Scan(&email, &hash)
 	if err != nil {
 		t.Fatalf("관리자 계정 조회 실패: %v", err)
 	}
 	if email != "admin@example.com" {
 		t.Errorf("email = %q, want admin@example.com (소문자화)", email)
-	}
-	if !isAdmin {
-		t.Error("is_admin = false, want true")
 	}
 
 	// NFR-212. **폼의 칸 이름과 핸들러가 읽는 이름은 다른 것이다.** 한쪽만

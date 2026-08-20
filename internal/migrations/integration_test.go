@@ -516,12 +516,19 @@ func TestIsAdminIsCarriedIntoUserRoles(t *testing.T) {
 		t.Errorf("is_admin 이 아닌 계정에 역할이 %d행 부여됐다", n)
 	}
 
-	// The column stays until Phase 2 (W2-01). Dropping it here would leave no
-	// downgrade path (D30 two-release rule, NFR-308).
+	// **컬럼은 사라졌고, 백필은 그 전에 돌았다** (00003 → 00006, W2-01).
+	//
+	// 위 두 단언이 이 순서를 지킨다: 전부 적용한 뒤에도 admin 역할이 남아
+	// 있다는 것은 백필이 삭제보다 먼저 돌았다는 뜻이다. 00006 을 00003 보다
+	// 앞 번호로 옮기면 백필이 없는 컬럼을 읽어 마이그레이션이 깨지고, 그
+	// 실패가 여기서 잡힌다.
+	//
+	// D30 의 두 릴리즈 규칙은 v0.1.0(릴리즈 N)으로 충족됐다 — 옛 스키마에서
+	// 올라오는 사이트는 00003 을 지나며 역할을 받는다.
 	if n := count(t, pool, `
 		SELECT count(*) FROM information_schema.columns
-		WHERE table_name = 'users' AND column_name = 'is_admin'`); n != 1 {
-		t.Error("is_admin 컬럼이 사라졌다 — Phase 1 에서 지우면 다운그레이드 경로가 없다")
+		WHERE table_name = 'users' AND column_name = 'is_admin'`); n != 0 {
+		t.Errorf("is_admin 컬럼이 %d 개 남아 있다 — 00006 이 지웠어야 한다 (W2-01)", n)
 	}
 }
 
