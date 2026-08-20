@@ -218,6 +218,15 @@ function spawnChrome(bin, userDataDir) {
     '--no-default-browser-check',
     '--disable-gpu',
     '--hide-scrollbars',
+    // **CI 러너에서는 샌드박스를 끈다.** Ubuntu 23.10+ 가 AppArmor 로 비특권
+    // user namespace 를 막아 zygote 가 `No usable sandbox!` 로 즉시 죽는다 —
+    // 개발 기계(macOS)에서는 이 조건이 없어 보이지 않았다.
+    //
+    // **여는 것은 우리가 만든 로컬 서버 하나뿐**이고, 컨테이너는 그 실행이
+    // 끝나면 버려진다. 반면 이걸 켠 채로 두면 감사가 CI 에서 아예 돌지 못하고,
+    // 그러면 UI 결함은 누가 손으로 돌릴 때까지 지나간다 — 그쪽 위험이 크다.
+    // 개발 기계에서는 켜 둔 채로 돈다: 여기서만 끈다.
+    ...(process.env.CI ? ['--no-sandbox'] : []),
   ], { detached: true })
   killOnExit(proc)
   return new Promise((resolve, reject) => {
