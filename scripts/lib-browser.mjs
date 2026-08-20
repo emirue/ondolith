@@ -16,22 +16,43 @@ export const WIDTHS = [375, 768, 1280]
 // Playwright 가 받아 둔 브라우저를 찾는다. 이름과 배치가 버전마다 달라서
 // (`Chromium.app` 과 `Google Chrome for Testing.app`, arm64 와 x64) 후보를
 // 훑는다 — 하나로 박아 두면 다음 버전에서 조용히 「없다」가 된다.
+// **캐시 위치는 OS 마다 다르다.** macOS 경로 하나만 보던 판은 Linux 에서 늘
+// null 을 돌려줬고, 그래서 이 감사는 CI 에 올릴 수 없었다 (D85 GAP-06 이 그
+// 상태였다). 같은 부류로 이미 두 번 당했다: PATH 로 docker 를 가리려던 검사도,
+// 릴리즈 산출물 실행 검증도 개발 기계의 배치를 전제했다.
+//
+// `PLAYWRIGHT_BROWSERS_PATH` 를 먼저 본다 — 설치할 때 그것으로 옮길 수 있고,
+// CI 는 캐시를 그렇게 고정한다.
 export function findChrome() {
-  const root = join(process.env.HOME, 'Library/Caches/ms-playwright')
-  if (!existsSync(root)) return null
-  const dirs = readdirSync(root)
-    .filter((d) => d.startsWith('chromium-'))
-    .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))
+  const home = process.env.HOME || ''
+  const roots = [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    join(home, 'Library/Caches/ms-playwright'), // macOS
+    join(home, '.cache/ms-playwright'), // Linux
+    join(home, 'AppData/Local/ms-playwright'), // Windows
+  ].filter((r) => r && existsSync(r))
+
   const apps = ['Google Chrome for Testing', 'Chromium']
-  const arches = ['chrome-mac-arm64', 'chrome-mac', 'chrome-linux']
-  for (const d of dirs) {
-    for (const arch of arches) {
-      for (const app of apps) {
-        const p = join(root, d, arch, app + '.app/Contents/MacOS/' + app)
-        if (existsSync(p)) return p
+  const arches = [
+    'chrome-mac-arm64', 'chrome-mac',
+    'chrome-linux', 'chrome-linux-arm64',
+    'chrome-win', 'chrome-win64',
+  ]
+  for (const root of roots) {
+    const dirs = readdirSync(root)
+      .filter((d) => d.startsWith('chromium-'))
+      .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))
+    for (const d of dirs) {
+      for (const arch of arches) {
+        for (const app of apps) {
+          const mac = join(root, d, arch, app + '.app/Contents/MacOS/' + app)
+          if (existsSync(mac)) return mac
+        }
+        for (const exe of ['chrome', 'chrome.exe', 'headless_shell']) {
+          const p = join(root, d, arch, exe)
+          if (existsSync(p)) return p
+        }
       }
-      const linux = join(root, d, arch, 'chrome')
-      if (existsSync(linux)) return linux
     }
   }
   return null
