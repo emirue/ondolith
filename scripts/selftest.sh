@@ -78,23 +78,37 @@ inject_new() {
 	rm -f "$REPO/$2"
 }
 
-# ignored <name> <file-to-restore> <shell-command>: the inverse of inject —
+# ignored <name> <files-to-restore> <shell-command>: the inverse of inject —
 # the checker must STAY GREEN. Written exceptions rot the other way: the
 # exception is dropped, everything still passes on a clean tree, and nobody
 # learns until the excluded file suddenly breaks the build. Only a case that
 # fails when the exception disappears keeps it honest.
+# $2 는 **공백으로 나눈 목록**이다. 한 파일만 적으면 예전과 같이 동작한다 —
+# 두 곳을 함께 고쳐야 통과하는 경우(마이그레이션에서 컬럼을 지우고 D30 에서도
+# 지우기)가 생겼고, 하나만 복원하면 그다음 케이스가 오염된 트리에서 돈다.
 ignored() {
-	cp "$REPO/$2" "$TMP/backup"
-	(cd "$REPO" && eval "$3")
+	ig_name=$1
+	ig_files=$2
+	ig_cmd=$3
+	ig_i=0
+	for ig_f in $ig_files; do
+		ig_i=$((ig_i + 1))
+		cp "$REPO/$ig_f" "$TMP/ig-$ig_i"
+	done
+	(cd "$REPO" && eval "$ig_cmd")
 	out=$(sh "$REPO/scripts/checkdocs.sh" 2>&1)
 	code=$?
 	if [ "$code" -eq 0 ]; then
-		ok "예외: $1"
+		ok "예외: $ig_name"
 	else
-		err "예외가 사라졌다 — 통과해야 하는데 exit $code: $1"
+		err "예외가 사라졌다 — 통과해야 하는데 exit $code: $ig_name"
 		printf '%s\n' "$out" | grep '✗' | sed 's/^/      /'
 	fi
-	cp "$TMP/backup" "$REPO/$2"
+	ig_i=0
+	for ig_f in $ig_files; do
+		ig_i=$((ig_i + 1))
+		cp "$TMP/ig-$ig_i" "$REPO/$ig_f"
+	done
 }
 
 echo "selftest: checkdocs 실패 주입"
@@ -398,6 +412,21 @@ inject "Phase 1 테이블의 컬럼이 D30 과 어긋남" internal/migrations/00
 inject "마이그레이션이 만드는 테이블에 D30 정의가 없음" docs/30-data-model.md \
 	'perl -pi -e "s/^..(.)menus(.)../**\${1}menus_renamed\${2}**/" docs/30-data-model.md' \
 	'만드는 테이블인데 docs/30-data-model.md 에 정의가 없다: menus'
+# **DROP COLUMN 을 따라가는지 본다.** 앞선 판의 파서는 CREATE/ADD 만 모아
+# sort -u 했다 — 지운 컬럼을 뺄 자리가 없어 한 번 만들어진 컬럼은 영원히
+# 「있어야 하는 컬럼」이었다. 00006(이 저장소 최초의 DROP COLUMN)이 그것을
+# 처음 건드렸고, 맹점의 모양이 특히 나빴다: **틀린 문서를 통과시키고 옳은
+# 문서를 막는다.** 아래 두 주입이 양쪽 방향을 각각 잡는다.
+#
+# ① 컬럼을 지웠는데 문서가 그대로면 실패해야 한다.
+inject "컬럼을 지웠는데 D30 이 그대로" internal/migrations/00019_user_fields.sql \
+	'printf "\n-- +goose Up\nALTER TABLE users DROP COLUMN display_name;\n" >> internal/migrations/00019_user_fields.sql' \
+	'이 마이그레이션에 없는 컬럼을 적었다: users.display_name'
+# ② 지운 뒤 문서도 고치면 통과해야 한다 — 파서가 삭제를 따라간다는 증거다.
+#    ①만 두면 「전부 실패로 만드는」 파서도 통과하므로 짝으로 둔다.
+ignored "컬럼을 지우고 D30 도 고치면 통과한다" "internal/migrations/00019_user_fields.sql docs/30-data-model.md" \
+	'printf "\n-- +goose Up\nALTER TABLE users DROP COLUMN display_name;\n" >> internal/migrations/00019_user_fields.sql &&
+	 perl -ni -e "print unless /^. .display_name. ./" docs/30-data-model.md'
 # D82 runs D81 as a loop: next-task.sh picks the task whose prerequisites are
 # all done. A dangling prerequisite makes it wait on nothing, a cycle deadlocks
 # it with no explanation, and a row marked done without its deliverable makes

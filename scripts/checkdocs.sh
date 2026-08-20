@@ -695,26 +695,38 @@ else
 	# table<TAB>column, from CREATE TABLE bodies and ALTER TABLE ... ADD COLUMN.
 	# Constraint clauses are upper-case so the lower-case column pattern skips
 	# them, and so do the `--` comment lines.
-	cat internal/migrations/*.sql | perl -e 'my $s = do { local $/; <> };
-		my ($up) = $s =~ /(.*?)^-- \+goose Down/ms;
-		$up = $s unless defined $up;
+	# **파일 이름 순서대로 읽고, 지운 것은 뺀다.** 앞선 판은 `CREATE TABLE` 과
+	# `ADD COLUMN` 만 모아 `sort -u` 했다 — `DROP COLUMN` 을 처리할 자리가
+	# 없어서, 한 번 만들어진 컬럼은 나중에 지워도 **영원히 「있어야 하는 컬럼」**
+	# 으로 남았다. 00006 이 이 저장소 최초의 DROP COLUMN 이라 그때까지 드러나지
+	# 않았고, 드러났을 때의 모양은 더 나쁘다: 문서를 **정확하게** 고쳐 그 행을
+	# 지우면 검사가 「마이그레이션에 있는 컬럼이 D30 에서 빠졌다」로 오탐한다.
+	# 즉 맹점이 틀린 문서를 통과시키고 옳은 문서를 막는다.
+	#
+	# `ls` 로 정렬해 넘긴다 — cat 의 glob 순서에 기대면 삭제가 생성보다 먼저
+	# 처리될 수 있다.
+	# shellcheck disable=SC2012
+	ls internal/migrations/*.sql | sort | xargs cat | perl -e 'my $s = do { local $/; <> };
+		my %col;   # "table\tcolumn" => 1. 순서대로 넣고 뺀다.
+		my $seq = 0;
 		# Only the Up half: Down drops things, it does not define them.
 		for my $chunk (split /^-- \+goose Up/m, $s) {
 			my ($u) = $chunk =~ /(.*?)^-- \+goose Down/ms;
 			$u = $chunk unless defined $u;
 			while ($u =~ /CREATE TABLE (\w+) \((.*?)^\);/gms) {
 				my ($t, $body) = ($1, $2);
-				print "$t\t$1\n" while $body =~ /^\s+([a-z_]+)\s+\S/gm;
+				$col{"$t\t$1"} = ++$seq while $body =~ /^\s+([a-z_]+)\s+\S/gm;
 			}
 			# Two steps on purpose. A single pattern with a nested quantifier
 			# ((?:[^;]*?ADD COLUMN[^;]*?)+) backtracks catastrophically and hung
 			# the whole check on inputs where the statement did not match.
 			while ($u =~ /ALTER TABLE (\w+)([^;]*);/gms) {
 				my ($t, $body) = ($1, $2);
-				next unless $body =~ /ADD COLUMN/;
-				print "$t\t$1\n" while $body =~ /ADD COLUMN (\w+)/g;
+				$col{"$t\t$1"} = ++$seq while $body =~ /ADD COLUMN (\w+)/g;
+				delete $col{"$t\t$1"}     while $body =~ /DROP COLUMN (\w+)/g;
 			}
-		}' | sort -u >"$T"/cd_sch_sql
+		}
+		print "$_\n" for keys %col;' | sort -u >"$T"/cd_sch_sql
 
 	# table<TAB>column from D30. A heading may name more than one table
 	# (`password_reset_tokens` · `email_verification_tokens`) and a table may

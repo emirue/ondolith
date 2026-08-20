@@ -237,8 +237,12 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `email` | text UNIQUE NOT NULL | 소문자로 저장 |
 | `password_hash` | text NOT NULL | bcrypt (NFR-208) |
 | `display_name` | text NOT NULL DEFAULT '' | |
-| `is_admin` | boolean NOT NULL DEFAULT false | **임시.** Phase 1에서 RBAC로 교체 |
 | `created_at` / `updated_at` | timestamptz | |
+
+> **`is_admin` 은 없다.** Phase 0 의 그 컬럼은 `00006_drop_is_admin.sql` 이 지웠다
+> (W2-01). 권한은 [D15](15-access-control.md)의 역할↔권한이 정하고, 계정 테이블에
+> 권한을 뜻하는 칸은 하나도 없다 — 값을 쓰는데 아무도 판정에 읽지 않는 불리언이
+> 정확히 그 컬럼이 위험했던 이유다.
 
 ### sessions
 
