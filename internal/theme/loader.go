@@ -10,6 +10,7 @@
 package theme
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"html/template"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -275,5 +277,80 @@ func ValidateThemeDir(dir, current string) (warn string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return CheckRequires(m.Requires, current)
+	w, err := CheckRequires(m.Requires, current)
+	if err != nil {
+		return "", err
+	}
+	return joinWarnings(w, contractWarnings(dir)), nil
+}
+
+// contractWarnings reports where a candidate theme leaves D17 unmet.
+//
+// **제3자 테마는 여기 말고 어디도 지나지 않는다.** 게이트는 내장 테마 하나만
+// 띄우고, `make ui` 는 이 저장소의 테마만 잰다. 남이 만든 테마가 계약을
+// 어겼는지 기계가 보는 자리는 활성화 시점뿐이다.
+//
+// **거부하지 않고 경고한다.** D17 규칙 2 가 `base.html` 하나만 필수로 정했다 —
+// 검사가 그 계약을 조용히 좁히면, 계약을 읽고 만든 테마가 활성화되지 않는다.
+func contractWarnings(dir string) []string {
+	var out []string
+
+	// ① base.html 이 세로축을 잴 띠를 내는가 (D17 구조 약속).
+	//
+	// 이 두 클래스는 오래 `ui-audit.mjs` 만 알고 있었다 — 도구가 전제하는
+	// 것을 계약이 약속하지 않으면 그 전제는 언제든 깨진다.
+	if b, err := os.ReadFile(filepath.Join(dir, "base.html")); err == nil {
+		for _, want := range []string{"site-header", "site-footer"} {
+			if !bytes.Contains(b, []byte(want)) {
+				out = append(out, "base.html 에 "+want+" 가 없다 — 머리·바닥 정렬 검사가 그만큼 헛돈다 (D17 구조 약속)")
+			}
+		}
+	}
+
+	// ② 코어가 찾지 않는 이름의 템플릿.
+	//
+	// **오류가 아니라 침묵이 문제다.** 그런 파일은 아무 화면도 바꾸지 않고
+	// 아무 말도 하지 않는다 — 「고쳤는데 반영이 안 되네」의 대부분이 이것이다.
+	known := map[string]bool{}
+	_ = fs.WalkDir(Builtin(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".html") {
+			known[p] = true
+		}
+		return nil
+	})
+	// 내장 목록을 못 읽었으면 대조하지 않는다 — 빈 목록으로 대조하면 모든
+	// 템플릿이 「모르는 이름」이 되어 오탐이 쏟아진다.
+	if len(known) == 0 {
+		return out
+	}
+	var unknown []string
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
+			return nil
+		}
+		rel, rerr := filepath.Rel(dir, p)
+		if rerr != nil {
+			return nil
+		}
+		if !known[filepath.ToSlash(rel)] {
+			unknown = append(unknown, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		out = append(out, "코어가 찾지 않는 템플릿 이름이라 아무 화면도 바뀌지 않는다: "+strings.Join(unknown, ", "))
+	}
+	return out
+}
+
+// joinWarnings folds the version warning and the contract warnings into the
+// one string A-202 renders. Empty pieces drop out so the screen never shows a
+// stray separator.
+func joinWarnings(first string, rest []string) string {
+	all := rest
+	if first != "" {
+		all = append([]string{first}, rest...)
+	}
+	return strings.Join(all, " · ")
 }

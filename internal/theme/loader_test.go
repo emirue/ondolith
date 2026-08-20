@@ -192,3 +192,58 @@ func write(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+// D17 의 구조 약속과 템플릿 목록을 활성화 시점에 대조한다.
+//
+// **제3자 테마는 여기 말고 어디도 지나지 않는다.** 게이트는 내장 테마 하나만
+// 띄우고 `make ui` 는 이 저장소의 테마만 잰다. 남이 만든 테마가 계약을 어겼는지
+// 기계가 보는 자리는 활성화뿐이다.
+func TestValidateThemeDirChecksTheContract(t *testing.T) {
+	// 계약을 지킨 테마는 조용하다. 이것이 없으면 「전부 경고하는」 검사도
+	// 아래 케이스들을 통과시킨다.
+	good := t.TempDir()
+	write(t, good, "base.html", `<header class="site-header"></header><footer class="site-footer"></footer>`)
+	if warn, err := ValidateThemeDir(good, "1.0.0"); err != nil || warn != "" {
+		t.Errorf("계약을 지킨 테마에 경고가 붙었다: warn=%q err=%v", warn, err)
+	}
+
+	// 세로축을 잴 띠가 없다 — 그만큼 make ui 의 규칙이 헛돈다.
+	for _, missing := range []struct{ name, base, want string }{
+		{"머리 띠 없음", `<footer class="site-footer"></footer>`, "site-header"},
+		{"바닥 띠 없음", `<header class="site-header"></header>`, "site-footer"},
+	} {
+		t.Run(missing.name, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, dir, "base.html", missing.base)
+			warn, err := ValidateThemeDir(dir, "1.0.0")
+			if err != nil {
+				t.Fatalf("거부됐다 — 경고여야 한다 (D17 규칙 2 는 base.html 하나만 필수다): %v", err)
+			}
+			if !strings.Contains(warn, missing.want) {
+				t.Errorf("경고에 %q 가 없다: %q", missing.want, warn)
+			}
+		})
+	}
+
+	// **코어가 찾지 않는 이름은 아무 화면도 바꾸지 않는다.** 오류가 아니라
+	// 침묵이 문제다 — 「고쳤는데 반영이 안 되네」의 대부분이 이것이다.
+	unknown := t.TempDir()
+	write(t, unknown, "base.html", `<header class="site-header"></header><footer class="site-footer"></footer>`)
+	write(t, unknown, "board/listing.html", "x") // 진짜 이름은 board/list.html 이다
+	warn, err := ValidateThemeDir(unknown, "1.0.0")
+	if err != nil {
+		t.Fatalf("모르는 이름 때문에 거부됐다 — 경고여야 한다: %v", err)
+	}
+	if !strings.Contains(warn, "board/listing.html") {
+		t.Errorf("코어가 찾지 않는 이름을 짚지 않았다: %q", warn)
+	}
+
+	// 코어가 아는 이름은 경고하지 않는다. 이것이 없으면 위 케이스는
+	// 「모든 템플릿을 모르는 이름이라 부르는」 구현으로도 통과한다.
+	known := t.TempDir()
+	write(t, known, "base.html", `<header class="site-header"></header><footer class="site-footer"></footer>`)
+	write(t, known, "board/list.html", "x")
+	if warn, err := ValidateThemeDir(known, "1.0.0"); err != nil || warn != "" {
+		t.Errorf("코어가 아는 이름에 경고가 붙었다: warn=%q err=%v", warn, err)
+	}
+}
