@@ -1,14 +1,17 @@
 package app
 
 import (
+	"html/template"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"text/template/parse"
 
 	"github.com/emirue/ondolith/internal/theme"
 )
@@ -484,5 +487,130 @@ func TestAdminDefaultThemeIsUnstamped(t *testing.T) {
 	}
 	if !strings.Contains(css, ":root:not([data-admin-theme])") {
 		t.Error("다크 블록의 선택자가 사라졌다")
+	}
+}
+
+// 관리자 템플릿이 부르는 함수의 **인자 수**가 함수맵과 맞는지 본다.
+//
+// **`html/template` 은 인자 수를 실행 시점에 본다.** 그래서 `{{date .CreatedAt}}`
+// 처럼 두 인자짜리를 하나로 부르면 파싱은 통과하고 **그 화면을 실제로 열 때
+// 500** 이 된다. 핸들러 테스트는 `d.Render` 를 스텁으로 바꾸므로 그리지 않고,
+// 그래서 이 부류는 DB·브라우저가 필요한 `make screens` 까지 가야 드러났다 —
+// 실제로 대시보드 위젯을 넣으며 그렇게 깨뜨렸다.
+//
+// 데이터를 지어내 실행하는 대신 파스 트리를 걷는다: 어떤 데이터를 만들어도
+// 닿지 않는 분기가 남고, 닿지 않은 분기는 검사되지 않은 채 통과한다.
+func TestAdminTemplateCallsMatchTheFuncMap(t *testing.T) {
+	arity := map[string]struct {
+		min      int
+		variadic bool
+	}{}
+	for name, fn := range adminFuncs {
+		ft := reflect.TypeOf(fn)
+		if ft == nil || ft.Kind() != reflect.Func {
+			continue
+		}
+		n := ft.NumIn()
+		if ft.IsVariadic() {
+			n--
+		}
+		arity[name] = struct {
+			min      int
+			variadic bool
+		}{n, ft.IsVariadic()}
+	}
+	if len(arity) == 0 {
+		t.Fatal("함수맵에서 함수를 하나도 읽지 못했다 — 검사가 헛돈다")
+	}
+
+	entries, err := adminFS.ReadDir("templates/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		tmpl, err := template.New("admin").Funcs(adminFuncs).
+			ParseFS(adminFS, "templates/admin/layout.html", "templates/admin/"+e.Name())
+		if err != nil {
+			t.Errorf("%s 파싱 실패: %v", e.Name(), err)
+			continue
+		}
+		for _, tp := range tmpl.Templates() {
+			if tp.Tree == nil || tp.Tree.Root == nil {
+				continue
+			}
+			walkCommands(tp.Tree.Root, func(cmd *parse.CommandNode) {
+				id, ok := cmd.Args[0].(*parse.IdentifierNode)
+				if !ok {
+					return
+				}
+				want, known := arity[id.Ident]
+				if !known {
+					return // 내장 함수(and·or·eq …)는 함수맵에 없다
+				}
+				checked++
+				got := len(cmd.Args) - 1
+				bad := got < want.min || (!want.variadic && got != want.min)
+				if bad {
+					t.Errorf("%s: %s 를 인자 %d 개로 부른다 — 함수맵은 %d 개다. "+
+						"파싱은 통과하고 그 화면을 열 때 500 이 된다",
+						e.Name(), id.Ident, got, want.min)
+				}
+			})
+		}
+	}
+	// 한 건도 못 봤다면 트리를 잘못 걷는 것이다 — 관리자 화면은 date·money 를
+	// 여러 곳에서 쓴다.
+	if checked == 0 {
+		t.Fatal("함수 호출을 하나도 보지 못했다 — 검사가 헛돌았다")
+	}
+}
+
+// walkCommands 는 파스 트리의 모든 CommandNode 를 찾는다. 파이프라인은 어디에나
+// 있다 — if·range·with 의 조건과 본문, 그리고 그 안의 중첩까지.
+func walkCommands(n parse.Node, fn func(*parse.CommandNode)) {
+	switch v := n.(type) {
+	case *parse.ListNode:
+		if v == nil {
+			return
+		}
+		for _, c := range v.Nodes {
+			walkCommands(c, fn)
+		}
+	case *parse.ActionNode:
+		walkPipe(v.Pipe, fn)
+	case *parse.IfNode:
+		walkPipe(v.Pipe, fn)
+		walkCommands(v.List, fn)
+		walkCommands(v.ElseList, fn)
+	case *parse.RangeNode:
+		walkPipe(v.Pipe, fn)
+		walkCommands(v.List, fn)
+		walkCommands(v.ElseList, fn)
+	case *parse.WithNode:
+		walkPipe(v.Pipe, fn)
+		walkCommands(v.List, fn)
+		walkCommands(v.ElseList, fn)
+	case *parse.TemplateNode:
+		walkPipe(v.Pipe, fn)
+	}
+}
+
+func walkPipe(p *parse.PipeNode, fn func(*parse.CommandNode)) {
+	if p == nil {
+		return
+	}
+	for _, c := range p.Cmds {
+		if len(c.Args) > 0 {
+			fn(c)
+		}
+		for _, a := range c.Args {
+			if sub, ok := a.(*parse.PipeNode); ok {
+				walkPipe(sub, fn)
+			}
+		}
 	}
 }

@@ -16,7 +16,7 @@
         <tr>
           <td>{{.Title}}</td>
           <td>{{if .AuthorName}}{{.AuthorName}}{{else}}—{{end}}</td>
-          <td>{{date .CreatedAt}}</td>
+          <td>{{date .CreatedAt "2006-01-02"}}</td>
         </tr>
         {{end}}
       </tbody>
@@ -38,7 +38,7 @@
           <td><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
           <td>{{.Status}}</td>
           <td>{{money .Total}}</td>
-          <td>{{date .CreatedAt}}</td>
+          <td>{{date .CreatedAt "2006-01-02"}}</td>
         </tr>
         {{end}}
       </tbody>
