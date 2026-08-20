@@ -454,6 +454,14 @@ input[type="file"] { padding: var(--s10) var(--s12); }
 
 .adm-hint { font-size: 11.5px; opacity: .45; margin: var(--s4) 0 0; }
 
+/* 대시보드 위젯. `.adm-field-row` 와 같은 규칙이되 최소 폭만 다르다 —
+   표가 들어가므로 130px 에서는 열이 겹친다. 좁은 화면에서는 한 줄로 떨어진다. */
+.adm-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--s16);
+}
+
 /* ---- 버튼 --------------------------------------------------------------- */
 /* **`button` 요소에도 건다.** `.adm-btn` 을 안 붙인 제출 버튼이 여럿 있고
    (환불 접수·기록·저장), 클래스가 없으면 브라우저 기본 모양으로 남는다.

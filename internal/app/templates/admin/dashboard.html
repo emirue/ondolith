@@ -1,6 +1,62 @@
 {{define "content"}}
+{{/* **각 위젯은 그 데이터에 대한 권한이 있을 때만 조회된다** (D13 A-101).
+     핸들러가 아예 묻지 않으므로 여기서 가릴 것이 없다 — 값이 없으면 위젯이
+     없다. 화면은 권한 검사의 자리가 아니다 (D15 4.4). */}}
+
+{{if or .Posts .Orders}}
+<div class="adm-grid-2">
+  {{if .Posts}}
+  <div class="adm-card">
+    <h2>최근 글</h2>
+    <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>제목</th><th>작성자</th><th>작성일</th></tr></thead>
+      <tbody>
+        {{range .Posts}}
+        <tr>
+          <td>{{.Title}}</td>
+          <td>{{if .AuthorName}}{{.AuthorName}}{{else}}—{{end}}</td>
+          <td>{{date .CreatedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    <p class="adm-hint"><a href="/admin/boards">게시판 관리 →</a></p>
+  </div>
+  {{end}}
+
+  {{if .Orders}}
+  <div class="adm-card">
+    <h2>최근 주문</h2>
+    <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>주문번호</th><th>상태</th><th>금액</th><th>주문일</th></tr></thead>
+      <tbody>
+        {{range .Orders}}
+        <tr>
+          <td><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
+          <td>{{.Status}}</td>
+          <td>{{money .Total}}</td>
+          <td>{{date .CreatedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    <p class="adm-hint"><a href="/admin/orders">주문 관리 →</a></p>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{/* **위젯이 하나도 없을 때만 안내를 낸다.** 권한이 좁은 계정(예: 테마만
+     관리)에게는 이 화면이 비는 것이 정상이고, 그때 아무 말도 없으면 고장으로
+     보인다. */}}
+{{if not (or .Posts .Orders)}}
 <div class="adm-card">
   <h2>시작하기</h2>
   <p>왼쪽 메뉴에서 관리할 항목을 고르세요. 권한이 없는 항목은 표시되지 않습니다.</p>
 </div>
+{{end}}
 {{end}}

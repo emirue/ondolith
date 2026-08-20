@@ -344,11 +344,46 @@ func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
 
 // Dashboard is A-101. It shows nothing but the shell: FR-702 makes the panel
 // optional, and an empty screen beats numbers nobody specified.
+// dashboardItems 는 위젯 하나가 보여 줄 줄 수다. 대시보드는 훑어보는 화면이지
+// 목록 화면이 아니다 — 길어지면 아래의 진짜 목록 화면과 하는 일이 겹친다.
+const dashboardItems = 5
+
 func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "admin.access"); !ok {
+	c, ok := d.require(w, r, "admin.access")
+	if !ok {
 		return
 	}
 	data := map[string]any{}
+
+	// **각 위젯은 그 데이터에 대한 권한이 있을 때만 조회한다** (D13 A-101).
+	//
+	// 「그릴 때 숨긴다」가 아니라 **묻지 않는다**. 데이터를 가져다 놓고
+	// 템플릿에서 가리면, 그 템플릿을 고치는 날 편집자에게 매출이 보인다 —
+	// 화면은 권한 검사의 자리가 아니다 (D15 4.4).
+	if c.Can("post.view") {
+		if boards, err := d.Content.Boards(r.Context()); err == nil {
+			ids := make([]string, 0, len(boards))
+			for _, b := range boards {
+				ids = append(ids, b.ID)
+			}
+			// **비밀글은 넣지 않는다.** 관리자 화면이라도 목록 요약에 남의
+			// 비밀글 제목이 뜨면 그 글은 비밀이 아니다 — 여는 것은 게시판
+			// 화면에서 권한을 다시 보고 한다. secretIn 을 비워 넘긴다.
+			if posts, err := d.Content.RecentPosts(r.Context(), ids, nil, "", dashboardItems); err == nil {
+				data["Posts"] = posts
+			}
+		}
+	}
+	// 주문 위젯은 커머스가 켜져 있고 order.view 가 있을 때만이다. Commerce 가
+	// nil 인 것은 조립 시점에 커머스를 끈 사이트다 (FR-710).
+	if d.Commerce != nil && c.Can("order.view") {
+		if orders, err := d.Commerce.AdminOrders(r.Context(), "", 1); err == nil {
+			if len(orders) > dashboardItems {
+				orders = orders[:dashboardItems]
+			}
+			data["Orders"] = orders
+		}
+	}
 	// **shop 모드에서 표시 의무 항목이 비어 있으면 알린다** (FR-711).
 	//
 	// 저장을 막지 않기로 했으므로 (설치 직후는 항상 비어 있다) 알리는 자리가

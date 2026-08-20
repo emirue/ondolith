@@ -251,6 +251,41 @@ func TestSiteTypeIsAClosedVocabulary(t *testing.T) {
 	}
 }
 
+// **각 위젯은 그 데이터에 대한 권한이 있을 때만 조회한다** (D13 A-101, FR-702).
+//
+// 「그릴 때 숨긴다」로는 부족하다 — 데이터를 가져다 놓고 템플릿에서 가리면,
+// 그 템플릿을 고치는 날 편집자에게 매출이 보인다. 그래서 **묻지 않았는지**를
+// 본다: 렌더러가 받은 데이터에 그 키가 아예 없어야 한다.
+func TestDashboardWidgetsFollowPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		perms      map[string]bool
+		wantPosts  bool
+		wantOrders bool
+	}{
+		{"권한 없음 — 위젯도 없다", map[string]bool{"admin.access": true}, false, false},
+		{"글만", map[string]bool{"admin.access": true, "post.view": true}, true, false},
+		{"주문만", map[string]bool{"admin.access": true, "order.view": true}, false, true},
+		{"둘 다", map[string]bool{"admin.access": true, "post.view": true, "order.view": true}, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _ := fixture(t, &fakeCaller{perms: tc.perms, id: "u1"})
+			var data map[string]any
+			d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, v any) {
+				data, _ = v.(map[string]any)
+			}
+			d.Dashboard(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin", nil))
+
+			if _, has := data["Posts"]; has != tc.wantPosts {
+				t.Errorf("Posts 위젯 존재=%v, want %v — 권한: %v", has, tc.wantPosts, tc.perms)
+			}
+			if _, has := data["Orders"]; has != tc.wantOrders {
+				t.Errorf("Orders 위젯 존재=%v, want %v — 권한 없이 매출이 보인다", has, tc.wantOrders)
+			}
+		})
+	}
+}
+
 // 관리자 배색도 닫힌 어휘다 (A-201). 모르는 값은 `data-admin-theme` 에 그대로
 // 찍히고 admin.css 의 어느 블록과도 매치되지 않아 콘솔이 기본으로 보인다 —
 // **저장은 됐는데 아무 일도 안 일어나는 상태**이고, 화면은 아무 말도 하지 않는다.
