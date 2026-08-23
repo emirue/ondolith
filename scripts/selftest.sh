@@ -270,7 +270,7 @@ inject "결함·공백 ID 중복" docs/85-gaps.md \
 # D19 오류표의 상태코드는 0.3 규약 안에 있어야 한다. 규약이 문서 안에서만 살아
 # 있으면 표가 하나씩 어긋난다 — 재고 네 행이 400 으로 적힌 채 구현은 전부 422 였다.
 inject "오류표가 규약에 없는 상태코드를 쓴다" docs/19-screen-io.md \
-	'printf "\n| 어떤 실패 | 418 | 안내 | 남기지 않음 |\n" >> docs/19-screen-io.md' \
+	'printf "\n| 상황 | HTTP | 사용자에게 | 로그 |\n| 어떤 실패 | 418 | 안내 | 남기지 않음 |\n" >> docs/19-screen-io.md' \
 	'0.3 에 없는 상태코드를 쓴다: 418'
 # **규약 표가 비면 무엇과도 어긋나지 않는다** — 읽지 못한 것을 통과로 읽는 것이
 # 이 저장소가 두 번 당한 모양이다 (BRE 의 `\(`, BSD sort).
@@ -290,16 +290,26 @@ inject "그 화면이 낼 수 없는 오류를 인용" docs/19-screen-io.md \
 # **상태코드를 헬퍼가 들고 있으면 「맞다」가 아니라 「못 읽는다」고 말한다.**
 # `d.checkoutError(...)` 처럼 분기 본문에 `http.Status...` 가 없는 자리가 실제로
 # 있다 — 그 행을 통과시키면 대조하지 않은 것을 대조했다고 말하는 셈이다.
+# 주입은 **한 행만** 건드린다. 「남의 주문 / 없는 주문」처럼 다섯 화면에
+# 되풀이되는 문구를 쓰면 `perl -p` 가 다섯 곳을 한꺼번에 바꾸고, detected() 는
+# 부분 문자열만 보므로 **다섯 중 하나가 우연히 걸려도 통과**한다 — 주석이
+# 말하는 그 분기를 검증한 것이 아니게 된다.
 inject "상태코드가 헬퍼 안이라 못 읽음" docs/19-screen-io.md \
-	'perl -pi -e "s/^\\| 남의 주문 \\/ 없는 주문 \\| /| 남의 주문 \\/ 없는 주문 (\\x60ErrNotFound\\x60) | /" docs/19-screen-io.md' \
-	'상태코드가 헬퍼 안에 있어 대조할 수 없다'
+	'perl -pi -e "s/^\\| 필수 약관 미동의 \\| /| 필수 약관 미동의 (\\x60ErrTermsRequired\\x60) | /" docs/19-screen-io.md' \
+	'P-406 의 ErrTermsRequired 는 상태코드가 헬퍼 안에 있어 대조할 수 없다'
+# **코드 칸을 못 읽는 행은 건너뛰지 않고 실패한다.** 건너뛰던 판에서
+# `ErrCartEmpty` 행(코드 칸 `302 → P-402`)이 대조된 적도, 안 이어졌다고
+# 알려진 적도 없이 사라졌다.
+inject "코드 칸에서 상태코드를 못 읽음" docs/19-screen-io.md \
+	'perl -pi -e "s/^\\| 장바구니가 비었음 (.*?) \\| 303 → P-402 \\|/| 장바구니가 비었음 \\1 | — |/" docs/19-screen-io.md' \
+	'에서 상태코드를 읽을 수 없어 대조되지 않는다'
 # **화면 절 밖의 행은 어느 핸들러와도 이을 수 없다.** 조용히 건너뛰면 그 행은
 # 이어진 것으로 세어지지도, 안 이어진 것으로 알려지지도 않는다.
 inject "화면 절 밖에서 오류를 인용" docs/19-screen-io.md \
-	'perl -pi -e "print \"| 절 밖 (\\x60ErrNotFound\\x60) | 404 | — | — |\\n\" if \$. == 1" docs/19-screen-io.md' \
+	'perl -pi -e "print \"| 상황 | HTTP | 사용자에게 | 로그 |\\n| 절 밖 (\\x60ErrNotFound\\x60) | 404 | — | — |\\n\" if \$. == 1" docs/19-screen-io.md' \
 	'화면 절 밖에서 오류를 인용한다'
 inject "없는 오류 식별자를 인용" docs/19-screen-io.md \
-	'perl -pi -e "s/\(.ErrOutOfStock.\)/(\x60ErrNoSuchThing\x60)/" docs/19-screen-io.md' \
+	'perl -pi -e "s/^\\| 재고 음수 \\(CHECK 위반\\) \\(.ErrOutOfStock.\\)/| 재고 음수 (CHECK 위반) (\x60ErrNoSuchThing\x60)/" docs/19-screen-io.md' \
 	'핸들러는 ErrNoSuchThing 를 내지 않는다'
 inject "0.3 규약 표를 읽지 못함" docs/19-screen-io.md \
 	'perl -pi -e "s/^### 0\.3 HTTP 코드 규약/### 0.3 HTTP 코드/" docs/19-screen-io.md' \

@@ -1513,12 +1513,50 @@ else
 	perl -nle 'if (/^### 0\.3 HTTP 코드 규약/) { $in = 1; next } if ($in && /^### /) { $in = 0 }
 		next unless $in;
 		print $1 if /^\|\s*`(\d{3})`\s*\|/' "$IO" | sort -u >"$T"/cd_io_codes_def
-	# 오류표는 둘째 칸이 코드다. 굵게 쓴 것(**400**)도 같은 칸이다.
-	perl -nle 'print "$.\t$1" if /^\|[^|]+\|\s*\*{0,2}(\d{3})\*{0,2}\s*\|/' "$IO" \
-		| sort -u >"$T"/cd_io_codes_use
+	# **오류표의 행을 한 곳에서 뽑아 30-1 과 30-2 가 같은 것을 본다.** 두 검사가
+	# 각자 정규식을 들고 있었을 때 둘 다 「코드 칸이 숫자뿐인 행」만 봤고, 뒤에
+	# 설명이 붙은 칸(`302 → P-402`, `400, **본문 없음**`, `409. **DB 가 막는다**`,
+	# `422 / 404`, `200 (저장됨)`)은 **통째로 안 읽혀 두 검사를 조용히 빠져나갔다**.
+	# 그렇게 빠져나간 아홉 행이 `302` 였는데 저장소에 `http.StatusFound` 는 한
+	# 곳도 없다(`http.StatusSeeOther` 215 곳) — 백틱 식별자까지 붙어 기계가 본
+	# 것처럼 보이는데 본 적이 없는 자리다.
+	#
+	# 표는 머리글로 찾는다. 오류표에는 `HTTP` 칸이 있고, **몇 번째 칸인지는
+	# 표마다 다르다** (P-408 은 `| # | 상황 | HTTP | …`). 머리글에서 `HTTP` 와
+	# 상황 칸의 자리를 읽어 그 자리만 본다 — 자리를 고정하면 로그 칸의
+	# `` `Error` `` 를 오류 식별자로 읽는 것 같은 일이 생긴다.
+	#
+	# 출력: 줄번호 · 화면 · 상황 칸 · 코드 칸.
+	perl -nle 'if (/^### ([PA]-\d{3}) /) { $scr = $1 }
+		my @c = split /\|/, $_, -1; shift @c;
+		my $norm = sub { my $s = shift // ""; $s =~ s/\*\*//g; $s =~ s/^\s+|\s+$//g; $s };
+		if (grep { $norm->($_) eq "HTTP" } @c) {
+			($ih) = grep { $norm->($c[$_]) eq "HTTP" } 0 .. $#c;
+			($is) = grep { $norm->($c[$_]) =~ /^(상황|조건)$/ } 0 .. $#c;
+			$is = 0 unless defined $is;
+			next;
+		}
+		if (defined $ih && !/^\|/) { undef $ih; next }
+		next unless defined $ih && /^\|/;
+		next if /^\|\s*-+/;
+		printf "%d\t%s\t%s\t%s\n", $., $scr // "?", $norm->($c[$is]), $norm->($c[$ih]);' \
+		"$IO" >"$T"/cd_io_rows
+
+	# 코드 칸에서 세 자리 수를 전부 읽는다. `P-402`·`A-512` 처럼 앞뒤가 이어진
+	# 것은 코드가 아니다.
+	awk -F'\t' '{ c = $4
+		while (match(c, /[0-9][0-9][0-9]/)) {
+			d = substr(c, RSTART, 3)
+			pre = RSTART > 1 ? substr(c, RSTART - 1, 1) : " "
+			post = substr(c, RSTART + 3, 1)
+			if (pre !~ /[-A-Za-z0-9_]/ && post !~ /[-A-Za-z0-9_]/) print $1 "\t" d
+			c = substr(c, RSTART + 3)
+		} }' "$T"/cd_io_rows | sort -u >"$T"/cd_io_codes_use
 
 	[ -s "$T"/cd_io_codes_def ] ||
 		err "$IO 0.3 절에서 코드 규약을 하나도 읽지 못했다 (검사가 헛돌았다)"
+	[ -s "$T"/cd_io_rows ] ||
+		err "$IO 오류표의 행을 하나도 읽지 못했다 (검사가 헛돌았다)"
 	[ -s "$T"/cd_io_codes_use ] ||
 		err "$IO 오류표에서 상태코드를 하나도 읽지 못했다 (검사가 헛돌았다)"
 
@@ -1562,12 +1600,18 @@ else
 			# **이름 붙은 sub 를 쓰지 않는다.** `-ne` 본문의 `my` 변수는 named sub
 			# 와 공유되지 않아("Variable will not stay shared") 함수 귀속이
 			# 조용히 어긋난다 — 실제로 P-406 이 다루는 오류를 「안 낸다」고 했다.
+			# **블록의 끝은 그 블록의 들여쓰기로 찾는다.** 탭 하나로 못 박아
+			# 두었더니 두 가지가 함께 틀렸다 — 2 탭 `case` 의 본문이 1 탭
+			# 종료까지 흘러넘쳐 **다음 분기의 코드를 제 것으로 주웠고**
+			# (`ErrNoUser` 는 본문에 코드가 없는데 500 을 냈다고 했다), 4 탭
+			# `case` 는 통째로 놓쳤다 (`ErrUnknownPreset`). 여는 줄의 탭을
+			# 잡아 같은 깊이의 `}`·`case` 에서 끊는다.
 			perl -0777 -ne '
 			my @fn;
 			while (/^func (?:\([^)]*\) )?(\w+)\(/gm) { push @fn, [$-[0], $1] }
 			my $at = sub { my $p = shift; my $n = "?"; for (@fn) { last if $_->[0] > $p; $n = $_->[1] } $n };
-			while (/case ((?:\s*errors\.Is\(err, [\w.]+\),?)+)\s*:(.*?)(?=\n\tcase |\n\t\}|\n\}\n)/gs) {
-				my ($c, $b, $p) = ($1, $2, $-[0]);
+			while (/^(\t+)case ((?:\s*errors\.Is\(err, [\w.]+\),?)+)\s*:(.*?)(?=\n\1case |\n\1\})/gsm) {
+				my ($c, $b, $p) = ($2, $3, $-[0]);
 				my ($st) = $b =~ /http\.Status(\w+)/;
 				# **상태코드가 헬퍼 안에 있는 분기**(`d.checkoutError(...)`)는 여기서
 				# 못 읽는다. 조용히 빼면 그 화면이 그 오류를 안 낸다고 잘못 말하므로
@@ -1579,8 +1623,8 @@ else
 			# **if 문도 본다.** case 만 훑던 판은 `if errors.Is(err, ErrEmailTaken)`
 			# 형태를 통째로 놓쳤고, 그러면 그 오류를 인용한 행이 「핸들러에서
 			# 찾지 못했다」로 오탐한다 — 문서가 맞는데 검사가 틀린 경우다.
-			while (/if ((?:errors\.Is\(err, [\w.]+\)\s*\|\|?\s*)*errors\.Is\(err, [\w.]+\))\s*\{(.*?)\n\t+\}/gs) {
-				my ($c, $b, $p) = ($1, $2, $-[0]);
+			while (/^(\t+)if ((?:errors\.Is\(err, [\w.]+\)\s*\|\|?\s*)*errors\.Is\(err, [\w.]+\))\s*\{(.*?)\n\1\}/gsm) {
+				my ($c, $b, $p) = ($2, $3, $-[0]);
 				my ($st) = $b =~ /http\.Status(\w+)/;
 				$st = "?" unless $st;
 				my $n = $at->($p);
@@ -1620,16 +1664,26 @@ else
 		esac
 	}
 
-	# 오류 식별자를 인용한 행 + **그 행이 속한 화면 절**.
-	perl -nle 'if (/^### ([PA]-\d{3}) /) { $scr = $1 }
-		next unless /^\|([^|]*`(Err\w+)`[^|]*)\|\s*\*{0,2}(\d{3})\*{0,2}\s*\|/;
-		print "$.\t$2\t$3\t" . ($scr // "?")' "$IO" >"$T"/cd_io_err
+	# 오류 식별자를 인용한 행 — **30-1 과 같은 행 목록에서 뽑는다.** 여기만
+	# 따로 정규식을 들고 있었을 때 코드 칸이 `302 → P-402` 인 행(`ErrCartEmpty`)
+	# 이 통째로 안 읽혔다. 백틱 식별자가 붙어 대조된 것처럼 보이는데 대조된 적도,
+	# 안 이어졌다고 알려진 적도 없었다 — 이 검사가 없애려던 바로 그 모양이다.
+	# 코드를 못 읽는 행은 **건너뛰지 않고 실패**시킨다.
+	awk -F'\t' '{ if (match($3, /`Err[A-Za-z0-9_]+`/)) {
+			id = substr($3, RSTART + 1, RLENGTH - 2)
+			print $1 "\t" id "\t" $4 "\t" $2
+		} }' "$T"/cd_io_rows >"$T"/cd_io_err
 	n_linked=$(wc -l <"$T"/cd_io_err | tr -d ' ')
 
-	while IFS="$(printf '\t')" read -r ln id want scr; do
+	while IFS="$(printf '\t')" read -r ln id cell scr; do
 		[ -z "$id" ] && continue
 		if [ "$scr" = "?" ]; then
 			err "$IO:$ln 이 화면 절 밖에서 오류를 인용한다: $id"
+			continue
+		fi
+		want=$(awk -F'\t' -v l="$ln" '$1==l {print $2}' "$T"/cd_io_codes_use | head -1)
+		if [ -z "$want" ]; then
+			err "$IO:$ln $scr 의 $id 는 코드 칸('$cell')에서 상태코드를 읽을 수 없어 대조되지 않는다"
 			continue
 		fi
 		got=$(awk -F'\t' -v k="$id" -v s="$scr" '$1==k && $3==s {print $2}' "$T"/cd_e2ss)
@@ -1655,7 +1709,7 @@ else
 	done <"$T"/cd_io_err
 
 	# **얼마나 이어졌는지 말한다.** 남은 행은 여전히 사람이 읽어야 한다.
-	n_rows=$(grep -cE '^\|[^|]+\|\s*\*{0,2}[0-9]{3}\*{0,2}\s*\|' "$IO")
+	n_rows=$(wc -l <"$T"/cd_io_rows | tr -d ' ')
 	done_ "$IO 오류표 $n_rows 행 중 $n_linked 행이 오류 식별자로 **그 화면의 핸들러와** 이어짐 (나머지는 사람이 읽는다)"
 fi
 
