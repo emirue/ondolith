@@ -1556,11 +1556,21 @@ else
 	find internal/app internal/admin -name '*.go' ! -name '*_test.go' 2>/dev/null |
 		while read -r f; do
 			perl -0777 -ne '
+			# switch 의 case 절.
 			while (/case ((?:\s*errors\.Is\(err, [\w.]+\),?)+)\s*:(.*?)(?=\n\tcase |\n\t\}|\n\}\n)/gs) {
 				my ($cases, $body) = ($1, $2);
 				my ($st) = $body =~ /http\.Status(\w+)/;
 				next unless $st;
 				while ($cases =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\n" }
+			}
+			# **if 문도 본다.** case 만 훑던 판은 `if errors.Is(err, ErrEmailTaken)`
+			# 형태를 통째로 놓쳤고, 그러면 그 오류를 인용한 행이 「핸들러에서
+			# 찾지 못했다」로 오탐한다 — 문서가 맞는데 검사가 틀린 경우다.
+			while (/if ((?:errors\.Is\(err, [\w.]+\)\s*\|\|?\s*)*errors\.Is\(err, [\w.]+\))\s*\{(.*?)\n\t+\}/gs) {
+				my ($conds, $body) = ($1, $2);
+				my ($st) = $body =~ /http\.Status(\w+)/;
+				next unless $st;
+				while ($conds =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\n" }
 			}' "$f"
 		done | sort -u >"$T"/cd_e2s
 
