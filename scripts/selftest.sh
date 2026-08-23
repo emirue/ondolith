@@ -279,10 +279,28 @@ inject "오류표가 규약에 없는 상태코드를 쓴다" docs/19-screen-io.
 # 기계가 잡는 자리다.
 inject "표의 코드가 구현과 다름" docs/19-screen-io.md \
 	'perl -pi -e "s/\| 재고 초과 \(.ErrOutOfStock.\) \| 422 \|/| 재고 초과 (\x60ErrOutOfStock\x60) | 400 |/" docs/19-screen-io.md' \
-	'ErrOutOfStock 은 표에 400 인데 구현은 422 를 낸다'
+	'ErrOutOfStock 는 표에 400 인데 구현은 422 를 낸다'
+# **그 화면이 낼 수 없는 오류를 인용하면 실패한다.** 앞선 판은 저장소 전체에서
+# (오류 → 코드) 를 한 표로 모아 「어딘가에 그 조합이 있으면 통과」였다 — A-507
+# 행에 ErrTransitionNotAllowed 를 잘못 달았는데 같은 파일의 다른 함수(A-506·
+# A-511)가 그 조합을 쓴다는 이유로 초록이었다. 화면까지 봐야 잡힌다.
+inject "그 화면이 낼 수 없는 오류를 인용" docs/19-screen-io.md \
+	'perl -pi -e "s/\| 요청 키 중복 \(재전송\) \| 200 \|/| 요청 키 중복 (재전송) (\x60ErrOutOfStock\x60) | 200 |/" docs/19-screen-io.md' \
+	'의 핸들러는 ErrOutOfStock 를 내지 않는다'
+# **상태코드를 헬퍼가 들고 있으면 「맞다」가 아니라 「못 읽는다」고 말한다.**
+# `d.checkoutError(...)` 처럼 분기 본문에 `http.Status...` 가 없는 자리가 실제로
+# 있다 — 그 행을 통과시키면 대조하지 않은 것을 대조했다고 말하는 셈이다.
+inject "상태코드가 헬퍼 안이라 못 읽음" docs/19-screen-io.md \
+	'perl -pi -e "s/^\\| 남의 주문 \\/ 없는 주문 \\| /| 남의 주문 \\/ 없는 주문 (\\x60ErrNotFound\\x60) | /" docs/19-screen-io.md' \
+	'상태코드가 헬퍼 안에 있어 대조할 수 없다'
+# **화면 절 밖의 행은 어느 핸들러와도 이을 수 없다.** 조용히 건너뛰면 그 행은
+# 이어진 것으로 세어지지도, 안 이어진 것으로 알려지지도 않는다.
+inject "화면 절 밖에서 오류를 인용" docs/19-screen-io.md \
+	'perl -pi -e "print \"| 절 밖 (\\x60ErrNotFound\\x60) | 404 | — | — |\\n\" if \$. == 1" docs/19-screen-io.md' \
+	'화면 절 밖에서 오류를 인용한다'
 inject "없는 오류 식별자를 인용" docs/19-screen-io.md \
 	'perl -pi -e "s/\(.ErrOutOfStock.\)/(\x60ErrNoSuchThing\x60)/" docs/19-screen-io.md' \
-	'인용한 오류를 핸들러에서 찾지 못했다: ErrNoSuchThing'
+	'핸들러는 ErrNoSuchThing 를 내지 않는다'
 inject "0.3 규약 표를 읽지 못함" docs/19-screen-io.md \
 	'perl -pi -e "s/^### 0\.3 HTTP 코드 규약/### 0.3 HTTP 코드/" docs/19-screen-io.md' \
 	'0.3 절에서 코드 규약을 하나도 읽지 못했다'

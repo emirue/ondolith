@@ -1534,17 +1534,20 @@ else
 		done_ "$IO 오류표의 상태코드가 0.3 규약 $(wc -l <"$T"/cd_io_codes_def | tr -d ' ')종 안에 있다"
 fi
 
-# --- 30-2. D19 오류표가 인용한 오류 식별자를 구현과 대조한다 ----------------
+# --- 30-2. D19 오류표가 인용한 오류를 그 화면의 핸들러와 대조한다 ----------
 #
 # **30-1 은 「규약 안의 코드인가」만 본다.** 어느 행이 어느 핸들러의 어느 분기인지는
 # 상황 칸(자연어)에 있어 기계가 못 읽는다 — 재고 네 행이 `400` 으로 적힌 채
 # 구현이 `422` 였던 것을 사람이 읽고서야 찾았다.
 #
 # 그래서 상황 칸에 **오류 식별자**(`ErrOutOfStock`)를 적을 수 있게 하고, 적힌
-# 행만 구현과 잇는다. 핸들러의 `case errors.Is(err, X): … http.StatusY` 에서
-# (X → Y) 를 뽑아, 그 행의 코드가 **구현이 실제로 내는 코드 집합에 속하는지**
-# 본다. 한 오류가 화면마다 다른 코드를 내는 경우가 있어(ErrNotFound 는 404 와
-# 500 둘 다다) 하나로 못 박지 않는다.
+# 행만 구현과 잇는다.
+#
+# **화면까지 본다.** 앞선 판은 저장소 전체에서 (오류 → 코드) 를 한 표로 모아
+# 「어딘가에 그 조합이 있으면 통과」였다. 그러면 **그 화면이 낼 수 없는 오류를
+# 인용해도 통과한다** — A-507 행에 `ErrTransitionNotAllowed` 를 잘못 달았는데,
+# 같은 파일의 다른 함수(A-506·A-511)가 그 조합을 쓴다는 이유로 초록이었다.
+# 그 화면의 핸들러가 실제로 그 오류를 그 코드로 내는지를 본다.
 #
 # **적히지 않은 행은 여전히 대조되지 않는다.** 그 수를 함께 알린다 — 얼마나
 # 이어졌는지 말하지 않으면 이 검사가 전부를 본다고 읽힌다.
@@ -1552,32 +1555,61 @@ begin
 if [ ! -f "$IO" ]; then
 	err "$IO 가 없다"
 else
-	# (오류 식별자 → 상태코드 이름) — 핸들러의 case 분기에서만 뽑는다.
+	# (오류 식별자, 상태코드, 함수) — switch 의 case 와 if 문 양쪽에서 뽑는다.
+	# 함수 이름은 그 앞의 `func` 선언에서 온다.
 	find internal/app internal/admin -name '*.go' ! -name '*_test.go' 2>/dev/null |
 		while read -r f; do
+			# **이름 붙은 sub 를 쓰지 않는다.** `-ne` 본문의 `my` 변수는 named sub
+			# 와 공유되지 않아("Variable will not stay shared") 함수 귀속이
+			# 조용히 어긋난다 — 실제로 P-406 이 다루는 오류를 「안 낸다」고 했다.
 			perl -0777 -ne '
-			# switch 의 case 절.
+			my @fn;
+			while (/^func (?:\([^)]*\) )?(\w+)\(/gm) { push @fn, [$-[0], $1] }
+			my $at = sub { my $p = shift; my $n = "?"; for (@fn) { last if $_->[0] > $p; $n = $_->[1] } $n };
 			while (/case ((?:\s*errors\.Is\(err, [\w.]+\),?)+)\s*:(.*?)(?=\n\tcase |\n\t\}|\n\}\n)/gs) {
-				my ($cases, $body) = ($1, $2);
-				my ($st) = $body =~ /http\.Status(\w+)/;
-				next unless $st;
-				while ($cases =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\n" }
+				my ($c, $b, $p) = ($1, $2, $-[0]);
+				my ($st) = $b =~ /http\.Status(\w+)/;
+				# **상태코드가 헬퍼 안에 있는 분기**(`d.checkoutError(...)`)는 여기서
+				# 못 읽는다. 조용히 빼면 그 화면이 그 오류를 안 낸다고 잘못 말하므로
+				# "?" 로 남겨 아래에서 「대조할 수 없다」고 밝힌다.
+				$st = "?" unless $st;
+				my $n = $at->($p);
+				while ($c =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\t$n\n" }
 			}
 			# **if 문도 본다.** case 만 훑던 판은 `if errors.Is(err, ErrEmailTaken)`
 			# 형태를 통째로 놓쳤고, 그러면 그 오류를 인용한 행이 「핸들러에서
 			# 찾지 못했다」로 오탐한다 — 문서가 맞는데 검사가 틀린 경우다.
 			while (/if ((?:errors\.Is\(err, [\w.]+\)\s*\|\|?\s*)*errors\.Is\(err, [\w.]+\))\s*\{(.*?)\n\t+\}/gs) {
-				my ($conds, $body) = ($1, $2);
-				my ($st) = $body =~ /http\.Status(\w+)/;
-				next unless $st;
-				while ($conds =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\n" }
+				my ($c, $b, $p) = ($1, $2, $-[0]);
+				my ($st) = $b =~ /http\.Status(\w+)/;
+				$st = "?" unless $st;
+				my $n = $at->($p);
+				while ($c =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\t$n\n" }
 			}' "$f"
 		done | sort -u >"$T"/cd_e2s
+	[ -s "$T"/cd_e2s ] || err "핸들러에서 (오류 → 상태코드 → 함수) 를 하나도 뽑지 못했다 (검사가 헛돌았다)"
 
-	[ -s "$T"/cd_e2s ] || err "핸들러에서 (오류 → 상태코드) 를 하나도 뽑지 못했다 (검사가 헛돌았다)"
+	# (함수 → 화면) — 라우트 표가 유일한 출처다. Handler 는 다음 줄에 오므로
+	# 파일 전체를 한 덩이로 읽는다.
+	perl -0777 -ne 'while (/Screen: "([PA]-\d{3})".*?Handler: \w+\.(\w+)/gs) { print "$2\t$1\n" }' \
+		internal/app/tree.go | sort -u >"$T"/cd_fn_scr0
 
-	# Go 의 상태코드 이름을 숫자로. 여기 없는 이름을 핸들러가 쓰면 그 행은
-	# 대조되지 않으므로, 이름이 늘면 여기도 늘려야 한다.
+	# **한 단계 위임을 따라간다.** `returnCreate` 는 곧바로 `returnKindCreate`
+	# 를 부르고 오류 분기는 그 안에 있다 — 위임을 안 보면 그 화면이 그 오류를
+	# 「안 낸다」고 잘못 말한다. 몸통이 한 줄짜리 위임인 함수만 잇는다.
+	perl -0777 -ne 'while (/func \([^)]*\) (\w+)\([^)]*\) \{\n\t(?:return )?d\.(\w+)\([^\n]*\)\n\}/gs) { print "$1\t$2\n" }' \
+		$(find internal/app internal/admin -name '*.go' ! -name '*_test.go') | sort -u >"$T"/cd_deleg
+	awk -F'\t' 'NR==FNR { to[$1] = $2; next }
+		{ print; if ($1 in to) print to[$1] "\t" $2 }' \
+		"$T"/cd_deleg "$T"/cd_fn_scr0 | sort -u >"$T"/cd_fn_scr
+	[ -s "$T"/cd_fn_scr ] || err "$IO 대조: tree.go 에서 (함수 → 화면) 을 하나도 뽑지 못했다"
+
+	# (오류, 코드, 화면) 삼중항.
+	awk -F'\t' 'NR==FNR { scr[$1] = scr[$1] " " $2; next }
+		($3 in scr) { n = split(scr[$3], a, " "); for (i = 1; i <= n; i++) if (a[i] != "") print $1 "\t" $2 "\t" a[i] }' \
+		"$T"/cd_fn_scr "$T"/cd_e2s | sort -u >"$T"/cd_e2ss
+	[ -s "$T"/cd_e2ss ] || err "$IO 대조: (오류, 코드, 화면) 을 하나도 만들지 못했다"
+
 	code_of() {
 		case $1 in
 		OK) echo 200 ;; SeeOther) echo 303 ;; BadRequest) echo 400 ;;
@@ -1588,31 +1620,43 @@ else
 		esac
 	}
 
-	# 오류 식별자를 인용한 오류표 행: `Err...` 를 담고 둘째 칸이 코드인 행.
-	perl -nle 'next unless /^\|([^|]*`(Err\w+)`[^|]*)\|\s*\*{0,2}(\d{3})\*{0,2}\s*\|/;
-		print "$.\t$2\t$3"' "$IO" >"$T"/cd_io_err
+	# 오류 식별자를 인용한 행 + **그 행이 속한 화면 절**.
+	perl -nle 'if (/^### ([PA]-\d{3}) /) { $scr = $1 }
+		next unless /^\|([^|]*`(Err\w+)`[^|]*)\|\s*\*{0,2}(\d{3})\*{0,2}\s*\|/;
+		print "$.\t$2\t$3\t" . ($scr // "?")' "$IO" >"$T"/cd_io_err
 	n_linked=$(wc -l <"$T"/cd_io_err | tr -d ' ')
 
-	while IFS="$(printf '\t')" read -r ln id want; do
+	while IFS="$(printf '\t')" read -r ln id want scr; do
 		[ -z "$id" ] && continue
-		got=$(awk -F'\t' -v k="$id" '$1==k {print $2}' "$T"/cd_e2s)
+		if [ "$scr" = "?" ]; then
+			err "$IO:$ln 이 화면 절 밖에서 오류를 인용한다: $id"
+			continue
+		fi
+		got=$(awk -F'\t' -v k="$id" -v s="$scr" '$1==k && $3==s {print $2}' "$T"/cd_e2ss)
 		if [ -z "$got" ]; then
-			err "$IO:$ln 이 인용한 오류를 핸들러에서 찾지 못했다: $id"
+			any=$(awk -F'\t' -v k="$id" '$1==k {printf "%s ", $3}' "$T"/cd_e2ss)
+			err "$IO:$ln $scr 의 핸들러는 $id 를 내지 않는다 (그 오류를 내는 화면: ${any:-없음})"
 			continue
 		fi
 		ok_code=no
+		unreadable=no
 		for name in $got; do
+			[ "$name" = "?" ] && unreadable=yes && continue
 			[ "$(code_of "$name")" = "$want" ] && ok_code=yes
 		done
-		[ "$ok_code" = yes ] || {
-			set -- $got
-			err "$IO:$ln $id 은 표에 $want 인데 구현은 $(for n in $got; do printf '%s ' "$(code_of "$n")"; done)를 낸다"
-		}
+		if [ "$ok_code" = no ] && [ "$unreadable" = yes ]; then
+			# **코드를 읽을 수 없는 분기다** (헬퍼가 상태코드를 들고 있다).
+			# 「맞다」고 통과시키지 않는다 — 이 검사의 요점은 대조이지 추정이
+			# 아니다. 그 헬퍼가 상태코드를 직접 쓰게 바꾸면 대조된다.
+			err "$IO:$ln $scr 의 $id 는 상태코드가 헬퍼 안에 있어 대조할 수 없다 — 그 분기가 코드를 직접 쓰게 하거나 인용을 지운다"
+		elif [ "$ok_code" = no ]; then
+			err "$IO:$ln $scr 의 $id 는 표에 $want 인데 구현은 $(for n in $got; do printf '%s ' "$(code_of "$n")"; done)를 낸다"
+		fi
 	done <"$T"/cd_io_err
 
 	# **얼마나 이어졌는지 말한다.** 남은 행은 여전히 사람이 읽어야 한다.
 	n_rows=$(grep -cE '^\|[^|]+\|\s*\*{0,2}[0-9]{3}\*{0,2}\s*\|' "$IO")
-	done_ "$IO 오류표 $n_rows 행 중 $n_linked 행이 오류 식별자로 구현과 이어짐 (나머지는 사람이 읽는다)"
+	done_ "$IO 오류표 $n_rows 행 중 $n_linked 행이 오류 식별자로 **그 화면의 핸들러와** 이어짐 (나머지는 사람이 읽는다)"
 fi
 
 # --- 31. D80 의 Phase 표시가 D81 의 완료 상태와 일치한다 --------------------
