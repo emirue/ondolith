@@ -1803,6 +1803,29 @@ else
 	done_ "Phase 표시 $n_phase 개가 $WBS 의 완료 상태와 일치"
 fi
 
+# --- 32. 테스트 DB 준비 판정은 TCP 로 묻는다 ---------------------------------
+#
+# **유닉스 소켓으로 물으면 초기화 중에 이미 준비됐다고 답한다.** 공식 postgres
+# 이미지의 entrypoint 는 초기화 스크립트를 돌리려고 임시 서버를
+# `-c listen_addresses=''`(소켓 전용)로 띄웠다가 끝나면 세운다
+# (`docker-entrypoint.sh` 297·311 행). `pg_isready` 가 그 임시 서버를 보고
+# 통과한 뒤, 그 사이 소켓이 사라져 실제 접속이 `No such file or directory` 로
+# 깨진다 — 코드 문제처럼 보이는 실패다. CI `ui` 잡이 이것으로 죽었고, 소켓
+# 기준으로 기다린 뒤 psql 이 로컬에서 3/3 실패하는 것을 재현했다 (TCP 는 0/3).
+# 임시 서버는 TCP 를 열지 않으므로 TCP 는 안 속는다.
+begin
+TDBS=scripts/testdb.sh
+if [ ! -f "$TDBS" ]; then
+	err "$TDBS 가 없다"
+elif ! grep -q 'pg_isready' "$TDBS"; then
+	err "$TDBS 에 준비 판정(pg_isready)이 없다 — 검사가 헛돌았다"
+elif grep 'pg_isready' "$TDBS" | grep -qv -- '-h 127\.0\.0\.1'; then
+	err "$TDBS 의 준비 판정이 TCP 가 아니다 — 유닉스 소켓은 초기화 중 임시 서버를 보고 ready 라고 답한다"
+else
+	done_ "$TDBS 의 준비 판정을 TCP 로 한다 (초기화 중 임시 서버에 속지 않는다)"
+fi
+
+
 rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_use_req "$T"/cd_def_dec \
 	"$T"/cd_use_dec "$T"/cd_def_mis "$T"/cd_use_mis "$T"/cd_stale \
 	"$T"/cd_def_scr "$T"/cd_def_scr_u "$T"/cd_use_scr "$T"/cd_scr_issues \

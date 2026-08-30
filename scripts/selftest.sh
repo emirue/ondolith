@@ -329,6 +329,12 @@ inject "화면 절 밖에서 오류를 인용" docs/19-screen-io.md \
 inject "없는 오류 식별자를 인용" docs/19-screen-io.md \
 	'perl -pi -e "s/^\\| 재고 음수 \\(CHECK 위반\\) \\(.ErrOutOfStock.\\)/| 재고 음수 (CHECK 위반) (\x60ErrNoSuchThing\x60)/" docs/19-screen-io.md' \
 	'핸들러는 ErrNoSuchThing 를 내지 않는다'
+# **준비 판정을 소켓으로 되돌리면 실패한다.** 초기화 중 임시 서버
+# (`listen_addresses=''`)가 ready 라고 답해 그 창에서 통과하고, 그 뒤 실제
+# 접속이 깨진다 — CI `ui` 잡이 이것으로 죽었다.
+inject "DB 준비 판정을 소켓으로 되돌림" scripts/testdb.sh \
+	'perl -pi -e "s/pg_isready -h 127\\.0\\.0\\.1 /pg_isready /" scripts/testdb.sh' \
+	'준비 판정이 TCP 가 아니다'
 inject "0.3 규약 표를 읽지 못함" docs/19-screen-io.md \
 	'perl -pi -e "s/^### 0\.3 HTTP 코드 규약/### 0.3 HTTP 코드/" docs/19-screen-io.md' \
 	'0.3 절에서 코드 규약을 하나도 읽지 못했다'

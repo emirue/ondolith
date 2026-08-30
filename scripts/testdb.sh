@@ -89,8 +89,16 @@ fi
 # Ready means "accepts connections", not "the container exists". Without this
 # the first test run races the server's own initialisation and fails with a
 # connection error that looks like a code problem.
+#
+# **TCP 로 묻는다.** 유닉스 소켓으로 물으면 **초기화 중에 이미 준비됐다고
+# 답한다**: 공식 이미지의 entrypoint 가 초기화 스크립트를 돌리려고 임시 서버를
+# `-c listen_addresses=''`(소켓 전용)로 띄웠다가 끝나면 세우기 때문이다
+# (`docker-entrypoint.sh` 297·311 행). 그 창에서 통과한 다음 실제 접속이
+# `No such file or directory` 로 깨진다 — 코드 문제처럼 보이는 실패다.
+# 로컬 재현: 소켓 기준으로 기다린 뒤 psql 이 3/3 실패했다. CI `ui` 잡이
+# 이것으로 한 번 죽었다. 임시 서버는 TCP 를 열지 않으므로 TCP 는 안 속는다.
 i=0
-until docker exec "$NAME" pg_isready -U "$USER" -d "$DB" >/dev/null 2>&1; do
+until docker exec "$NAME" pg_isready -h 127.0.0.1 -U "$USER" -d "$DB" >/dev/null 2>&1; do
 	i=$((i + 1))
 	if [ "$i" -ge 60 ]; then
 		echo "$NAME 이 60초 안에 준비되지 않았다" >&2
