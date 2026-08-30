@@ -1603,24 +1603,41 @@ else
 	# 표에 404 를 잘못 적어도 통과한다. 헬퍼의 결과는 **끝까지 갔을 때 하는 일**
 	# 이고, 그것만 최상위에 있다. 중첩 안에서만 코드가 나오는 헬퍼는 아무것도
 	# 못 읽어 "?" 가 되고 「대조할 수 없다」로 실패한다 — 넓게 통과시키지 않는다.
-	perl -0777 -ne 'while (/(^func \([^)]*\) (\w+)\([^)]*\)[^{]*\{(.*?)\n\})/gsm) {
-			my ($name, $body) = ($2, $3);
+	# **키는 `리시버타입.이름` 이다.** 이름만으로 모으면 두 패키지가 같은 이름의
+	# 헬퍼를 가지는 순간 **서로 다른 코드가 한 버킷으로 조용히 합쳐진다** — 그
+	# 방향은 "모르면 실패" 가 아니라 「더 넓은 집합으로 통과」라 이 검사의 목적을
+	# 무력화한다. 지금도 `Can`·`CanOn` 이 `Actor` 와 `adminCaller` 에 겹쳐 있다.
+	# 리시버 **변수 이름**도 파일마다 다르므로(`d`·`c`·`r`·`a`·`s`) 선언에서
+	# 읽어 쓴다 — `d\.` 로 못 박으면 나머지 넷의 호출을 통째로 놓친다.
+	perl -0777 -ne 'while (/(^func \((\w+) \*?(\w+)\) (\w+)\([^)]*\)[^{]*\{(.*?)\n\})/gsm) {
+			my ($rv, $rt, $nm, $body) = ($2, $3, $4, $5);
 			for my $l (split /\n/, $body) {
 				next unless $l =~ /^\t[^\t]/;
-				while ($l =~ /http\.Status(\w+)/g) { print "$name\t$1\n" }
-				while ($l =~ /\bd\.(\w+)\(/g)      { print "$name\t\@$1\n" }
+				while ($l =~ /http\.Status(\w+)/g)   { print "$rt.$nm\t$1\n" }
+				while ($l =~ /\b\Q$rv\E\.(\w+)\(/g)  { print "$rt.$nm\t\@$rt.$1\n" }
 			}
 		}' $(find internal/app internal/admin -name '*.go' ! -name '*_test.go') |
 		sort -u >"$T"/cd_hraw
-	awk -F'\t' '{ e[$1] = e[$1] " " $2 } END {
-		for (i = 0; i < 8; i++) for (k in e) { n = split(e[k], a, " ")
-			for (j = 1; j <= n; j++) if (a[j] ~ /^@/) { t = substr(a[j], 2)
-				if (t in e) { m = split(e[t], b, " ")
-					for (x = 1; x <= m; x++) if (b[x] !~ /^@/ && index(" " e[k] " ", " " b[x] " ") == 0) e[k] = e[k] " " b[x] } } }
-		for (k in e) { n = split(e[k], a, " "); s = ""
-			for (j = 1; j <= n; j++) if (a[j] !~ /^@/ && index(s " ", " " a[j] " ") == 0) s = s " " a[j]
-			if (s != "") { sub(/^ /, "", s); print k "\t" s } } }' "$T"/cd_hraw |
-		sort >"$T"/cd_hcodes
+	# 임베딩 (`type shopDeps struct { publicDeps … }`) — 자식이 정의하지 않은
+	# 이름은 부모 것이다. 이것이 없으면 `shopDeps.notFound` 가 안 풀린다.
+	perl -0777 -ne 'while (/^type (\w+) struct \{(.*?)\n\}/gsm) { my ($n, $b) = ($1, $2);
+			for my $l (split /\n/, $b) { print "$n\t$1\n" if $l =~ /^\t\*?(\w+)\s*$/ } }' \
+		$(find internal/app internal/admin -name '*.go' ! -name '*_test.go') |
+		sort -u >"$T"/cd_embed
+	awk -F'\t' 'FILENAME == ARGV[1] { emb[$1] = $2; next }
+		{ e[$1] = e[$1] " " $2; seen[$1] = 1 }
+		END {
+			for (d = 0; d < 6; d++) for (k in seen) { split(k, p, ".")
+				for (t in emb) if (emb[t] == p[1] && !((t "." p[2]) in seen)) {
+					e[t "." p[2]] = e[k]; seen[t "." p[2]] = 1 } }
+			for (d = 0; d < 8; d++) for (k in e) { n = split(e[k], a, " ")
+				for (j = 1; j <= n; j++) if (a[j] ~ /^@/) { t = substr(a[j], 2)
+					if (t in e) { m = split(e[t], b, " ")
+						for (x = 1; x <= m; x++) if (b[x] !~ /^@/ && index(" " e[k] " ", " " b[x] " ") == 0) e[k] = e[k] " " b[x] } } }
+			for (k in e) { n = split(e[k], a, " "); s = ""
+				for (j = 1; j <= n; j++) if (a[j] !~ /^@/ && index(s " ", " " a[j] " ") == 0) s = s " " a[j]
+				if (s != "") { sub(/^ /, "", s); print k "\t" s } } }' \
+		"$T"/cd_embed "$T"/cd_hraw | sort >"$T"/cd_hcodes
 	[ -s "$T"/cd_hcodes ] || err "헬퍼에서 상태코드를 하나도 풀지 못했다 (검사가 헛돌았다)"
 
 	# (오류 식별자, 상태코드, 함수) — switch 의 case 와 if 문 양쪽에서 뽑는다.
@@ -1638,8 +1655,12 @@ else
 			# 잡아 같은 깊이의 `}`·`case` 에서 끊는다.
 			perl -0777 -ne '
 			my @fn;
-			while (/^func (?:\([^)]*\) )?(\w+)\(/gm) { push @fn, [$-[0], $1] }
+			while (/^func (?:\((\w+) \*?(\w+)\) )?(\w+)\(/gm) { push @fn, [$-[0], $3, $2 // "", $1 // ""] }
 			my $at = sub { my $p = shift; my $n = "?"; for (@fn) { last if $_->[0] > $p; $n = $_->[1] } $n };
+			# 헬퍼 호출은 **그 함수의 리시버 타입**에 붙는다. 타입을 빼면 두 패키지의
+			# 동명 헬퍼가 한 버킷으로 합쳐진다. 리시버 변수 이름도 선언에서 읽는다.
+			my $rt = sub { my $p = shift; my $t = ""; for (@fn) { last if $_->[0] > $p; $t = $_->[2] } $t };
+			my $rv = sub { my $p = shift; my $v = ""; for (@fn) { last if $_->[0] > $p; $v = $_->[3] } $v };
 			while (/^(\t+)case ((?:\s*errors\.Is\(err, [\w.]+\),?)+)\s*:(.*?)(?=\n\1case |\n\1\})/gsm) {
 				my ($c, $b, $p) = ($2, $3, $-[0]);
 				my ($st) = $b =~ /http\.Status(\w+)/;
@@ -1650,7 +1671,10 @@ else
 				# `Error(w, "404 page not found", StatusNotFound)`). 이것을 모르면
 				# 관리자 화면 여섯 개의 ErrNotFound 가 영영 「대조할 수 없다」로 남는다.
 				$st = "NotFound" if !$st && $b =~ /http\.NotFound\(/;
-				$st = ($b =~ /\bd\.(\w+)\(/) ? "\@$1" : "?" unless $st;
+				unless ($st) {
+					my ($v, $t) = ($rv->($p), $rt->($p));
+					$st = ($v && $b =~ /\b\Q$v\E\.(\w+)\(/) ? "\@$t.$1" : "?";
+				}
 				my $n = $at->($p);
 				while ($c =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\t$n\n" }
 			}
@@ -1661,7 +1685,10 @@ else
 				my ($c, $b, $p) = ($2, $3, $-[0]);
 				my ($st) = $b =~ /http\.Status(\w+)/;
 				$st = "NotFound" if !$st && $b =~ /http\.NotFound\(/;
-				$st = ($b =~ /\bd\.(\w+)\(/) ? "\@$1" : "?" unless $st;
+				unless ($st) {
+					my ($v, $t) = ($rv->($p), $rt->($p));
+					$st = ($v && $b =~ /\b\Q$v\E\.(\w+)\(/) ? "\@$t.$1" : "?";
+				}
 				my $n = $at->($p);
 				while ($c =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\t$n\n" }
 			}' "$f"

@@ -64,11 +64,22 @@ detected() {
 }
 
 # inject <name> <file-to-restore> <shell-command> <expected-substring>
+# 둘째 인자는 **공백으로 구분한 파일 목록**이다 — 두 파일을 함께 건드려야
+# 재현되는 위반이 있다 (예: 다른 패키지에 동명 헬퍼를 만들고 문서 행을 그 코드로
+# 바꾸는 것). 한 파일만 되돌리면 다음 주입이 오염된 트리에서 돈다.
 inject() {
-	cp "$REPO/$2" "$TMP/backup"
+	in_i=0
+	for in_f in $2; do
+		in_i=$((in_i + 1))
+		cp "$REPO/$in_f" "$TMP/in-$in_i"
+	done
 	(cd "$REPO" && eval "$3")
 	detected "$1" "$4"
-	cp "$TMP/backup" "$REPO/$2"
+	in_i=0
+	for in_f in $2; do
+		in_i=$((in_i + 1))
+		cp "$TMP/in-$in_i" "$REPO/$in_f"
+	done
 }
 
 # inject_new <name> <file-to-delete> <shell-command> <expected-substring>
@@ -310,6 +321,15 @@ inject "헬퍼가 든 상태코드로 대조" docs/19-screen-io.md \
 inject "헬퍼의 조기 반환 코드로 통과" docs/19-screen-io.md \
 	'perl -pi -e "s/^(\\| \\*\\*중복 제출\\*\\* \\(이미 .구매확정.\\) \\(.ErrTransitionNotAllowed.\\) \\|) 422 \\|/\\1 404 |/" docs/19-screen-io.md' \
 	'P-510 의 ErrTransitionNotAllowed 는 표에 404 인데 구현은 422 를 낸다'
+# **다른 패키지의 동명 헬퍼와 합쳐지지 않는다.** 이름만으로 키를 잡던 판은
+# `refundError` 를 `{422, 500}` 으로 모아, 표에 500 을 적어도 통과시켰다
+# (직접 재현: 이름 키로는 두 코드가 한 버킷, 타입 키로는 `shopDeps.refundError`
+# 와 `Deps.refundError` 로 갈린다). 아래 주입은 그 분리를 지킨다 — 되돌리면
+# 이 위반이 통과해 「탐지하지 못함」으로 실패한다.
+inject "다른 패키지의 동명 헬퍼와 합쳐짐" "internal/admin/handlers.go docs/19-screen-io.md" \
+	'printf "\nfunc (d *Deps) refundError(w http.ResponseWriter, r *http.Request, a, b string) {\n\thttp.Error(w, \"x\", http.StatusInternalServerError)\n}\n" >> internal/admin/handlers.go;
+	 perl -pi -e "s/\\| 422 \\| .이미 구매확정된 주문입니다./| 500 | \\x22이미 구매확정된 주문입니다\\x22/" docs/19-screen-io.md' \
+	'P-510 의 ErrTransitionNotAllowed 는 표에 500 인데 구현은 422 를 낸다'
 # **못 푸는 헬퍼는 여전히 실패시킨다.** P-110 은 지역 클로저(`bad(...)`)가 코드를
 # 들고 있어 따라갈 수 없다 — 추정으로 통과시키지 않는다.
 inject "상태코드를 못 푸는 분기" docs/19-screen-io.md \
