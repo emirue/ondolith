@@ -302,6 +302,14 @@ inject "그 화면이 낼 수 없는 오류를 인용" docs/19-screen-io.md \
 inject "헬퍼가 든 상태코드로 대조" docs/19-screen-io.md \
 	'perl -pi -e "s/^\\| 필수 약관 미동의 \\| /| 필수 약관 미동의 (\\x60ErrTermsRequired\\x60) | /" docs/19-screen-io.md' \
 	'P-406 의 ErrTermsRequired 는 표에 400 인데 구현은 422 를 낸다'
+# **헬퍼의 조기 반환 코드를 그 오류의 것으로 세지 않는다.** `refundError` 는
+# 「주문이 안 보이면」 `d.notFound` 로 조기 반환하는데, 함수 전체를 훑던 판은
+# 그 404 를 오류 분기의 결과와 뭉뚱그려 `{404, 422}` 로 읽었다 — 그러면 이 행이
+# 표에 404 를 잘못 적어도 통과한다. 최상위(탭 하나)만 보게 고쳐 422 하나로
+# 좁혔고, 아래 주입이 그 좁힘을 지킨다.
+inject "헬퍼의 조기 반환 코드로 통과" docs/19-screen-io.md \
+	'perl -pi -e "s/^(\\| \\*\\*중복 제출\\*\\* \\(이미 .구매확정.\\) \\(.ErrTransitionNotAllowed.\\) \\|) 422 \\|/\\1 404 |/" docs/19-screen-io.md' \
+	'P-510 의 ErrTransitionNotAllowed 는 표에 404 인데 구현은 422 를 낸다'
 # **못 푸는 헬퍼는 여전히 실패시킨다.** P-110 은 지역 클로저(`bad(...)`)가 코드를
 # 들고 있어 따라갈 수 없다 — 추정으로 통과시키지 않는다.
 inject "상태코드를 못 푸는 분기" docs/19-screen-io.md \
