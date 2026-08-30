@@ -1593,6 +1593,29 @@ begin
 if [ ! -f "$IO" ]; then
 	err "$IO 가 없다"
 else
+	# **헬퍼가 들고 있는 상태코드를 푼다.** 분기 본문이 `d.notFound(w, r)` 한
+	# 줄이면 코드는 그 헬퍼 안에 있다 — 53 개 (오류, 함수) 조합이 그 모양이라
+	# 「대조할 수 없다」로 남아 있었다. 헬퍼에서 도달 가능한 코드를 **집합으로**
+	# 모은다. 하나로 못 박으면 틀린다: `refundError` 는 주문이 안 보이면
+	# `d.notFound` 로 조기 반환하므로 422 와 404 를 **둘 다** 낸다.
+	# 헬퍼가 헬퍼를 부르는 것도 따라간다(고정점).
+	perl -0777 -ne 'while (/(^func \([^)]*\) (\w+)\([^)]*\)[^{]*\{.*?\n\})/gsm) {
+			my ($body, $name) = ($1, $2);
+			while ($body =~ /http\.Status(\w+)/g) { print "$name\t$1\n" }
+			while ($body =~ /\bd\.(\w+)\(/g)      { print "$name\t\@$1\n" }
+		}' $(find internal/app internal/admin -name '*.go' ! -name '*_test.go') |
+		sort -u >"$T"/cd_hraw
+	awk -F'\t' '{ e[$1] = e[$1] " " $2 } END {
+		for (i = 0; i < 8; i++) for (k in e) { n = split(e[k], a, " ")
+			for (j = 1; j <= n; j++) if (a[j] ~ /^@/) { t = substr(a[j], 2)
+				if (t in e) { m = split(e[t], b, " ")
+					for (x = 1; x <= m; x++) if (b[x] !~ /^@/ && index(" " e[k] " ", " " b[x] " ") == 0) e[k] = e[k] " " b[x] } } }
+		for (k in e) { n = split(e[k], a, " "); s = ""
+			for (j = 1; j <= n; j++) if (a[j] !~ /^@/ && index(s " ", " " a[j] " ") == 0) s = s " " a[j]
+			if (s != "") { sub(/^ /, "", s); print k "\t" s } } }' "$T"/cd_hraw |
+		sort >"$T"/cd_hcodes
+	[ -s "$T"/cd_hcodes ] || err "헬퍼에서 상태코드를 하나도 풀지 못했다 (검사가 헛돌았다)"
+
 	# (오류 식별자, 상태코드, 함수) — switch 의 case 와 if 문 양쪽에서 뽑는다.
 	# 함수 이름은 그 앞의 `func` 선언에서 온다.
 	find internal/app internal/admin -name '*.go' ! -name '*_test.go' 2>/dev/null |
@@ -1613,10 +1636,14 @@ else
 			while (/^(\t+)case ((?:\s*errors\.Is\(err, [\w.]+\),?)+)\s*:(.*?)(?=\n\1case |\n\1\})/gsm) {
 				my ($c, $b, $p) = ($2, $3, $-[0]);
 				my ($st) = $b =~ /http\.Status(\w+)/;
-				# **상태코드가 헬퍼 안에 있는 분기**(`d.checkoutError(...)`)는 여기서
-				# 못 읽는다. 조용히 빼면 그 화면이 그 오류를 안 낸다고 잘못 말하므로
-				# "?" 로 남겨 아래에서 「대조할 수 없다」고 밝힌다.
-				$st = "?" unless $st;
+				# **코드가 본문에 없으면 부른 헬퍼 이름을 남긴다** — 위에서 푼
+				# 헬퍼→코드집합으로 아래에서 잇는다. 조용히 빼면 그 화면이 그
+				# 오류를 안 낸다고 잘못 말한다.
+				# `http.NotFound(w, r)` 는 stdlib 이 404 를 쓴다 (net/http/server.go:
+				# `Error(w, "404 page not found", StatusNotFound)`). 이것을 모르면
+				# 관리자 화면 여섯 개의 ErrNotFound 가 영영 「대조할 수 없다」로 남는다.
+				$st = "NotFound" if !$st && $b =~ /http\.NotFound\(/;
+				$st = ($b =~ /\bd\.(\w+)\(/) ? "\@$1" : "?" unless $st;
 				my $n = $at->($p);
 				while ($c =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\t$n\n" }
 			}
@@ -1626,12 +1653,23 @@ else
 			while (/^(\t+)if ((?:errors\.Is\(err, [\w.]+\)\s*\|\|?\s*)*errors\.Is\(err, [\w.]+\))\s*\{(.*?)\n\1\}/gsm) {
 				my ($c, $b, $p) = ($2, $3, $-[0]);
 				my ($st) = $b =~ /http\.Status(\w+)/;
-				$st = "?" unless $st;
+				$st = "NotFound" if !$st && $b =~ /http\.NotFound\(/;
+				$st = ($b =~ /\bd\.(\w+)\(/) ? "\@$1" : "?" unless $st;
 				my $n = $at->($p);
 				while ($c =~ /errors\.Is\(err, [\w.]*?(\w+)\)/g) { print "$1\t$st\t$n\n" }
 			}' "$f"
-		done | sort -u >"$T"/cd_e2s
-	[ -s "$T"/cd_e2s ] || err "핸들러에서 (오류 → 상태코드 → 함수) 를 하나도 뽑지 못했다 (검사가 헛돌았다)"
+		done | sort -u >"$T"/cd_e2s_raw
+	[ -s "$T"/cd_e2s_raw ] || err "핸들러에서 (오류 → 상태코드 → 함수) 를 하나도 뽑지 못했다 (검사가 헛돌았다)"
+
+	# `@헬퍼` 를 그 헬퍼가 낼 수 있는 코드들로 편다. 못 푸는 헬퍼는 "?" 로
+	# 남겨 「대조할 수 없다」로 실패시킨다 — 추정으로 통과시키지 않는다.
+	awk -F'\t' 'NR==FNR { h[$1] = $2; next }
+		$2 ~ /^@/ { k = substr($2, 2)
+			if (k in h) { n = split(h[k], a, " ")
+				for (i = 1; i <= n; i++) print $1 "\t" a[i] "\t" $3 }
+			else print $1 "\t?\t" $3
+			next }
+		{ print }' "$T"/cd_hcodes "$T"/cd_e2s_raw | sort -u >"$T"/cd_e2s
 
 	# (함수 → 화면) — 라우트 표가 유일한 출처다. Handler 는 다음 줄에 오므로
 	# 파일 전체를 한 덩이로 읽는다.

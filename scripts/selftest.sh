@@ -294,9 +294,19 @@ inject "그 화면이 낼 수 없는 오류를 인용" docs/19-screen-io.md \
 # 되풀이되는 문구를 쓰면 `perl -p` 가 다섯 곳을 한꺼번에 바꾸고, detected() 는
 # 부분 문자열만 보므로 **다섯 중 하나가 우연히 걸려도 통과**한다 — 주석이
 # 말하는 그 분기를 검증한 것이 아니게 된다.
-inject "상태코드가 헬퍼 안이라 못 읽음" docs/19-screen-io.md \
+#
+# **헬퍼가 든 코드를 실제로 풀었는지 본다.** P-406 의 `ErrTermsRequired` 는
+# 분기 본문에 코드가 없고 `d.checkoutError` 안에 422 가 있다 — 아래 문구는
+# 그 헬퍼를 따라가 422 를 읽어야만 나온다. 안 풀면 「대조할 수 없다」가 나오고
+# 이 주입은 실패한다.
+inject "헬퍼가 든 상태코드로 대조" docs/19-screen-io.md \
 	'perl -pi -e "s/^\\| 필수 약관 미동의 \\| /| 필수 약관 미동의 (\\x60ErrTermsRequired\\x60) | /" docs/19-screen-io.md' \
-	'P-406 의 ErrTermsRequired 는 상태코드가 헬퍼 안에 있어 대조할 수 없다'
+	'P-406 의 ErrTermsRequired 는 표에 400 인데 구현은 422 를 낸다'
+# **못 푸는 헬퍼는 여전히 실패시킨다.** P-110 은 지역 클로저(`bad(...)`)가 코드를
+# 들고 있어 따라갈 수 없다 — 추정으로 통과시키지 않는다.
+inject "상태코드를 못 푸는 분기" docs/19-screen-io.md \
+	'perl -pi -e "s/^\\| \\*\\*마지막 superuser 본인\\*\\* \\| /| **마지막 superuser 본인** (\\x60ErrLastSuperuser\\x60) | /" docs/19-screen-io.md' \
+	'P-110 의 ErrLastSuperuser 는 상태코드가 헬퍼 안에 있어 대조할 수 없다'
 # **코드 칸을 못 읽는 행은 건너뛰지 않고 실패한다.** 건너뛰던 판에서
 # `ErrCartEmpty` 행(코드 칸 `302 → P-402`)이 대조된 적도, 안 이어졌다고
 # 알려진 적도 없이 사라졌다.
