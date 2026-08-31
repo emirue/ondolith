@@ -107,6 +107,9 @@ measure: ## 1 vCPU / 512MB 티어에서 자원 실측 (NFR-101, W4-08)
 verify-upgrade: ## 데이터가 든 인스턴스에서 업그레이드 절차 실측 (NFR-301, W4-11)
 	@sh scripts/verify-upgrade.sh
 
+verify-install-doc: ## D71·D72 를 문서 그대로 밟아 본다 (FR-104, W4-13)
+	@sh scripts/verify-install-doc.sh
+
 # 토스 계정과 네트워크가 필요해 check 에도 test-integration 에도 넣지 않는다.
 # 태그 없이는 빌드조차 되지 않으므로 SKIP 이 생기지 않는다 (check-testrun.sh).
 test-toss: ## 토스 테스트 키로 어댑터 실측 (W3-34). ONDOLITH_TOSS_TEST_SECRET 필요
