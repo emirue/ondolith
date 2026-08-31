@@ -698,7 +698,7 @@ else
 	# **파일 이름 순서대로 읽고, 지운 것은 뺀다.** 앞선 판은 `CREATE TABLE` 과
 	# `ADD COLUMN` 만 모아 `sort -u` 했다 — `DROP COLUMN` 을 처리할 자리가
 	# 없어서, 한 번 만들어진 컬럼은 나중에 지워도 **영원히 「있어야 하는 컬럼」**
-	# 으로 남았다. 00006 이 이 저장소 최초의 DROP COLUMN 이라 그때까지 드러나지
+	# 으로 남았다. 00020 이 이 저장소 최초의 DROP COLUMN 이라 그때까지 드러나지
 	# 않았고, 드러났을 때의 모양은 더 나쁘다: 문서를 **정확하게** 고쳐 그 행을
 	# 지우면 검사가 「마이그레이션에 있는 컬럼이 D30 에서 빠졌다」로 오탐한다.
 	# 즉 맹점이 틀린 문서를 통과시키고 옳은 문서를 막는다.
@@ -723,7 +723,10 @@ else
 			while ($u =~ /ALTER TABLE (\w+)([^;]*);/gms) {
 				my ($t, $body) = ($1, $2);
 				$col{"$t\t$1"} = ++$seq while $body =~ /ADD COLUMN (\w+)/g;
-				delete $col{"$t\t$1"}     while $body =~ /DROP COLUMN (\w+)/g;
+				# `IF EXISTS` 를 건너뛴다. 없으면 컬럼 이름 대신 `IF` 를 지우게
+				# 되고, 실제로 지워진 컬럼은 「있어야 하는 컬럼」으로 남는다 —
+				# 위 주석이 말하는 그 맹점이 형태만 바꿔 되살아난다.
+				delete $col{"$t\t$1"}     while $body =~ /DROP COLUMN (?:IF EXISTS )?(\w+)/g;
 			}
 		}
 		print "$_\n" for keys %col;' | sort -u >"$T"/cd_sch_sql

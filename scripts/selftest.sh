@@ -495,13 +495,19 @@ inject "마이그레이션이 만드는 테이블에 D30 정의가 없음" docs/
 	'만드는 테이블인데 docs/30-data-model.md 에 정의가 없다: menus'
 # **DROP COLUMN 을 따라가는지 본다.** 앞선 판의 파서는 CREATE/ADD 만 모아
 # sort -u 했다 — 지운 컬럼을 뺄 자리가 없어 한 번 만들어진 컬럼은 영원히
-# 「있어야 하는 컬럼」이었다. 00006(이 저장소 최초의 DROP COLUMN)이 그것을
+# 「있어야 하는 컬럼」이었다. 00020(이 저장소 최초의 DROP COLUMN)이 그것을
 # 처음 건드렸고, 맹점의 모양이 특히 나빴다: **틀린 문서를 통과시키고 옳은
 # 문서를 막는다.** 아래 두 주입이 양쪽 방향을 각각 잡는다.
 #
 # ① 컬럼을 지웠는데 문서가 그대로면 실패해야 한다.
 inject "컬럼을 지웠는데 D30 이 그대로" internal/migrations/00019_user_fields.sql \
 	'printf "\n-- +goose Up\nALTER TABLE users DROP COLUMN display_name;\n" >> internal/migrations/00019_user_fields.sql' \
+	'이 마이그레이션에 없는 컬럼을 적었다: users.display_name'
+# ①' `DROP COLUMN IF EXISTS` 도 같아야 한다. 번호를 옮긴 마이그레이션은
+#     이 형태를 쓰는데(00020), 파서가 `IF` 를 컬럼 이름으로 읽으면 삭제를
+#     놓치고 ① 이 잡던 것을 그대로 통과시킨다.
+inject "IF EXISTS 로 지웠는데 D30 이 그대로" internal/migrations/00019_user_fields.sql \
+	'printf "\n-- +goose Up\nALTER TABLE users DROP COLUMN IF EXISTS display_name;\n" >> internal/migrations/00019_user_fields.sql' \
 	'이 마이그레이션에 없는 컬럼을 적었다: users.display_name'
 # ② 지운 뒤 문서도 고치면 통과해야 한다 — 파서가 삭제를 따라간다는 증거다.
 #    ①만 두면 「전부 실패로 만드는」 파서도 통과하므로 짝으로 둔다.

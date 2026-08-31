@@ -231,7 +231,7 @@ func (h *handler) provision(ctx context.Context, cfg *config.Config, f *form) er
 	//
 	// 관리자로 만드는 것은 `user_roles` 행이다. 권한은 역할이 정하고 (D15),
 	// 그 밖의 어떤 컬럼도 판정에 쓰이지 않는다 — Phase 0 의 `is_admin` 은
-	// 00006 이 지웠다 (W2-01).
+	// 00020 이 지웠다 (W2-01).
 	//
 	// 00003 의 백필(`WHERE u.is_admin`)은 **마이그레이션 시점에 한 번** 도는데
 	// 설치는 마이그레이션을 먼저 돌리고 계정을 나중에 만든다 — 그 순서 때문에

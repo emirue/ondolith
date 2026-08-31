@@ -35,18 +35,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# **한 릴리즈 이전**을 흉내 낸다: 최신 마이그레이션을 뺀 바이너리를 따로 빌드해
-# 그것으로 설치한 뒤, 진짜 산출물을 얹는다. 같은 바이너리를 두 번 올리면
-# "대기 마이그레이션이 적용된다" 를 확인할 수 없다.
-latest=$(ls internal/migrations/*.sql | sort | tail -1)
-mkdir -p "$tmp/old"
-cp -R . "$tmp/old/src" 2>/dev/null || true
-rm -rf "$tmp/old/src/.git" "$tmp/old/src/dist"
-rm -f "$tmp/old/src/$latest"
+# **이전 릴리즈를 태그에서 그대로 꺼낸다 — 흉내 내지 않는다.**
+#
+# 예전에는 현재 소스를 복사해 *번호가 가장 큰* 마이그레이션 하나만 빼서 "이전
+# 릴리즈" 라고 불렀다. 그러면 **번호가 낮은 마이그레이션이 나중에 추가된 경우를
+# 영원히 못 잡는다**: v0.1.0 은 1~5·7~19 를 싣고 나갔고 그 뒤 6 번이 추가돼
+# 실제 업그레이드가 goose 의
+#   detected 1 missing (out-of-order) migration lower than database version (19)
+# 으로 죽었는데, 흉내 낸 이전 버전에는 6 번이 이미 들어 있어서 이 검사는 계속
+# 초록이었다. 검사가 도는 것과 검사가 보는 것은 다르다.
+tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
+[ -n "$tag" ] || { say "✗" "릴리즈 태그가 없다 — 업그레이드해 올 이전 릴리즈가 없다"; exit 1; }
+mkdir -p "$tmp/old/src"
+git archive "$tag" | tar -x -C "$tmp/old/src" \
+	|| { say "✗" "$tag 의 트리를 꺼내지 못했다"; exit 1; }
 (cd "$tmp/old/src" && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
-	go build -trimpath -ldflags "-s -w -X main.version=vOLD" -o "$tmp/old/$BIN" ./cmd/ondolith) \
-	|| { say "✗" "이전 바이너리 빌드 실패"; exit 1; }
-say "✓" "이전 릴리즈 흉내: $(basename "$latest") 를 뺀 바이너리"
+	go build -trimpath -ldflags "-s -w -X main.version=$tag" -o "$tmp/old/$BIN" ./cmd/ondolith) \
+	|| { say "✗" "$tag 바이너리 빌드 실패"; exit 1; }
+
+# 대기 마이그레이션 = 지금은 있고 $tag 에는 없던 것. ③ 이 확인할 대상이다.
+ls "$tmp/old/src"/internal/migrations/*.sql | xargs -n1 basename | sort >"$tmp/old.list"
+ls internal/migrations/*.sql | xargs -n1 basename | sort >"$tmp/new.list"
+pending=$(comm -13 "$tmp/old.list" "$tmp/new.list" | tail -1)
+[ -n "$pending" ] || { say "✗" "$tag 이후 새 마이그레이션이 없다 — ③ 이 헛돈다"; exit 1; }
+say "✓" "이전 릴리즈 $tag 를 태그에서 빌드 (대기 마이그레이션 $pending)"
 
 docker network create "$NET" >/dev/null
 docker run -d --name "$PG" --network "$NET" \
@@ -135,7 +147,7 @@ after=$(docker exec "$PG" psql -U u -tAc "SELECT count(*) FROM users" 2>/dev/nul
 probe=$(docker exec "$PG" psql -U u -tAc \
 	"SELECT count(*) FROM pages WHERE slug='upgrade-probe'" 2>/dev/null | tr -d ' \r')
 applied=$(docker exec "$PG" psql -U u -tAc \
-	"SELECT count(*) FROM goose_db_version WHERE version_id = $(basename "$latest" | cut -d_ -f1 | sed 's/^0*//')" \
+	"SELECT count(*) FROM goose_db_version WHERE version_id = $(echo "$pending" | cut -d_ -f1 | sed 's/^0*//')" \
 	2>/dev/null | tr -d ' \r')
 
 # **두 값이 모두 비어도 같다.** psql 이 실패하면 before 도 after 도 빈
@@ -149,7 +161,7 @@ case "$after" in
 esac
 [ "$probe" = "1" ] && say "✓" "업그레이드 전에 넣은 행이 그대로다" \
 	|| { say "✗" "표식 행이 사라졌다"; fail=1; }
-[ "$applied" = "1" ] && say "✓" "대기 마이그레이션이 부팅 때 적용됐다 ($(basename "$latest"))" \
+[ "$applied" = "1" ] && say "✓" "대기 마이그레이션이 부팅 때 적용됐다 ($pending)" \
 	|| { say "✗" "대기 마이그레이션이 적용되지 않았다"; fail=1; }
 
 # 설정·업로드·테마가 그대로인지. 바이너리 교체가 이것들을 만지면 안 된다.
@@ -165,6 +177,10 @@ fi
 # ④ **다운그레이드 실측.** 이전 바이너리로 되돌려도 뜨는지 본다. 추가만 하는
 # 마이그레이션은 앞 릴리즈가 모르는 컬럼을 남길 뿐이라 기동을 막지 않는다 —
 # 그것이 D30 「두 릴리즈 규칙」이 지키려는 성질이고, 여기서 확인한다.
+#
+# **컬럼을 지우는 마이그레이션이어도 같다.** 규칙이 릴리즈 N 에서 대체물로
+# 옮겨 두게 하므로, N 은 지워진 컬럼을 읽지 않는다 — 되돌려도 뜬다. 그
+# 전제가 깨졌다면(N 이 아직 그 컬럼을 읽는다) 여기서 기동이 실패한다.
 if start_app "$tmp/old/$BIN"; then
 	down_users=$(docker exec "$PG" psql -U u -tAc "SELECT count(*) FROM users" 2>/dev/null | tr -d ' \r')
 	case "$down_users" in

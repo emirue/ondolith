@@ -148,7 +148,7 @@ func TestSignupDropsFieldsNobodyDefined(t *testing.T) {
 	// 앞선 판은 `SELECT is_admin FROM users` 를 봤다. 그 컬럼은 권한의 근거가
 	// 아니다 (D15: 역할↔권한). 공격자가 어떤 경로로든 `user_roles` 행을
 	// 얻었다면 그 단언은 **그대로 통과했다** — 막으려던 것을 보지 않는
-	// 단언이었고, 00006 이 컬럼을 지우면서 그 사실이 드러났다.
+	// 단언이었고, 00020 이 컬럼을 지우면서 그 사실이 드러났다.
 	//
 	// 이제 역할 부여 자체를 센다. 폼이 무엇을 실어 보내든 이 수는 0 이어야 한다.
 	var roles int

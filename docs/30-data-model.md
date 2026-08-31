@@ -220,6 +220,14 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 - 파괴적 변경(컬럼 삭제·타입 변경)은 두 릴리즈에 나눠 적용한다:
   릴리즈 N에서 새 컬럼 추가 + 양쪽 쓰기 → 릴리즈 N+1에서 옛 컬럼 삭제.
   이렇게 해야 다운그레이드 경로가 남는다
+- **새 마이그레이션의 번호는 이미 릴리즈된 모든 번호보다 커야 한다.** 비어 있는
+  번호가 보여도 채우지 않는다 — 릴리즈된 사이트의 goose 는 이미 그보다 위로
+  올라가 있어서, 낮은 번호를 뒤늦게 들이밀면 `detected 1 missing (out-of-order)
+  migration lower than database version` 으로 **부팅을 거부한다.** v0.1.0 은
+  1~5·7~19 를 실었고, 그 뒤 6 번을 채웠다가 그 릴리즈의 모든 사이트가
+  업그레이드하지 못했다 (`00020_drop_is_admin.sql` 이 그 파일이다).
+  번호 구멍은 메우지 않고 남긴다. `make verify-upgrade` 가 실제 릴리즈 태그로
+  이것을 확인한다
 
 ## 현재 스키마
 
@@ -239,7 +247,7 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `display_name` | text NOT NULL DEFAULT '' | |
 | `created_at` / `updated_at` | timestamptz | |
 
-> **`is_admin` 은 없다.** Phase 0 의 그 컬럼은 `00006_drop_is_admin.sql` 이 지웠다
+> **`is_admin` 은 없다.** Phase 0 의 그 컬럼은 `00020_drop_is_admin.sql` 이 지웠다
 > (W2-01). 권한은 [D15](15-access-control.md)의 역할↔권한이 정하고, 계정 테이블에
 > 권한을 뜻하는 칸은 하나도 없다 — 값을 쓰는데 아무도 판정에 읽지 않는 불리언이
 > 정확히 그 컬럼이 위험했던 이유다.

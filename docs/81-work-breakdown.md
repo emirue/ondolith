@@ -162,7 +162,7 @@ RBAC 사슬이 막히면 Phase 1 전체가 막힌다. 이유는 W1-24다 — 라
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W2-01 | `users.is_admin` 컬럼 삭제 (릴리즈 N+1) **(완료 — `00006_drop_is_admin.sql`, v0.1.0 이 릴리즈 N)** | Phase 1 릴리즈 | `00006_drop_is_admin.sql`, `CHANGELOG.md` | 컬럼이 사라지고 코드에 참조가 남지 않는다(`grep`으로 확인). **되돌릴 수 없는 마이그레이션임을 CHANGELOG에 파괴적 변경으로 표시**한다 (NFR-303, NFR-308). Down은 컬럼을 되살리되 값 복원이 불가함을 주석에 적는다 |
+| W2-01 | `users.is_admin` 컬럼 삭제 (릴리즈 N+1) **(완료 — `00020_drop_is_admin.sql`, v0.1.0 이 릴리즈 N)** | Phase 1 릴리즈 | `00020_drop_is_admin.sql`, `CHANGELOG.md` | 컬럼이 사라지고 코드에 참조가 남지 않는다(`grep`으로 확인). **되돌릴 수 없는 마이그레이션임을 CHANGELOG에 파괴적 변경으로 표시**한다 (NFR-303, NFR-308). Down은 컬럼을 되살리되 값 복원이 불가함을 주석에 적는다 |
 | W2-02 | 게시판 스키마 마이그레이션 **(완료 — `00007_board.sql`)** | — | `00007_board.sql`, `D30`·`D16` 갱신 | `boards`·`board_fields`·`posts`·`comments`·`attachments` 생성. `boards.slug` UNIQUE, `board_fields (board_id, key)` UNIQUE. `posts (board_id, created_at DESC)` 인덱스. 모든 FK에 `ON DELETE` 명시. D16에 5행 추가 |
 | W2-03 | 전문검색 인덱스 **(완료 — `00008_post_search.sql`, 교차점 실측은 D30)** | W2-02 | `00008_post_search.sql` | `posts`에 `tsvector` 생성 컬럼 + GIN 인덱스. 한국어 제목·본문 질의가 인덱스를 탄다는 것을 `EXPLAIN`으로 확인한다 (FR-507). `custom_fields` GIN은 **만들지 않는다** (D30 — 실제로 느려질 때 추가) |
 | W2-04 | (선택) 작업 로그 스키마 **(완료 — `00010_oplog.sql`, `internal/content/oplog.go`)** | W2-02 | `00010_oplog.sql`, `D16` 갱신 | `operation_logs` 생성. `actor_user_id`는 `ON DELETE SET NULL`, `actor_email`은 스냅샷 컬럼. UPDATE·DELETE 경로가 코드에 없다 (D15 7절) |

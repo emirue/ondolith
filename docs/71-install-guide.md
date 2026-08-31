@@ -42,12 +42,22 @@ psql "postgres://ondolith:<강한-비밀번호>@127.0.0.1:5432/ondolith?sslmode=
 ## 2. 바이너리 내려받기
 
 ```bash
-sudo mkdir -p /opt/ondolith && cd /opt/ondolith
+sudo mkdir -p /opt/ondolith
+sudo chown "$(id -un)" /opt/ondolith    # ← 없으면 4절 제출이 실패한다
+cd /opt/ondolith
 sudo curl -sSL -o ondolith \
   https://github.com/emirue/ondolith/releases/download/<vX.Y.Z>/ondolith-linux-amd64
 sudo chmod +x ondolith
 ./ondolith -version
 ```
+
+> **`chown` 을 빼면 4절에서 막힌다.** 이 디렉터리는 내려받는 곳이 아니라 **앱이
+> 쓰는 곳**이다 — 마법사가 `ondolith.json` 을 여기 쓰고, 업로드·테마 디렉터리도
+> 그 파일 위치를 기준으로 잡힌다 (`internal/config`). `sudo mkdir` 로 만든
+> 디렉터리는 root 소유라, 아래 3절처럼 일반 사용자로 띄우면 제출 순간
+> `설정 파일을 저장하지 못했습니다: ... permission denied` 가 난다.
+> 서비스로 돌릴 것이라면 이 사용자 대신 전용 계정에 넘긴다
+> ([D72 2절](72-deploy-lightsail.md)).
 
 arm64 인스턴스면 `ondolith-linux-arm64` 를 받는다. 두 산출물 모두 릴리즈 때 **해당
 아키텍처에서 실제로 실행해** 확인한다 ([D70 「릴리즈 만들기」](70-operations.md)).

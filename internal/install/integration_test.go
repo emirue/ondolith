@@ -148,7 +148,7 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 
 	// FR-104: administrator exists, email lower-cased, password only as bcrypt.
 	//
-	// `is_admin` 은 보지 않는다 — 00006 이 지웠다 (W2-01). 관리자인지는 아래
+	// `is_admin` 은 보지 않는다 — 00020 이 지웠다 (W2-01). 관리자인지는 아래
 	// 역할 단언이 정한다. 그 단언이 이 테스트의 본체이고, 불리언은 처음부터
 	// 그것을 대신하지 못했다.
 	var email, hash string

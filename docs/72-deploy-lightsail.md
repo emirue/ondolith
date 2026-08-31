@@ -22,6 +22,19 @@ PostgreSQL을 같은 인스턴스에 올린다면 `shared_buffers`를 낮춘다 
 
 ## 2. systemd 유닛
 
+**먼저 유닛이 쓸 계정을 만들고 디렉터리를 넘긴다.** 아래 유닛의 `User=ondolith` 는
+이 계정을 가리키는데, `/opt/ondolith` 는 [D71 2절](71-install-guide.md)까지만 밟았다면
+설치한 사람 계정(또는 root) 소유다 — 이 두 줄을 건너뛰면 서비스가 설정 파일도 업로드도
+쓰지 못한다:
+
+```bash
+sudo useradd --system --home-dir /opt/ondolith --shell /usr/sbin/nologin ondolith
+sudo chown -R ondolith:ondolith /opt/ondolith
+```
+
+D71 을 이미 밟아 자기 계정으로 설치를 마쳤다면 `chown` 이 그 산출물(`ondolith.json`·
+업로드·테마)의 소유권까지 함께 넘긴다.
+
 ```ini
 # /etc/systemd/system/ondolith.service
 [Unit]

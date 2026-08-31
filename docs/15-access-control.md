@@ -282,7 +282,7 @@ CREATE UNIQUE INDEX roles_one_superuser_idx ON roles ((is_superuser)) WHERE is_s
 릴리즈 N: RBAC 테이블 추가 + `is_admin=true`인 사용자에게 `admin` 역할 부여 + 양쪽 쓰기.
 릴리즈 N+1: `is_admin` 컬럼 삭제. 이러면 N+1에서 N으로 돌아갈 경로가 남는다 (NFR-308).
 
-**끝났다.** N 은 `v0.1.0`, N+1 의 삭제는 `00006_drop_is_admin.sql` 이다 (W2-01).
+**끝났다.** N 은 `v0.1.0`, N+1 의 삭제는 `00020_drop_is_admin.sql` 이다 (W2-01).
 그 뒤로 권한의 근거는 `role_permissions` 하나뿐이다 — 컬럼 하나로 표현할 수
 없는 것(권한 37종·게시판별 부여·회수)이 애초에 이관의 이유였다.
 

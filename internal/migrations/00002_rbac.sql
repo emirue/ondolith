@@ -4,7 +4,7 @@
 --
 -- is_admin is NOT dropped here. D30's two-release rule requires release N to
 -- add the replacement and write both, and release N+1 to drop the old column
--- (00006, W2-01). Dropping it now would leave no downgrade path (NFR-308).
+-- (00020, W2-01). Dropping it now would leave no downgrade path (NFR-308).
 --
 -- sessions_valid_from is NOT NULL with a default on purpose: a nullable cutoff
 -- makes "no cutoff" a NULL, and every comparison against it becomes fail-open.

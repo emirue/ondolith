@@ -19,10 +19,18 @@
 -- **왜 지금인가.** D30 의 두 릴리즈 규칙: 릴리즈 N 에서 대체물을 넣고 양쪽을
 -- 쓰고, N+1 에서 옛 컬럼을 지운다. N 은 v0.1.0 이었다.
 --
+-- **번호가 20 인 이유.** 이 파일은 한때 `00006` 이었다. v0.1.0 은 1~5·7~19 를
+-- 싣고 나갔으므로, 그 사이트의 goose 는 이미 19 까지 올라가 있다. 거기에 6 을
+-- 들이밀면 goose 가 `detected 1 missing (out-of-order) migration lower than
+-- database version (19): version 6` 으로 **부팅을 거부한다** — v0.1.0 을 쓰는
+-- 모든 사이트가 업그레이드할 수 없었다. 번호는 릴리즈 순서를 거스를 수 없다.
+--
 -- **00003 의 백필은 그대로 둔다.** `WHERE u.is_admin` 은 마이그레이션 순서상
 -- 여기보다 먼저 돌아 이미 역할을 부여한 뒤다. 옛 스키마에서 올라오는 사이트가
 -- 관리자를 잃지 않는 유일한 경로이므로 지우면 안 된다.
-ALTER TABLE users DROP COLUMN is_admin;
+-- `IF EXISTS` 는 옛 `00006` 을 이미 돌린 DB(태그가 아니라 main 을 따라온 개발
+-- 인스턴스) 때문이다. 그쪽은 컬럼이 이미 없어 그냥 지나가야 한다.
+ALTER TABLE users DROP COLUMN IF EXISTS is_admin;
 
 -- +goose Down
 
