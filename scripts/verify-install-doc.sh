@@ -126,6 +126,25 @@ else
 	fail=1
 fi
 
+# **설치됐다 = 관리자가 사이트를 운영할 수 있다.** `/install` 404 는 설정 파일이
+# 써졌다는 뜻일 뿐이고, 마법사가 만든 계정으로 실제로 들어가지는지는 별개다.
+# 제3자 검증이 확인한 것도 「관리자 로그인 및 /admin/ 접근」이었다 (W4-13).
+adm=$(docker run --rm --network "$NET" alpine:3 sh -c "
+	apk add --no-cache curl >/dev/null 2>&1 || exit 9
+	curl -sS -c /tmp/j -b /tmp/j -o /dev/null -H 'Origin: http://$APP:8080' \
+		-d 'email=a@example.com' -d 'password=correct-horse-battery' \
+		http://$APP:8080/login
+	printf 'admin=%s ' \"\$(curl -sS -b /tmp/j -o /dev/null -w '%{http_code}' http://$APP:8080/admin/)\"
+	printf 'pending=%s' \"\$(curl -sS -b /tmp/j http://$APP:8080/admin/system |
+		sed -n '/대기 마이그레이션/,+1p' | grep -o '>[0-9]*<' | tr -d '><' | head -1)\"
+" 2>&1)
+case "$adm" in
+"admin=200 pending=0")
+	say "✓" "마법사가 만든 관리자로 로그인·/admin/ 접근 ok · A-602 대기 마이그레이션 0" ;;
+*)
+	say "✗" "설치는 끝났는데 관리자가 사이트에 들어가지 못한다 ($adm)"; fail=1 ;;
+esac
+
 # ⑥ 음성 대조 — chown 을 빼면 반드시 실패해야 한다.
 reset_all
 as_op 'sudo mkdir -p /opt/ondolith && cd /opt/ondolith &&

@@ -164,6 +164,32 @@ esac
 [ "$applied" = "1" ] && say "✓" "대기 마이그레이션이 부팅 때 적용됐다 ($pending)" \
 	|| { say "✗" "대기 마이그레이션이 적용되지 않았다"; fail=1; }
 
+# ③' **관리자가 업그레이드 뒤에도 사이트에 들어간다.**
+#
+# `users` 행 수만 세면 보이지 않는 실패가 있다: 대기 마이그레이션이 컬럼을
+# 지우는데(00020 이 `users.is_admin` 을 지운다) 어딘가 그것을 아직 읽고 있으면,
+# 행은 그대로 남은 채 **로그인이나 관리자 화면에서 깨진다.** 위 세 검사는 전부
+# 초록인 채로다. 제3자 검증이 실제로 확인한 것도 「관리자 로그인 및 /admin/
+# 접근」이었다 (W4-13).
+#
+# A-602 의 대기 마이그레이션이 0 인지도 함께 본다 — 부팅이 적용했다는 것과
+# 화면이 그렇게 보고한다는 것은 다른 진술이다 (NFR-302).
+adm=$(docker run --rm --network "$NET" alpine:3 sh -c "
+	apk add --no-cache curl >/dev/null 2>&1 || exit 9
+	curl -sS -c /tmp/j -b /tmp/j -o /dev/null -H 'Origin: http://$APP:8080' \
+		-d 'email=a@example.com' -d 'password=correct-horse-battery' \
+		http://$APP:8080/login
+	printf 'admin=%s ' \"\$(curl -sS -b /tmp/j -o /dev/null -w '%{http_code}' http://$APP:8080/admin/)\"
+	printf 'pending=%s' \"\$(curl -sS -b /tmp/j http://$APP:8080/admin/system |
+		sed -n '/대기 마이그레이션/,+1p' | grep -o '>[0-9]*<' | tr -d '><' | head -1)\"
+" 2>&1)
+case "$adm" in
+"admin=200 pending=0")
+	say "✓" "업그레이드 뒤 관리자 로그인·/admin/ 접근 ok · A-602 대기 마이그레이션 0" ;;
+*)
+	say "✗" "업그레이드 뒤 관리자가 사이트에 들어가지 못한다 ($adm)"; fail=1 ;;
+esac
+
 # 설정·업로드·테마가 그대로인지. 바이너리 교체가 이것들을 만지면 안 된다.
 after_hash=$(hash_of)
 if [ "$after_hash" = "$before_hash" ]; then
