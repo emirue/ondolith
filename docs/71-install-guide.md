@@ -17,6 +17,20 @@
 
 바이너리 외에 설치할 것은 없다 (NFR-102). 런타임·패키지 매니저·컨테이너가 필요 없다.
 
+**PostgreSQL 18 은 배포판 패키지로 오지 않는다.** Ubuntu 24.04 의 `apt install postgresql`
+은 **16** 을 준다 — Lightsail 에서 문서대로 밟다가 여기서 막혔다 (W4-13). PostgreSQL 공식
+apt 저장소(PGDG)에서 받는다 ([공식 절차](https://www.postgresql.org/download/linux/ubuntu/)):
+
+```bash
+sudo apt install -y postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+sudo apt update && sudo apt install -y postgresql-18
+psql --version    # → psql (PostgreSQL) 18.x
+```
+
+512MB 인스턴스에서 기본 설정(`shared_buffers` 128MB)으로 기동됐고 앱까지 올린 뒤 가용
+메모리가 약 180MB 남았다 (2026-09-02 실측, `nano_3_0`).
+
 ---
 
 ## 1. 빈 데이터베이스 만들기
@@ -78,9 +92,20 @@ cd /opt/ondolith && ./ondolith -addr 0.0.0.0:8080
 > 아직 없기 때문이다.
 >
 > 둘 중 하나를 한다:
-> - **방화벽으로 막고 설치한다** (권장)
+> - **방화벽으로 막고 설치한다** (권장). Lightsail 이면 **인스턴스 방화벽**으로 한다 —
+>   콘솔의 「네트워킹 → IPv4 방화벽」에서 8080 을 내 IP 로만 열거나:
 >   ```bash
->   sudo ufw allow from <내-IP>/32 to any port 8080
+>   aws lightsail put-instance-public-ports --instance-name <이름> \
+>     --port-infos "fromPort=22,toPort=22,protocol=tcp,cidrs=<내-IP>/32" \
+>                  "fromPort=8080,toPort=8080,protocol=tcp,cidrs=<내-IP>/32"
+>   ```
+>   **`ufw allow` 만으로는 아무것도 막히지 않는다.** Lightsail 의 Ubuntu 는 `ufw` 가
+>   **inactive** 로 온다 — `sudo ufw allow from <내-IP>/32 to any port 8080` 은
+>   `Rules updated` 를 찍고 끝이고, 규칙은 `sudo ufw enable` 전까지 적용되지 않는다.
+>   문서대로 하고 보호된다고 믿은 채 열려 있던 것을 Lightsail 에서 확인했다 (W4-13).
+>   `ufw` 를 쓰려면 **SSH 를 먼저 허용하고** 켠다 — 순서가 바뀌면 자신이 잠긴다:
+>   ```bash
+>   sudo ufw allow OpenSSH && sudo ufw allow from <내-IP>/32 to any port 8080 && sudo ufw enable
 >   ```
 >   설치를 마친 뒤 규칙을 넓힌다.
 > - **띄운 즉시 설치를 끝낸다.** 자리를 비우지 않는다.

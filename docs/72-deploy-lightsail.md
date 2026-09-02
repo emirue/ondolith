@@ -144,10 +144,17 @@ WAF를 CloudFront에 붙인다.
 업그레이드 전마다, 그리고 정기적으로:
 
 ```bash
-pg_dump -Fc ondolith > /backup/ondolith-$(date +%F).dump
-cp /opt/ondolith/ondolith.json /backup/
-tar czf /backup/uploads-$(date +%F).tgz /opt/ondolith/uploads
+sudo mkdir -p /backup
+sudo -u postgres pg_dump -Fc ondolith | sudo tee /backup/ondolith-$(date +%F).dump >/dev/null
+sudo cp /opt/ondolith/ondolith.json /backup/
+sudo tar czf /backup/uploads-$(date +%F).tgz -C /opt/ondolith uploads
 ```
+
+**`sudo` 가 붙는 이유.** 2절의 `chown -R ondolith` 뒤로 `ondolith.json` 은
+`ondolith:ondolith 600` 이라 운영자 계정은 읽지 못하고, `pg_dump` 는 운영자 계정이
+PostgreSQL 롤이 아니라서 peer 인증에서 막힌다. 앞선 판의 세 줄은 Lightsail 에서 **셋 다
+실패했다** — `/backup` 이 없고, `Permission denied`, 그리고 롤 없음 (W4-13). 백업이
+안 뜨는 것은 업그레이드 직전에 알게 된다.
 
 **세 가지를 함께 뜬다.** DB만 뜨면 첨부 파일이 없는 글이 되살아나고, 설정 파일이 없으면
 복원한 DB에 붙을 방법이 없다.
