@@ -45,12 +45,26 @@ jobs:
       - name: checksums
         run: cd dist && sha256sum ondolith-* > SHA256SUMS
 
+      # **릴리즈 노트는 CHANGELOG 의 최신 절이다.** D70 은 운영자에게 「릴리즈
+      # 노트에 ⚠️ 파괴적 변경 표시가 있으면 그것만 더 읽는다」고 한다 — 자동
+      # 생성 노트(커밋 제목 나열)에는 그 표시가 없다. checkdocs 가 같은 절에서
+      # 「백업 복원」을 요구하므로, 여기 붙는 본문에는 반드시 다운그레이드 경로가
+      # 있다. 절이 비어 있으면 릴리즈를 멈춘다 — 노트 없는 릴리즈가 조용히
+      # 나가는 것이 이 단계가 막으려는 것이다.
+      - name: release notes
+        run: |
+          awk '/^## /{n++} n==1' CHANGELOG.md > dist/RELEASE_NOTES.md
+          [ "$(wc -l < dist/RELEASE_NOTES.md)" -gt 3 ] || { echo "CHANGELOG 최신 절이 비어 있다"; exit 1; }
+          grep -q "$GITHUB_REF_NAME" dist/RELEASE_NOTES.md || { echo "CHANGELOG 최신 절이 $GITHUB_REF_NAME 이 아니다"; exit 1; }
+
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/ondolith-linux-amd64
             dist/ondolith-linux-arm64
             dist/SHA256SUMS
+          # body_path 가 자동 생성 노트 **앞에** 붙는다 (action 문서).
+          body_path: dist/RELEASE_NOTES.md
           generate_release_notes: true
 
   # 커뮤니티(비공개) 저장소에 「새 코어가 나왔다」를 알린다. 저쪽이 PR 을 연다 —
