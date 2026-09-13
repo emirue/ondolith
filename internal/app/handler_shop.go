@@ -346,7 +346,7 @@ func pgAdapterFor(provider, secret string) (string, commerce.Gateway) {
 	switch provider {
 	case "toss":
 		return provider, commerce.NewToss(secret,
-			"https://api.tosspayments.com", commerce.AuthWindow)
+			"https://api.tosspayments.com", commerce.GatewayTimeout)
 	default:
 		return "", nil
 	}

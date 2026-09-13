@@ -238,9 +238,9 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "user.update", Handler: ad.UserFieldSave})
 	r.Add(Route{Screen: "A-403", Method: "GET", Pattern: "/admin/roles", Class: SC4,
 		Permission: "role.view", Handler: ad.RoleList})
-	r.Add(Route{Screen: "A-404", Method: "POST", Pattern: "/admin/roles/{id}/permissions", Class: SC5,
+	r.Add(Route{Screen: "A-404", Method: "POST", Pattern: "/admin/roles/permissions", Class: SC5,
 		Permission: "role.manage", Handler: ad.RoleGrantPermission})
-	r.Add(Route{Screen: "A-405", Method: "POST", Pattern: "/admin/users/{id}/roles", Class: SC5,
+	r.Add(Route{Screen: "A-405", Method: "POST", Pattern: "/admin/users/roles", Class: SC5,
 		Permission: "role.assign", Handler: ad.RoleAssign})
 
 	r.Add(Route{Screen: "A-304", Method: "GET", Pattern: "/admin/boards", Class: SC4,

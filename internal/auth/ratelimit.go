@@ -60,6 +60,13 @@ func (l *Limiter) Allow(key string, lim Limit) bool {
 
 	b, ok := l.buckets[key]
 	if !ok {
+		// 새 키를 넣기 전에 커진 지도를 비운다. 한 시간 넘게 쉰 버킷은 D15
+		// 4.3-2 의 어느 창(최대 1시간)에서도 이미 가득 찼으므로 지우는 것과
+		// 있는 것이 같다 — 손실 없는 정리다. 이것이 없으면 IP 마다 하나씩
+		// 영원히 남는다: Sweep 을 부르는 곳이 실제로 없었다.
+		if len(l.buckets) >= sweepAt {
+			l.sweepLocked(now, time.Hour)
+		}
 		// A new key starts full, then immediately spends one.
 		l.buckets[key] = &bucket{tokens: float64(lim.Burst) - 1, last: now}
 		return true
@@ -95,14 +102,21 @@ func (l *Limiter) Forget(key string) {
 	l.mu.Unlock()
 }
 
-// Sweep removes buckets untouched for longer than maxIdle. Without it the map
-// grows once per distinct IP forever, which is a slow leak on a public site.
-// Callers run it from the same goroutine that already ticks; there is no
-// background worker (NFR-103).
+// Sweep removes buckets untouched for longer than maxIdle. Allow does this on
+// its own once the map is large (sweepAt); Sweep is for callers that want it
+// at a moment of their choosing. There is no background worker (NFR-103).
 func (l *Limiter) Sweep(maxIdle time.Duration) int {
-	cutoff := l.now().Add(-maxIdle)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.sweepLocked(l.now(), maxIdle)
+}
+
+// sweepAt is the map size at which Allow sweeps before inserting. 4096 개의
+// 활성 클라이언트 아래서는 아무 일도 없다.
+const sweepAt = 4096
+
+func (l *Limiter) sweepLocked(now time.Time, maxIdle time.Duration) int {
+	cutoff := now.Add(-maxIdle)
 	n := 0
 	for k, b := range l.buckets {
 		if b.last.Before(cutoff) {

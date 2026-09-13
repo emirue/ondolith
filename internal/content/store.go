@@ -135,7 +135,7 @@ func (s *Store) UpdatePage(ctx context.Context, id string, p Page) error {
 // one statement so that two publishers cannot both see `draft` and both act.
 func (s *Store) SetPageStatus(ctx context.Context, id string, to PageStatus) error {
 	var from PageStatus
-	err := s.pool.QueryRow(ctx, `SELECT status FROM pages WHERE id = $1 FOR UPDATE`, id).Scan(&from)
+	err := s.pool.QueryRow(ctx, `SELECT status FROM pages WHERE id = $1`, id).Scan(&from)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -145,9 +145,25 @@ func (s *Store) SetPageStatus(ctx context.Context, id string, to PageStatus) err
 	if err := CanTransition(from, to); err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx,
-		`UPDATE pages SET status = $2, updated_at = now() WHERE id = $1`, id, to)
-	return err
+	// 비교-교환이다. 위의 `FOR UPDATE` 는 자동 커밋 문장이라 잠금이 문장과 함께
+	// 풀렸다 — 두 발행자가 둘 다 draft 를 읽고 둘 다 지나갈 수 있었다. 읽은
+	// 상태가 그대로일 때만 옮기고, 아니면 지금 상태로 다시 판정한다.
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE pages SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`, id, to, from)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		var now PageStatus
+		if err := s.pool.QueryRow(ctx, `SELECT status FROM pages WHERE id = $1`, id).Scan(&now); err != nil {
+			return ErrNotFound
+		}
+		if err := CanTransition(now, to); err != nil {
+			return err
+		}
+		return ErrNoRowsSave
+	}
+	return nil
 }
 
 func (s *Store) DeletePage(ctx context.Context, id string) error {

@@ -63,24 +63,32 @@ func (c Comment) IsTombstone() bool { return !c.DeletedAt.IsZero() }
 func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]Post, error) {
 	// The ORDER BY comes from the allow list (listquery.go). Everything else is
 	// a bind parameter.
-	sql := `
+	//
+	// **검색 절은 검색어가 있을 때만 붙는다.** `($2 = '' OR … @@ …)` 한 줄로
+	// 두면 준비된 문장이 일반 계획으로 넘어간 뒤 OR 의 한쪽이 인덱스를 못 타
+	// GIN 인덱스(posts_search_idx)가 버려지고, 게시판 전체를 훑으며 @@ 를
+	// 평가한다 — SearchPosts 가 같은 조건을 OR 없이 쓰는 이유다.
+	head := `
 		SELECT ` + postColumns + `
 		FROM posts p
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.board_id = $1
-		  AND p.status = 'published'
-		  AND ($2 = '' OR p.search_vector @@ to_tsquery('simple', $3))
-		ORDER BY ` + q.OrderBy() + `
-		LIMIT $4 OFFSET $5`
-
+		  AND p.status = 'published'`
+	if q.Search == "" {
+		rows, err := s.pool.Query(ctx, head+`
+			ORDER BY `+q.OrderBy()+`
+			LIMIT $2 OFFSET $3`, boardID, q.PerPage, q.Offset())
+		if err != nil {
+			return nil, err
+		}
+		return scanPosts(rows)
+	}
 	// A prefix query is what actually matches Korean text: the stored token
 	// carries the particle, so the exact term misses (D30 measured this).
-	tsq := ""
-	if q.Search != "" {
-		tsq = toPrefixQuery(q.Search)
-	}
-
-	rows, err := s.pool.Query(ctx, sql, boardID, q.Search, tsq, q.PerPage, q.Offset())
+	rows, err := s.pool.Query(ctx, head+`
+		  AND p.search_vector @@ to_tsquery('simple', $2)
+		ORDER BY `+q.OrderBy()+`
+		LIMIT $3 OFFSET $4`, boardID, toPrefixQuery(q.Search), q.PerPage, q.Offset())
 	if err != nil {
 		return nil, err
 	}
@@ -91,17 +99,57 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 // returns — a pager whose total disagrees with its pages tells the visitor
 // there is a page that is not there.
 func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (int64, error) {
-	tsq := ""
-	if q.Search != "" {
-		tsq = toPrefixQuery(q.Search)
-	}
 	var n int64
+	if q.Search == "" {
+		err := s.pool.QueryRow(ctx, `
+			SELECT count(*) FROM posts p
+			WHERE p.board_id = $1 AND p.status = 'published'`, boardID).Scan(&n)
+		return n, err
+	}
 	err := s.pool.QueryRow(ctx, `
 		SELECT count(*) FROM posts p
 		WHERE p.board_id = $1 AND p.status = 'published'
-		  AND ($2 = '' OR p.search_vector @@ to_tsquery('simple', $3))`,
-		boardID, q.Search, tsq).Scan(&n)
+		  AND p.search_vector @@ to_tsquery('simple', $2)`, boardID, toPrefixQuery(q.Search)).Scan(&n)
 	return n, err
+}
+
+// SitemapEntry is all P-901 needs of a post: where it lives and when it changed.
+type SitemapEntry struct {
+	ID        string
+	BoardID   string
+	UpdatedAt time.Time
+}
+
+// SitemapPosts returns each board's newest published, non-secret posts — up to
+// perBoard each — in ONE query. 게시판마다 ListPosts 를 부르면 게시판 수만큼의
+// 왕복에 본문·커스텀 필드·댓글 수까지 실어 나른다; 크롤러가 자주 찾는 주소에
+// 그 값은 쓰이지 않는다.
+func (s *Store) SitemapPosts(ctx context.Context, boardIDs []string, perBoard int) ([]SitemapEntry, error) {
+	if len(boardIDs) == 0 || perBoard <= 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, board_id, updated_at FROM (
+			SELECT id, board_id, updated_at,
+			       row_number() OVER (PARTITION BY board_id ORDER BY created_at DESC, id DESC) AS rn
+			FROM posts
+			WHERE board_id = ANY($1) AND status = 'published' AND NOT is_secret
+		) t
+		WHERE rn <= $2
+		ORDER BY board_id, rn`, boardIDs, perBoard)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SitemapEntry
+	for rows.Next() {
+		var e SitemapEntry
+		if err := rows.Scan(&e.ID, &e.BoardID, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // PostByID reads one post. Secret posts are filtered in SQL, not after the

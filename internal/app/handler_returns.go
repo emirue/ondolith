@@ -217,6 +217,12 @@ func (d *shopDeps) exchangePayConfirm(w http.ResponseWriter, r *http.Request) {
 		d.renderPage(w, r, "order/exchange-pay.html", http.StatusConflict,
 			d.shopView(r, "교환 차액 결제", map[string]any{
 				"Order": order, "Error": "결제할 차액이 없습니다."}))
+	case errors.Is(err, commerce.ErrDepositPending), errors.Is(err, commerce.ErrPaymentDeclined):
+		// 차액 결제는 카드만 받는다 — 입금을 기다리는 교환은 재고를 잡은 채
+		// 매달려 있게 된다. 승인이 아니면 발송하지 않는다.
+		d.renderPage(w, r, "order/exchange-pay.html", http.StatusConflict,
+			d.shopView(r, "교환 차액 결제", map[string]any{
+				"Order": order, "Error": "결제가 승인되지 않았습니다. 카드로 다시 시도해 주세요."}))
 	default:
 		d.serverError(w, r, err)
 	}

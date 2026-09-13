@@ -495,12 +495,16 @@ func (s *Store) PermissionIsScoped(ctx context.Context, key string) (bool, error
 }
 
 // GrantPermission adds a permission to a role, ignoring a repeat.
-func (s *Store) GrantPermission(ctx context.Context, roleKey, permKey string) error {
+// **board 가 곧 범위다** (D15 2.4). 검증만 하고 버리면 게시판 하나에 주려던
+// 권한이 전역으로 저장되고, A-403 목록은 범위를 보여주지 않아 그 사실이
+// 보이지 않는다 — 받은 쪽은 모든 게시판에서 그 권한을 갖는다.
+func (s *Store) GrantPermission(ctx context.Context, roleKey, permKey string, board BoardID) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO role_permissions (role_id, permission_id)
-		SELECT r.id, p.id FROM roles r, permissions p
+		INSERT INTO role_permissions (role_id, permission_id, board_id)
+		SELECT r.id, p.id, NULLIF($3, '')::uuid FROM roles r, permissions p
 		WHERE r.key = $1 AND p.key = $2
-		ON CONFLICT ON CONSTRAINT role_permissions_uniq DO NOTHING`, roleKey, permKey)
+		ON CONFLICT ON CONSTRAINT role_permissions_uniq DO NOTHING`,
+		roleKey, permKey, string(board))
 	return err
 }
 

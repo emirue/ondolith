@@ -20,7 +20,7 @@
 
 <div class="adm-card">
   <h2>역할에 권한 부여</h2>
-  <form method="post" action="/admin/roles/-/permissions">
+  <form method="post" action="/admin/roles/permissions">
     <div class="adm-field-row">
       <label class="adm-field"><span>역할 키</span><input type="text" name="role" required></label>
       <label class="adm-field"><span>권한 키</span><input type="text" name="permission" required></label>
@@ -34,7 +34,7 @@
 
 <div class="adm-card">
   <h2>사용자에게 역할 부여</h2>
-  <form method="post" action="/admin/users/-/roles">
+  <form method="post" action="/admin/users/roles">
     <div class="adm-field-row">
       <label class="adm-field"><span>사용자 ID</span><input type="text" name="user_id" required></label>
       <label class="adm-field"><span>역할 키</span><input type="text" name="role" required></label>

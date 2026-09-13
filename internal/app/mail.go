@@ -11,6 +11,7 @@ import (
 	"net/smtp"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // settingsSender delivers mail using the SMTP settings A-205 stores.
@@ -29,7 +30,7 @@ type settingsSender struct {
 // fails, because nobody investigates a success.
 var ErrMailNotConfigured = errors.New("app: SMTP 설정이 없습니다")
 
-func (s settingsSender) Send(_ context.Context, to, subject, body string) error {
+func (s settingsSender) Send(ctx context.Context, to, subject, body string) error {
 	kv := s.settings("mail.smtp_host", "mail.smtp_port", "mail.smtp_user",
 		"mail.smtp_password", "mail.tls_mode", "mail.from_address", "mail.from_name")
 	host := kv["mail.smtp_host"]
@@ -54,7 +55,7 @@ func (s settingsSender) Send(_ context.Context, to, subject, body string) error 
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\n"+
 		"Content-Type: text/plain; charset=utf-8\r\n\r\n%s",
 		formatFrom(kv["mail.from_name"], from), to, subject, body)
-	return sendMail(host+":"+port, host, auth, from, []string{to}, []byte(msg))
+	return sendMail(ctx, host+":"+port, host, auth, from, []string{to}, []byte(msg))
 }
 
 // ErrMailHostBlocked is what an SMTP host inside 169.254.0.0/16 gets.
@@ -84,11 +85,21 @@ func blockMetadataAddr(_, address string, _ syscall.RawConn) error {
 // sendMail is smtp.SendMail with the dial replaced so blockMetadataAddr can
 // see the resolved address. The exchange below is the standard library's, step
 // for step; smtp.SendMail owns its own dial and offers no hook.
-func sendMail(addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
-	d := net.Dialer{Control: blockMetadataAddr}
-	conn, err := d.Dial("tcp", addr)
+//
+// **기한이 있다.** 접속 10초, 교환 전체 30초. 없으면 방화벽이 조용히 버리는
+// SMTP 호스트 하나가 시도마다 고루틴을 OS 접속 시한(리눅스 ~2분)×재시도만큼
+// 붙들고, 받아 놓고 답하지 않는 서버는 영원히 붙든다 — Mailer 가 건네는 30초
+// ctx 는 여기서 읽지 않으면 종이에만 있는 시한이다.
+func sendMail(ctx context.Context, addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	d := net.Dialer{Timeout: 10 * time.Second, Control: blockMetadataAddr}
+	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	} else {
+		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	}
 	c, err := smtp.NewClient(conn, host)
 	if err != nil {

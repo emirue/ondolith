@@ -160,13 +160,10 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	// The role comes from the path (D11 A-404 is /admin/roles/{id}/permissions).
-	// "-" is the form's placeholder when the screen has no role selected yet, in
-	// which case the body names it.
-	roleKey := r.PathValue("id")
-	if roleKey == "" || roleKey == "-" {
-		roleKey = r.PostFormValue("role")
-	}
+	// The role is named in the body (D11 A-404 is /admin/roles/permissions).
+	// 경로에 `{id}` 를 두었을 때는 guardID 가 uuid 를 요구해 이 핸들러에 도달할
+	// 수 없었다 — 역할 키는 `^[a-z][a-z0-9_]*$` 라 uuid 일 수 없다 (00002).
+	roleKey := r.PostFormValue("role")
 	permKey := r.PostFormValue("permission")
 	board := auth.BoardID(r.PostFormValue("board_id"))
 
@@ -206,7 +203,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := d.Auth.GrantPermission(ctx, role.Key, permKey); err != nil {
+	if err := d.Auth.GrantPermission(ctx, role.Key, permKey, board); err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
@@ -224,11 +221,10 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	// D11 A-405 is /admin/users/{id}/roles.
-	targetUser := r.PathValue("id")
-	if targetUser == "" || targetUser == "-" {
-		targetUser = r.PostFormValue("user_id")
-	}
+	// D11 A-405 is /admin/users/roles: the target is named in the body. A-403's
+	// form has no user selected in advance, and a path placeholder ("-") never
+	// passes guardID.
+	targetUser := r.PostFormValue("user_id")
 	roleKey := r.PostFormValue("role")
 
 	role, err := d.Auth.RoleByKey(ctx, roleKey)

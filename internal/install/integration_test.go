@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -240,6 +241,11 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 	if w.installed == nil {
 		t.Fatal("onInstalled 이 호출되지 않았다 — 운영 모드로 전환되지 않는다")
 	}
+	// 메일 링크의 주소는 설치 요청에서 잡는다 (config.SiteURL). 비어 있으면
+	// 재설정·인증 메일의 링크가 경로뿐이라 눌리지 않는다 — v0.1.0 이 그랬다.
+	if w.installed.SiteURL != "http://example.com" {
+		t.Errorf("SiteURL = %q, want http://example.com (요청의 Host)", w.installed.SiteURL)
+	}
 	if w.installed.DatabaseURL != cfg.DatabaseURL {
 		t.Error("운영 트리에 넘어간 설정이 저장된 설정과 다르다")
 	}
@@ -296,5 +302,53 @@ func TestMigrationsAreRerunnable(t *testing.T) {
 	}
 	if after != before {
 		t.Errorf("goose 적용 건수 %d → %d, 재실행에서 늘어나면 안 된다", before, after)
+	}
+}
+
+// **설정 파일이 써진 순간이 설치다** (D20). 운영 모드 전환이 실패해도 문은
+// 닫혀 있어야 한다 — 열려 있으면 포트에 닿는 누구나 자기 DSN·관리자로 다시
+// 제출해 설정을 덮어쓰고, 다음 재시작이 그 사람의 DB 로 부팅한다.
+func TestInstallStaysClosedWhenSwitchFails(t *testing.T) {
+	dsn := testDSN(t)
+	pool := freshSchema(t, dsn)
+	path := filepath.Join(t.TempDir(), "ondolith.json")
+	h, err := New(path, slog.New(slog.DiscardHandler), func(*config.Config) error {
+		return errors.New("swap failed")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &wizard{handler: h, configPath: path}
+
+	rec := w.post(installForm(dsn))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("전환 실패인데 HTTP %d", rec.Code)
+	}
+	first, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("설정이 써지지 않았다: %v", err)
+	}
+
+	again := installForm(dsn)
+	again.Set("admin_email", "attacker@example.com")
+	again.Set("site_name", "탈취")
+	rec = w.post(again)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("두 번째 제출이 HTTP %d — 설치 창이 아직 열려 있다", rec.Code)
+	}
+	after, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.SiteName != first.SiteName || after.InstalledAt != first.InstalledAt {
+		t.Errorf("두 번째 제출이 설정을 덮어썼다: %+v → %+v", first, after)
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM users WHERE email = 'attacker@example.com'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Error("두 번째 제출이 관리자를 만들었다")
 	}
 }

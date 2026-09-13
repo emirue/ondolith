@@ -227,3 +227,24 @@ func TestInstallRefusesEmailAsDisplayName(t *testing.T) {
 		t.Errorf("멀쩡한 이름이 거부됐다: %v", err)
 	}
 }
+
+// config.SiteURL 은 설치 요청의 스킴·호스트다. 프록시 뒤라면 X-Forwarded-Proto
+// 가 스킴을 정한다 (secure_cookies 와 같은 판정).
+func TestRequestOriginFollowsTheInstallRequest(t *testing.T) {
+	for _, tc := range []struct {
+		host, proto, want string
+	}{
+		{"shop.example", "", "http://shop.example"},
+		{"shop.example", "https", "https://shop.example"},
+		{"10.0.0.5:8080", "", "http://10.0.0.5:8080"},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/install", nil)
+		req.Host = tc.host
+		if tc.proto != "" {
+			req.Header.Set("X-Forwarded-Proto", tc.proto)
+		}
+		if got := requestOrigin(req); got != tc.want {
+			t.Errorf("host=%s proto=%q → %q, want %q", tc.host, tc.proto, got, tc.want)
+		}
+	}
+}

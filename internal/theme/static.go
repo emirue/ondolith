@@ -33,6 +33,15 @@ func (l *Loader) StaticHandler(prefix string) http.Handler {
 		// directory is served. Without this the whole theme is reachable —
 		// `/static/page.html` would return the raw template, `{{...}}` and all.
 		name = path.Join("static", name)
+		// 주소가 곧 ETag 다: 템플릿의 `asset` 이 내용 해시를 `?v=` 로 붙이므로
+		// 그 주소는 내용이 바뀌면 주소도 바뀐다 — 영구 캐시가 안전하다. 해시
+		// 없는 주소(직접 친 것)는 한 시간이다. 내장 자산은 ModTime 이 0 이라
+		// Last-Modified 조차 없었고, 매 방문마다 전부 다시 받았다.
+		if r.URL.Query().Get("v") != "" {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 
 		if l.dir != "" {
 			p := filepath.Join(l.dir, filepath.FromSlash(name))

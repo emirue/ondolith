@@ -92,7 +92,14 @@ func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
 // an error rather than starting anyway (FR-110): a server that comes up in the
 // wrong state has its wrong state discovered by a visitor.
 func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger) (http.Handler, func(), error) {
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pcfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app: pool: %w", err)
+	}
+	// 유휴 30분 뒤 첫 요청이 접속부터 여는 지연을 피한다. 상한은 기본값
+	// (max(4, CPU))에 둔다 — NFR-101 의 1 vCPU 상자에서 4 다.
+	pcfg.MinConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app: pool: %w", err)
 	}
@@ -132,8 +139,14 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	// Settings are read per request, not cached: A-201 changes them from the
 	// running server and FR-303 says the next request reflects it.
+	// 부팅 ctx 에서 **취소만 뗀다.** 이 클로저는 요청마다 불리는데, 부팅 ctx 는
+	// SIGTERM 에 취소되고 그 순간부터 srv.Shutdown 이 비우는 15초 동안의 모든
+	// 요청이 `context canceled` 로 빈 설정을 받았다 — 사이트 이름 없는 화면,
+	// 게이트웨이 nil 로 503 인 결제. 종료 신호는 서버가 받고, 설정 조회는 그
+	// 신호와 무관하게 끝까지 답한다.
+	settingCtx := context.WithoutCancel(ctx)
 	setting := func(keys ...string) map[string]string {
-		kv, err := contentStore.Settings(ctx, keys...)
+		kv, err := contentStore.Settings(settingCtx, keys...)
 		if err != nil {
 			log.Error("설정 조회", "err", err)
 			return map[string]string{}
@@ -204,7 +217,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	limiter := auth.NewLimiter()
 	limits := auth.DefaultLimits()
 
-	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site, dev: dev,
+	verifyRequired := func() bool {
+		return setting("auth.email_verification_required")["auth.email_verification_required"] != ""
+	}
+	// 오류 원문은 **개발 빌드에서만** 보인다. `site.dev_mode` 는 DB 설정이라
+	// 관리자 폼 하나로 켜지고, 테마 작업(FR-306 재파싱)을 위해 켜 둔 채 잊으면
+	// 공개 500 페이지가 pgx 오류·파일 경로를 찍는다 — D60 이 원문을 허용한
+	// 화면은 설치 페이지 하나다. 재파싱은 dev_mode 가, 원문 노출은 빌드가 정한다.
+	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site,
+		dev:            dev && theme.IsDevBuild(version),
+		verifyRequired: verifyRequired,
 		// P-907. 풀을 통째로 넘기지 않는다 — 헬스체크가 필요한 것은
 		// "지금 DB 에 닿는가" 하나이고, 그보다 넓은 접근은 그 화면이 더
 		// 많은 것을 말하게 되는 경로가 된다.
@@ -238,11 +260,14 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
 		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
-	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: "",
-		userFields: contentStore.UserFields,
-		verifyRequired: func() bool {
-			return setting("auth.email_verification_required")["auth.email_verification_required"] != ""
-		}}
+	// 메일 링크의 주소는 설치 때 잡아 둔 값이다 (config.SiteURL). 비어 있으면
+	// 링크가 `/password/reset/…` 뿐이라 메일에서 눌리지 않는다 — v0.1.0 으로
+	// 설치한 사이트가 그렇다. 요청의 Host 로 채우지 않는 이유는 그 필드에 있다.
+	if cfg.SiteURL == "" {
+		log.Warn("site_url 이 비어 있어 메일의 링크에 주소가 없습니다 — ondolith.json 에 site_url 을 적으세요 (예: https://example.com)")
+	}
+	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
+		userFields: contentStore.UserFields, verifyRequired: verifyRequired}
 
 	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
 	// five directions share one markup, so switching is a token swap.
@@ -304,7 +329,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			return theme.Install(cfg.Themes(), name, rd, size, replace)
 		},
 		SendReset: func(email, token string) {
-			mailer.SendAsync(email, "비밀번호 재설정", "아래 링크로 재설정하세요:\n/password/reset/"+token)
+			mailer.SendAsync(email, "비밀번호 재설정",
+				"아래 링크로 재설정하세요:\n"+strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token)
 		},
 	}
 
@@ -414,18 +440,28 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 보호가 아니다. 그 우연에 기대는 대신 아예 다른 문으로 받는다.
 	//
 	// `cms` 모드에서는 등록하지 않는다 — 커머스가 없으면 결제 웹훅도 없다.
+	var hooks http.Handler
 	if shopMode {
-		hooks := webhookMux(webhookDeps{store: commerceStore,
+		hooks = webhookMux(webhookDeps{store: commerceStore,
 			gateway: sh.gateway, pgName: sh.pgName, log: log})
-		main := h
-		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/webhooks/") {
-				hooks.ServeHTTP(w, r)
-				return
-			}
-			main.ServeHTTP(w, r)
-		})
 	}
+	// **정적 자산도 본 트리 밖이다.** 세션 로드·액터 로드·권한 조회는 화면을
+	// 위한 것이고 CSS 한 장에는 쓸 데가 없다 — 안에 두면 페이지 하나가 자산
+	// 수만큼 DB 왕복을 더 한다(1 vCPU, 풀 4). scs 가 붙이는 `Vary: Cookie` 는
+	// 공유 캐시도 막았다. 보안 헤더는 그대로 진다. 라우트 등록(P-906)은 남긴다
+	// — 기동 검사가 D11 과 대조하는 것이 그 표다.
+	staticOutside := httpsec.Headers(http.HandlerFunc(static))
+	main := h
+	h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/static/"):
+			staticOutside.ServeHTTP(w, r)
+		case hooks != nil && strings.HasPrefix(r.URL.Path, "/webhooks/"):
+			hooks.ServeHTTP(w, r)
+		default:
+			main.ServeHTTP(w, r)
+		}
+	})
 
 	cleanup := func() {
 		sessionStore.StopCleanup()

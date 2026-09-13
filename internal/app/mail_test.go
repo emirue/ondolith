@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"net"
 	"strings"
@@ -37,7 +38,7 @@ func TestBlockMetadataAddr(t *testing.T) {
 // into the dialer sendMail uses. Nothing listens on that address; Control runs
 // before connect, so the call returns our error rather than a timeout.
 func TestSendMailRefusesMetadataHost(t *testing.T) {
-	err := sendMail("169.254.169.254:25", "169.254.169.254", nil,
+	err := sendMail(context.Background(), "169.254.169.254:25", "169.254.169.254", nil,
 		"a@example.com", []string{"b@example.com"}, []byte("hi"))
 	if !errors.Is(err, ErrMailHostBlocked) {
 		t.Fatalf("sendMail to the metadata address: %v, want ErrMailHostBlocked", err)
@@ -66,7 +67,7 @@ func TestSendMailDeliversToServer(t *testing.T) {
 	}()
 
 	msg := []byte("Subject: 확인\r\n\r\n본문입니다")
-	err = sendMail(ln.Addr().String(), "127.0.0.1", nil,
+	err = sendMail(context.Background(), ln.Addr().String(), "127.0.0.1", nil,
 		"from@example.com", []string{"to@example.com"}, msg)
 	if err != nil {
 		t.Fatalf("sendMail: %v", err)

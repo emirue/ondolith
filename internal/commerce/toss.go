@@ -42,9 +42,9 @@ func (t *Toss) GoString() string { return t.String() }
 // payments.raw_response 가 커진다.
 const tossMaxBody = 1 << 20 // 1 MiB
 
-// NewToss builds the adapter. timeout 이 인자인 이유는 D50 의 10분 창 때문이다 —
-// 승인 호출이 그 창 안에서 끝나야 하고, 무한정 기다리는 클라이언트는 창을
-// 넘긴 뒤에도 매달려 있다.
+// NewToss builds the adapter. timeout 은 HTTP 왕복 하나의 시한이다
+// (GatewayTimeout) — D50 의 10분 창(AuthWindow)과 다르다. 무한정 기다리는
+// 클라이언트는 창을 넘긴 뒤에도 매달려 있다.
 func NewToss(secret, baseURL string, timeout time.Duration) *Toss {
 	return &Toss{
 		secret:  secret,

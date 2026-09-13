@@ -230,3 +230,31 @@ func TestConcurrentAllowIsRaceFree(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+// Allow 가 스스로 비운다. Sweep 을 부르는 곳이 없어 IP 마다 버킷 하나가 영원히
+// 남았다 — 한 시간 넘게 쉰 버킷은 어느 창에서도 가득 찼으므로 지워도 같다.
+func TestAllowSweepsIdleBucketsOnceLarge(t *testing.T) {
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	l := NewLimiterAt(func() time.Time { return now })
+	lim := Limit{Burst: 3, Window: time.Minute}
+	for i := 0; i < sweepAt; i++ {
+		l.Allow(fmt.Sprintf("login:ip:10.0.%d.%d", i/256, i%256), lim)
+	}
+	if got := len(l.buckets); got != sweepAt {
+		t.Fatalf("버킷 %d 개, want %d", got, sweepAt)
+	}
+	now = now.Add(2 * time.Hour)
+	l.Allow("login:ip:203.0.113.9", lim)
+	if got := len(l.buckets); got != 1 {
+		t.Errorf("두 시간 쉰 뒤 새 키를 넣었는데 버킷이 %d 개 남았다 — 지도가 영원히 자란다", got)
+	}
+	// 쉰 지 얼마 안 된 버킷은 남는다: 정리는 손실이 없어야 한다.
+	l.Allow("login:ip:203.0.113.10", lim)
+	now = now.Add(30 * time.Minute)
+	for i := 0; i < sweepAt; i++ {
+		l.Allow(fmt.Sprintf("login:ip:10.1.%d.%d", i/256, i%256), lim)
+	}
+	if !l.Allow("login:ip:203.0.113.10", lim) {
+		t.Error("30분 쉰 버킷이 지워져 다시 가득 찼어야 하는데, 지워지지 않았다면 토큰이 남아 있어야 한다")
+	}
+}

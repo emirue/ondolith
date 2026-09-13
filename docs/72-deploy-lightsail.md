@@ -99,6 +99,17 @@ server {
 }
 ```
 
+### 프록시 뒤의 속도 제한
+
+D15 4.3-2 의 IP 별 제한(로그인 10/분, 재설정 3/시간 …)은 **`RemoteAddr`** 로 센다.
+`X-Forwarded-For` 는 누구나 보낼 수 있어 믿지 않는다 — 믿으면 요청자가 자기 버킷을
+고르고 제한은 없는 것이 된다. 그 대가로, 위 nginx 처럼 같은 인스턴스의 프록시 뒤에서는
+**모든 방문자의 `RemoteAddr` 가 127.0.0.1** 이라 IP 별 제한이 **사이트 전체 제한**이
+된다: 누군가 1분에 10번 틀리면 모든 방문자의 로그인이 잠시 막히고, 계정별 제한
+(5/분)만이 남는다. 이 구성에서는 **프록시가 IP 별 제한을 맡는다** —
+`limit_req_zone $binary_remote_addr` 로 `/login`·`/password/reset`·`/signup` 을 묶는다.
+CloudFront 를 앞에 두면 WAF 의 레이트 리밋이 같은 자리다.
+
 ### `X-Forwarded-Proto`와 `secure_cookies`
 
 **설치 마법사는 이 헤더를 보고 `secure_cookies`를 정한다.** HTTPS로 접속했다고 판단하면
@@ -112,6 +123,9 @@ server {
 
 뒤 두 경우는 `/opt/ondolith/ondolith.json`의 `secure_cookies`를 직접 `true`로 고치고
 재시작한다. **설치를 다시 하지 않는다** — 설정 파일 한 줄이다.
+
+`site_url`도 같은 파일에 있다. 설치 요청의 주소를 그대로 잡으므로, 도메인을 붙이거나 TLS 로
+옮긴 뒤에는 `https://<도메인>` 으로 고친다 — 재설정·인증 메일의 링크가 이 값으로 만들어진다.
 
 ---
 

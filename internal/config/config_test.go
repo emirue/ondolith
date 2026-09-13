@@ -50,6 +50,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		SiteName:      "온돌 사이트",
 		InstalledAt:   time.Date(2026, 7, 29, 4, 58, 16, 0, time.UTC),
 		SecureCookies: true,
+		SiteURL:       "https://shop.example",
 	}
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
@@ -70,6 +71,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if got.SecureCookies != want.SecureCookies {
 		t.Errorf("SecureCookies = %v, want %v", got.SecureCookies, want.SecureCookies)
+	}
+	if got.SiteURL != want.SiteURL {
+		t.Errorf("SiteURL = %q, want %q", got.SiteURL, want.SiteURL)
 	}
 }
 

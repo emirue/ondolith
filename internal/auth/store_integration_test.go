@@ -518,3 +518,50 @@ func TestDeletingAUserWithOrdersIsRefused(t *testing.T) {
 		t.Errorf("주문의 주인이 %v 로 바뀌었다 — SET NULL 이 그대로다", owner)
 	}
 }
+
+// D15 2.4: board 가 곧 범위다. 검증만 하고 버리면 게시판 하나에 주려던 권한이
+// 전역이 되고, A-403 은 범위를 보여주지 않아 그 사실이 보이지 않는다.
+func TestGrantPermissionKeepsBoardScope(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	var board string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('scoped', '범위') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	uid, err := s.CreateUser(ctx, "mod@example.com", "h", "모드")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO roles (key, name) VALUES ('mod_x', '게시판 X 모더레이터')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='mod_x'`, uid); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.GrantPermission(ctx, "mod_x", "post.moderate", BoardID(board)); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.LoadPermissions(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.CanOn("post.moderate", BoardID(board)) {
+		t.Error("그 게시판에서 post.moderate 가 없다")
+	}
+	if p.Can("post.moderate") {
+		t.Error("게시판 하나에 준 권한이 전역이 됐다")
+	}
+
+	// 범위 없이 주면 전역이다 — 두 경로가 갈라지지 않는다.
+	if err := s.GrantPermission(ctx, "mod_x", "post.read_secret", Global); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = s.LoadPermissions(ctx, uid)
+	if !p.Can("post.read_secret") {
+		t.Error("범위 없는 부여가 전역이 아니다")
+	}
+}

@@ -228,8 +228,14 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	if req.Kind == KindExchange {
 		var newProduct string
 		var newDelta int
+		// 노출 중인 상품의 노출 중인 조합만이다 (D19 P-512: 미노출 조합은
+		// 404). 화면(VariantsForExchange)이 거른 것을 서버가 다시 거르지 않으면
+		// 운영자가 숨긴 조합을 폼 값 하나로 고를 수 있다 — 구매 경로는
+		// VariantForPurchase 가 같은 조건을 본다.
 		err := tx.QueryRow(ctx, `
-			SELECT product_id, price_delta FROM product_variants WHERE id = $1`,
+			SELECT v.product_id, v.price_delta FROM product_variants v
+			JOIN products p ON p.id = v.product_id
+			WHERE v.id = $1 AND v.is_visible AND p.is_visible`,
 			req.NewVariantID).Scan(&newProduct, &newDelta)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -932,6 +938,23 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 		}
 		return err
 	}
+	// ConfirmPayment 와 같은 두 검사다. 응답 금액이 다르면 장부가 갈리고,
+	// 200 은 승인이 아니다 — 가상계좌의 WAITING_FOR_DEPOSIT 을 승인으로 읽으면
+	// 차액을 받지 않은 채 교환품이 나간다.
+	if err := VerifyAmount(d.Amount, res.Amount); err != nil {
+		return err
+	}
+	if res.Status != PaymentApproved {
+		if _, uerr := s.pool.Exec(ctx, `
+			UPDATE payments SET status = '실패', raw_response = $2, updated_at = now()
+			WHERE id = $1`, paymentID, MaskCardFields(res.Raw)); uerr != nil {
+			return uerr
+		}
+		if res.Status == PaymentPending {
+			return fmt.Errorf("%w: 차액 결제는 즉시 승인만 받습니다", ErrDepositPending)
+		}
+		return fmt.Errorf("%w: 승인 응답 상태 %s", ErrPaymentDeclined, res.Status)
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -946,22 +969,29 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 		return err
 	}
 	// 상태 전이는 상태머신을 거친다 (D14 5절). P-514 가 일으키는 유일한 전이다.
-	if err := CanTransition(StatusExchangeDiffDue, StatusExchangeShipped, "P-514"); err != nil {
+	// **비교-교환이다.** 게이트웨이 왕복 사이에 A-511 이 반려해 주문을 되돌렸을
+	// 수 있고, 조건 없는 UPDATE 는 그 위에 교환발송을 덮어쓴다 — 표에 없는
+	// 전이를 코드가 만드는 경로다.
+	var orderStatus string
+	if err := tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1 FOR UPDATE`,
+		d.OrderID).Scan(&orderStatus); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE returns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		d.ReturnID, string(StatusExchangeShipped), string(StatusExchangeDiffDue)); err != nil {
+	if err := s.moveOrder(ctx, tx, d.OrderID, Status(orderStatus), StatusExchangeShipped, "P-514"); err != nil {
 		return err
+	}
+	tag, err := tx.Exec(ctx,
+		`UPDATE returns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
+		d.ReturnID, string(StatusExchangeShipped), string(StatusExchangeDiffDue))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: 결제하는 사이 반품 상태가 바뀌었습니다", ErrTransitionNotAllowed)
 	}
 	// 차액을 다 받았으므로 처리 중 표시를 내린다 — 그 품목에 다시 걸 수 있다.
 	if _, err := tx.Exec(ctx,
 		`UPDATE return_items SET is_open = false WHERE return_id = $1`, d.ReturnID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`,
-		d.OrderID, string(StatusExchangeShipped)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

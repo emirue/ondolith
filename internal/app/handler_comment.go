@@ -42,6 +42,10 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, loginPath, http.StatusSeeOther)
 		return
 	}
+	if d.unverified(a) {
+		d.refuseUnverified(w, r, "댓글을 쓸 수 있습니다.")
+		return
+	}
 	// A board with comments turned off has no comment form. The check is here
 	// as well, because the form's absence is UX and the POST still arrives
 	// (D15 4.3).

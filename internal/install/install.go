@@ -172,6 +172,7 @@ func (h *handler) submit(w http.ResponseWriter, r *http.Request) {
 		SiteName:      f.SiteName,
 		InstalledAt:   time.Now().UTC(),
 		SecureCookies: requestIsHTTPS(r),
+		SiteURL:       requestOrigin(r),
 	}
 
 	if err := h.provision(r.Context(), cfg, f); err != nil {
@@ -187,14 +188,18 @@ func (h *handler) submit(w http.ResponseWriter, r *http.Request) {
 		h.render(w, http.StatusInternalServerError, f)
 		return
 	}
+	// **설정 파일이 써진 순간이 설치다** (D20). 여기서 닫는다 — 아래 운영 모드
+	// 전환이 실패해도 DSN 과 관리자는 이미 있으므로, 이 문을 열어 두면 포트에
+	// 닿는 누구나 자기 DSN·관리자로 다시 제출해 설정을 덮어쓰고, 다음 재시작이
+	// 그 사람의 DB 로 부팅한다. 전환 실패는 재설치가 아니라 재시작으로 푼다.
+	h.done = true
 
 	if err := h.onInstalled(cfg); err != nil {
-		f.Error = fmt.Sprintf("운영 모드 전환에 실패했습니다: %v", err)
+		f.Error = fmt.Sprintf("운영 모드 전환에 실패했습니다: %v — 설치는 끝났습니다. 서버를 재시작하세요.", err)
 		h.render(w, http.StatusInternalServerError, f)
 		return
 	}
 
-	h.done = true
 	h.log.Info("설치 완료", "site", cfg.SiteName, "admin", f.AdminEmail)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -319,6 +324,16 @@ func (f *form) dsn() string {
 // meaningful behind a trusted reverse proxy; getting it wrong writes a wrong
 // value into the config, which the operator can edit. It is not a trust
 // boundary — nothing is authorised on the strength of this.
+// requestOrigin is the scheme and host the operator reached the wizard with —
+// the only Host header this program ever trusts (see config.SiteURL).
+func requestOrigin(r *http.Request) string {
+	scheme := "http"
+	if requestIsHTTPS(r) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
 func requestIsHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true

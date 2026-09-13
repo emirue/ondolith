@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"github.com/emirue/ondolith/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -368,4 +369,56 @@ func TestRbacHandlersCheckTheirOwnPermission(t *testing.T) {
 
 func contentItem(title, url, parent string) content.MenuItem {
 	return content.MenuItem{Title: title, URL: url, ParentID: parent}
+}
+
+// A-404 의 `board_id` 는 저장되는 값이다. 검증만 하고 버리던 판에서는 게시판
+// 단위로 준 post.moderate 가 전역으로 들어갔다.
+func TestScopedGrantIsStoredScoped(t *testing.T) {
+	d, pool := fixture(t, nil)
+	ctx := context.Background()
+	me, err := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// R4: the caller must hold what they grant; admin holds post.moderate.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`, me); err != nil {
+		t.Fatal(err)
+	}
+	var board string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO boards (slug, name) VALUES ('x', 'X') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO roles (key, name) VALUES ('mod_x', 'X')`); err != nil {
+		t.Fatal(err)
+	}
+	target, err := d.Auth.CreateUser(ctx, "mod@example.com", "h", "모드")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='mod_x'`, target); err != nil {
+		t.Fatal(err)
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me}
+	}
+
+	rec := post(d.RoleGrantPermission, "/admin/roles/permissions", url.Values{
+		"role": {"mod_x"}, "permission": {"post.moderate"}, "board_id": {board},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	p, err := d.Auth.LoadPermissions(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.CanOn("post.moderate", auth.BoardID(board)) {
+		t.Error("그 게시판에 post.moderate 가 없다")
+	}
+	if p.Can("post.moderate") {
+		t.Error("게시판 하나에 준 권한이 전역으로 저장됐다")
+	}
 }

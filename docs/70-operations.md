@@ -162,6 +162,7 @@ WAF를 CloudFront에 붙이는 구성을 권장한다.
 
 - `X-Forwarded-Proto`를 넘긴다 → 설치 시 `secure_cookies` 감지에 쓰인다
 - 이미 설치를 마쳤는데 값이 틀렸다면 `ondolith.json`의 `secure_cookies`를 직접 고친다
+- `site_url`도 설치 요청에서 잡는다. **v0.1.0 으로 설치한 사이트에는 이 키가 없다** — `ondolith.json`에 `"site_url": "https://<도메인>"`을 적고 재시작한다. 없으면 부팅 로그가 경고하고, 재설정·인증 메일의 링크에 주소가 빠진다
 
 ### systemd 유닛 예
 

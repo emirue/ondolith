@@ -22,7 +22,13 @@ type publicDeps struct {
 	loader func() *theme.Loader
 	log    *slog.Logger
 	site   func() theme.Site
-	// dev decides how much an error page says (FR-306). In production it says
+	// verifyRequired mirrors auth.email_verification_required (FR-214). 켜져
+	// 있으면 인증 전 계정은 글쓰기·주문을 할 수 없다 — 가입 직후 로그인은
+	// 되므로(P-107) 그 문은 로그인이 아니라 **쓰기** 앞에 있다.
+	verifyRequired func() bool
+	// dev decides how much an error page says. It is true only for a dev
+	// BUILD with site.dev_mode on — never from the setting alone (app.go).
+	// In production it says
 	// nothing; in development it names the cause.
 	dev bool
 	// products lists the newest visible products for the home page. nil 이면
@@ -213,6 +219,23 @@ func (d *publicDeps) renderNamed(w http.ResponseWriter, r *http.Request, name st
 func (d *publicDeps) notFound(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, "찾을 수 없습니다", "")
 	d.renderPage(w, r, "error.html", http.StatusNotFound, v)
+}
+
+// unverified reports whether FR-214 blocks this actor from writing: the setting
+// is on, the account is logged in, and the address was never verified.
+// 익명은 해당 없다 — 그쪽은 권한(post.write 등)이 정한다.
+func (d *publicDeps) unverified(a *Actor) bool {
+	return d.verifyRequired != nil && d.verifyRequired() &&
+		a.IsAuthenticated() && a.User.EmailVerifiedAt == nil
+}
+
+// refuseUnverified is the 400 D19 puts on P-205 · P-208 · P-406 for an
+// unverified account: the reason and where to get the mail again (P-113).
+func (d *publicDeps) refuseUnverified(w http.ResponseWriter, r *http.Request, what string) {
+	v := d.view(r, "이메일 인증이 필요합니다", "")
+	v.Data = map[string]string{"Detail": "이메일 인증 후 " + what +
+		" 인증 메일을 다시 받으려면 계정 화면에서 「인증 메일 재발송」을 누르세요."}
+	d.renderPage(w, r, "error.html", http.StatusBadRequest, v)
 }
 
 // P-904 — server error.

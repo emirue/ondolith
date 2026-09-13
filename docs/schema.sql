@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict hvLJ9HjDe2rmfPDCNPMG7xMADVSVlUaHZuGNxtAaKnw1UlFGhypp29nfXcwc0H7
+\restrict 3gExDr4yjLhQNyRiPiG6BRzJNcIkA61XFA32Cej2iuW88qa0vkLeDQPdVmKt4r7
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1424,6 +1424,13 @@ CREATE INDEX password_reset_tokens_user_id_idx ON public.password_reset_tokens U
 
 
 --
+-- Name: payments_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX payments_created_idx ON public.payments USING btree (created_at DESC);
+
+
+--
 -- Name: payments_exchange_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1470,6 +1477,13 @@ CREATE INDEX posts_author_id_idx ON public.posts USING btree (author_id);
 --
 
 CREATE INDEX posts_board_list_idx ON public.posts USING btree (board_id, is_pinned DESC, created_at DESC, id DESC);
+
+
+--
+-- Name: posts_recent_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_recent_idx ON public.posts USING btree (created_at DESC, id DESC) WHERE (status = 'published'::text);
 
 
 --
@@ -1599,6 +1613,13 @@ CREATE UNIQUE INDEX shipments_first_idx ON public.shipments USING btree (order_i
 
 
 --
+-- Name: shipments_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX shipments_order_idx ON public.shipments USING btree (order_id, shipped_at DESC);
+
+
+--
 -- Name: shipments_return_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1652,6 +1673,13 @@ CREATE TRIGGER operation_logs_no_delete BEFORE DELETE ON public.operation_logs F
 --
 
 CREATE TRIGGER operation_logs_no_update BEFORE UPDATE ON public.operation_logs FOR EACH ROW WHEN (((new.actor_user_id IS NOT NULL) OR (old.actor_user_id IS NULL))) EXECUTE FUNCTION public.operation_logs_append_only();
+
+
+--
+-- Name: operation_logs operation_logs_no_update_cols; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operation_logs_no_update_cols BEFORE UPDATE OF id, actor_email, action, target_type, target_id, summary, ip, created_at ON public.operation_logs FOR EACH ROW EXECUTE FUNCTION public.operation_logs_append_only();
 
 
 --
@@ -2018,5 +2046,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict hvLJ9HjDe2rmfPDCNPMG7xMADVSVlUaHZuGNxtAaKnw1UlFGhypp29nfXcwc0H7
+\unrestrict 3gExDr4yjLhQNyRiPiG6BRzJNcIkA61XFA32Cej2iuW88qa0vkLeDQPdVmKt4r7
 

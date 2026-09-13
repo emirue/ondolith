@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/emirue/ondolith/internal/commerce"
 )
@@ -107,7 +108,12 @@ func (d webhookDeps) receive(w http.ResponseWriter, r *http.Request) {
 	// 프로세스가 여기서 죽으면 그 행은 `수신` 으로 남는다 — 그것이 A-603 이
 	// 보여주는 집합이고, D50 이 자동 재처리를 두지 않기로 한 자리다.
 	go func() {
-		if err := d.store.ProcessWebhook(context.WithoutCancel(r.Context()), id, ev); err != nil {
+		// 응답과는 무관하되 무한은 아니다 — 조회 API 와 DB 를 거치는 일이고,
+		// 멈춘 PG 하나가 고루틴을 영영 붙들면 안 된다. 못 끝내면 행은 `수신`
+		// 으로 남고 A-603 이 보여준다.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Minute)
+		defer cancel()
+		if err := d.store.ProcessWebhook(ctx, d.gateway(), id, ev); err != nil {
 			d.log.Error("웹훅 처리", "pg", pg, "event", ev.EventID, "err", err)
 		}
 	}()

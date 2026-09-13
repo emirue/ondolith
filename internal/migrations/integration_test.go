@@ -1853,3 +1853,40 @@ func seedFiles(t *testing.T) []string {
 	sort.Strings(out)
 	return out
 }
+
+// D15 7절: 작업 로그는 고칠 수 없다. 00010 의 트리거는 사용자 삭제의 SET NULL 을
+// 통과시키느라 「actor_user_id 를 NULL 로 바꾸는 UPDATE」를 열어 두었는데, 그
+// UPDATE 가 다른 컬럼까지 바꾸는 것을 막지 않았다 — 한 문장으로 주체와 기록을
+// 함께 지울 수 있었다. 00021 이 나머지 컬럼을 잠근다; SET NULL 은 여전히 통한다.
+func TestOperationLogCannotBeRewrittenUnderCoverOfActorNull(t *testing.T) {
+	db, pool := testDB(t)
+	ctx := context.Background()
+	if err := Run(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var uid, logID string
+	if err := pool.QueryRow(ctx, `INSERT INTO users (email, password_hash) VALUES ('a@example.com','h') RETURNING id`).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO operation_logs (actor_user_id, actor_email, action, target_type, target_id, summary)
+		VALUES ($1, 'a@example.com', 'settings.update', 'settings', 'site.name', '원래 기록') RETURNING id`, uid).Scan(&logID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE operation_logs SET actor_user_id = NULL, summary = '고쳐 쓴 기록' WHERE id = $1`, logID); err == nil {
+		t.Fatal("actor 를 NULL 로 바꾸는 척하며 summary 를 고치는 UPDATE 가 통과했다")
+	}
+	// 정당한 경로: 사용자 삭제 → actor_user_id 만 NULL, 나머지는 그대로.
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, uid); err != nil {
+		t.Fatalf("사용자 삭제가 막혔다 — SET NULL 이 트리거에 걸렸다: %v", err)
+	}
+	var actor *string
+	var summary string
+	if err := pool.QueryRow(ctx, `SELECT actor_user_id, summary FROM operation_logs WHERE id = $1`, logID).Scan(&actor, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if actor != nil || summary != "원래 기록" {
+		t.Errorf("삭제 뒤 (actor=%v, summary=%q), want (nil, 원래 기록)", actor, summary)
+	}
+}

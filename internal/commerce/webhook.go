@@ -2,6 +2,7 @@ package commerce
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"time"
@@ -48,8 +49,8 @@ func (s *Store) RecordWebhook(ctx context.Context, pg string, ev *WebhookEvent) 
 // 어떤 결과든 `webhook_events.status` 에 남긴다. 남기지 않으면 A-603 이
 // 「처리되지 않은 웹훅」을 보여줄 수 없고, D50 이 자동 재처리를 두지 않기로
 // 한 이상 사람이 보는 그 목록이 유일한 복구 수단이다.
-func (s *Store) ProcessWebhook(ctx context.Context, eventID string, ev *WebhookEvent) error {
-	err := s.processWebhook(ctx, ev)
+func (s *Store) ProcessWebhook(ctx context.Context, gw Gateway, eventID string, ev *WebhookEvent) error {
+	err := s.processWebhook(ctx, gw, ev)
 	status, msg := "처리완료", ""
 	if err != nil {
 		status, msg = "실패", err.Error()
@@ -65,7 +66,7 @@ func (s *Store) ProcessWebhook(ctx context.Context, eventID string, ev *WebhookE
 	return err
 }
 
-func (s *Store) processWebhook(ctx context.Context, ev *WebhookEvent) error {
+func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent) error {
 	var orderID, orderStatus string
 	var total int
 	err := s.pool.QueryRow(ctx,
@@ -79,19 +80,25 @@ func (s *Store) processWebhook(ctx context.Context, ev *WebhookEvent) error {
 		return err
 	}
 
-	// **secret 대조.** 승인 응답이 준 값과 같아야 한다 (D50). 이것만으로 진실을
-	// 삼지는 않지만, 다르면 우리 결제에 대한 알림이 아니다.
-	var stored string
+	// 살아 있는 주문결제 행 하나. '승인' 만 찾으면 가상계좌(입금 전 '대기')의
+	// 입금 알림이 「승인된 결제가 없다」로 떨어져 영영 결제완료가 되지 않는다.
+	var paymentID, paymentKey, payStatus, stored string
 	err = s.pool.QueryRow(ctx, `
-		SELECT COALESCE(secret, '') FROM payments
-		WHERE order_id = $1 AND kind = '주문결제' AND status = '승인'`, orderID).Scan(&stored)
+		SELECT id, payment_key, status, COALESCE(secret, '') FROM payments
+		WHERE order_id = $1 AND kind = '주문결제' AND status <> '실패'`, orderID).
+		Scan(&paymentID, &paymentKey, &payStatus, &stored)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: 승인된 결제가 없다", ErrNoPayment)
+		return fmt.Errorf("%w: 살아 있는 결제가 없다", ErrNoPayment)
 	}
 	if err != nil {
 		return err
 	}
-	if stored != "" && ev.Secret != stored {
+	// **secret 대조.** 승인 응답이 준 값과 같아야 한다 (D50). 상수 시간이다 —
+	// `!=` 는 앞에서부터 비교하다 멈추므로 한 글자씩 맞춰 볼 수 있다. 어느 한
+	// 쪽에만 있는 것도 불일치다: 우리 쪽에 secret 이 있는데 알림이 비어 오면
+	// 그 알림은 우리 결제에 대한 것이 아니다.
+	if (stored != "" || ev.Secret != "") &&
+		subtle.ConstantTimeCompare([]byte(ev.Secret), []byte(stored)) != 1 {
 		return errors.New("commerce: 웹훅 secret 이 승인 응답과 다릅니다")
 	}
 
@@ -99,7 +106,46 @@ func (s *Store) processWebhook(ctx context.Context, ev *WebhookEvent) error {
 	if ev.Amount > 0 && ev.Amount != total {
 		return fmt.Errorf("%w: 주문 %d, 웹훅 %d", ErrAmountMismatch, total, ev.Amount)
 	}
-	return nil
+	if payStatus != string(PaymentPending) {
+		return nil
+	}
+
+	// **입금 확인.** 진실은 웹훅 본문이 아니라 조회 API 다 (D50 — secret 은
+	// 아는 사람이 흉내낼 수 있고, 그 사람이 곧 우리에게 입금을 통보할 수
+	// 있다). 웹훅은 「지금 물어볼 때」를 알려줄 뿐이고, PG 가 DONE 과 우리
+	// 금액을 답해야만 입금대기 → 결제완료 로 옮긴다 (D14: P-905).
+	if gw == nil {
+		return errors.New("commerce: 게이트웨이 없이 입금을 확인할 수 없습니다")
+	}
+	got, err := gw.Get(ctx, paymentKey)
+	if err != nil {
+		return err
+	}
+	if got == nil || got.Status != PaymentApproved {
+		return nil // 아직 입금 전이다. 다음 알림이 다시 묻는다.
+	}
+	if err := VerifyAmount(total, got.Amount); err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := s.moveOrder(ctx, tx, orderID, Status(orderStatus), StatusPaid, "P-905"); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE payments SET status = '승인', approved_at = now(), raw_response = $2,
+		       updated_at = now()
+		WHERE id = $1 AND status = '대기'`, paymentID, MaskCardFields(got.Raw))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: 확인하는 사이 결제 상태가 바뀌었습니다", ErrTransitionNotAllowed)
+	}
+	return tx.Commit(ctx)
 }
 
 // WebhookRow is one row of A-603.

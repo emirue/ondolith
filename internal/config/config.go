@@ -29,6 +29,16 @@ type Config struct {
 	// server later moves behind (or out from behind) TLS.
 	SecureCookies bool `json:"secure_cookies"`
 
+	// SiteURL is the origin that emailed links (password reset, address
+	// verification) point at. Captured at install time from the operator's
+	// own request; edit this file if the domain or scheme changes later.
+	//
+	// It is deliberately NOT derived from each request's Host header: a reset
+	// mail is sent to the victim, and a forged Host would make its link point
+	// at the attacker's server (reset poisoning). The install request is the
+	// one Host we can trust — the operator typed it.
+	SiteURL string `json:"site_url"`
+
 	// UploadDir holds attachments. It is configuration and not a fixed path
 	// because NFR-304 says an upgrade replaces the binary and nothing else —
 	// a path compiled in would move with the binary, and the files would not.

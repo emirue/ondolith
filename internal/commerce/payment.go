@@ -21,10 +21,25 @@ var (
 	// "이미 결제된 주문" 과 다르다 — 이쪽은 PG 쪽 이상이거나 우리가 키를
 	// 잘못 옮긴 것이고, A-508 대사가 볼 대상이다.
 	ErrPaymentKeyReused = errors.New("commerce: 이미 기록된 승인 키입니다")
+	// ErrDepositPending 은 승인 응답이 200 이되 **입금 전**이라는 뜻이다 —
+	// 가상계좌는 계좌를 발급했을 뿐인 WAITING_FOR_DEPOSIT 을 200 으로 준다.
+	// 오류가 아니라 「아직 결제완료가 아니다」는 사실이고, 주문은 입금대기에
+	// 있다. 결제완료는 P-905 가 조회 API 로 DONE 을 확인한 뒤에만 한다.
+	ErrDepositPending = errors.New("commerce: 입금 대기 중입니다")
+	// ErrPaymentDeclined 는 승인 응답이 200 이되 상태가 취소·만료 등 확정된
+	// 실패라는 뜻이다. 결과 불명(ErrPaymentUnknown)과 다르다 — 이쪽은 재결제
+	// 경로를 열어도 된다.
+	ErrPaymentDeclined = errors.New("commerce: 결제가 승인되지 않았습니다")
 )
 
 // AuthWindow is D50's 10분. 리다이렉트 후 이 시간 안에 승인 API 를 불러야 한다.
 const AuthWindow = 10 * time.Minute
+
+// GatewayTimeout bounds ONE HTTP round trip to the PG. AuthWindow 는 업무 창이지
+// 호출 시한이 아니다 — 그것을 클라이언트 시한으로 쓰면 PG 가 멈췄을 때 P-408
+// 이 10분을 기다리는데, 브라우저는 WriteTimeout(60초)에 이미 끊겨 있다. 결과
+// 불명은 ErrPaymentUnknown 으로 조회 경로를 탄다 (D50).
+const GatewayTimeout = 30 * time.Second
 
 // ConfirmPayment is P-408's body.
 //
@@ -144,31 +159,42 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 		return nil, err
 	}
 
-	// 상태 전이는 상태머신을 거친다. 여기서 UPDATE 를 직접 쓰면 D14 5절의
-	// 표가 이 경로에는 적용되지 않는다.
-	if err := CanTransition(Status(status), StatusPaid, "P-408"); err != nil {
-		return nil, err
-	}
-
-	// 비교-교환이다. 위에서 읽은 상태가 그대로일 때만 옮긴다.
+	// **HTTP 200 은 승인이 아니다 — 응답의 상태가 승인이다.** 가상계좌는
+	// 계좌를 발급했을 뿐인 WAITING_FOR_DEPOSIT 을 200 으로 주고, 취소·만료도
+	// 200 에 실려 온다. 상태를 보지 않고 결제완료로 옮기면 **입금 없이 물건이
+	// 나간다** — 운영자는 A-506 에서 결제완료를 보고 발송하기 때문이다.
 	//
-	// 상태는 승인 API 왕복 **전에** 읽은 값이다. 그 사이 A-507 이 취소로 옮겼을
-	// 수 있고, 조건 없는 UPDATE 는 취소된 주문을 결제완료로 되돌린다 — 역전이
-	// 금지(D14)를 코드가 스스로 어기는 경로다.
-	tag, err := tx2.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		orderID, string(StatusPaid), status)
-	if err != nil {
-		return nil, err
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, fmt.Errorf("%w: 승인하는 사이 주문 상태가 %s 에서 바뀌었습니다",
-			ErrTransitionNotAllowed, status)
+	//   승인   → 결제대기 → 결제완료 (P-408)
+	//   대기   → 결제대기 → 입금대기 (시스템: 가상계좌 발급, D14 5절).
+	//            결제완료는 P-905 웹훅이 조회 API 로 DONE 을 확인한 뒤에만.
+	//   실패   → payments 만 '실패'. 부분 유니크가 재결제 경로를 연다.
+	switch res.Status {
+	case PaymentApproved:
+		if err := s.moveOrder(ctx, tx2, orderID, Status(status), StatusPaid, "P-408"); err != nil {
+			return nil, err
+		}
+	case PaymentPending:
+		if err := s.moveOrder(ctx, tx2, orderID, Status(status), StatusDepositPending, ActorSystem); err != nil {
+			return nil, err
+		}
+	default:
+		if _, err := tx2.Exec(ctx, `
+			UPDATE payments SET status = '실패', raw_response = $2, updated_at = now()
+			WHERE id = $1`, paymentID, MaskCardFields(res.Raw)); err != nil {
+			return nil, err
+		}
+		if err := tx2.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: 승인 응답 상태 %s", ErrPaymentDeclined, res.Status)
 	}
 	// secret 을 함께 남긴다 — 웹훅이 올 때 대조할 상대가 이것뿐이다 (D50).
+	// approved_at 은 승인일 때만 찍는다. 입금 전 결제에 승인 시각이 있으면
+	// A-508 대사가 그것을 승인으로 읽는다.
 	if _, err := tx2.Exec(ctx, `
-		UPDATE payments SET status = $2, approved_at = now(), raw_response = $3,
-		       secret = NULLIF($4, ''), updated_at = now()
+		UPDATE payments SET status = $2,
+		       approved_at = CASE WHEN $2 = '승인' THEN now() ELSE approved_at END,
+		       raw_response = $3, secret = NULLIF($4, ''), updated_at = now()
 		WHERE id = $1`, paymentID, string(res.Status), MaskCardFields(res.Raw),
 		res.Secret); err != nil {
 		return nil, err
@@ -177,7 +203,34 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 	if err := tx2.Commit(ctx); err != nil {
 		return nil, err
 	}
+	if res.Status == PaymentPending {
+		return res, ErrDepositPending
+	}
 	return res, nil
+}
+
+// moveOrder is the compare-and-swap every payment-driven transition uses.
+//
+// 상태 전이는 상태머신을 거친다 — 여기서 UPDATE 를 직접 쓰면 D14 5절의 표가
+// 이 경로에는 적용되지 않는다. 그리고 비교-교환이다: `from` 은 승인 API 왕복
+// **전에** 읽은 값이라 그 사이 A-507 이 취소로 옮겼을 수 있고, 조건 없는
+// UPDATE 는 취소된 주문을 결제완료로 되돌린다 — 역전이 금지(D14)를 코드가
+// 스스로 어기는 경로다.
+func (s *Store) moveOrder(ctx context.Context, tx pgx.Tx, orderID string, from, to Status, actor Actor) error {
+	if err := CanTransition(from, to, actor); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx,
+		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
+		orderID, string(to), string(from))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: 처리하는 사이 주문 상태가 %s 에서 바뀌었습니다",
+			ErrTransitionNotAllowed, from)
+	}
+	return nil
 }
 
 // cardish matches anything long enough to be a card number, with or without

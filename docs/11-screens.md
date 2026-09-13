@@ -217,8 +217,8 @@
 | A-401 | 사용자 목록 | `/admin/users` | GET | 권한:user.view | 없음 | SC-4 | FR-704 |
 | A-402 | 사용자 상세·편집 | `/admin/users/{id}` | GET, POST | 권한:user.update | 있음 | SC-5 | FR-207, FR-704 |
 | A-403 | 역할 목록·정의 | `/admin/roles` | GET | 권한:role.manage | 있음 | SC-5 | FR-205, FR-704 |
-| A-404 | 역할 권한 편집 | `/admin/roles/{id}/permissions` | POST | 권한:role.manage | 있음 | SC-5 | FR-205 |
-| A-405 | 사용자 역할 부여 | `/admin/users/{id}/roles` | POST | 권한:role.assign | 있음 | SC-5 | FR-205, FR-704 |
+| A-404 | 역할 권한 편집 | `/admin/roles/permissions` | POST | 권한:role.manage | 있음 | SC-5 | FR-205 |
+| A-405 | 사용자 역할 부여 | `/admin/users/roles` | POST | 권한:role.assign | 있음 | SC-5 | FR-205, FR-704 |
 | A-406 | 회원 프로필 항목 정의 | `/admin/user-fields` | GET, POST | 권한:user.update | 있음 | SC-5 | FR-215 |
 
 ### A-5xx 커머스 관리

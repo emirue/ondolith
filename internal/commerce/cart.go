@@ -75,16 +75,19 @@ func (s *Store) cartID(ctx context.Context, tx pgx.Tx, o CartOwner) (string, err
 // 담기는 재고를 **차감하지 않는다.** 차감은 주문 생성(P-406)이 한다 — 장바구니가
 // 재고를 잡으면 담아 두고 안 사는 사람이 품절을 만든다.
 func (s *Store) AddToCart(ctx context.Context, o CartOwner, variantID string, qty int) error {
+	// 조합 읽기는 트랜잭션 **앞**이다. 안에서 풀로 읽으면 요청 하나가
+	// 커넥션 둘을 잡고(풀 상한 4), 그 읽기는 어차피 트랜잭션 밖의 스냅샷이다
+	// — 재고 확인은 안내용이고 차감은 주문 생성이 잠그고 한다 (stock.go).
+	_, sell, err := s.VariantForPurchase(ctx, variantID)
+	if err != nil {
+		return err
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-
-	_, sell, err := s.VariantForPurchase(ctx, variantID)
-	if err != nil {
-		return err
-	}
 
 	cart, err := s.cartID(ctx, tx, o)
 	if err != nil {

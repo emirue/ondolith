@@ -206,6 +206,10 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, loginPath, http.StatusSeeOther)
 		return
 	}
+	if d.unverified(a) {
+		d.refuseUnverified(w, r, "글을 쓸 수 있습니다.")
+		return
+	}
 	ctx := r.Context()
 	form, fields, ok2 := d.readPostForm(w, r, b)
 	if !ok2 {

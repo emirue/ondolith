@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
-	"github.com/emirue/ondolith/internal/content"
 )
 
 // urlEntry is one <url> in the sitemap.
@@ -54,32 +53,32 @@ func (d *boardDeps) sitemap(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	var readable []string
+	slugOf := map[string]string{}
 	for _, b := range boards {
 		if !anon.CanOn("post.read", auth.BoardID(b.ID)) {
 			continue
 		}
+		readable = append(readable, b.ID)
+		slugOf[b.ID] = b.Slug
 		set.URLs = append(set.URLs, urlEntry{Loc: base + "/board/" + b.Slug})
-
-		posts, err := d.content.ListPosts(ctx, b.ID,
-			content.ListQuery{Sort: "created", Desc: true, PerPage: sitemapPostsPerBoard})
-		if err != nil {
-			d.serverError(w, r, err)
-			return
-		}
-		for _, p := range posts {
-			// 비밀글은 목록에는 나오지만 사이트맵에는 넣지 않는다. 크롤러가
-			// 여는 것은 본문이고, 익명에게 그 본문은 404 다 — 404 로 가는
-			// URL 을 색인시키는 것은 사이트맵의 목적과 반대다.
-			if p.IsSecret {
-				continue
-			}
-			set.URLs = append(set.URLs, urlEntry{
-				Loc:     base + "/board/" + b.Slug + "/" + p.ID,
-				LastMod: p.UpdatedAt.UTC().Format(time.RFC3339),
-			})
-		}
+	}
+	// 비밀글은 목록에는 나오지만 사이트맵에는 넣지 않는다 — 크롤러가 여는 것은
+	// 본문이고, 익명에게 그 본문은 404 다. 질의가 그 조건을 이미 걸고 있다.
+	posts, err := d.content.SitemapPosts(ctx, readable, sitemapPostsPerBoard)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	for _, p := range posts {
+		set.URLs = append(set.URLs, urlEntry{
+			Loc:     base + "/board/" + slugOf[p.BoardID] + "/" + p.ID,
+			LastMod: p.UpdatedAt.UTC().Format(time.RFC3339),
+		})
 	}
 
+	// 크롤러는 이 주소를 자주 찾고, 매번 만들면 그때마다 위의 질의가 돈다.
+	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	if _, err := w.Write([]byte(xml.Header)); err != nil {
 		return

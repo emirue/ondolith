@@ -87,6 +87,12 @@ func (d *shopDeps) checkoutCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := ActorFrom(ctx)
+	// FR-214: 인증 전 계정은 주문할 수 없다. 비회원은 해당 없다 — 그쪽은
+	// 주문자 이메일이 곧 비회원 조회의 대조 키다 (P-504).
+	if d.unverified(a) {
+		d.refuseUnverified(w, r, "주문할 수 있습니다.")
+		return
+	}
 
 	form := commerce.OrderForm{
 		ReceiverName:  r.PostFormValue("receiver_name"),
@@ -218,12 +224,12 @@ func (d *shopDeps) checkoutSuccess(w http.ResponseWriter, r *http.Request) {
 	// 콜백의 orderId 는 **대조용일 뿐**이다. 이 값으로 주문을 조회하지 않는다
 	// (D19 P-408) — 조회 키로 쓰면 남의 주문번호로 남의 주문을 승인시킬 수 있다.
 	if q := r.URL.Query().Get("orderId"); q != order.OrderNo {
-		d.renderFail(w, r, "결제 정보가 주문과 맞지 않습니다.")
+		d.refuseConfirm(w, r, "결제 정보가 주문과 맞지 않습니다.")
 		return
 	}
 	amount, err := strconv.Atoi(r.URL.Query().Get("amount"))
 	if err != nil {
-		d.renderFail(w, r, "결제 정보가 올바르지 않습니다.")
+		d.refuseConfirm(w, r, "결제 정보가 올바르지 않습니다.")
 		return
 	}
 
@@ -235,15 +241,21 @@ func (d *shopDeps) checkoutSuccess(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrAlreadyPaid):
 		// 새로고침이 여기로 온다. 오류가 아니라 완료로 보낸다.
 		http.Redirect(w, r, "/checkout/complete", http.StatusSeeOther)
+	case errors.Is(err, commerce.ErrDepositPending):
+		// 가상계좌: 계좌는 발급됐고 입금은 아직이다. 주문은 입금대기이고 P-410
+		// 이 그 상태를 그대로 보여준다. 결제완료는 웹훅이 입금을 확인한 뒤다.
+		http.Redirect(w, r, "/checkout/complete", http.StatusSeeOther)
+	case errors.Is(err, commerce.ErrPaymentDeclined):
+		d.refuseConfirm(w, r, "결제가 승인되지 않았습니다. 다른 결제 수단으로 다시 시도해 주세요.")
 	case errors.Is(err, commerce.ErrAuthWindowClosed):
-		d.renderFail(w, r, "결제 시간이 지났습니다. 다시 결제해 주세요.")
+		d.refuseConfirm(w, r, "결제 시간이 지났습니다. 다시 결제해 주세요.")
 	case errors.Is(err, commerce.ErrAmountMismatch):
-		d.renderFail(w, r, "결제 금액이 주문 금액과 다릅니다.")
+		d.refuseConfirm(w, r, "결제 금액이 주문 금액과 다릅니다.")
 	case errors.Is(err, commerce.ErrPaymentUnknown):
-		d.renderFail(w, r, "결제 결과를 확인하지 못했습니다. 잠시 후 주문 내역을 확인해 주세요.")
+		d.refuseConfirm(w, r, "결제 결과를 확인하지 못했습니다. 잠시 후 주문 내역을 확인해 주세요.")
 	default:
 		d.log.Warn("결제 승인 실패", "order", order.OrderNo, "err", err)
-		d.renderFail(w, r, "결제가 완료되지 않았습니다.")
+		d.refuseConfirm(w, r, "결제가 완료되지 않았습니다.")
 	}
 }
 
@@ -281,8 +293,18 @@ func failMessage(code string) string {
 	return "결제가 완료되지 않았습니다."
 }
 
+// renderFail is P-409's landing: the PG sent the customer back. 요청 자체는
+// 정상이므로 200 이다.
 func (d *shopDeps) renderFail(w http.ResponseWriter, r *http.Request, msg string) {
 	d.renderPage(w, r, "shop/fail.html", http.StatusOK,
+		d.shopView(r, "결제 실패", map[string]any{"Message": msg}))
+}
+
+// refuseConfirm is P-408 refusing to confirm: same screen, but the request was
+// read and could not be honoured — 400 (D19 P-408, 0.3 규약). 200 으로 그리면
+// 「실패 화면이 떴다」와 「승인됐다」가 상태코드에서 구분되지 않는다.
+func (d *shopDeps) refuseConfirm(w http.ResponseWriter, r *http.Request, msg string) {
+	d.renderPage(w, r, "shop/fail.html", http.StatusBadRequest,
 		d.shopView(r, "결제 실패", map[string]any{"Message": msg}))
 }
 
