@@ -47,6 +47,7 @@
 | D83 | [83-browser-test.md](83-browser-test.md) | **브라우저 수동 테스트 시나리오.** 설치부터 커머스 한 바퀴 | 화면을 직접 확인할 때 |
 | D84 | [84-logo-brief.md](84-logo-brief.md) | **로고 제작 요청서.** 외부 도구에 붙여 넣는 요청문 + 검수 항목 | 로고를 만들거나 교체할 때 |
 | D85 | [85-gaps.md](85-gaps.md) | **결함·미검증 대장.** 게이트가 초록이어도 확인되지 않은 것 (`GAP-##`) · 알려진 결함 (`BUG-##`) | 무엇이 확인되지 않았는지 볼 때 |
+| D86 | [86-security-performance-checklist.md](86-security-performance-checklist.md) | **보안·성능 점검 목록.** 항목마다 어디·어떻게·마지막 확인 상태 (✓/△/—) | 보안·성능을 점검하거나 새 기능의 점검 항목을 더할 때 |
 | D90 | [90-conventions.md](90-conventions.md) | **문서 작성 규칙.** 번호·ID·추가 절차·기계 검증 | 문서를 쓰기 전 |
 
 ## 작업 지침 (`.ai/`)
