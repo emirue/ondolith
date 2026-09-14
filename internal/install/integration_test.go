@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/emirue/ondolith/internal/config"
+	"github.com/emirue/ondolith/internal/secretbox"
 )
 
 // These exercise the wizard against a real PostgreSQL, because the parts worth
@@ -243,6 +244,10 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 	}
 	// 메일 링크의 주소는 설치 요청에서 잡는다 (config.SiteURL). 비어 있으면
 	// 재설정·인증 메일의 링크가 경로뿐이라 눌리지 않는다 — v0.1.0 이 그랬다.
+	// 자격증명 봉인 키는 설치가 만든다 (D60 「저장된 자격증명」).
+	if _, err := secretbox.New(w.installed.SecretKey); err != nil {
+		t.Errorf("설치가 쓸 수 있는 secret_key 를 만들지 않았다: %q (%v)", w.installed.SecretKey, err)
+	}
 	if w.installed.SiteURL != "http://example.com" {
 		t.Errorf("SiteURL = %q, want http://example.com (요청의 Host)", w.installed.SiteURL)
 	}

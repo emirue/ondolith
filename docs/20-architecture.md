@@ -68,6 +68,7 @@ cmd/ondolith/          main. 플래그, 부팅 분기, 핸들러 교체, gracefu
 internal/
   config/              설정 파일 읽기·쓰기. 파일 존재 = 설치 완료 플래그
   httpsec/             모든 응답이 지는 보안 헤더. 설치·운영 **양 트리**가 같은 것을 쓴다
+  secretbox/           자격증명 봉인(AES-256-GCM). `settings` 의 PG 시크릿·SMTP 비밀번호·소셜 client_secret 을 `ondolith.json` 의 `secret_key` 로 봉인·개봉 (D60 「저장된 자격증명」)
   install/             설치 트리 — 라우트 + 폼 검증 + 프로비저닝 + 템플릿(embed)
   app/                 운영 트리 — 풀·세션·라우트 조립
   migrations/          goose 마이그레이션 (embed.FS) + Run()
@@ -194,6 +195,7 @@ mux.HandleFunc("GET /board/{slug}/{id}", view)
 | `installed_at` | 설치 시각 (UTC) |
 | `secure_cookies` | 세션 쿠키 `Secure` 플래그. 설치 시 감지, 운영자가 편집 가능 |
 | `site_url` | 메일 링크(비밀번호 재설정·주소 인증)의 주소. 설치 요청의 스킴·호스트에서 잡는다 — **요청의 Host 로 매번 만들지 않는다**(재설정 링크 오염). 도메인·TLS 가 바뀌면 운영자가 편집 |
+| `secret_key` | `settings` 의 자격증명(PG 시크릿·SMTP 비밀번호·소셜 client_secret)을 봉인하는 키. 설치가 만든다(base64 32바이트). **DB 가 아니라 여기 있는 이유**: DB 덤프가 새도 이 파일 없이는 풀리지 않는다. DB 와 함께 백업한다 — 없으면 저장된 자격증명을 다시 입력해야 한다 |
 
 쓰기는 임시 파일 + `rename`으로 원자적이다. 부분 기록된 설정 파일이 남으면 다음 부팅이
 FR-110에 걸려 기동하지 못한다.

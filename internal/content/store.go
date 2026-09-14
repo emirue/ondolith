@@ -3,6 +3,8 @@ package content
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,9 +24,36 @@ var (
 // into a statement, and there is no sort/filter column taken from the request —
 // when one is needed it goes through an allow-list, never through escaping
 // (D22 6절).
-type Store struct{ pool *pgxpool.Pool }
+type Store struct {
+	pool   *pgxpool.Pool
+	sealer Sealer
+}
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// Sealer is what seals a secret setting on the way in and opens it on the way
+// out. secretbox.Box satisfies it; the store does not import that package so
+// the tests can pass a stub.
+type Sealer interface {
+	Seal(name, plaintext string) (string, error)
+	Open(name, stored string) (plaintext string, sealed bool, err error)
+}
+
+// UseSealer makes Settings/PutSettings seal the keys IsSecretSetting names.
+// nil turns it off (tests without a config file).
+func (s *Store) UseSealer(box Sealer) { s.sealer = box }
+
+// IsSecretSetting names the settings that never sit in the database as
+// plaintext and never travel back to the browser: **한 곳**이다. admin 의
+// 「다시 보여주지 않는다」와 이 파일의 「봉인한다」가 같은 목록을 봐야, 새 자격
+// 증명을 한쪽에만 등록하는 실수가 다른 쪽에서 드러난다.
+func IsSecretSetting(key string) bool {
+	switch key {
+	case "pg.secret_key", "mail.smtp_password":
+		return true
+	}
+	return strings.HasPrefix(key, "social.") && strings.HasSuffix(key, ".client_secret")
+}
 
 type Page struct {
 	ID       string
@@ -192,6 +221,16 @@ func (s *Store) Settings(ctx context.Context, keys ...string) (map[string]string
 		if err := rows.Scan(&k, &v); err != nil {
 			return nil, err
 		}
+		if s.sealer != nil && IsSecretSetting(k) {
+			// 열리지 않는 값을 평문인 척 돌려주지 않는다 — 키가 바뀐 설정 파일로
+			// 부팅한 경우이고, 그 시크릿으로 PG 를 부르면 401 이 아니라 엉뚱한
+			// 실패가 난다. 오류가 원인을 말한다.
+			pt, _, err := s.sealer.Open(k, v)
+			if err != nil {
+				return nil, fmt.Errorf("설정 %s: %w", k, err)
+			}
+			v = pt
+		}
 		out[k] = v
 	}
 	return out, rows.Err()
@@ -212,11 +251,51 @@ func (s *Store) PutSettings(ctx context.Context, kv map[string]string) error {
 		INSERT INTO settings (key, value) VALUES ($1, $2)
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`
 	for k, v := range kv {
+		if s.sealer != nil && IsSecretSetting(k) {
+			sealed, err := s.sealer.Seal(k, v)
+			if err != nil {
+				return err
+			}
+			v = sealed
+		}
 		if _, err := tx.Exec(ctx, q, k, v); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// SealLegacySecrets re-writes secret settings that were stored before sealing
+// existed (v0.1.0·v0.2.0 설치). 부팅 때 한 번 돈다: 평문인 채 남은 값이 있으면
+// 그 백업은 여전히 평문을 담고 있다.
+func (s *Store) SealLegacySecrets(ctx context.Context) (int, error) {
+	if s.sealer == nil {
+		return 0, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT key, value FROM settings
+		WHERE (key IN ('pg.secret_key', 'mail.smtp_password') OR key LIKE 'social.%.client_secret')
+		  AND value <> '' AND value NOT LIKE 'enc:v1:%'`)
+	if err != nil {
+		return 0, err
+	}
+	legacy := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		legacy[k] = v
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(legacy) == 0 {
+		return 0, nil
+	}
+	return len(legacy), s.PutSettings(ctx, legacy)
 }
 
 // MenuItems reads the whole tree in ONE query. The theme renders the menu on

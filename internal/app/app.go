@@ -30,6 +30,7 @@ import (
 	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/httpsec"
 	"github.com/emirue/ondolith/internal/migrations"
+	"github.com/emirue/ondolith/internal/secretbox"
 	"github.com/emirue/ondolith/internal/theme"
 )
 
@@ -126,6 +127,35 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	authStore := auth.NewStore(pool)
 	contentStore := content.NewStore(pool)
+	// 자격증명 봉인 (secretbox). 키는 설정 파일에 산다 — DB 가 지키려는 대상이라
+	// 거기 둘 수 없고, 관리자가 매번 입력하면 재시작이 사람에게 묶인다.
+	// 설치가 만들지만 v0.1.0·v0.2.0 설치본에는 없으므로 여기서 만들어 저장한다.
+	// 저장할 수 없으면 기동하지 않는다: 이번에 봉인한 값을 다음 부팅이 못 연다.
+	if cfg.SecretKey == "" {
+		k, err := secretbox.NewKey()
+		if err != nil {
+			return nil, nil, fmt.Errorf("app: secret_key: %w", err)
+		}
+		cfg.SecretKey = k
+		if cfg.Path != "" {
+			if err := config.Save(cfg.Path, cfg); err != nil {
+				return nil, nil, fmt.Errorf("app: secret_key 를 %s 에 저장하지 못했습니다 — 봉인한 시크릿을 다음 부팅이 열 수 없다: %w", cfg.Path, err)
+			}
+			log.Warn("secret_key 를 만들어 저장했습니다 — 설정 파일을 DB 와 함께 백업하세요 (D72 5절)", "path", cfg.Path)
+		} else {
+			log.Warn("secret_key 가 없고 설정 파일 경로도 없어 이번 프로세스에서만 쓰는 키로 봉인합니다")
+		}
+	}
+	box, err := secretbox.New(cfg.SecretKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app: secret_key: %w", err)
+	}
+	contentStore.UseSealer(box)
+	if n, err := contentStore.SealLegacySecrets(ctx); err != nil {
+		return nil, nil, fmt.Errorf("app: 평문 시크릿 봉인: %w", err)
+	} else if n > 0 {
+		log.Info("평문으로 저장돼 있던 자격증명을 봉인했습니다", "count", n)
+	}
 
 	// **업로드 디렉터리를 만든다.** 아무도 만들지 않아서 `os.OpenRoot` 가 없는
 	// 경로에서 실패했고, 그래서 첨부는 화면을 붙여도 저장될 수 없었다 —

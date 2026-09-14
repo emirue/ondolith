@@ -51,6 +51,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		InstalledAt:   time.Date(2026, 7, 29, 4, 58, 16, 0, time.UTC),
 		SecureCookies: true,
 		SiteURL:       "https://shop.example",
+		SecretKey:     "c2VjcmV0LWtleS0zMi1ieXRlcy1sb25nLXh4eHh4eA==",
 	}
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
@@ -74,6 +75,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if got.SiteURL != want.SiteURL {
 		t.Errorf("SiteURL = %q, want %q", got.SiteURL, want.SiteURL)
+	}
+	if got.SecretKey != want.SecretKey {
+		t.Errorf("SecretKey = %q, want %q", got.SecretKey, want.SecretKey)
 	}
 }
 

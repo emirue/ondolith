@@ -201,7 +201,7 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 				"키가 너무 깁니다 (200자 이내).")
 			return
 		}
-		if secretKeys[k] && v == "" {
+		if isSecretKey(k) && v == "" {
 			// 빈 시크릿은 "그대로 두라" 이지 "지우라" 가 아니다. 화면이 현재
 			// 값을 보여줄 수 없으므로 빈 칸이 정상 상태다.
 			continue
@@ -233,7 +233,7 @@ func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, m
 	shown := map[string]string{}
 	saved := map[string]bool{}
 	for k, v := range kv {
-		if secretKeys[k] {
+		if isSecretKey(k) {
 			// 설정 여부만. 값은 아니다.
 			saved[k] = v != ""
 			continue

@@ -223,11 +223,10 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 // read only by the code that uses it (D19 A-205): re-displaying it turns every
 // admin screen view into a credential disclosure, and "it is masked in the UI"
 // is not the same as "it was never sent".
-var secretKeys = map[string]bool{
-	"mail.smtp_password": true,
-	// PG 시크릿 키. 이것이 새면 상점의 모든 승인·취소를 남이 부를 수 있다.
-	"pg.secret_key": true,
-}
+//
+// 목록은 content.IsSecretSetting 하나다 — 봉인(at rest)과 비노출(화면)이 같은
+// 이름들을 봐야 한다.
+func isSecretKey(k string) bool { return content.IsSecretSetting(k) }
 
 var mailSettingKeys = []string{
 	"mail.smtp_host", "mail.smtp_port", "mail.smtp_user", "mail.smtp_password",
@@ -256,7 +255,7 @@ func (d *Deps) renderSettings(w http.ResponseWriter, r *http.Request,
 	shown := map[string]string{}
 	saved := map[string]bool{}
 	for k, v := range kv {
-		if secretKeys[k] {
+		if isSecretKey(k) {
 			saved[k] = v != ""
 			continue
 		}
@@ -284,7 +283,7 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 	kv := map[string]string{}
 	for _, k := range mailSettingKeys {
 		v := r.PostFormValue(k)
-		if secretKeys[k] && v == "" {
+		if isSecretKey(k) && v == "" {
 			// An empty secret means "leave it alone", not "erase it": the form
 			// cannot show the current value, so an empty box is the normal
 			// state of a screen the operator opened to change something else.

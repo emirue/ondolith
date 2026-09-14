@@ -29,6 +29,7 @@ import (
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/httpsec"
 	"github.com/emirue/ondolith/internal/migrations"
+	"github.com/emirue/ondolith/internal/secretbox"
 )
 
 //go:embed templates/*.html
@@ -167,12 +168,19 @@ func (h *handler) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	secretKey, err := secretbox.NewKey()
+	if err != nil {
+		f.Error = fmt.Sprintf("봉인 키를 만들지 못했습니다: %v", err)
+		h.render(w, http.StatusInternalServerError, f)
+		return
+	}
 	cfg := &config.Config{
 		DatabaseURL:   f.dsn(),
 		SiteName:      f.SiteName,
 		InstalledAt:   time.Now().UTC(),
 		SecureCookies: requestIsHTTPS(r),
 		SiteURL:       requestOrigin(r),
+		SecretKey:     secretKey,
 	}
 
 	if err := h.provision(r.Context(), cfg, f); err != nil {

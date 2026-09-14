@@ -39,6 +39,14 @@ type Config struct {
 	// one Host we can trust — the operator typed it.
 	SiteURL string `json:"site_url"`
 
+	// SecretKey seals the credentials stored in the settings table (PG 시크릿
+	// 키, SMTP 비밀번호, 소셜 client_secret): base64 of 32 random bytes,
+	// generated at install. It lives HERE and not in the database because the
+	// database is what it protects — a leaked dump opens nothing without this
+	// file. Back the file up with the database (D72 5절); without it the
+	// stored credentials cannot be read and must be typed again.
+	SecretKey string `json:"secret_key"`
+
 	// UploadDir holds attachments. It is configuration and not a fixed path
 	// because NFR-304 says an upgrade replaces the binary and nothing else —
 	// a path compiled in would move with the binary, and the files would not.

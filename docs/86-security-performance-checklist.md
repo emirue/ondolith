@@ -82,6 +82,7 @@
 | 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·테마 24 MiB·웹훅 1 MiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
 | 4.9 | 정적 파일: `static/` 아래만, 심볼릭 링크 탈출·디렉터리 목록 404 | `theme/static.go` | 단위 테스트 | ✓ |
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
+| 4.12 | 저장된 자격증명(PG 시크릿·SMTP 비밀번호·소셜 client_secret)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |
 | 4.11 | 글 삭제가 첨부 **파일**까지 지운다(디스크 고아 없음) | `content/attachment.go` `DeletePost` — P-207·A-307 둘 다 이 경로 | 코드 읽기 | ✓ 행은 CASCADE, 파일은 `os.Root.Remove` |
 
 ## 5. 결제·커머스
