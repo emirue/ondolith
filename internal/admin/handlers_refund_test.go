@@ -1576,3 +1576,27 @@ func TestQRLabelEncodesTheVariantIDNotTheSKU(t *testing.T) {
 		t.Error("SKU 를 바꿨더니 QR 이 달라졌다 — 이미 붙은 스티커가 무의미해진다")
 	}
 }
+
+// A-507 접수는 PG 취소까지 간다 (D13: DB 한도 선점 → PG 호출 → 확정). 접수만
+// 하고 끝나던 판에서는 장부에만 환불이 있었다.
+func TestAdminRefundIsExecutedAtThePG(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, reauth: true,
+		id: "u1", email: "op@example.com", password: "correct horse battery"}
+	d, pool := fixture(t, caller)
+	order, _ := paidAdminOrder(t, d, pool)
+
+	rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"},
+			"password": {"correct horse battery"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	var status string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM refunds`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "완료" {
+		t.Errorf("접수 뒤 환불 상태 %s, want 완료 — PG 를 부르지 않았다", status)
+	}
+}

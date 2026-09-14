@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Post is one row of posts, plus the counts a list screen shows.
@@ -67,15 +68,16 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 	// **검색 절은 검색어가 있을 때만 붙는다.** `($2 = '' OR … @@ …)` 한 줄로
 	// 두면 준비된 문장이 일반 계획으로 넘어간 뒤 OR 의 한쪽이 인덱스를 못 타
 	// GIN 인덱스(posts_search_idx)가 버려지고, 게시판 전체를 훑으며 @@ 를
-	// 평가한다 — SearchPosts 가 같은 조건을 OR 없이 쓰는 이유다.
-	head := `
-		SELECT ` + postColumns + `
-		FROM posts p
-		LEFT JOIN users u ON u.id = p.author_id
-		WHERE p.board_id = $1
-		  AND p.status = 'published'`
+	// 평가한다 — SearchPosts 가 같은 조건을 OR 없이 쓰는 이유다. 두 문장이
+	// 머리를 공유하지 않고 통째로 적혀 있는 것은 post_shape_test 가 문자열
+	// 리터럴만 읽기 때문이다: 변수로 합치면 그 검사가 이 질의를 보지 못한다.
 	if q.Search == "" {
-		rows, err := s.pool.Query(ctx, head+`
+		rows, err := s.pool.Query(ctx, `
+			SELECT `+postListColumns+`
+			FROM posts p
+			LEFT JOIN users u ON u.id = p.author_id
+			WHERE p.board_id = $1
+			  AND p.status = 'published'
 			ORDER BY `+q.OrderBy()+`
 			LIMIT $2 OFFSET $3`, boardID, q.PerPage, q.Offset())
 		if err != nil {
@@ -85,7 +87,12 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 	}
 	// A prefix query is what actually matches Korean text: the stored token
 	// carries the particle, so the exact term misses (D30 measured this).
-	rows, err := s.pool.Query(ctx, head+`
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+postListColumns+`
+		FROM posts p
+		LEFT JOIN users u ON u.id = p.author_id
+		WHERE p.board_id = $1
+		  AND p.status = 'published'
 		  AND p.search_vector @@ to_tsquery('simple', $2)
 		ORDER BY `+q.OrderBy()+`
 		LIMIT $3 OFFSET $4`, boardID, toPrefixQuery(q.Search), q.PerPage, q.Offset())
@@ -97,7 +104,7 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 
 // CountPosts is the total for the pager. It counts exactly what ListPosts
 // returns — a pager whose total disagrees with its pages tells the visitor
-// there is a page that is not there.
+// there is a page that is not there. 검색 절은 ListPosts 와 같은 이유로 조건부다.
 func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (int64, error) {
 	var n int64
 	if q.Search == "" {
@@ -299,13 +306,14 @@ func (s *Store) CreateComment(ctx context.Context, c Comment) (string, error) {
 // database refuses. That refusal is what produces the tombstone: the row stays,
 // the body is emptied in the DATABASE (not hidden by a template `if`, because
 // themes are third-party), and deleted_at marks it.
+//
+// 세어 보고 지우지 않는다. 세는 문장과 지우는 문장 사이에 답글이 달리면 DELETE
+// 가 외래키에 걸려 500 이었다 — 외래키의 거절 자체가 판정이므로 먼저 지워 보고,
+// 23503 이면 묘비로 간다.
 func (s *Store) DeleteComment(ctx context.Context, id string) error {
-	var replies int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT count(*) FROM comments WHERE parent_id = $1`, id).Scan(&replies); err != nil {
-		return err
-	}
-	if replies > 0 {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM comments WHERE id = $1`, id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 		tag, err := s.pool.Exec(ctx,
 			`UPDATE comments SET body = '', deleted_at = now(), updated_at = now()
 			 WHERE id = $1 AND deleted_at IS NULL`, id)
@@ -317,7 +325,6 @@ func (s *Store) DeleteComment(ctx context.Context, id string) error {
 		}
 		return nil
 	}
-	tag, err := s.pool.Exec(ctx, `DELETE FROM comments WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
@@ -493,7 +500,7 @@ func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []strin
 // hidden post cannot un-hide it.
 func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit int) ([]Post, error) {
 	const q = `
-		SELECT ` + postColumns + `
+		SELECT ` + postListColumns + `
 		FROM posts p
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.board_id = $1
@@ -550,6 +557,16 @@ const postColumns = `
 	(SELECT count(*) FROM comments c WHERE c.post_id = p.id),
 	EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)`
 
+// postListColumns is postColumns with the body left out. 목록·최근 글·중재 목록은
+// 본문을 그리지 않는데, 페이지마다 최대 100개의 본문이 DB→앱→GC 를 오갔다.
+// 모양은 같아서 scanPost 가 그대로 읽는다.
+const postListColumns = `
+	p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
+	p.title, '' AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+	p.view_count, p.created_at, p.updated_at,
+	(SELECT count(*) FROM comments c WHERE c.post_id = p.id),
+	EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)`
+
 // postScanner is what pgx.Row and pgx.Rows share — 한 행을 읽는 것.
 type postScanner interface{ Scan(dest ...any) error }
 
@@ -602,7 +619,7 @@ func (s *Store) RecentPosts(ctx context.Context, readable, secretIn []string,
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+postColumns+`
+		SELECT `+postListColumns+`
 		FROM posts p
 		LEFT JOIN users u ON u.id = p.author_id
 		WHERE p.board_id = ANY($1)

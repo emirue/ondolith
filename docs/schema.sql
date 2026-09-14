@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 3gExDr4yjLhQNyRiPiG6BRzJNcIkA61XFA32Cej2iuW88qa0vkLeDQPdVmKt4r7
+\restrict b1TTRZK0m0RatOUQnsAd815qsdF613QJAcLQqVJL39G1JSKG1FST9nI5ezymQgm
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -538,6 +538,7 @@ CREATE TABLE public.refunds (
     request_key text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    pg_response jsonb,
     CONSTRAINT refunds_amount_check CHECK ((amount > 0)),
     CONSTRAINT refunds_reason_check CHECK ((length(reason) <= 500)),
     CONSTRAINT refunds_request_key_check CHECK (((length(request_key) >= 1) AND (length(request_key) <= 100))),
@@ -1480,6 +1481,20 @@ CREATE INDEX posts_board_list_idx ON public.posts USING btree (board_id, is_pinn
 
 
 --
+-- Name: posts_board_title_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_board_title_idx ON public.posts USING btree (board_id, is_pinned DESC, title, id);
+
+
+--
+-- Name: posts_board_views_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_board_views_idx ON public.posts USING btree (board_id, is_pinned DESC, view_count DESC, id DESC);
+
+
+--
 -- Name: posts_recent_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2046,5 +2061,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 3gExDr4yjLhQNyRiPiG6BRzJNcIkA61XFA32Cej2iuW88qa0vkLeDQPdVmKt4r7
+\unrestrict b1TTRZK0m0RatOUQnsAd815qsdF613QJAcLQqVJL39G1JSKG1FST9nI5ezymQgm
 

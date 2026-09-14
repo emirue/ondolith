@@ -689,3 +689,78 @@ func (s *Store) RecordShipment(ctx context.Context, orderNo, carrier, tracking s
 	}
 	return err
 }
+
+// ExpirePendingOrders moves orders that can no longer be paid to 결제실패 and
+// puts their stock back (D14: 결제대기 → 결제실패, 시스템 「10분 만료」).
+//
+// 결제대기 주문은 생성 시각 기준 AuthWindow 가 지나면 P-408 이 승인을 거부한다
+// (ConfirmPayment ③). 그 뒤로는 어떤 경로로도 결제될 수 없는데, 그 주문이 차감한
+// 재고는 잡힌 채였다 — 결제하지 않고 떠난 장바구니마다 재고가 하나씩 사라졌다.
+//
+// 살아 있는 '대기' 결제 행이 있는 주문은 건드리지 않는다: 승인 결과가 불명인
+// 것(ErrPaymentUnknown)이고, 그쪽은 A-508 대사가 사람의 손으로 닫는다. 가상계좌는
+// 입금대기라 여기 오지 않는다.
+func (s *Store) ExpirePendingOrders(ctx context.Context, before time.Time, limit int) (int, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT o.id FROM orders o
+		WHERE o.status = $1 AND o.created_at < $2
+		  AND NOT EXISTS (SELECT 1 FROM payments p
+		                  WHERE p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기')
+		ORDER BY o.created_at LIMIT $3`, string(StatusPaymentPending), before, limit)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		if err := s.expireOne(ctx, id); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+func (s *Store) expireOne(ctx context.Context, orderID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1 FOR UPDATE`, orderID).
+		Scan(&status); err != nil {
+		return err
+	}
+	if Status(status) != StatusPaymentPending {
+		return nil // 목록을 뽑은 뒤 결제됐다. 손대지 않는다
+	}
+	if err := CanTransition(StatusPaymentPending, StatusPaymentFailed, ActorSystem); err != nil {
+		return err
+	}
+	deltas, err := restockDeltas(ctx, tx, orderID)
+	if err != nil {
+		return err
+	}
+	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
+		orderID, string(StatusPaymentFailed), string(StatusPaymentPending)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

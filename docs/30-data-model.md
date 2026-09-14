@@ -1022,6 +1022,7 @@ PCI DSS). 정기결제가 필요해지면 빌링키 컬럼을 그때 더한다.
 | `amount` | integer | NOT NULL `CHECK (> 0)` |
 | `reason` | text | NOT NULL DEFAULT '' |
 | `request_key` | text | NOT NULL **UNIQUE** |
+| `pg_response` | jsonb | NULL. 취소 API 응답 원문(카드 필드 가림). `ExecuteRefund` 가 `완료` 로 옮기며 채운다 |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 **`refund_items`**

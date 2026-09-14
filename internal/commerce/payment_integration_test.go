@@ -25,6 +25,10 @@ type fakeGateway struct {
 	getResponse *Payment
 	getErr      error
 	getCalls    int
+	// Cancel 이 돌려줄 것과 받은 것. 기본값 (nil, nil) 은 「취소가 됐다」다.
+	cancelResponse *Payment
+	cancelErr      error
+	cancelReqs     []CancelRequest
 }
 
 func (g *fakeGateway) Confirm(_ context.Context, req ConfirmRequest) (*Payment, error) {
@@ -44,7 +48,15 @@ func (g *fakeGateway) Confirm(_ context.Context, req ConfirmRequest) (*Payment, 
 	}
 	return &res, nil
 }
-func (g *fakeGateway) Cancel(context.Context, CancelRequest) (*Payment, error) { return nil, nil }
+func (g *fakeGateway) Cancel(_ context.Context, req CancelRequest) (*Payment, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.cancelReqs = append(g.cancelReqs, req)
+	if g.cancelErr != nil {
+		return nil, g.cancelErr
+	}
+	return g.cancelResponse, nil
+}
 func (g *fakeGateway) Get(context.Context, string) (*Payment, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

@@ -33,7 +33,8 @@ func flattenSQL(e ast.Expr) string {
 		}
 		return s
 	case *ast.Ident:
-		if v.Name == "postColumns" {
+		// postListColumns 는 본문만 뺀 같은 모양이다 — 목록 질의는 그것을 쓴다.
+		if v.Name == "postColumns" || v.Name == "postListColumns" {
 			return columnMark
 		}
 		return " "

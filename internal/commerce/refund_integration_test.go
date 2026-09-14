@@ -338,7 +338,7 @@ func TestCancelRestoresStockAndRefundsInFull(t *testing.T) {
 	assertStock(t, pool, variant, 8) // 10 - 2
 
 	// 결제완료 → 취소는 표에 있다.
-	if err := s.CancelOrder(ctx, orderNo, "P-506", "cancel-1"); err != nil {
+	if _, err := s.CancelOrder(ctx, orderNo, "P-506", "cancel-1"); err != nil {
 		t.Fatal(err)
 	}
 	assertStock(t, pool, variant, 10)
@@ -371,7 +371,7 @@ func TestBuyerCannotCancelAfterDispatch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	err := s.CancelOrder(ctx, orderNo, "P-506", "c1")
+	_, err := s.CancelOrder(ctx, orderNo, "P-506", "c1")
 	if !errors.Is(err, ErrTransitionNotAllowed) && !errors.Is(err, ErrActorNotAllowed) {
 		t.Fatalf("배송 후 취소 = %v", err)
 	}
@@ -433,11 +433,11 @@ func TestCancelRecordsWhoAskedForIt(t *testing.T) {
 	ctx := context.Background()
 
 	buyer, _, _ := paidOrder(t, s, pool, "buyer", 1)
-	if err := s.CancelOrder(ctx, buyer, "P-506", "c1"); err != nil {
+	if _, err := s.CancelOrder(ctx, buyer, "P-506", "c1"); err != nil {
 		t.Fatal(err)
 	}
 	admin, _, _ := paidOrder(t, s, pool, "admin", 1)
-	if err := s.CancelOrder(ctx, admin, "A-507", "c2"); err != nil {
+	if _, err := s.CancelOrder(ctx, admin, "A-507", "c2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -541,7 +541,7 @@ func TestCancelledOrderRefusesFurtherRefunds(t *testing.T) {
 	orderNo, _, _ := paidOrder(t, s, pool, "tee", 2)
 	items := itemsOf(t, s, orderNo)
 
-	if err := s.CancelOrder(ctx, orderNo, "P-506", "c1"); err != nil {
+	if _, err := s.CancelOrder(ctx, orderNo, "P-506", "c1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.RequestRefund(ctx, orderNo,
@@ -583,7 +583,7 @@ func TestCancelAfterPartialRefundOnlyReturnsWhatIsLeft(t *testing.T) {
 	if err := s.TransitionOrder(ctx, orderNo, StatusPreparing, "A-506"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CancelOrder(ctx, orderNo, "P-506", "k-cancel"); err != nil {
+	if _, err := s.CancelOrder(ctx, orderNo, "P-506", "k-cancel"); err != nil {
 		t.Fatal(err)
 	}
 

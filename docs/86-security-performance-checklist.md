@@ -12,7 +12,7 @@
 **상태 기호** — ✓ 확인됨 (무엇으로 확인했는지 함께) · △ 열림 (아직 안 했거나 못 잰 것) ·
 — 하지 않기로 함 (이유 함께)
 
-**마지막 전수 점검: 2026-09-14** (`370e9d9`). 방법: 다섯 갈래(인증·세션·RBAC / 파일·
+**마지막 전수 점검: 2026-09-14** (`370e9d9` 이후 이 문서의 △ 를 닫는 작업까지). 방법: 다섯 갈래(인증·세션·RBAC / 파일·
 템플릿·XSS / SQL·결제·웹훅 / DB 성능 / HTTP·런타임)로 코드 전체를 읽고, `govulncheck`·
 `staticcheck`·`gosec` 을 돌리고, 결함으로 확인된 것은 고친 뒤 실제 PostgreSQL 로 재현·
 검증했다. 결과는 [CHANGELOG](../CHANGELOG.md) v0.2.0 「Security」「Performance」에 있다.
@@ -50,6 +50,7 @@
 | 2.6 | 소유권은 **SQL 술어**로: 주문·환불·반품·댓글·글·첨부 | `commerce/order.go`·`returns.go`·`handler_board.go`·`handler_comment.go` | 통합 테스트(`TestOrderDetailNeedsAGrantOrOwnership` 등) | ✓ |
 | 2.7 | `{id}` 경로는 uuid 만(`guardID`), 형식 불량은 404 | `internal/app/routes.go` | 통합 테스트 | ✓ |
 | 2.8 | 관리자 트리 IP 제한 60/분 | `middleware_gate.go` | 코드 읽기 | ✓ (1.12 의 한계 동일) |
+| 2.9 | 글·댓글 작성에 속도 제한 없음 | [D15](15-access-control.md) 4.3-2 표에 없다 | — | — 표가 정한 것이 아니다. 인증 계정(FR-214)과 게시판 권한이 문이고, 스팸은 중재(A-307)의 몫. 필요해지면 D15 표에 행을 먼저 더한다 |
 
 ## 3. CSRF·출력 인코딩·헤더
 
@@ -65,6 +66,7 @@
 | 3.8 | CSP 에 `script-src`/`default-src` 없음 (인라인 스크립트 허용) | `headers.go` | — | — 의도적. XSS 방어는 3.3~3.5 에 있다. 테마가 인라인을 쓴다 |
 | 3.9 | `Host`·`X-Forwarded-Host` 신뢰 | `handler_seo.go`(사이트맵 origin)·`app.go`(OAuth `redirect_uri`) | `grep X-Forwarded-Host` | ✓ `X-Forwarded-Host` 0건. 메일 링크는 요청이 아니라 `site_url`(4.6) |
 | 3.10 | 오류 페이지가 내부를 말하지 않는다 | `handler_public.go` `serverError` | 코드 읽기 | ✓ 원문은 **개발 빌드**에서만 (2026-09-13 에 고침 — DB 설정 하나로 켜졌었다) |
+| 3.11 | HSTS | 앱은 TLS 를 모른다 — [D72](72-deploy-lightsail.md) 3절 nginx 블록의 `Strict-Transport-Security` | 프록시 응답 헤더 확인 | ✓ 2026-09-14 에 문서에 넣음. **실기로 확인한 적은 없다** |
 
 ## 4. 입력·파일·설정
 
@@ -80,6 +82,7 @@
 | 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·테마 24 MiB·웹훅 1 MiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
 | 4.9 | 정적 파일: `static/` 아래만, 심볼릭 링크 탈출·디렉터리 목록 404 | `theme/static.go` | 단위 테스트 | ✓ |
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
+| 4.11 | 글 삭제가 첨부 **파일**까지 지운다(디스크 고아 없음) | `content/attachment.go` `DeletePost` — P-207·A-307 둘 다 이 경로 | 코드 읽기 | ✓ 행은 CASCADE, 파일은 `os.Root.Remove` |
 
 ## 5. 결제·커머스
 
@@ -96,10 +99,11 @@
 | 5.9 | 교환 대상 조합은 노출 중인 것만 | `returns.go` `OpenReturn` | `TestExchangeRefusesHiddenVariant` | ✓ 2026-09-13 |
 | 5.10 | 시크릿·카드 정보가 로그·화면·원문 보관에 없다 | `Toss.String`(가림)·`MaskCardFields`·`oplog.go`(비밀 필드 없음)·A-602 | `grep` + `make verify-upgrade` ⑤ 실기동 로그 | ✓ |
 | 5.11 | 작업 로그 append-only(D15 7절): DELETE 거부, UPDATE 는 `SET NULL` 한 경우만 | `00010`·`00021` | `TestOperationLogCannotBeRewrittenUnderCoverOfActorNull` | ✓ 2026-09-13 에 구멍을 막음 |
-| 5.12 | 취소 API 호출 경로 | `Gateway.Cancel` | `grep '\.Cancel(ctx'` | △ 호출처 0 — 환불·취소는 `refunds('요청')` 행만 만든다. 돈이 토스에서 나가는 코드가 없다([GAP-03](85-gaps.md)와 함께 실측 대상) |
-| 5.13 | `결제대기` 주문의 만료 작업 | `StatusPaymentFailed` 로의 시스템 전이 | `grep` | △ 호출처 0 — 결제 안 한 주문이 차감한 재고를 무기한 잡는다 |
-| 5.14 | `payments_pg_key_idx` 가 부분 인덱스가 아님 | `00013` | 코드 읽기 | △ `실패` 행이 같은 `payment_key` 를 영구히 점유한다 |
-| 5.15 | 웹훅 서명 실패에 200/400 중 무엇을 답할지 | [D19](19-screen-io.md) P-905 「미확정」 | — | △ 토스 재전송 정책 확인 필요 |
+| 5.12 | 취소 API 호출: 접수(A-507)·취소(P-506)·반품 정산(A-511)이 `ExecuteRefund` 로 PG 를 부르고 `완료` 로 확정 | `commerce/refund.go` `ExecuteRefund` | `TestExecuteRefundCallsThePGOnceAndCompletes`·`…KeepsUnknownResultsAndRetriesDeclines` | ✓ 2026-09-14 에 넣음(이전엔 호출처 0 — 돈이 나가지 않았다). 실제 토스 왕복은 [GAP-03](85-gaps.md) |
+| 5.13 | `결제대기` 만료: `AuthWindow` 를 넘긴 주문을 `결제실패` 로, 재고 복원. 결과 불명 결제가 있는 주문은 제외 | `commerce/order.go` `ExpirePendingOrders`, `app.go` 1분 고루틴 | `TestExpirePendingOrdersRestoresStock` | ✓ 2026-09-14 |
+| 5.14 | `payments_pg_key_idx` 가 부분 인덱스가 아님 | `00013` | 코드 읽기 | — 그대로 둔다. 토스 `paymentKey` 는 결제 시도마다 새 값이라 실패 행이 키를 점유해도 정상 재결제는 막히지 않고, 다른 주문에서 같은 키가 오는 것(`ErrPaymentKeyReused`)을 잡는 쪽이 더 값지다 |
+| 5.15 | 웹훅 서명 실패 응답 400 | `handler_webhook.go`·[D19](19-screen-io.md) P-905 | 토스 웹훅 가이드(200 만 성공, 최대 7회 재전송) | ✓ 2026-09-14 확정 |
+| 5.16 | 구매자 부분 환불 요청(P-507)의 승인·거부 | A-507 | — | △ 화면이 없다 — [GAP-08](85-gaps.md) |
 
 ## 6. 운영 환경
 
@@ -125,13 +129,14 @@
 | 7.6 | 풀: `MinConns=1`, 상한 기본(1 vCPU 에서 4) | `app.go` | 코드 읽기 | ✓ |
 | 7.7 | 트랜잭션이 네트워크 호출을 잡고 있지 않다 | `payment.go`(승인 전 커밋)·`cart.go`(읽기가 앞) | 코드 읽기 | ✓ |
 | 7.8 | 요청 ctx 가 DB 까지 간다; 종료 시 설정 조회가 끊기지 않는다 | `app.go` `settingCtx` | 코드 읽기 | ✓ `setting()` 만 부팅 ctx 의 취소를 뗀 것 |
-| 7.9 | 반품 목록(`Returns`)이 건당 품목 질의 | `returns.go` | 코드 읽기 | △ N 은 주문당 반품 수라 작다. 미착수 |
-| 7.10 | `views`·`title` 정렬 인덱스 없음 | `listquery.go` `SortKeys` | 코드 읽기 | △ 공개 URL 인자라 크롤러가 밟는다. 미착수 |
-| 7.11 | OFFSET 페이징 상한 1000 페이지, 키셋 커서(`After`)는 파싱만 되고 미사용 | `listquery.go` | `grep '\.After'` | △ 950 페이지에서 순차 탐색 실측 기록이 D30 에 있다. 미착수 |
-| 7.12 | 목록이 본문(`p.body`)까지 싣는다 | `post.go` `postColumns` | 코드 읽기 | △ 목록 화면은 본문을 그리지 않는다. 미착수 |
-| 7.13 | 목록마다 `count(*)`(글·작업 로그) | `CountPosts`·`OpLog.Count` | 코드 읽기 | △ `UserList` 처럼 `limit+1` 로 바꿀 수 있다. 미착수 |
-| 7.14 | 댓글 삭제가 검사-후-행동(답글 사이에 끼면 500) | `post.go` `DeleteComment` | 코드 읽기 | △ 미착수 |
+| 7.9 | 반품 목록(`Returns`)이 한 질의 | `returns.go` | 기존 반품 테스트 | ✓ 2026-09-14 |
+| 7.10 | `views`·`title` 정렬 인덱스 | `00022` | 코드 읽기 | ✓ 2026-09-14 (기본 방향만) |
+| 7.11 | OFFSET 페이징 상한 100 페이지; 키셋 커서(`After`)는 파싱만 되고 미사용 | `listquery.go` | 코드 읽기 | — 상한 100 × 100 행이면 최악 OFFSET 10,000 을 인덱스가 흡수한다. 커서는 그 상한이 부족해질 때 |
+| 7.12 | 목록·최근 글·중재 목록은 본문을 싣지 않는다 | `post.go` `postListColumns` | 기존 목록 테스트 | ✓ 2026-09-14 |
+| 7.13 | 목록마다 `count(*)` | `CountPosts`(게시판)·`OpLog.Count`(A-601) | 코드 읽기 | — 게시판 총수는 화면 요소다: 내장 테마 페이저가 「전체 N건」을 그린다(`partials/pagination.html`, `TestPaginationLinksReflectWhereYouAre`). 없애 봤다가 되돌렸다. 인덱스만 세는 질의라 둔다 |
+| 7.14 | 댓글 삭제: 먼저 지우고 23503 이면 묘비 | `post.go` `DeleteComment` | 기존 댓글 테스트 | ✓ 2026-09-14 |
 | 7.15 | `statement_timeout` | 없음 | — | — 부팅 마이그레이션이 같은 풀을 쓴다. 두면 큰 표의 마이그레이션이 끊긴다 |
+| 7.16 | `operation_logs` 가 영원히 자란다 | `00010` — 삭제·수정 금지가 설계 | — | — D15 7절의 성질이다. 보존 기간·아카이브는 정한 바 없다 ([D18](18-open-decisions.md) 후보). 목록은 `LIMIT 100`·`created_at` 인덱스라 크기에 무관 |
 
 ## 8. 성능 — HTTP·런타임
 
@@ -145,8 +150,9 @@
 | 8.6 | 레이트리미터 지도가 자란다 | `auth/ratelimit.go` | `TestAllowSweepsIdleBucketsOnceLarge` | ✓ 2026-09-13 |
 | 8.7 | 사이트맵: 질의 하나 + `Cache-Control` 1시간 | `handler_seo.go`·`content.SitemapPosts` | 코드 읽기 | ✓ 2026-09-13 |
 | 8.8 | bcrypt 비용 10 = 1 vCPU 에서 시도당 수십~백 ms | `auth/login.go` | — | — 의도적. IP·계정 제한이 앞에 있다 |
-| 8.9 | A-508 대사가 요청 하나에서 최대 500 건 순차 조회 | `commerce/webhook.go` `Reconcile` | 코드 읽기 | △ 500 × 30초 상한 > `WriteTimeout` 60초. 미착수 |
+| 8.9 | A-508 대사: 조회 하나 5초, 요청 전체 40초 예산, 넘긴 행은 「조회하지 않았다」 | `commerce/webhook.go` `Reconcile` | 코드 읽기 | ✓ 2026-09-14 |
 | 8.10 | 1 vCPU/512MB 실측 | `make measure` | 실기 | ✓ 2026-09-02 Lightsail: 앱 RSS 15.6 MB, PG 125 MB, 가용 165 MB |
+| 8.11 | 응답 압축(gzip/br) 없음 | `net/http` 에 내장 없음 | — | — 프록시(nginx `gzip on`, CloudFront)가 한다. 앱은 정적 자산에 `immutable` 캐시(8.3)로 재요청 자체를 줄인다 |
 
 ## 9. 점검을 다시 할 때
 

@@ -89,6 +89,9 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/<도메인>/privkey.pem;
 
     client_max_body_size 24m;   # 테마 zip 업로드 상한 + 멀티파트 여유
+    # 한 번 HTTPS 로 온 브라우저는 이후 평문으로 오지 않는다. 앱은 TLS 를 모르므로
+    # 이 헤더는 프록시가 낸다 — 세션 쿠키가 평문으로 다니는 창을 닫는 것이다.
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     location / {
         proxy_pass         http://127.0.0.1:8080;

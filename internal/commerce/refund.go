@@ -277,11 +277,11 @@ func (s *Store) RefundedTotal(ctx context.Context, orderNo string) (approved, re
 // 일으킬 수 있다 (D14 5-1). 배송 후는 A-507 이 승인해야 한다 — 승인 없이 돈이
 // 나가면 되돌릴 방법이 없다.
 func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
-	requestKey string) error {
+	requestKey string) (refundID string, err error) {
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback(ctx)
 
@@ -291,13 +291,13 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 		`SELECT id, status, total_amount FROM orders WHERE order_no = $1 FOR UPDATE`,
 		orderNo).Scan(&orderID, &status, &total)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return "", ErrNotFound
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := CanTransition(Status(status), StatusCancelled, actor); err != nil {
-		return err
+		return "", err
 	}
 
 	// 재고를 되돌린다. 주문 생성이 차감했으므로 취소는 같은 만큼 푼다 — 풀지
@@ -305,7 +305,7 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 	rows, err := tx.Query(ctx,
 		`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`, orderID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var deltas []StockDelta
 	for rows.Next() {
@@ -313,22 +313,22 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 		var qty int
 		if err := rows.Scan(&variantID, &qty); err != nil {
 			rows.Close()
-			return err
+			return "", err
 		}
 		deltas = append(deltas, StockDelta{VariantID: variantID, Delta: qty})
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return err
+		return "", err
 	}
 	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
-		return err
+		return "", err
 	}
 
 	if _, err := tx.Exec(ctx,
 		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
 		orderID, string(StatusCancelled), status); err != nil {
-		return err
+		return "", err
 	}
 
 	// 결제가 있었으면 전액 환불을 접수한다. 없으면(결제대기) 돌려줄 돈이 없다.
@@ -340,9 +340,9 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 		orderID).Scan(&paymentID, &approved, &alreadyRefunded)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return tx.Commit(ctx)
+		return "", tx.Commit(ctx)
 	case err != nil:
-		return err
+		return "", err
 	}
 
 	// 남은 수량을 전부 소진 처리해 두면, 취소된 주문에 다시 부분 환불을 넣는
@@ -350,7 +350,7 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 	if _, err := tx.Exec(ctx,
 		`UPDATE order_items SET settled_quantity = quantity, updated_at = now()
 		 WHERE order_id = $1`, orderID); err != nil {
-		return err
+		return "", err
 	}
 
 	// **남은 몫만 돌려준다.** 부분 환불이 이미 나간 주문을 전액으로 취소하면
@@ -360,24 +360,28 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 	remaining := approved - alreadyRefunded
 	if remaining <= 0 {
 		// 이미 전액이 선점됐다. 취소 상태와 수량 소진만 남기고 끝낸다.
-		return tx.Commit(ctx)
+		return "", tx.Commit(ctx)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE payments SET refunded_amount = refunded_amount + $2, updated_at = now()
 		WHERE id = $1`, paymentID, remaining); err != nil {
-		return err
+		return "", err
 	}
-	if _, err := tx.Exec(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO refunds (order_id, payment_id, status, requester, amount, reason, request_key)
-		VALUES ($1, $2, '요청', $3, $4, '주문 취소', $5)`,
-		orderID, paymentID, requesterOf(actor), remaining, requestKey); err != nil {
+		VALUES ($1, $2, '요청', $3, $4, '주문 취소', $5) RETURNING id`,
+		orderID, paymentID, requesterOf(actor), remaining, requestKey).Scan(&refundID)
+	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return ErrRefundDuplicate
+			return "", ErrRefundDuplicate
 		}
-		return err
+		return "", err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return refundID, nil
 }
 
 // requesterOf maps a screen id to refunds.requester.
@@ -394,4 +398,151 @@ func requesterOf(actor Actor) string {
 // ConfirmPurchase is P-510.
 func (s *Store) ConfirmPurchase(ctx context.Context, orderNo string, actor Actor) error {
 	return s.TransitionOrder(ctx, orderNo, StatusConfirmed, actor)
+}
+
+// restockDeltas is what putting an order's items back on the shelf looks like.
+func restockDeltas(ctx context.Context, tx pgx.Tx, orderID string) ([]StockDelta, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var deltas []StockDelta
+	for rows.Next() {
+		var variantID string
+		var qty int
+		if err := rows.Scan(&variantID, &qty); err != nil {
+			return nil, err
+		}
+		deltas = append(deltas, StockDelta{VariantID: variantID, Delta: qty})
+	}
+	return deltas, rows.Err()
+}
+
+// ErrRefundState 는 환불 건이 실행할 수 있는 상태가 아니라는 뜻이다.
+var ErrRefundState = errors.New("commerce: 실행할 수 있는 환불 건이 아닙니다")
+
+// ExecuteRefund sends a reserved refund to the PG (A-507 의 순서: DB 한도 선점 →
+// PG 호출 → 확정, D13). RequestRefund·CancelOrder·SettleReturn 이 만든 '요청'
+// 행이 대상이다 — 그 행이 있다는 것은 한도가 이미 선점됐다는 뜻이고, 여기서
+// 돈이 나간다. 이것이 없던 판에서는 어떤 경로도 PG 를 부르지 않았다: 환불은
+// 우리 장부에만 있었고 돈은 토스에서 나가지 않았다.
+//
+// 상태의 뜻:
+//
+//	요청 → PG 를 부르기 전. 한도는 잡혀 있고 돈은 아직 안 나갔다
+//	승인 → PG 를 **부르는 중이거나 결과 불명**. 다시 부르지 않는다 — 두 번째
+//	       호출이 이중 환불이다. 멱등키(request_key)가 같은 요청은 PG 가
+//	       첫 결과를 돌려주므로 사람이 조회로 확인한 뒤 손으로 닫는다
+//	완료 → PG 가 취소를 확정했다
+//	거부 → RejectRefund 가 한도를 돌려줬다
+//
+// 확정된 실패(4xx)는 '요청' 으로 되돌려 다시 시도할 수 있게 한다. 결과 불명
+// (타임아웃·5xx·IDEMPOTENT_REQUEST_PROCESSING)은 '승인' 에 둔다 —
+// **미환불이 이중환불보다 낫다** (D13).
+func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string) error {
+	if gw == nil {
+		return errors.New("commerce: PG 가 설정되어 있지 않아 환불을 실행할 수 없습니다")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var status, reason, requestKey, paymentKey string
+	var amount int
+	err = tx.QueryRow(ctx, `
+		SELECT r.status, r.reason, r.request_key, r.amount, p.payment_key
+		FROM refunds r JOIN payments p ON p.id = r.payment_id
+		WHERE r.id = $1 FOR UPDATE`, refundID).Scan(&status, &reason, &requestKey, &amount, &paymentKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	switch status {
+	case "완료":
+		return nil // 이미 나갔다. 재전송은 같은 결과다
+	case "요청":
+	default:
+		return fmt.Errorf("%w: 상태 %s", ErrRefundState, status)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE refunds SET status = '승인', updated_at = now() WHERE id = $1 AND status = '요청'`,
+		refundID); err != nil {
+		return err
+	}
+	// 호출 중 표시를 커밋한다. 트랜잭션을 연 채 PG 를 부르면 잠금이 그 시간만큼
+	// 유지되고, 프로세스가 도중에 죽으면 '요청' 으로 남아 두 번째 호출을 부른다.
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	res, err := gw.Cancel(ctx, CancelRequest{
+		PaymentKey: paymentKey, Amount: amount, IdempotencyKey: requestKey,
+		Reason: truncateRunes(reason, cancelReasonMax),
+	})
+	if err != nil {
+		if errors.Is(err, ErrPaymentUnknown) {
+			return err // '승인' 에 둔다. 사람이 조회로 확인한다
+		}
+		if _, uerr := s.pool.Exec(ctx,
+			`UPDATE refunds SET status = '요청', updated_at = now() WHERE id = $1 AND status = '승인'`,
+			refundID); uerr != nil {
+			return errors.Join(err, uerr)
+		}
+		return err
+	}
+	var raw []byte
+	if res != nil {
+		raw = MaskCardFields(res.Raw)
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE refunds SET status = '완료', pg_response = $2, updated_at = now()
+		WHERE id = $1 AND status = '승인'`, refundID, nullIfEmptyBytes(raw))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: 호출하는 사이 상태가 바뀌었습니다", ErrRefundState)
+	}
+	return nil
+}
+
+// cancelReasonMax is Toss's limit on cancelReason (D50: ≤ 200자). refunds.reason
+// allows 500.
+const cancelReasonMax = 200
+
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+func nullIfEmptyBytes(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}
+
+// RefundForReturn finds the refund a return settlement produced, so the caller
+// can execute it.
+func (s *Store) RefundForReturn(ctx context.Context, orderNo, returnNo string) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `
+		SELECT rf.id FROM refunds rf
+		JOIN returns rt ON rt.id = rf.return_id
+		JOIN orders o ON o.id = rf.order_id
+		WHERE o.order_no = $1 AND rt.return_no = $2
+		ORDER BY rf.created_at DESC LIMIT 1`, orderNo, returnNo).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
 }

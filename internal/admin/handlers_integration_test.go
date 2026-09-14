@@ -105,6 +105,9 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		// 아무것도 안 하고, "로그에 남는다" 를 확인하는 검사가 전부 무의미해진다
 		// (D15 7절이 요구하는 것이 바로 그 기록이다).
 		OpLog: store.OpLog(),
+		// 운영과 같이 PG 가 있다. 비우면 환불 실행(A-507·A-511)이 「PG 미설정」
+		// 502 로 끝나고, 돈이 나가는 경로를 검사하는 테스트가 전부 그 502 를 본다.
+		Gateway: func() commerce.Gateway { return reconcileGateway{status: commerce.PaymentApproved} },
 		// 운영과 같이 채운다. 비우면 A-206 이 콜백을 빈 주소로 그리고,
 		// 관리자가 그것을 프로바이더 콘솔에 붙여넣으면 연동이 안 된다.
 		BaseURL: func(r *http.Request) string {

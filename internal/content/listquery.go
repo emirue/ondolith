@@ -60,10 +60,11 @@ const (
 	// MaxPerPage is the ceiling regardless of the board's setting. A visitor
 	// asking for 10,000 rows is a denial of service with a query string.
 	MaxPerPage = 100
-	// MaxPage bounds OFFSET paging. Keyset paging has no such limit, but the
-	// screen still offers numbered pages and a five-digit page number is a
-	// crawler, not a reader.
-	MaxPage = 1000
+	// MaxPage bounds OFFSET paging. D30 measured page 950 falling to a
+	// sequential scan plus a 19,020-row sort; at 100 pages × 100 rows the
+	// worst OFFSET skips 10,000 index entries, which the board index absorbs.
+	// A three-digit page number is a crawler, not a reader.
+	MaxPage = 100
 	// MaxSearchRunes bounds the search term. A megabyte of text in a tsquery is
 	// work the database does before it can refuse.
 	MaxSearchRunes = 100

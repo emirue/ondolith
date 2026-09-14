@@ -389,7 +389,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, amount, err := d.Commerce.RequestRefund(r.Context(), order.OrderNo, lines,
+	refundID, amount, err := d.Commerce.RequestRefund(r.Context(), order.OrderNo, lines,
 		"관리자", r.PostFormValue("reason"), key)
 	switch {
 	case errors.Is(err, commerce.ErrNoPayment):
@@ -413,6 +413,23 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 	// 돈이 움직인 일은 반드시 로그에 남는다 (D15 7절).
 	d.log(r, c, "order.refund", "order", order.OrderNo,
 		"환불 "+itoa(amount)+"원 접수 ("+itoa(len(lines))+"개 품목)")
+
+	// 순서는 DB 한도 선점 → PG 호출 → 확정이다 (D13, D19 A-507). 선점은 위에서
+	// 끝났고 여기서 돈이 나간다. 실패는 502 — 선점은 유지되고, 작업 로그에
+	// 그 사실을 남긴다 (「선점 해제 여부까지 기록」).
+	var gw commerce.Gateway
+	if d.Gateway != nil {
+		gw = d.Gateway()
+	}
+	if err := d.Commerce.ExecuteRefund(r.Context(), gw, refundID); err != nil {
+		d.Logger.Error("환불 실행", "order", order.OrderNo, "refund", refundID, "err", err)
+		d.log(r, c, "order.refund", "order", order.OrderNo,
+			"환불 "+itoa(amount)+"원 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)
+		d.renderRefund(w, r, c, order, http.StatusBadGateway,
+			"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
+		return
+	}
+	d.log(r, c, "order.refund", "order", order.OrderNo, "환불 "+itoa(amount)+"원 PG 확정")
 	http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
 }
 
@@ -527,6 +544,23 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				d.log(r, c, "return.settle", "return", returnNo,
 					"반품 환불 "+itoa(amount)+"원 확정")
+				// 정산이 만든 환불 건을 PG 로 보낸다 (A-507 과 같은 순서).
+				var gw commerce.Gateway
+				if d.Gateway != nil {
+					gw = d.Gateway()
+				}
+				var refundID string
+				if refundID, err = d.Commerce.RefundForReturn(r.Context(), order.OrderNo, returnNo); err == nil {
+					err = d.Commerce.ExecuteRefund(r.Context(), gw, refundID)
+				}
+				if err != nil {
+					d.Logger.Error("반품 환불 실행", "return", returnNo, "err", err)
+					d.log(r, c, "return.settle", "return", returnNo,
+						"반품 환불 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)
+					d.renderReturns(w, r, c, order, http.StatusBadGateway,
+						"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
+					return
+				}
 			}
 		}
 	default:

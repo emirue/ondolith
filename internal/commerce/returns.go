@@ -700,14 +700,34 @@ func (s *Store) Returns(ctx context.Context, orderID string) ([]Return, error) {
 		return nil, err
 	}
 
+	if len(out) == 0 {
+		return out, nil
+	}
+	// 품목은 한 질의로 가져와 건별로 나눈다 — 건마다 질의하면 반품 수만큼의
+	// 왕복이다 (NFR-105).
+	ids := make([]string, len(out))
+	index := make(map[string]int, len(out))
 	for i := range out {
-		items, err := s.returnItems(ctx, out[i].ID)
-		if err != nil {
+		ids[i] = out[i].ID
+		index[out[i].ID] = i
+	}
+	rows, err = s.pool.Query(ctx, `
+		SELECT ri.return_id, ri.order_item_id, oi.product_name, oi.option_label, ri.quantity, ri.is_open
+		FROM return_items ri JOIN order_items oi ON oi.id = ri.order_item_id
+		WHERE ri.return_id = ANY($1) ORDER BY oi.created_at, oi.id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rid string
+		var it ReturnItem
+		if err := rows.Scan(&rid, &it.OrderItemID, &it.ProductName, &it.OptionLabel, &it.Quantity, &it.IsOpen); err != nil {
 			return nil, err
 		}
-		out[i].Items = items
+		out[index[rid]].Items = append(out[index[rid]].Items, it)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 func (s *Store) returnItems(ctx context.Context, returnID string) ([]ReturnItem, error) {

@@ -463,7 +463,34 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 	})
 
+	// 결제대기 만료 (D14: 결제대기 → 결제실패, 시스템). NFR-103 대로 고루틴이다.
+	// AuthWindow 가 지난 주문은 P-408 이 승인을 거부하므로 결제될 길이 없는데,
+	// 그 주문이 차감한 재고는 잡혀 있었다 — 결제 없이 떠난 장바구니마다 재고가
+	// 하나씩 사라졌다. 1분마다 최대 100건.
+	stopExpire := make(chan struct{})
+	if shopMode {
+		go func() {
+			t := time.NewTicker(time.Minute)
+			defer t.Stop()
+			for {
+				n, err := commerceStore.ExpirePendingOrders(settingCtx,
+					time.Now().Add(-commerce.AuthWindow), 100)
+				if err != nil {
+					log.Warn("결제대기 만료", "err", err)
+				} else if n > 0 {
+					log.Info("결제대기 만료", "orders", n)
+				}
+				select {
+				case <-stopExpire:
+					return
+				case <-t.C:
+				}
+			}
+		}()
+	}
+
 	cleanup := func() {
+		close(stopExpire)
 		sessionStore.StopCleanup()
 		_ = db.Close()
 		pool.Close()

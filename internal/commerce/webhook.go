@@ -148,6 +148,13 @@ func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent
 	return tx.Commit(ctx)
 }
 
+// ReconcileBudget bounds one A-508 request's gateway time; reconcileCallTimeout
+// bounds one lookup. 둘 다 WriteTimeout(60초) 안이다.
+const (
+	ReconcileBudget      = 40 * time.Second
+	reconcileCallTimeout = 5 * time.Second
+)
+
 // WebhookRow is one row of A-603.
 type WebhookRow struct {
 	ID        string
@@ -255,15 +262,28 @@ func (s *Store) PaymentsToReconcile(ctx context.Context, since, until time.Time)
 //
 // 조회하지 않은 것을 「일치」로 그리지 않는다 — 대사의 목적은 우리 장부와 PG 가
 // 다른 자리를 찾는 것이고, 묻지 않은 것은 같다는 뜻이 아니다.
+//
+// 조회 하나에 5초, 전체에 ReconcileBudget 이다. 요청 하나가 최대 500건을 순서대로
+// 묻는데, 시한이 없으면 PG 가 느린 날 WriteTimeout(60초)에 브라우저가 먼저 끊기고
+// 관리자는 빈 화면을 본다. 예산을 넘긴 행은 「조회하지 않았다」로 표시한다 —
+// 못 본 것을 본 것처럼 그리지 않는다.
 func (s *Store) Reconcile(ctx context.Context, gw Gateway, rows []ReconcileRow) []ReconcileRow {
 	out := make([]ReconcileRow, 0, len(rows))
+	deadline := time.Now().Add(ReconcileBudget)
 	for _, r := range rows {
 		if gw == nil {
 			r.Diff = "PG 가 설정되어 있지 않아 조회하지 않았다"
 			out = append(out, r)
 			continue
 		}
-		got, err := gw.Get(ctx, r.PaymentKey)
+		if time.Now().After(deadline) {
+			r.Diff = "시간 예산을 넘겨 조회하지 않았다 — 기간을 줄여 다시 보세요"
+			out = append(out, r)
+			continue
+		}
+		callCtx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
+		got, err := gw.Get(callCtx, r.PaymentKey)
+		cancel()
 		switch {
 		case err != nil:
 			r.Diff = "조회 실패: " + err.Error()
