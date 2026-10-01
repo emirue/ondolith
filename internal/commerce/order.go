@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -82,20 +83,12 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
 	// (1) 장바구니를 잠근 채 읽는다. FOR UPDATE OF ci 는 장바구니 항목 행만
 	// 잠근다 — 상품 행까지 잠그면 같은 상품을 보는 모든 주문이 줄을 선다.
-	rows, err := tx.Query(ctx, `
-		SELECT ci.variant_id, ci.quantity, p.id, p.name, v.option_values,
-		       p.base_price, v.price_delta, p.is_visible, v.is_visible, v.stock
-		FROM cart_items ci
-		JOIN carts c            ON c.id = ci.cart_id
-		JOIN product_variants v ON v.id = ci.variant_id
-		JOIN products p         ON p.id = v.product_id
-		WHERE ($1::uuid IS NOT NULL AND c.user_id = $1)
-		   OR ($2::text IS NOT NULL AND c.guest_key = $2)
-		ORDER BY ci.created_at, ci.id
-		FOR UPDATE OF ci`, nullable(o.UserID), nullable(o.GuestKey))
+	rows, err := q.LockCartForOrder(ctx, commerceq.LockCartForOrderParams{
+		UserID: nullable(o.UserID), GuestKey: nullable(o.GuestKey)})
 	if err != nil {
 		return nil, err
 	}
@@ -108,26 +101,17 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 	var lines []line
 	var amounts []Line
 	var deltas []StockDelta
-	for rows.Next() {
-		var l line
-		var raw []byte
-		var basePrice, priceDelta, stock int
-		var productVisible, variantVisible bool
-		if err := rows.Scan(&l.variantID, &l.quantity, &l.productID, &l.name, &raw,
-			&basePrice, &priceDelta, &productVisible, &variantVisible, &stock); err != nil {
-			rows.Close()
-			return nil, err
-		}
+	for _, r := range rows {
+		l := line{variantID: r.VariantID, productID: r.ProductID, name: r.Name, quantity: int(r.Quantity)}
+		basePrice, priceDelta := int(r.BasePrice), int(r.PriceDelta)
 		var opts map[string]string
-		if err := unmarshalOptions(raw, &opts); err != nil {
-			rows.Close()
+		if err := unmarshalOptions(r.OptionValues, &opts); err != nil {
 			return nil, err
 		}
 		l.optionLabel = OptionLabel(opts)
 
-		sell := Sellable{ProductVisible: productVisible, VariantVisible: variantVisible, Stock: stock}
+		sell := Sellable{ProductVisible: r.ProductVisible, VariantVisible: r.VariantVisible, Stock: int(r.Stock)}
 		if err := sell.CheckAvailable(l.quantity); err != nil {
-			rows.Close()
 			return nil, fmt.Errorf("%s: %w", l.name, err)
 		}
 		l.unitPrice = basePrice + priceDelta
@@ -135,10 +119,6 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 		lines = append(lines, l)
 		amounts = append(amounts, Line{BasePrice: basePrice, PriceDelta: priceDelta, Quantity: l.quantity})
 		deltas = append(deltas, StockDelta{VariantID: l.variantID, Delta: -l.quantity})
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	if len(lines) == 0 {
 		return nil, ErrCartEmpty
@@ -190,14 +170,12 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 	// (4) 주문 기록. 상태는 상태머신의 시작점이다.
 	order := &Order{OrderNo: NewOrderNo(now), Status: StatusPaymentPending,
 		Goods: goods, Fee: fee, Discount: discount, Total: total}
-	err = tx.QueryRow(ctx, `
-		INSERT INTO orders (order_no, user_id, status, total_amount, discount_amount,
-		                    receiver_name, receiver_phone, postcode, address1, address2,
-		                    delivery_memo, orderer_email, orderer_phone)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
-		order.OrderNo, nullable(userID), string(order.Status), total, discount,
-		form.ReceiverName, form.ReceiverPhone, form.Postcode, form.Address1, form.Address2,
-		form.DeliveryMemo, form.OrdererEmail, form.OrdererPhone).Scan(&order.ID)
+	order.ID, err = q.InsertOrder(ctx, commerceq.InsertOrderParams{
+		OrderNo: order.OrderNo, UserID: nullable(userID), Status: string(order.Status),
+		TotalAmount: int32(total), DiscountAmount: int32(discount),
+		ReceiverName: form.ReceiverName, ReceiverPhone: form.ReceiverPhone, Postcode: form.Postcode,
+		Address1: form.Address1, Address2: form.Address2, DeliveryMemo: form.DeliveryMemo,
+		OrdererEmail: form.OrdererEmail, OrdererPhone: form.OrdererPhone})
 	if err != nil {
 		return nil, err
 	}
@@ -206,12 +184,10 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 		// 상품명·옵션 표기·단가는 스냅샷이다 (FR-612). FK 조인으로 대체하지
 		// 않는다 — 조합이 은퇴한 뒤에도 그때 산 것이 재현돼야 한다.
 		// 배분된 할인도 같은 이유로 스냅샷이다 (FR-626).
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO order_items (order_id, product_id, variant_id, product_name,
-			                         option_label, unit_price, quantity, discount_amount)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			order.ID, l.productID, l.variantID, l.name, l.optionLabel,
-			l.unitPrice, l.quantity, perItem[i]); err != nil {
+		if err := q.InsertOrderItem(ctx, commerceq.InsertOrderItemParams{
+			OrderID: order.ID, ProductID: l.productID, VariantID: l.variantID, ProductName: l.name,
+			OptionLabel: l.optionLabel, UnitPrice: int32(l.unitPrice), Quantity: int32(l.quantity),
+			DiscountAmount: int32(perItem[i])}); err != nil {
 			return nil, err
 		}
 	}
@@ -219,20 +195,15 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 	// (5-b) 동의 이력. 본문을 복사하지 않는다 — terms 행이 불변이고 RESTRICT 가
 	// 삭제를 막으므로 참조만으로 재현된다 (D30).
 	for _, id := range form.AgreedTerms {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO order_agreements (order_id, terms_id) VALUES ($1, $2)
-			 ON CONFLICT DO NOTHING`, order.ID, id); err != nil {
+		if err := q.InsertOrderAgreement(ctx, commerceq.InsertOrderAgreementParams{
+			OrderID: order.ID, TermsID: id}); err != nil {
 			return nil, err
 		}
 	}
 
 	// 장바구니를 비운다. 남겨 두면 뒤로 가기 한 번이 같은 것을 또 주문한다.
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM cart_items ci
-		WHERE ci.cart_id IN (SELECT id FROM carts
-		                     WHERE ($1::uuid IS NOT NULL AND user_id = $1)
-		                        OR ($2::text IS NOT NULL AND guest_key = $2))`,
-		nullable(o.UserID), nullable(o.GuestKey)); err != nil {
+	if err := q.ClearCart(ctx, commerceq.ClearCartParams{
+		UserID: nullable(o.UserID), GuestKey: nullable(o.GuestKey)}); err != nil {
 		return nil, err
 	}
 
@@ -247,23 +218,7 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 // 종류마다 가장 최근 시행본 하나다. 여러 버전을 다 요구하면 개정할 때마다
 // 과거 버전에도 동의해야 한다.
 func requiredTermIDs(ctx context.Context, tx pgx.Tx, now time.Time) ([]string, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT DISTINCT ON (kind) id FROM terms
-		WHERE is_required AND effective_at <= $1
-		ORDER BY kind, effective_at DESC`, now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
+	return commerceq.New(tx).RequiredTermIDs(ctx, now)
 }
 
 // OptionLabel renders "색상: 검정 / 사이즈: L" for the order-item snapshot.
@@ -308,24 +263,15 @@ type Term struct {
 // 두 곳에서 고르면 화면은 v2 를 보여주고 서버는 v1 을 요구하는 일이 생기고,
 // 그때 사용자는 체크했는데도 거부당한다.
 func (s *Store) TermsInForce(ctx context.Context, now time.Time) ([]Term, error) {
-	const q = `
-		SELECT DISTINCT ON (kind) id, kind, version, body, is_required
-		FROM terms WHERE effective_at <= $1
-		ORDER BY kind, effective_at DESC`
-	rows, err := s.pool.Query(ctx, q, now)
+	rows, err := s.q.TermsInForce(ctx, now)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Term
-	for rows.Next() {
-		var t Term
-		if err := rows.Scan(&t.ID, &t.Kind, &t.Version, &t.Body, &t.Required); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
+	for _, r := range rows {
+		out = append(out, Term{ID: r.ID, Kind: r.Kind, Version: r.Version, Body: r.Body, Required: r.IsRequired})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // OrderDetail is what P-410/P-502 draw, snapshots only.
@@ -380,44 +326,34 @@ func (it OrderItem) RemainingQty() int { return it.Quantity - it.Settled }
 // 그때는 주문번호만으로 열지 않고 **연락처 대조**를 함께 요구한다 (P-504) —
 // 주문번호 하나로 열리면 그 번호가 곧 열쇠가 된다.
 func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone string) (*OrderDetail, error) {
-	const q = `
-		SELECT id, order_no, status, total_amount, discount_amount,
-		       receiver_name, receiver_phone,
-		       postcode, address1, address2, orderer_email, orderer_phone, created_at
-		FROM orders
-		WHERE order_no = $1
-		  AND ( ($2::uuid IS NOT NULL AND user_id = $2)
-		     OR ($3::text IS NOT NULL AND orderer_phone = $3) )`
-	var o OrderDetail
-	var status string
-	err := s.pool.QueryRow(ctx, q, orderNo, nullable(userID), nullable(ordererPhone)).
-		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.Discount, &o.ReceiverName, &o.ReceiverPhone,
-			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
+	r, err := s.q.OrderByNo(ctx, commerceq.OrderByNoParams{
+		OrderNo: orderNo, UserID: nullable(userID), OrdererPhone: nullable(ordererPhone)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	o.Status = Status(status)
+	return s.withItems(ctx, orderDetailFromRow(commerceq.OrderByNoUnscopedRow(r)))
+}
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, product_name, option_label, unit_price, quantity, line_amount,
-		       discount_amount, settled_quantity
-		FROM order_items WHERE order_id = $1 ORDER BY created_at, id`, o.ID)
+// orderDetailFromRow converts the 13-column order read. 세 질의(OrderByNo·
+// OrderByNoUnscoped·GuestOrder)의 행이 같은 모양이라 구조체 변환으로 여기 온다.
+func orderDetailFromRow(r commerceq.OrderByNoUnscopedRow) OrderDetail {
+	return OrderDetail{ID: r.ID, OrderNo: r.OrderNo, Status: Status(r.Status),
+		Total: int(r.TotalAmount), Discount: int(r.DiscountAmount),
+		ReceiverName: r.ReceiverName, ReceiverPhone: r.ReceiverPhone, Postcode: r.Postcode,
+		Address1: r.Address1, Address2: r.Address2, OrdererEmail: r.OrdererEmail,
+		OrdererPhone: r.OrdererPhone, CreatedAt: r.CreatedAt}
+}
+
+func (s *Store) withItems(ctx context.Context, o OrderDetail) (*OrderDetail, error) {
+	items, err := s.orderItems(ctx, o.ID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var it OrderItem
-		if err := rows.Scan(&it.ID, &it.ProductName, &it.OptionLabel, &it.UnitPrice,
-			&it.Quantity, &it.LineAmount, &it.Discount, &it.Settled); err != nil {
-			return nil, err
-		}
-		o.Items = append(o.Items, it)
-	}
-	return &o, rows.Err()
+	o.Items = items
+	return &o, nil
 }
 
 // MyOrders is P-501.
@@ -426,25 +362,17 @@ func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderD
 		return nil, ErrNotFound
 	}
 	limit, offset := ProductQuery{Page: page}.clamp()
-	rows, err := s.pool.Query(ctx, `
-		SELECT order_no, status, total_amount, created_at
-		FROM orders WHERE user_id = $1
-		ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, userID, limit, offset)
+	rows, err := s.q.MyOrders(ctx, commerceq.MyOrdersParams{
+		UserID: &userID, Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []OrderDetail
-	for rows.Next() {
-		var o OrderDetail
-		var status string
-		if err := rows.Scan(&o.OrderNo, &status, &o.Total, &o.CreatedAt); err != nil {
-			return nil, err
-		}
-		o.Status = Status(status)
-		out = append(out, o)
+	for _, r := range rows {
+		out = append(out, OrderDetail{OrderNo: r.OrderNo, Status: Status(r.Status),
+			Total: int(r.TotalAmount), CreatedAt: r.CreatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // OrderByNoUnscoped reads an order without an ownership predicate.
@@ -456,50 +384,28 @@ func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderD
 // 이름에 Unscoped 를 박아 둔 이유는 grep 으로 찾기 위해서다 — 소유권 없는
 // 읽기가 늘어나는 것을 눈에 보이게 한다.
 func (s *Store) OrderByNoUnscoped(ctx context.Context, orderNo string) (*OrderDetail, error) {
-	const q = `
-		SELECT id, order_no, status, total_amount, discount_amount,
-		       receiver_name, receiver_phone,
-		       postcode, address1, address2, orderer_email, orderer_phone, created_at
-		FROM orders WHERE order_no = $1`
-	var o OrderDetail
-	var status string
-	err := s.pool.QueryRow(ctx, q, orderNo).
-		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.Discount, &o.ReceiverName, &o.ReceiverPhone,
-			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
+	r, err := s.q.OrderByNoUnscoped(ctx, orderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	o.Status = Status(status)
-	items, err := s.orderItems(ctx, o.ID)
-	if err != nil {
-		return nil, err
-	}
-	o.Items = items
-	return &o, nil
+	return s.withItems(ctx, orderDetailFromRow(r))
 }
 
 func (s *Store) orderItems(ctx context.Context, orderID string) ([]OrderItem, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, product_name, option_label, unit_price, quantity, line_amount,
-		       discount_amount, settled_quantity
-		FROM order_items WHERE order_id = $1 ORDER BY created_at, id`, orderID)
+	rows, err := s.q.OrderItems(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []OrderItem
-	for rows.Next() {
-		var it OrderItem
-		if err := rows.Scan(&it.ID, &it.ProductName, &it.OptionLabel, &it.UnitPrice,
-			&it.Quantity, &it.LineAmount, &it.Discount, &it.Settled); err != nil {
-			return nil, err
-		}
-		out = append(out, it)
+	for _, r := range rows {
+		out = append(out, OrderItem{ID: r.ID, ProductName: r.ProductName, OptionLabel: r.OptionLabel,
+			UnitPrice: int(r.UnitPrice), Quantity: int(r.Quantity), LineAmount: int(r.LineAmount),
+			Discount: int(r.DiscountAmount), Settled: int(r.SettledQuantity)})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // GuestOrder is P-504's read: order number AND a matching contact.
@@ -514,33 +420,15 @@ func (s *Store) GuestOrder(ctx context.Context, orderNo, phone, email string) (*
 	if orderNo == "" || (phone == "" && email == "") {
 		return nil, ErrNotFound
 	}
-	const q = `
-		SELECT id, order_no, status, total_amount, discount_amount,
-		       receiver_name, receiver_phone,
-		       postcode, address1, address2, orderer_email, orderer_phone, created_at
-		FROM orders
-		WHERE order_no = $1
-		  AND user_id IS NULL
-		  AND ( ($2::text IS NOT NULL AND orderer_phone = $2)
-		     OR ($3::text IS NOT NULL AND orderer_email = $3) )`
-	var o OrderDetail
-	var status string
-	err := s.pool.QueryRow(ctx, q, orderNo, nullable(phone), nullable(email)).
-		Scan(&o.ID, &o.OrderNo, &status, &o.Total, &o.Discount, &o.ReceiverName, &o.ReceiverPhone,
-			&o.Postcode, &o.Address1, &o.Address2, &o.OrdererEmail, &o.OrdererPhone, &o.CreatedAt)
+	r, err := s.q.GuestOrder(ctx, commerceq.GuestOrderParams{
+		OrderNo: orderNo, Phone: nullable(phone), Email: nullable(email)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	o.Status = Status(status)
-	items, err := s.orderItems(ctx, o.ID)
-	if err != nil {
-		return nil, err
-	}
-	o.Items = items
-	return &o, nil
+	return s.withItems(ctx, orderDetailFromRow(commerceq.OrderByNoUnscopedRow(r)))
 }
 
 // Shipment is one row of shipments, as P-505 draws it.
@@ -553,22 +441,15 @@ type Shipment struct {
 
 // Shipments lists an order's dispatches, newest first.
 func (s *Store) Shipments(ctx context.Context, orderID string) ([]Shipment, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT kind, carrier, tracking_no, shipped_at FROM shipments
-		WHERE order_id = $1 ORDER BY shipped_at DESC, id`, orderID)
+	rows, err := s.q.Shipments(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Shipment
-	for rows.Next() {
-		var sh Shipment
-		if err := rows.Scan(&sh.Kind, &sh.Carrier, &sh.TrackingNo, &sh.ShippedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, sh)
+	for _, r := range rows {
+		out = append(out, Shipment{Kind: r.Kind, Carrier: r.Carrier, TrackingNo: r.TrackingNo, ShippedAt: r.ShippedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 var ErrShipmentExists = errors.New("commerce: 이미 최초 발송이 기록된 주문입니다")
@@ -597,26 +478,17 @@ func (s *Store) AdminOrders(ctx context.Context, status string, page int) ([]Ord
 		return nil, fmt.Errorf("%w: %q", ErrUnknownStatus, status)
 	}
 	limit, offset := ProductQuery{Page: page}.clamp()
-	rows, err := s.pool.Query(ctx, `
-		SELECT order_no, status, total_amount, orderer_email, created_at
-		FROM orders
-		WHERE ($1::text IS NULL OR status = $1)
-		ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, nullable(status), limit, offset)
+	rows, err := s.q.AdminOrders(ctx, commerceq.AdminOrdersParams{
+		Status: nullable(status), Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []OrderDetail
-	for rows.Next() {
-		var o OrderDetail
-		var st string
-		if err := rows.Scan(&o.OrderNo, &st, &o.Total, &o.OrdererEmail, &o.CreatedAt); err != nil {
-			return nil, err
-		}
-		o.Status = Status(st)
-		out = append(out, o)
+	for _, r := range rows {
+		out = append(out, OrderDetail{OrderNo: r.OrderNo, Status: Status(r.Status),
+			Total: int(r.TotalAmount), OrdererEmail: r.OrdererEmail, CreatedAt: r.CreatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // TransitionOrder is A-506's write: the state machine decides, then the row moves.
@@ -630,36 +502,31 @@ func (s *Store) TransitionOrder(ctx context.Context, orderNo string, to Status, 
 		return err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
-	var id, from string
-	err = tx.QueryRow(ctx,
-		`SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE`, orderNo).Scan(&id, &from)
+	row, err := q.LockOrderByNo(ctx, orderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	id, from := row.ID, row.Status
 	if err := CanTransition(Status(from), to, actor); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`, id, string(to)); err != nil {
+	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: id, Status: string(to)}); err != nil {
 		return err
 	}
 	// 배송완료 전이는 시각을 남긴다. A-512 의 반품 기간·자동 확정이 전부 이
 	// 시각 기준이고, operation_logs 는 감사 흔적이지 운영 데이터가 아니다 (D30).
 	if to == StatusDelivered {
-		if _, err := tx.Exec(ctx,
-			`UPDATE orders SET delivered_at = now() WHERE id = $1 AND delivered_at IS NULL`,
-			id); err != nil {
+		if err := q.MarkDelivered(ctx, id); err != nil {
 			return err
 		}
 	}
 	if to == StatusConfirmed {
-		if _, err := tx.Exec(ctx,
-			`UPDATE orders SET confirmed_at = now() WHERE id = $1 AND confirmed_at IS NULL`,
-			id); err != nil {
+		if err := q.MarkConfirmed(ctx, id); err != nil {
 			return err
 		}
 	}
@@ -672,17 +539,15 @@ func (s *Store) TransitionOrder(ctx context.Context, orderNo string, to Status, 
 // 둘이 되고, FR-623 이 A-516 에 대해 지적한 것과 같은 문제가 된다.
 func (s *Store) RecordShipment(ctx context.Context, orderNo, carrier, tracking string,
 	at time.Time) error {
-	var orderID string
-	err := s.pool.QueryRow(ctx, `SELECT id FROM orders WHERE order_no = $1`, orderNo).Scan(&orderID)
+	orderID, err := s.q.OrderIDByNo(ctx, orderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO shipments (order_id, kind, carrier, tracking_no, shipped_at)
-		VALUES ($1, '최초발송', $2, $3, $4)`, orderID, carrier, tracking, at)
+	err = s.q.InsertFirstShipment(ctx, commerceq.InsertFirstShipmentParams{
+		OrderID: orderID, Carrier: carrier, TrackingNo: tracking, ShippedAt: at})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return ErrShipmentExists
@@ -701,26 +566,9 @@ func (s *Store) RecordShipment(ctx context.Context, orderNo, carrier, tracking s
 // 것(ErrPaymentUnknown)이고, 그쪽은 A-508 대사가 사람의 손으로 닫는다. 가상계좌는
 // 입금대기라 여기 오지 않는다.
 func (s *Store) ExpirePendingOrders(ctx context.Context, before time.Time, limit int) (int, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT o.id FROM orders o
-		WHERE o.status = $1 AND o.created_at < $2
-		  AND NOT EXISTS (SELECT 1 FROM payments p
-		                  WHERE p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기')
-		ORDER BY o.created_at LIMIT $3`, string(StatusPaymentPending), before, limit)
+	ids, err := s.q.ExpirablePendingOrders(ctx, commerceq.ExpirablePendingOrdersParams{
+		Status: string(StatusPaymentPending), Before: before, Limit: int32(limit)})
 	if err != nil {
-		return 0, err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	n := 0
@@ -739,9 +587,9 @@ func (s *Store) expireOne(ctx context.Context, orderID string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var status string
-	if err := tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1 FOR UPDATE`, orderID).
-		Scan(&status); err != nil {
+	q := s.q.WithTx(tx)
+	status, err := q.LockOrderStatus(ctx, orderID)
+	if err != nil {
 		return err
 	}
 	if Status(status) != StatusPaymentPending {
@@ -749,10 +597,8 @@ func (s *Store) expireOne(ctx context.Context, orderID string) error {
 	}
 	// A confirmation can reserve a payment after the expiry list was read.
 	// Recheck under the same order lock ConfirmPayment uses for reservation.
-	var pending bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM payments WHERE order_id = $1 AND kind = '주문결제' AND status = '대기'
-	)`, orderID).Scan(&pending); err != nil {
+	pending, err := q.HasPendingOrderPayment(ctx, orderID)
+	if err != nil {
 		return err
 	}
 	if pending {
@@ -768,9 +614,8 @@ func (s *Store) expireOne(ctx context.Context, orderID string) error {
 	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		orderID, string(StatusPaymentFailed), string(StatusPaymentPending)); err != nil {
+	if _, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
+		ID: orderID, ToStatus: string(StatusPaymentFailed), FromStatus: string(StatusPaymentPending)}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -788,8 +633,6 @@ func (s *Store) OpenOrders(ctx context.Context) (int, error) {
 			terminal = append(terminal, string(st))
 		}
 	}
-	var n int
-	err := s.pool.QueryRow(ctx,
-		`SELECT count(*) FROM orders WHERE status <> ALL($1)`, terminal).Scan(&n)
-	return n, err
+	n, err := s.q.OpenOrders(ctx, terminal)
+	return int(n), err
 }

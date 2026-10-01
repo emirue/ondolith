@@ -7,7 +7,457 @@ package commerceq
 
 import (
 	"context"
+	"time"
 )
+
+const adminOrders = `-- name: AdminOrders :many
+SELECT order_no, status, total_amount, orderer_email, created_at
+FROM orders
+WHERE ($1::text IS NULL OR status = $1)
+ORDER BY created_at DESC, id LIMIT $3::int OFFSET $2::int
+`
+
+type AdminOrdersParams struct {
+	Status *string
+	Offset int32
+	Limit  int32
+}
+
+type AdminOrdersRow struct {
+	OrderNo      string
+	Status       string
+	TotalAmount  int32
+	OrdererEmail string
+	CreatedAt    time.Time
+}
+
+func (q *Queries) AdminOrders(ctx context.Context, arg AdminOrdersParams) ([]AdminOrdersRow, error) {
+	rows, err := q.db.Query(ctx, adminOrders, arg.Status, arg.Offset, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminOrdersRow{}
+	for rows.Next() {
+		var i AdminOrdersRow
+		if err := rows.Scan(
+			&i.OrderNo,
+			&i.Status,
+			&i.TotalAmount,
+			&i.OrdererEmail,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const clearCart = `-- name: ClearCart :exec
+DELETE FROM cart_items ci
+WHERE ci.cart_id IN (SELECT id FROM carts
+                     WHERE ($1::uuid IS NOT NULL AND user_id = $1)
+                        OR ($2::text IS NOT NULL AND guest_key = $2))
+`
+
+type ClearCartParams struct {
+	UserID   *string
+	GuestKey *string
+}
+
+func (q *Queries) ClearCart(ctx context.Context, arg ClearCartParams) error {
+	_, err := q.db.Exec(ctx, clearCart, arg.UserID, arg.GuestKey)
+	return err
+}
+
+const expirablePendingOrders = `-- name: ExpirablePendingOrders :many
+SELECT o.id FROM orders o
+WHERE o.status = $1 AND o.created_at < $2
+  AND NOT EXISTS (SELECT 1 FROM payments p
+                  WHERE p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기')
+ORDER BY o.created_at LIMIT $3::int
+`
+
+type ExpirablePendingOrdersParams struct {
+	Status string
+	Before time.Time
+	Limit  int32
+}
+
+func (q *Queries) ExpirablePendingOrders(ctx context.Context, arg ExpirablePendingOrdersParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, expirablePendingOrders, arg.Status, arg.Before, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const guestOrder = `-- name: GuestOrder :one
+SELECT id, order_no, status, total_amount, discount_amount,
+       receiver_name, receiver_phone,
+       postcode, address1, address2, orderer_email, orderer_phone, created_at
+FROM orders
+WHERE order_no = $1
+  AND user_id IS NULL
+  AND ( ($2::text IS NOT NULL AND orderer_phone = $2)
+     OR ($3::text IS NOT NULL AND orderer_email = $3) )
+`
+
+type GuestOrderParams struct {
+	OrderNo string
+	Phone   *string
+	Email   *string
+}
+
+type GuestOrderRow struct {
+	ID             string
+	OrderNo        string
+	Status         string
+	TotalAmount    int32
+	DiscountAmount int32
+	ReceiverName   string
+	ReceiverPhone  string
+	Postcode       string
+	Address1       string
+	Address2       string
+	OrdererEmail   string
+	OrdererPhone   string
+	CreatedAt      time.Time
+}
+
+func (q *Queries) GuestOrder(ctx context.Context, arg GuestOrderParams) (GuestOrderRow, error) {
+	row := q.db.QueryRow(ctx, guestOrder, arg.OrderNo, arg.Phone, arg.Email)
+	var i GuestOrderRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNo,
+		&i.Status,
+		&i.TotalAmount,
+		&i.DiscountAmount,
+		&i.ReceiverName,
+		&i.ReceiverPhone,
+		&i.Postcode,
+		&i.Address1,
+		&i.Address2,
+		&i.OrdererEmail,
+		&i.OrdererPhone,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const hasPendingOrderPayment = `-- name: HasPendingOrderPayment :one
+SELECT EXISTS (
+    SELECT 1 FROM payments WHERE order_id = $1 AND kind = '주문결제' AND status = '대기'
+)::boolean AS pending
+`
+
+func (q *Queries) HasPendingOrderPayment(ctx context.Context, orderID string) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingOrderPayment, orderID)
+	var pending bool
+	err := row.Scan(&pending)
+	return pending, err
+}
+
+const insertFirstShipment = `-- name: InsertFirstShipment :exec
+INSERT INTO shipments (order_id, kind, carrier, tracking_no, shipped_at)
+VALUES ($1, '최초발송', $2, $3, $4)
+`
+
+type InsertFirstShipmentParams struct {
+	OrderID    string
+	Carrier    string
+	TrackingNo string
+	ShippedAt  time.Time
+}
+
+func (q *Queries) InsertFirstShipment(ctx context.Context, arg InsertFirstShipmentParams) error {
+	_, err := q.db.Exec(ctx, insertFirstShipment,
+		arg.OrderID,
+		arg.Carrier,
+		arg.TrackingNo,
+		arg.ShippedAt,
+	)
+	return err
+}
+
+const insertOrder = `-- name: InsertOrder :one
+INSERT INTO orders (order_no, user_id, status, total_amount, discount_amount,
+                    receiver_name, receiver_phone, postcode, address1, address2,
+                    delivery_memo, orderer_email, orderer_phone)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id
+`
+
+type InsertOrderParams struct {
+	OrderNo        string
+	UserID         *string
+	Status         string
+	TotalAmount    int32
+	DiscountAmount int32
+	ReceiverName   string
+	ReceiverPhone  string
+	Postcode       string
+	Address1       string
+	Address2       string
+	DeliveryMemo   string
+	OrdererEmail   string
+	OrdererPhone   string
+}
+
+func (q *Queries) InsertOrder(ctx context.Context, arg InsertOrderParams) (string, error) {
+	row := q.db.QueryRow(ctx, insertOrder,
+		arg.OrderNo,
+		arg.UserID,
+		arg.Status,
+		arg.TotalAmount,
+		arg.DiscountAmount,
+		arg.ReceiverName,
+		arg.ReceiverPhone,
+		arg.Postcode,
+		arg.Address1,
+		arg.Address2,
+		arg.DeliveryMemo,
+		arg.OrdererEmail,
+		arg.OrdererPhone,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertOrderAgreement = `-- name: InsertOrderAgreement :exec
+INSERT INTO order_agreements (order_id, terms_id) VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type InsertOrderAgreementParams struct {
+	OrderID string
+	TermsID string
+}
+
+func (q *Queries) InsertOrderAgreement(ctx context.Context, arg InsertOrderAgreementParams) error {
+	_, err := q.db.Exec(ctx, insertOrderAgreement, arg.OrderID, arg.TermsID)
+	return err
+}
+
+const insertOrderItem = `-- name: InsertOrderItem :exec
+INSERT INTO order_items (order_id, product_id, variant_id, product_name,
+                         option_label, unit_price, quantity, discount_amount)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+`
+
+type InsertOrderItemParams struct {
+	OrderID        string
+	ProductID      string
+	VariantID      string
+	ProductName    string
+	OptionLabel    string
+	UnitPrice      int32
+	Quantity       int32
+	DiscountAmount int32
+}
+
+func (q *Queries) InsertOrderItem(ctx context.Context, arg InsertOrderItemParams) error {
+	_, err := q.db.Exec(ctx, insertOrderItem,
+		arg.OrderID,
+		arg.ProductID,
+		arg.VariantID,
+		arg.ProductName,
+		arg.OptionLabel,
+		arg.UnitPrice,
+		arg.Quantity,
+		arg.DiscountAmount,
+	)
+	return err
+}
+
+const lockCartForOrder = `-- name: LockCartForOrder :many
+
+SELECT ci.variant_id, ci.quantity, p.id AS product_id, p.name, v.option_values,
+       p.base_price, v.price_delta, p.is_visible AS product_visible, v.is_visible AS variant_visible, v.stock
+FROM cart_items ci
+JOIN carts c            ON c.id = ci.cart_id
+JOIN product_variants v ON v.id = ci.variant_id
+JOIN products p         ON p.id = v.product_id
+WHERE ($1::uuid IS NOT NULL AND c.user_id = $1)
+   OR ($2::text IS NOT NULL AND c.guest_key = $2)
+ORDER BY ci.created_at, ci.id
+FOR UPDATE OF ci
+`
+
+type LockCartForOrderParams struct {
+	UserID   *string
+	GuestKey *string
+}
+
+type LockCartForOrderRow struct {
+	VariantID      string
+	Quantity       int32
+	ProductID      string
+	Name           string
+	OptionValues   []byte
+	BasePrice      int32
+	PriceDelta     int32
+	ProductVisible bool
+	VariantVisible bool
+	Stock          int32
+}
+
+// 주문 (order.go, FR-604/FR-612/FR-619). 소유권 술어는 WHERE 에 있다 (SC-3).
+func (q *Queries) LockCartForOrder(ctx context.Context, arg LockCartForOrderParams) ([]LockCartForOrderRow, error) {
+	rows, err := q.db.Query(ctx, lockCartForOrder, arg.UserID, arg.GuestKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockCartForOrderRow{}
+	for rows.Next() {
+		var i LockCartForOrderRow
+		if err := rows.Scan(
+			&i.VariantID,
+			&i.Quantity,
+			&i.ProductID,
+			&i.Name,
+			&i.OptionValues,
+			&i.BasePrice,
+			&i.PriceDelta,
+			&i.ProductVisible,
+			&i.VariantVisible,
+			&i.Stock,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockOrderByNo = `-- name: LockOrderByNo :one
+SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE
+`
+
+type LockOrderByNoRow struct {
+	ID     string
+	Status string
+}
+
+func (q *Queries) LockOrderByNo(ctx context.Context, orderNo string) (LockOrderByNoRow, error) {
+	row := q.db.QueryRow(ctx, lockOrderByNo, orderNo)
+	var i LockOrderByNoRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
+const lockOrderStatus = `-- name: LockOrderStatus :one
+SELECT status FROM orders WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockOrderStatus(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, lockOrderStatus, id)
+	var status string
+	err := row.Scan(&status)
+	return status, err
+}
+
+const markConfirmed = `-- name: MarkConfirmed :exec
+UPDATE orders SET confirmed_at = now() WHERE id = $1 AND confirmed_at IS NULL
+`
+
+func (q *Queries) MarkConfirmed(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, markConfirmed, id)
+	return err
+}
+
+const markDelivered = `-- name: MarkDelivered :exec
+UPDATE orders SET delivered_at = now() WHERE id = $1 AND delivered_at IS NULL
+`
+
+func (q *Queries) MarkDelivered(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, markDelivered, id)
+	return err
+}
+
+const moveOrderStatus = `-- name: MoveOrderStatus :execrows
+UPDATE orders SET status = $1, updated_at = now()
+WHERE id = $2 AND status = $3
+`
+
+type MoveOrderStatusParams struct {
+	ToStatus   string
+	ID         string
+	FromStatus string
+}
+
+func (q *Queries) MoveOrderStatus(ctx context.Context, arg MoveOrderStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, moveOrderStatus, arg.ToStatus, arg.ID, arg.FromStatus)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const myOrders = `-- name: MyOrders :many
+SELECT order_no, status, total_amount, created_at
+FROM orders WHERE user_id = $1
+ORDER BY created_at DESC, id LIMIT $3::int OFFSET $2::int
+`
+
+type MyOrdersParams struct {
+	UserID *string
+	Offset int32
+	Limit  int32
+}
+
+type MyOrdersRow struct {
+	OrderNo     string
+	Status      string
+	TotalAmount int32
+	CreatedAt   time.Time
+}
+
+func (q *Queries) MyOrders(ctx context.Context, arg MyOrdersParams) ([]MyOrdersRow, error) {
+	rows, err := q.db.Query(ctx, myOrders, arg.UserID, arg.Offset, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MyOrdersRow{}
+	for rows.Next() {
+		var i MyOrdersRow
+		if err := rows.Scan(
+			&i.OrderNo,
+			&i.Status,
+			&i.TotalAmount,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const openOrders = `-- name: OpenOrders :one
 SELECT count(*) FROM orders WHERE status <> ALL($1::text[])
@@ -18,4 +468,275 @@ func (q *Queries) OpenOrders(ctx context.Context, terminal []string) (int64, err
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const orderByNo = `-- name: OrderByNo :one
+SELECT id, order_no, status, total_amount, discount_amount,
+       receiver_name, receiver_phone,
+       postcode, address1, address2, orderer_email, orderer_phone, created_at
+FROM orders
+WHERE order_no = $1
+  AND ( ($2::uuid IS NOT NULL AND user_id = $2)
+     OR ($3::text IS NOT NULL AND orderer_phone = $3) )
+`
+
+type OrderByNoParams struct {
+	OrderNo      string
+	UserID       *string
+	OrdererPhone *string
+}
+
+type OrderByNoRow struct {
+	ID             string
+	OrderNo        string
+	Status         string
+	TotalAmount    int32
+	DiscountAmount int32
+	ReceiverName   string
+	ReceiverPhone  string
+	Postcode       string
+	Address1       string
+	Address2       string
+	OrdererEmail   string
+	OrdererPhone   string
+	CreatedAt      time.Time
+}
+
+func (q *Queries) OrderByNo(ctx context.Context, arg OrderByNoParams) (OrderByNoRow, error) {
+	row := q.db.QueryRow(ctx, orderByNo, arg.OrderNo, arg.UserID, arg.OrdererPhone)
+	var i OrderByNoRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNo,
+		&i.Status,
+		&i.TotalAmount,
+		&i.DiscountAmount,
+		&i.ReceiverName,
+		&i.ReceiverPhone,
+		&i.Postcode,
+		&i.Address1,
+		&i.Address2,
+		&i.OrdererEmail,
+		&i.OrdererPhone,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const orderByNoUnscoped = `-- name: OrderByNoUnscoped :one
+SELECT id, order_no, status, total_amount, discount_amount,
+       receiver_name, receiver_phone,
+       postcode, address1, address2, orderer_email, orderer_phone, created_at
+FROM orders WHERE order_no = $1
+`
+
+type OrderByNoUnscopedRow struct {
+	ID             string
+	OrderNo        string
+	Status         string
+	TotalAmount    int32
+	DiscountAmount int32
+	ReceiverName   string
+	ReceiverPhone  string
+	Postcode       string
+	Address1       string
+	Address2       string
+	OrdererEmail   string
+	OrdererPhone   string
+	CreatedAt      time.Time
+}
+
+func (q *Queries) OrderByNoUnscoped(ctx context.Context, orderNo string) (OrderByNoUnscopedRow, error) {
+	row := q.db.QueryRow(ctx, orderByNoUnscoped, orderNo)
+	var i OrderByNoUnscopedRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNo,
+		&i.Status,
+		&i.TotalAmount,
+		&i.DiscountAmount,
+		&i.ReceiverName,
+		&i.ReceiverPhone,
+		&i.Postcode,
+		&i.Address1,
+		&i.Address2,
+		&i.OrdererEmail,
+		&i.OrdererPhone,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const orderIDByNo = `-- name: OrderIDByNo :one
+SELECT id FROM orders WHERE order_no = $1
+`
+
+func (q *Queries) OrderIDByNo(ctx context.Context, orderNo string) (string, error) {
+	row := q.db.QueryRow(ctx, orderIDByNo, orderNo)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const orderItems = `-- name: OrderItems :many
+SELECT id, product_name, option_label, unit_price, quantity, line_amount::int AS line_amount,
+       discount_amount, settled_quantity
+FROM order_items WHERE order_id = $1 ORDER BY created_at, id
+`
+
+type OrderItemsRow struct {
+	ID              string
+	ProductName     string
+	OptionLabel     string
+	UnitPrice       int32
+	Quantity        int32
+	LineAmount      int32
+	DiscountAmount  int32
+	SettledQuantity int32
+}
+
+func (q *Queries) OrderItems(ctx context.Context, orderID string) ([]OrderItemsRow, error) {
+	rows, err := q.db.Query(ctx, orderItems, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OrderItemsRow{}
+	for rows.Next() {
+		var i OrderItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductName,
+			&i.OptionLabel,
+			&i.UnitPrice,
+			&i.Quantity,
+			&i.LineAmount,
+			&i.DiscountAmount,
+			&i.SettledQuantity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const requiredTermIDs = `-- name: RequiredTermIDs :many
+SELECT DISTINCT ON (kind) id FROM terms
+WHERE is_required AND effective_at <= $1
+ORDER BY kind, effective_at DESC
+`
+
+func (q *Queries) RequiredTermIDs(ctx context.Context, now time.Time) ([]string, error) {
+	rows, err := q.db.Query(ctx, requiredTermIDs, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setOrderStatus = `-- name: SetOrderStatus :exec
+UPDATE orders SET status = $2, updated_at = now() WHERE id = $1
+`
+
+type SetOrderStatusParams struct {
+	ID     string
+	Status string
+}
+
+func (q *Queries) SetOrderStatus(ctx context.Context, arg SetOrderStatusParams) error {
+	_, err := q.db.Exec(ctx, setOrderStatus, arg.ID, arg.Status)
+	return err
+}
+
+const shipments = `-- name: Shipments :many
+SELECT kind, carrier, tracking_no, shipped_at FROM shipments
+WHERE order_id = $1 ORDER BY shipped_at DESC, id
+`
+
+type ShipmentsRow struct {
+	Kind       string
+	Carrier    string
+	TrackingNo string
+	ShippedAt  time.Time
+}
+
+func (q *Queries) Shipments(ctx context.Context, orderID string) ([]ShipmentsRow, error) {
+	rows, err := q.db.Query(ctx, shipments, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ShipmentsRow{}
+	for rows.Next() {
+		var i ShipmentsRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Carrier,
+			&i.TrackingNo,
+			&i.ShippedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const termsInForce = `-- name: TermsInForce :many
+SELECT DISTINCT ON (kind) id, kind, version, body, is_required
+FROM terms WHERE effective_at <= $1
+ORDER BY kind, effective_at DESC
+`
+
+type TermsInForceRow struct {
+	ID         string
+	Kind       string
+	Version    string
+	Body       string
+	IsRequired bool
+}
+
+func (q *Queries) TermsInForce(ctx context.Context, now time.Time) ([]TermsInForceRow, error) {
+	rows, err := q.db.Query(ctx, termsInForce, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TermsInForceRow{}
+	for rows.Next() {
+		var i TermsInForceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Version,
+			&i.Body,
+			&i.IsRequired,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

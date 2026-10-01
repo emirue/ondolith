@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -68,18 +69,14 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 	// 만료 처리도 같은 주문을 잠근다. 상태 조회와 결제 선점을 한 잠금 안에서
 	// 끝내야, 만료된 주문을 승인하거나 진행 중인 결제의 재고를 풀지 않는다.
 	// 잠금은 승인 API 를 부르기 전에 커밋하여 해제한다.
-	var orderID, status string
-	var stored int
-	var createdAt time.Time
-	err = tx.QueryRow(ctx, `
-		SELECT id, status, total_amount, created_at FROM orders
-		WHERE order_no = $1 FOR UPDATE`, orderNo).Scan(&orderID, &status, &stored, &createdAt)
+	locked, err := s.q.WithTx(tx).LockOrderForPayment(ctx, orderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	orderID, status, stored, createdAt := locked.ID, locked.Status, int(locked.TotalAmount), locked.CreatedAt
 
 	// (2) FR-607. 승인 API 를 부르기 전이다.
 	if err := VerifyAmount(stored, callbackAmount); err != nil {
@@ -95,11 +92,8 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 	// (4) 선점. 부분 유니크(주문당 살아 있는 주문결제 1건)가 여기서 두 번째를
 	// 떨어뜨린다. 애플리케이션의 "이미 승인됐나?" 검사는 두 요청이 같은 답을
 	// 읽고 둘 다 진행하므로 막지 못한다 (D50 「멱등성」).
-	var paymentID string
-	err = tx.QueryRow(ctx, `
-		INSERT INTO payments (order_id, kind, status, pg, payment_key, approved_amount)
-		VALUES ($1, '주문결제', '대기', $2, $3, $4) RETURNING id`,
-		orderID, pgName, paymentKey, stored).Scan(&paymentID)
+	paymentID, err := s.q.WithTx(tx).ReservePayment(ctx, commerceq.ReservePaymentParams{
+		OrderID: orderID, Pg: pgName, PaymentKey: paymentKey, ApprovedAmount: int32(stored)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		// 어느 유니크에 걸렸는지 구분한다. 둘을 한 오류로 접으면 "이 주문은
@@ -142,9 +136,7 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 		}
 		// 확정된 실패만 '실패' 로 내린다. 부분 유니크의 `status <> '실패'` 가
 		// 재결제 경로를 열어 준다.
-		if _, uerr := s.pool.Exec(ctx,
-			`UPDATE payments SET status = '실패', updated_at = now() WHERE id = $1`,
-			paymentID); uerr != nil {
+		if uerr := s.q.FailPaymentByID(ctx, paymentID); uerr != nil {
 			return nil, uerr
 		}
 		return nil, err
@@ -184,9 +176,8 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 			return nil, err
 		}
 	default:
-		if _, err := tx2.Exec(ctx, `
-			UPDATE payments SET status = '실패', raw_response = $2, updated_at = now()
-			WHERE id = $1`, paymentID, MaskCardFields(res.Raw)); err != nil {
+		if err := s.q.WithTx(tx2).DeclinePayment(ctx, commerceq.DeclinePaymentParams{
+			ID: paymentID, RawResponse: MaskCardFields(res.Raw)}); err != nil {
 			return nil, err
 		}
 		if err := tx2.Commit(ctx); err != nil {
@@ -197,12 +188,9 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 	// secret 을 함께 남긴다 — 웹훅이 올 때 대조할 상대가 이것뿐이다 (D50).
 	// approved_at 은 승인일 때만 찍는다. 입금 전 결제에 승인 시각이 있으면
 	// A-508 대사가 그것을 승인으로 읽는다.
-	if _, err := tx2.Exec(ctx, `
-		UPDATE payments SET status = $2,
-		       approved_at = CASE WHEN $2 = '승인' THEN now() ELSE approved_at END,
-		       raw_response = $3, secret = NULLIF($4, ''), updated_at = now()
-		WHERE id = $1`, paymentID, string(res.Status), MaskCardFields(res.Raw),
-		res.Secret); err != nil {
+	if err := s.q.WithTx(tx2).RecordPaymentResult(ctx, commerceq.RecordPaymentResultParams{
+		ID: paymentID, Status: string(res.Status), RawResponse: MaskCardFields(res.Raw),
+		Secret: res.Secret}); err != nil {
 		return nil, err
 	}
 
@@ -226,13 +214,12 @@ func (s *Store) moveOrder(ctx context.Context, tx pgx.Tx, orderID string, from, 
 	if err := CanTransition(from, to, actor); err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		orderID, string(to), string(from))
+	n, err := s.q.WithTx(tx).MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
+		ID: orderID, ToStatus: string(to), FromStatus: string(from)})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return fmt.Errorf("%w: 처리하는 사이 주문 상태가 %s 에서 바뀌었습니다",
 			ErrTransitionNotAllowed, from)
 	}
@@ -316,14 +303,11 @@ func lower(s string) string {
 // D14 5-1: P-409 는 결제 시도만 기록한다. 주문은 결제대기에 머문다 — 재시도
 // 경로를 남기기 위해서이고, 역전이 금지 규칙과도 맞는다.
 func (s *Store) FailPayment(ctx context.Context, orderNo, reason string) error {
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE payments SET status = '실패', updated_at = now()
-		WHERE order_id = (SELECT id FROM orders WHERE order_no = $1)
-		  AND kind = '주문결제' AND status = '대기'`, orderNo)
+	n, err := s.q.FailPendingPayment(ctx, orderNo)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return fmt.Errorf("%w: %s", ErrNotFound, orderNo)
 	}
 	return nil

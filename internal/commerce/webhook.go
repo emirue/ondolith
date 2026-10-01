@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -25,11 +26,8 @@ var ErrWebhookDuplicate = errors.New("commerce: 이미 받은 웹훅 이벤트�
 // 형식상 있어도 읽지 않는다 (D19 P-905 받지 않는 필드). 못 찾으면 NULL 로
 // 남긴다 — 우리 주문이 아닌 알림도 기록은 남아야 A-603 에서 보인다.
 func (s *Store) RecordWebhook(ctx context.Context, pg string, ev *WebhookEvent) (string, error) {
-	var id string
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO webhook_events (pg, event_id, order_id, status, payload)
-		VALUES ($1, $2, (SELECT id FROM orders WHERE order_no = $3), '수신', $4)
-		RETURNING id`, pg, ev.EventID, ev.OrderNo, ev.Raw).Scan(&id)
+	id, err := s.q.RecordWebhook(ctx, commerceq.RecordWebhookParams{
+		Pg: pg, EventID: ev.EventID, OrderNo: ev.OrderNo, Payload: ev.Raw})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrWebhookDuplicate
@@ -58,20 +56,15 @@ func (s *Store) ProcessWebhook(ctx context.Context, gw Gateway, eventID string, 
 			msg = msg[:500]
 		}
 	}
-	if _, uerr := s.pool.Exec(ctx, `
-		UPDATE webhook_events SET status = $2, error = NULLIF($3, ''), updated_at = now()
-		WHERE id = $1`, eventID, status, msg); uerr != nil {
+	if uerr := s.q.FinishWebhook(ctx, commerceq.FinishWebhookParams{
+		ID: eventID, Status: status, Error: msg}); uerr != nil {
 		return errors.Join(err, uerr)
 	}
 	return err
 }
 
 func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent) error {
-	var orderID, orderStatus string
-	var total int
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, status, total_amount FROM orders WHERE order_no = $1`, ev.OrderNo).
-		Scan(&orderID, &orderStatus, &total)
+	o, err := s.q.OrderForWebhook(ctx, ev.OrderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// 우리 주문이 아니다. 기록은 남았고 그 이상 할 일이 없다.
 		return fmt.Errorf("%w: 주문 %q", ErrNotFound, ev.OrderNo)
@@ -79,20 +72,18 @@ func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent
 	if err != nil {
 		return err
 	}
+	orderID, orderStatus, total := o.ID, o.Status, int(o.TotalAmount)
 
 	// 살아 있는 주문결제 행 하나. '승인' 만 찾으면 가상계좌(입금 전 '대기')의
 	// 입금 알림이 「승인된 결제가 없다」로 떨어져 영영 결제완료가 되지 않는다.
-	var paymentID, paymentKey, payStatus, stored string
-	err = s.pool.QueryRow(ctx, `
-		SELECT id, payment_key, status, COALESCE(secret, '') FROM payments
-		WHERE order_id = $1 AND kind = '주문결제' AND status <> '실패'`, orderID).
-		Scan(&paymentID, &paymentKey, &payStatus, &stored)
+	p, err := s.q.LivePayment(ctx, orderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("%w: 살아 있는 결제가 없다", ErrNoPayment)
 	}
 	if err != nil {
 		return err
 	}
+	paymentID, paymentKey, payStatus, stored := p.ID, p.PaymentKey, p.Status, p.Secret
 	// **secret 대조.** 승인 응답이 준 값과 같아야 한다 (D50). 상수 시간이다 —
 	// `!=` 는 앞에서부터 비교하다 멈추므로 한 글자씩 맞춰 볼 수 있다. 어느 한
 	// 쪽에만 있는 것도 불일치다: 우리 쪽에 secret 이 있는데 알림이 비어 오면
@@ -135,14 +126,12 @@ func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent
 	if err := s.moveOrder(ctx, tx, orderID, Status(orderStatus), StatusPaid, "P-905"); err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx, `
-		UPDATE payments SET status = '승인', approved_at = now(), raw_response = $2,
-		       updated_at = now()
-		WHERE id = $1 AND status = '대기'`, paymentID, MaskCardFields(got.Raw))
+	n, err := s.q.WithTx(tx).ApprovePendingPayment(ctx, commerceq.ApprovePendingPaymentParams{
+		ID: paymentID, RawResponse: MaskCardFields(got.Raw)})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return fmt.Errorf("%w: 확인하는 사이 결제 상태가 바뀌었습니다", ErrTransitionNotAllowed)
 	}
 	return tx.Commit(ctx)
@@ -174,26 +163,16 @@ func (s *Store) WebhookHistory(ctx context.Context, limit int) ([]WebhookRow, er
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT w.id, w.pg, w.event_id, COALESCE(o.order_no, ''), w.status,
-		       w.payload::text, COALESCE(w.error, ''), w.created_at
-		FROM webhook_events w LEFT JOIN orders o ON o.id = w.order_id
-		ORDER BY (w.status = '수신') DESC, w.created_at DESC
-		LIMIT $1`, limit)
+	rows, err := s.q.WebhookHistory(ctx, int32(limit))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []WebhookRow
-	for rows.Next() {
-		var r WebhookRow
-		if err := rows.Scan(&r.ID, &r.PG, &r.EventID, &r.OrderNo, &r.Status,
-			&r.Payload, &r.Error, &r.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+	for _, r := range rows {
+		out = append(out, WebhookRow{ID: r.ID, PG: r.Pg, EventID: r.EventID, OrderNo: r.OrderNo,
+			Status: r.Status, Payload: r.Payload, Error: r.Error, CreatedAt: r.CreatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // ReconcileRow is one line of A-508: 우리 기록과 PG 조회의 대조 결과.
@@ -223,27 +202,17 @@ type ReconcileRow struct {
 // 트랜잭션이 실패한 경우가 그 모습이고, 그 돈은 나갔는데 주문은 결제대기다.
 // 그래서 기간 필터와 무관하게 먼저 온다.
 func (s *Store) PaymentsToReconcile(ctx context.Context, since, until time.Time) ([]ReconcileRow, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT p.id, p.payment_key, o.order_no, p.pg, p.kind, p.status,
-		       p.approved_amount, p.refunded_amount, p.created_at
-		FROM payments p JOIN orders o ON o.id = p.order_id
-		WHERE p.created_at >= $1 AND p.created_at < $2
-		ORDER BY (p.status = '대기') DESC, p.created_at DESC
-		LIMIT 500`, since, until)
+	rows, err := s.q.PaymentsToReconcile(ctx, commerceq.PaymentsToReconcileParams{Since: since, Until: until})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []ReconcileRow
-	for rows.Next() {
-		var r ReconcileRow
-		if err := rows.Scan(&r.PaymentID, &r.PaymentKey, &r.OrderNo, &r.PG, &r.Kind,
-			&r.OurStatus, &r.OurAmount, &r.OurRefunded, &r.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+	for _, r := range rows {
+		out = append(out, ReconcileRow{PaymentID: r.ID, PaymentKey: r.PaymentKey, OrderNo: r.OrderNo,
+			PG: r.Pg, Kind: r.Kind, OurStatus: r.Status, OurAmount: int(r.ApprovedAmount),
+			OurRefunded: int(r.RefundedAmount), CreatedAt: r.CreatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Reconcile asks the gateway what it thinks and reports the differences.
