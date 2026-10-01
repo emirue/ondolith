@@ -2,10 +2,12 @@ package commerce
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -26,18 +28,14 @@ var (
 
 // ProductByID reads one product for A-502.
 func (s *Store) ProductByID(ctx context.Context, id string) (*Product, error) {
-	var p Product
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, slug, name, description, base_price, is_visible
-		FROM products WHERE id = $1`, id).
-		Scan(&p.ID, &p.Slug, &p.Name, &p.Description, &p.BasePrice, &p.Visible)
+	r, err := s.q.ProductByID(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &p, nil
+	return productFromRow(r), nil
 }
 
 // UpdateProduct is A-502's save.
@@ -49,10 +47,9 @@ func (s *Store) UpdateProduct(ctx context.Context, p Product) error {
 	if p.BasePrice < 0 {
 		return fmt.Errorf("%w: 기본가 %d", ErrPriceNegative, p.BasePrice)
 	}
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE products SET slug = $2, name = $3, description = $4,
-		       base_price = $5, is_visible = $6, updated_at = now()
-		WHERE id = $1`, p.ID, p.Slug, p.Name, p.Description, p.BasePrice, p.Visible)
+	n, err := s.q.UpdateProduct(ctx, commerceq.UpdateProductParams{
+		ID: p.ID, Slug: p.Slug, Name: p.Name, Description: p.Description,
+		BasePrice: int32(p.BasePrice), IsVisible: p.Visible})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return ErrSlugTaken
@@ -60,7 +57,7 @@ func (s *Store) UpdateProduct(ctx context.Context, p Product) error {
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -72,7 +69,7 @@ func (s *Store) UpdateProduct(ctx context.Context, p Product) error {
 // 세고 나서 지우는 사이에 주문이 들어오면 그 검사는 통과하고 삭제도 통과하는
 // 것처럼 보이지만, 실제로 막는 것은 FK 다. 여기서는 FK 의 오류를 읽는다.
 func (s *Store) DeleteProduct(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, id)
+	n, err := s.q.DeleteProduct(ctx, id)
 	var pgErr *pgconn.PgError
 	// 23503 은 FK 위반, 23001 은 RESTRICT 위반이다. RESTRICT 는 별도 코드를
 	// 쓰므로 23503 만 보면 이 경로가 통째로 500 이 된다.
@@ -82,7 +79,7 @@ func (s *Store) DeleteProduct(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -103,9 +100,9 @@ type VariantEdit struct {
 
 // EditVariants applies A-503's edits in one transaction.
 //
-// **재고는 조정값으로만 움직인다.** `SET stock = stock + $1` 이 한 문장이고,
-// 읽고-더하고-쓰는 경로는 코드에 없다 — 그 경로가 있으면 동시 두 건 중 하나가
-// 다른 하나를 덮어쓴다.
+// **재고는 조정값으로만 움직인다.** queries/product_admin.sql EditVariant 의
+// `SET stock = stock + $3` 이 한 문장이고, 읽고-더하고-쓰는 경로는 코드에 없다
+// — 그 경로가 있으면 동시 두 건 중 하나가 다른 하나를 덮어쓴다.
 //
 // 잠금 순서는 variant id 오름차순이다 (AdjustStock 과 같은 이유): 순서를
 // 요청자가 정하면 역순 요청 두 건이 교착한다.
@@ -122,12 +119,10 @@ func (s *Store) EditVariants(ctx context.Context, productID string, edits []Vari
 		return err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
 	for _, e := range ordered {
-		var stock int
-		err := tx.QueryRow(ctx,
-			`SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE`,
-			e.ID, productID).Scan(&stock)
+		stock, err := q.LockVariantOfProduct(ctx, commerceq.LockVariantOfProductParams{ID: e.ID, ProductID: productID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			// 다른 상품의 조합 ID 도 여기로 온다. product_id 술어가 막는다.
 			return ErrNotFound
@@ -137,17 +132,16 @@ func (s *Store) EditVariants(ctx context.Context, productID string, edits []Vari
 		}
 		// 낙관적 잠금: 화면이 읽은 재고와 지금이 다르면 거부한다. 조정값이라도
 		// 화면이 "3 → 5" 라고 보여준 결과가 달라지므로, 그 차이를 삼키지 않는다.
-		if e.Version >= 0 && e.Version != stock {
+		if e.Version >= 0 && e.Version != int(stock) {
 			return fmt.Errorf("%w: 화면 %d, 현재 %d", ErrStockVersion, e.Version, stock)
 		}
 
 		// **단일 문장이다.** 위에서 읽은 stock 을 쓰지 않는다 — 쓰면 그것이
 		// 곧 읽고-더하고-쓰기이고, FOR UPDATE 를 빼는 순간 판매분이 사라진다.
-		tag, err := tx.Exec(ctx, `
-			UPDATE product_variants
-			SET stock = stock + $3, sku = NULLIF($4, ''), price_delta = $5, updated_at = now()
-			WHERE id = $1 AND product_id = $2`,
-			e.ID, productID, e.StockDelta, e.SKU, e.PriceDelta)
+		// 질의가 자리 인자($3·$4)라 생성 이름이 Stock·Column4 다 — 조정값과 SKU.
+		n, err := q.EditVariant(ctx, commerceq.EditVariantParams{
+			ID: e.ID, ProductID: productID, Stock: int32(e.StockDelta),
+			Column4: e.SKU, PriceDelta: int32(e.PriceDelta)})
 		var pgErr *pgconn.PgError
 		switch {
 		case errors.As(err, &pgErr) && pgErr.Code == "23505":
@@ -157,7 +151,7 @@ func (s *Store) EditVariants(ctx context.Context, productID string, edits []Vari
 			return ErrOutOfStock
 		case err != nil:
 			return err
-		case tag.RowsAffected() == 0:
+		case n == 0:
 			return ErrNotFound
 		}
 	}
@@ -174,11 +168,12 @@ func (s *Store) AddVariant(ctx context.Context, productID string, options map[st
 	if len(options) == 0 {
 		return "", ErrOptionDuplicate
 	}
-	var id string
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO product_variants (product_id, option_values, price_delta, stock, sku)
-		VALUES ($1, $2, $3, 0, NULLIF($4, '')) RETURNING id`,
-		productID, options, priceDelta, sku).Scan(&id)
+	raw, err := json.Marshal(options)
+	if err != nil {
+		return "", err
+	}
+	id, err := s.q.AddVariant(ctx, commerceq.AddVariantParams{
+		ProductID: productID, OptionValues: raw, PriceDelta: int32(priceDelta), Sku: sku})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		// 같은 조합이거나 같은 SKU 다. 둘을 한 오류로 접으면 운영자는 무엇이
@@ -199,22 +194,19 @@ type Option struct {
 
 // Options lists a product's option groups in display order.
 func (s *Store) Options(ctx context.Context, productID string) ([]Option, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT name, values FROM product_options
-		WHERE product_id = $1 ORDER BY sort_order, name`, productID)
+	rows, err := s.q.Options(ctx, productID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Option
-	for rows.Next() {
-		var o Option
-		if err := rows.Scan(&o.Name, &o.Values); err != nil {
+	for _, r := range rows {
+		o := Option{Name: r.Name}
+		if err := json.Unmarshal(r.Values, &o.Values); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // SetOptions replaces a product's option groups and **creates the missing
@@ -262,24 +254,25 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // 커밋됐으면 무의미하다
+	q := s.q.WithTx(tx)
 
-	var exists bool
-	if err := tx.QueryRow(ctx,
-		`SELECT true FROM products WHERE id = $1`, productID).Scan(&exists); err != nil {
+	if _, err := q.ProductExists(ctx, productID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
 
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM product_options WHERE product_id = $1`, productID); err != nil {
+	if err := q.DeleteProductOptions(ctx, productID); err != nil {
 		return err
 	}
 	for i, o := range opts {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO product_options (product_id, name, values, sort_order)
-			VALUES ($1, $2, $3, $4)`, productID, o.Name, o.Values, i); err != nil {
+		vals, err := json.Marshal(o.Values)
+		if err != nil {
+			return err
+		}
+		if err := q.InsertProductOption(ctx, commerceq.InsertProductOptionParams{
+			ProductID: productID, Name: o.Name, Values: vals, SortOrder: int32(i)}); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				return ErrOptionDuplicate
@@ -291,10 +284,12 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 	// 곱을 만든다. `ON CONFLICT DO NOTHING` 이 이미 있는 조합을 지켜 준다 —
 	// UNIQUE (product_id, option_values) 가 그 열쇠다.
 	for _, combo := range optionProduct(opts) {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO product_variants (product_id, option_values, price_delta, stock)
-			VALUES ($1, $2, 0, 0)
-			ON CONFLICT (product_id, option_values) DO NOTHING`, productID, combo); err != nil {
+		raw, err := json.Marshal(combo)
+		if err != nil {
+			return err
+		}
+		if err := q.InsertVariantIfMissing(ctx, commerceq.InsertVariantIfMissingParams{
+			ProductID: productID, OptionValues: raw}); err != nil {
 			return err
 		}
 	}

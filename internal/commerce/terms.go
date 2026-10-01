@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -35,24 +36,21 @@ type Terms struct {
 
 // ListTerms is A-207's table, newest first per kind.
 func (s *Store) ListTerms(ctx context.Context) ([]Terms, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT t.id, t.kind, t.version, t.body, t.effective_at, t.is_required, t.created_at,
-		       EXISTS (SELECT 1 FROM order_agreements a WHERE a.terms_id = t.id)
-		FROM terms t ORDER BY t.kind, t.effective_at DESC`)
+	rows, err := s.q.ListTerms(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Terms
-	for rows.Next() {
-		var t Terms
-		if err := rows.Scan(&t.ID, &t.Kind, &t.Version, &t.Body, &t.EffectiveAt,
-			&t.Required, &t.CreatedAt, &t.InUse); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
+	for _, r := range rows {
+		out = append(out, Terms{ID: r.ID, Kind: r.Kind, Version: r.Version, Body: r.Body,
+			EffectiveAt: r.EffectiveAt, Required: r.IsRequired, CreatedAt: r.CreatedAt, InUse: r.InUse})
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+func termsFromRow(r commerceq.Term) Terms {
+	return Terms{ID: r.ID, Kind: r.Kind, Version: r.Version, Body: r.Body,
+		EffectiveAt: r.EffectiveAt, Required: r.IsRequired, CreatedAt: r.CreatedAt}
 }
 
 // AddTerms writes a new version.
@@ -78,11 +76,8 @@ func (s *Store) AddTerms(ctx context.Context, t Terms, now time.Time) (string, e
 	if t.EffectiveAt.Before(now) && !sameDay(t.EffectiveAt, now) {
 		return "", fmt.Errorf("%w: %s", ErrTermsBackdated, t.EffectiveAt.Format("2006-01-02"))
 	}
-	var id string
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO terms (kind, version, body, effective_at, is_required)
-		VALUES ($1, $2, $3, GREATEST($4::timestamptz, now()), $5) RETURNING id`,
-		t.Kind, t.Version, t.Body, t.EffectiveAt, t.Required).Scan(&id)
+	id, err := s.q.AddTerms(ctx, commerceq.AddTermsParams{
+		Kind: t.Kind, Version: t.Version, Body: t.Body, EffectiveAt: t.EffectiveAt, IsRequired: t.Required})
 	var pgErr *pgconn.PgError
 	switch {
 	case errors.As(err, &pgErr) && pgErr.Code == "23505":
@@ -99,40 +94,27 @@ func (s *Store) AddTerms(ctx context.Context, t Terms, now time.Time) (string, e
 //
 // 시행일이 미래인 버전은 아직 유효하지 않다 — 등록해 두고 그날부터 적용된다.
 func (s *Store) RequiredTerms(ctx context.Context, now time.Time) ([]Terms, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT ON (kind) id, kind, version, body, effective_at, is_required, created_at
-		FROM terms
-		WHERE is_required AND effective_at <= $1
-		ORDER BY kind, effective_at DESC`, now)
+	rows, err := s.q.RequiredTerms(ctx, now)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Terms
-	for rows.Next() {
-		var t Terms
-		if err := rows.Scan(&t.ID, &t.Kind, &t.Version, &t.Body, &t.EffectiveAt,
-			&t.Required, &t.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
+	for _, r := range rows {
+		out = append(out, termsFromRow(r))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // TermsByID reads one version.
 func (s *Store) TermsByID(ctx context.Context, id string) (*Terms, error) {
-	var t Terms
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, kind, version, body, effective_at, is_required, created_at
-		FROM terms WHERE id = $1`, id).
-		Scan(&t.ID, &t.Kind, &t.Version, &t.Body, &t.EffectiveAt, &t.Required, &t.CreatedAt)
+	r, err := s.q.TermsByID(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	t := termsFromRow(r)
 	return &t, nil
 }
 

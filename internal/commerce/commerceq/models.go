@@ -3,3 +3,17 @@
 //   sqlc v1.31.1
 
 package commerceq
+
+import (
+	"time"
+)
+
+type Term struct {
+	ID          string
+	Kind        string
+	Version     string
+	Body        string
+	EffectiveAt time.Time
+	IsRequired  bool
+	CreatedAt   time.Time
+}

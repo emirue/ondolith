@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -41,21 +42,19 @@ func (s *Store) ScanVariant(ctx context.Context, scanned string) (*ScannedVarian
 	if !looksLikeUUID(scanned) {
 		return nil, fmt.Errorf("%w: %q", ErrScanFormat, scanned)
 	}
-	var v ScannedVariant
-	var sku *string
-	err := s.pool.QueryRow(ctx, `
-		SELECT v.id, v.product_id, p.name, v.option_values, v.sku, v.stock
-		FROM product_variants v JOIN products p ON p.id = v.product_id
-		WHERE v.id = $1`, scanned).
-		Scan(&v.ID, &v.ProductID, &v.ProductName, &v.OptionValues, &sku, &v.Stock)
+	r, err := s.q.ScanVariant(ctx, scanned)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if sku != nil {
-		v.SKU = *sku
+	v := ScannedVariant{ID: r.ID, ProductID: r.ProductID, ProductName: r.ProductName, Stock: int(r.Stock)}
+	if err := unmarshalOptions(r.OptionValues, &v.OptionValues); err != nil {
+		return nil, err
+	}
+	if r.Sku != nil {
+		v.SKU = *r.Sku
 	}
 	return &v, nil
 }
@@ -72,17 +71,14 @@ func (s *Store) ReceiveStock(ctx context.Context, variantID string, qty int) (in
 	if qty < 1 || qty > 10000 {
 		return 0, fmt.Errorf("%w: 수량 %d", ErrQuantityRange, qty)
 	}
-	var after int
-	err := s.pool.QueryRow(ctx, `
-		UPDATE product_variants SET stock = stock + $2, updated_at = now()
-		WHERE id = $1 RETURNING stock`, variantID, qty).Scan(&after)
+	after, err := s.q.ReceiveStock(ctx, commerceq.ReceiveStockParams{ID: variantID, Qty: int32(qty)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotFound
 	}
 	if err != nil {
 		return 0, err
 	}
-	return after, nil
+	return int(after), nil
 }
 
 // StocktakeResult is what A-515 logs: 장부·실측·조정 세 값.
@@ -113,24 +109,21 @@ func (s *Store) Stocktake(ctx context.Context, variantID string, counted, ledger
 	if delta == 0 {
 		// 차이가 없다는 것도 실사의 결과다. 장부가 그 사이 바뀌지 않았는지는
 		// 확인한다 — 안 하면 "차이 없음" 이 거짓이 될 수 있다.
-		var now int
-		err := s.pool.QueryRow(ctx,
-			`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&now)
+		now, err := s.q.VariantStock(ctx, variantID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		if err != nil {
 			return nil, err
 		}
-		if now != ledger {
+		if int(now) != ledger {
 			return nil, fmt.Errorf("%w: 장부 %d, 현재 %d", ErrStockLedger, ledger, now)
 		}
 		return &StocktakeResult{Ledger: ledger, Counted: counted}, nil
 	}
 
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE product_variants SET stock = stock + $2, updated_at = now()
-		WHERE id = $1 AND stock = $3`, variantID, delta, ledger)
+	n, err := s.q.StocktakeAdjust(ctx, commerceq.StocktakeAdjustParams{
+		ID: variantID, Delta: int32(delta), Ledger: int32(ledger)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23514" {
 		return nil, ErrOutOfStock
@@ -138,12 +131,10 @@ func (s *Store) Stocktake(ctx context.Context, variantID string, counted, ledger
 	if err != nil {
 		return nil, err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		// 조합이 없거나 장부가 바뀌었다. 둘을 구분한다 — 운영자가 할 일이
 		// 다르다 (라벨 교체 vs 다시 세기).
-		var now int
-		err := s.pool.QueryRow(ctx,
-			`SELECT stock FROM product_variants WHERE id = $1`, variantID).Scan(&now)
+		now, err := s.q.VariantStock(ctx, variantID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -169,24 +160,14 @@ type PickLine struct {
 // 재고는 P-406 에서 이미 차감됐으므로 이중 차감이 되고, 상태는 A-506 이
 // 옮기는 것이라 유령 전이가 생긴다 — 그래서 여기에는 UPDATE 가 없다.
 func (s *Store) PickList(ctx context.Context, orderNo string) ([]PickLine, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT oi.variant_id, oi.product_name, oi.option_label, oi.quantity
-		FROM order_items oi JOIN orders o ON o.id = oi.order_id
-		WHERE o.order_no = $1 ORDER BY oi.product_name`, orderNo)
+	rows, err := s.q.PickList(ctx, orderNo)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []PickLine
-	for rows.Next() {
-		var l PickLine
-		if err := rows.Scan(&l.VariantID, &l.ProductName, &l.OptionLabel, &l.Ordered); err != nil {
-			return nil, err
-		}
-		out = append(out, l)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	for _, r := range rows {
+		out = append(out, PickLine{VariantID: r.VariantID, ProductName: r.ProductName,
+			OptionLabel: r.OptionLabel, Ordered: int(r.Quantity)})
 	}
 	if len(out) == 0 {
 		return nil, ErrNotFound

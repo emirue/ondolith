@@ -1,0 +1,44 @@
+-- 상품 관리 (product_admin.go, A-502/A-503). 재고는 조정값으로만 움직인다.
+
+-- name: ProductByID :one
+SELECT id, slug, name, description, base_price, is_visible
+FROM products WHERE id = $1;
+
+-- name: UpdateProduct :execrows
+UPDATE products SET slug = $2, name = $3, description = $4,
+       base_price = $5, is_visible = $6, updated_at = now()
+WHERE id = $1;
+
+-- name: DeleteProduct :execrows
+DELETE FROM products WHERE id = $1;
+
+-- name: LockVariantOfProduct :one
+SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE;
+
+-- name: EditVariant :execrows
+UPDATE product_variants
+SET stock = stock + $3, sku = NULLIF($4::text, ''), price_delta = $5, updated_at = now()
+WHERE id = $1 AND product_id = $2;
+
+-- name: AddVariant :one
+INSERT INTO product_variants (product_id, option_values, price_delta, stock, sku)
+VALUES ($1, $2, $3, 0, NULLIF(sqlc.arg('sku')::text, '')) RETURNING id;
+
+-- name: Options :many
+SELECT name, values FROM product_options
+WHERE product_id = $1 ORDER BY sort_order, name;
+
+-- name: ProductExists :one
+SELECT true::boolean AS found FROM products WHERE id = $1;
+
+-- name: DeleteProductOptions :exec
+DELETE FROM product_options WHERE product_id = $1;
+
+-- name: InsertProductOption :exec
+INSERT INTO product_options (product_id, name, values, sort_order)
+VALUES ($1, $2, $3, $4);
+
+-- name: InsertVariantIfMissing :exec
+INSERT INTO product_variants (product_id, option_values, price_delta, stock)
+VALUES ($1, $2, 0, 0)
+ON CONFLICT (product_id, option_values) DO NOTHING;

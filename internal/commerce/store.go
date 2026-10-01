@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,11 +21,14 @@ var (
 // amount.go, stock.go 가 갖고 있고 여기서 부른다. 섞으면 규칙이 SQL 문자열
 // 안으로 흩어져서 테스트할 수 없어진다.
 //
-// 모든 값은 바인딩으로 간다. 정렬 컬럼처럼 바인딩할 수 없는 것은 허용 목록으로
-// 검사한다 (D22 6절).
-type Store struct{ pool *pgxpool.Pool }
+// 질의는 queries/*.sql 에 있고 q 가 그 생성 코드다 (D22 6절). 정렬 컬럼처럼
+// 바인딩할 수 없는 것은 허용 목록으로 검사한 뒤 CASE 식으로 한 질의에 담는다.
+type Store struct {
+	pool *pgxpool.Pool
+	q    *commerceq.Queries
+}
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: commerceq.New(pool)} }
 
 // Product is one row of products, plus what the list screen needs.
 type Product struct {
@@ -54,13 +58,10 @@ type Variant struct {
 }
 
 // productSortColumns is the allow-list. 요청에서 온 문자열을 SQL 에 잇지 않는다
-// — 이스케이프가 아니라 목록이다 (D22 6절).
-var productSortColumns = map[string]string{
-	"":           "p.created_at DESC, p.id",
-	"new":        "p.created_at DESC, p.id",
-	"price":      "p.base_price, p.id",
-	"price_desc": "p.base_price DESC, p.id",
-	"name":       "p.name, p.id",
+// — 이스케이프가 아니라 목록이다 (D22 6절). 키는 queries/store.sql ListProducts
+// 의 ORDER BY CASE 가 그대로 받고, 각 키의 실제 정렬은 거기 적혀 있다.
+var productSortColumns = map[string]bool{
+	"": true, "new": true, "price": true, "price_desc": true, "name": true,
 }
 
 // ListProducts is P-301's read. 상수 개수 쿼리다 (NFR-105): 목록과 조합 요약이
@@ -70,48 +71,33 @@ var productSortColumns = map[string]string{
 // D30 이 정한 것과 같다 — 미노출 상품은 데이터베이스 밖으로 나오지 않아야 하고,
 // 없는 술어는 잊힐 수 없다.
 func (s *Store) ListProducts(ctx context.Context, opt ProductQuery) ([]Product, error) {
-	order, ok := productSortColumns[opt.Sort]
-	if !ok {
+	if !productSortColumns[opt.Sort] {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownSort, opt.Sort)
 	}
 	limit, offset := opt.clamp()
-
-	q := `
-		SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
-		       COALESCE(v.min_delta, 0), COALESCE(v.in_stock, false)
-		FROM products p
-		LEFT JOIN LATERAL (
-			SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
-			FROM product_variants
-			WHERE product_id = p.id AND is_visible
-		) v ON true
-		WHERE ($1::boolean IS NOT TRUE OR p.is_visible)
-		  AND ($2::uuid IS NULL OR EXISTS (
-		        SELECT 1 FROM product_categories pc
-		        WHERE pc.product_id = p.id AND pc.category_id = $2))
-		ORDER BY ` + order + `
-		LIMIT $3 OFFSET $4`
-
-	var category any
-	if opt.CategoryID != "" {
-		category = opt.CategoryID
-	}
-	rows, err := s.pool.Query(ctx, q, opt.VisibleOnly, category, limit, offset)
+	rows, err := s.q.ListProducts(ctx, commerceq.ListProductsParams{
+		VisibleOnly: opt.VisibleOnly, CategoryID: nullable(opt.CategoryID), Sort: opt.Sort,
+		Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var out []Product
-	for rows.Next() {
-		var p Product
-		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
-			&p.BasePrice, &p.Visible, &p.MinDelta, &p.InStock); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
+	for _, r := range rows {
+		out = append(out, productFromList(r))
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// productFromList converts a list row. SearchProducts 의 행은 필드가 같아
+// 구조체 변환으로 여기 온다.
+func productFromList(r commerceq.ListProductsRow) Product {
+	return Product{ID: r.ID, Slug: r.Slug, Name: r.Name, Description: r.Description,
+		BasePrice: int(r.BasePrice), Visible: r.IsVisible, MinDelta: int(r.MinDelta), InStock: r.InStock}
+}
+
+func productFromRow(r commerceq.ProductByIDRow) *Product {
+	return &Product{ID: r.ID, Slug: r.Slug, Name: r.Name, Description: r.Description,
+		BasePrice: int(r.BasePrice), Visible: r.IsVisible}
 }
 
 // ProductQuery is what the list screen may ask for. 클라이언트가 정렬 컬럼을
@@ -142,45 +128,32 @@ func (q ProductQuery) clamp() (limit, offset int) {
 // ProductBySlug is P-303's read. visibleOnly 가 true 면 미노출 상품은 404 다 —
 // 숨김이 아니라 없음이어야 URL 을 아는 사람도 존재를 확인하지 못한다.
 func (s *Store) ProductBySlug(ctx context.Context, slug string, visibleOnly bool) (*Product, error) {
-	const q = `
-		SELECT id, slug, name, description, base_price, is_visible
-		FROM products WHERE slug = $1 AND ($2::boolean IS NOT TRUE OR is_visible)`
-	var p Product
-	err := s.pool.QueryRow(ctx, q, slug, visibleOnly).Scan(&p.ID, &p.Slug, &p.Name,
-		&p.Description, &p.BasePrice, &p.Visible)
+	r, err := s.q.ProductBySlug(ctx, commerceq.ProductBySlugParams{Slug: slug, VisibleOnly: visibleOnly})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return &p, err
+	if err != nil {
+		return nil, err
+	}
+	return productFromRow(commerceq.ProductByIDRow(r)), nil
 }
 
 // Variants lists a product's combinations. sellableOnly 는 P-304 가 쓴다.
 func (s *Store) Variants(ctx context.Context, productID string, sellableOnly bool) ([]Variant, error) {
-	const q = `
-		SELECT id, product_id, option_values, COALESCE(sku, ''), price_delta, stock, is_visible
-		FROM product_variants
-		WHERE product_id = $1 AND ($2::boolean IS NOT TRUE OR (is_visible AND stock > 0))
-		ORDER BY price_delta, id`
-	rows, err := s.pool.Query(ctx, q, productID, sellableOnly)
+	rows, err := s.q.Variants(ctx, commerceq.VariantsParams{ProductID: productID, SellableOnly: sellableOnly})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var out []Variant
-	for rows.Next() {
-		var v Variant
-		var raw []byte
-		if err := rows.Scan(&v.ID, &v.ProductID, &raw, &v.SKU,
-			&v.PriceDelta, &v.Stock, &v.Visible); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(raw, &v.OptionValues); err != nil {
+	for _, r := range rows {
+		v := Variant{ID: r.ID, ProductID: r.ProductID, SKU: r.Sku,
+			PriceDelta: int(r.PriceDelta), Stock: int(r.Stock), Visible: r.IsVisible}
+		if err := json.Unmarshal(r.OptionValues, &v.OptionValues); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // VariantForPurchase reads one combination WITH the product's visibility.
@@ -189,28 +162,19 @@ func (s *Store) Variants(ctx context.Context, productID string, sellableOnly boo
 // 하나가 바뀔 수 있고, 무엇보다 호출자가 한쪽만 확인하는 경로가 생긴다.
 // Sellable 이 둘 다 요구하므로 한 문장이 둘 다 낸다.
 func (s *Store) VariantForPurchase(ctx context.Context, variantID string) (*Variant, Sellable, error) {
-	const q = `
-		SELECT v.id, v.product_id, v.option_values, COALESCE(v.sku, ''), v.price_delta,
-		       v.stock, v.is_visible, p.is_visible, p.base_price
-		FROM product_variants v JOIN products p ON p.id = v.product_id
-		WHERE v.id = $1`
-	var v Variant
-	var sell Sellable
-	var raw []byte
-	var basePrice int
-	err := s.pool.QueryRow(ctx, q, variantID).Scan(&v.ID, &v.ProductID, &raw, &v.SKU,
-		&v.PriceDelta, &v.Stock, &v.Visible, &sell.ProductVisible, &basePrice)
+	r, err := s.q.VariantForPurchase(ctx, variantID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, Sellable{}, ErrNotFound
 	}
 	if err != nil {
 		return nil, Sellable{}, err
 	}
-	if err := json.Unmarshal(raw, &v.OptionValues); err != nil {
+	v := Variant{ID: r.ID, ProductID: r.ProductID, SKU: r.Sku,
+		PriceDelta: int(r.PriceDelta), Stock: int(r.Stock), Visible: r.IsVisible}
+	if err := json.Unmarshal(r.OptionValues, &v.OptionValues); err != nil {
 		return nil, Sellable{}, err
 	}
-	sell.VariantVisible = v.Visible
-	sell.Stock = v.Stock
+	sell := Sellable{ProductVisible: r.ProductVisible, VariantVisible: v.Visible, Stock: v.Stock}
 	return &v, sell, nil
 }
 
@@ -229,22 +193,20 @@ func (s *Store) AdjustStock(ctx context.Context, tx pgx.Tx, deltas []StockDelta)
 			ordered[j], ordered[j-1] = ordered[j-1], ordered[j]
 		}
 	}
+	q := s.q.WithTx(tx)
 	for _, d := range ordered {
-		var stock int
-		err := tx.QueryRow(ctx,
-			`SELECT stock FROM product_variants WHERE id = $1 FOR UPDATE`, d.VariantID).Scan(&stock)
+		stock, err := q.LockVariantStock(ctx, d.VariantID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
 			return err
 		}
-		if stock+d.Delta < 0 {
+		if int(stock)+d.Delta < 0 {
 			return fmt.Errorf("%w: 재고 %d, 요청 %d", ErrOutOfStock, stock, -d.Delta)
 		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE product_variants SET stock = stock + $2, updated_at = now() WHERE id = $1`,
-			d.VariantID, d.Delta); err != nil {
+		if err := q.AddVariantStock(ctx, commerceq.AddVariantStockParams{
+			ID: d.VariantID, Delta: int32(d.Delta)}); err != nil {
 			return err
 		}
 	}
@@ -253,11 +215,9 @@ func (s *Store) AdjustStock(ctx context.Context, tx pgx.Tx, deltas []StockDelta)
 
 // CreateProduct is A-502's write.
 func (s *Store) CreateProduct(ctx context.Context, p Product) (string, error) {
-	const q = `
-		INSERT INTO products (slug, name, description, base_price, is_visible)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id`
-	var id string
-	err := s.pool.QueryRow(ctx, q, p.Slug, p.Name, p.Description, p.BasePrice, p.Visible).Scan(&id)
+	id, err := s.q.CreateProduct(ctx, commerceq.CreateProductParams{
+		Slug: p.Slug, Name: p.Name, Description: p.Description,
+		BasePrice: int32(p.BasePrice), IsVisible: p.Visible})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrSlugTaken
@@ -271,20 +231,20 @@ func (s *Store) CreateProduct(ctx context.Context, p Product) (string, error) {
 // 남는다 (category.go). 재귀 CTE 로 옮기면 그 판정이 SQL 안으로 들어가 테스트가
 // DB 를 요구하게 된다.
 func (s *Store) CategoryParents(ctx context.Context) (map[string]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(parent_id::text, '') FROM categories`)
+	return categoryParents(ctx, s.q)
+}
+
+// categoryParents is the shared body — Reparent 는 트랜잭션 안에서 같은 것을 읽는다.
+func categoryParents(ctx context.Context, q *commerceq.Queries) (map[string]string, error) {
+	rows, err := q.CategoryParents(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := map[string]string{}
-	for rows.Next() {
-		var id, parent string
-		if err := rows.Scan(&id, &parent); err != nil {
-			return nil, err
-		}
-		out[id] = parent
+	for _, r := range rows {
+		out[r.ID] = r.ParentID
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Reparent moves a category, serialised against other movers.
@@ -301,28 +261,16 @@ func (s *Store) Reparent(ctx context.Context, child, newParent string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
 	// 상수 키 하나. 카테고리 이동은 드물고, 키를 잘게 쪼개면 A→B 와 B→A 가
 	// 서로 다른 키를 잡아 직렬화가 성립하지 않는다.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, categoryLockKey); err != nil {
+	if err := q.AdvisoryXactLock(ctx, categoryLockKey); err != nil {
 		return err
 	}
 
-	rows, err := tx.Query(ctx, `SELECT id, COALESCE(parent_id::text, '') FROM categories`)
+	parents, err := categoryParents(ctx, q)
 	if err != nil {
-		return err
-	}
-	parents := map[string]string{}
-	for rows.Next() {
-		var id, parent string
-		if err := rows.Scan(&id, &parent); err != nil {
-			rows.Close()
-			return err
-		}
-		parents[id] = parent
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return err
 	}
 
@@ -330,13 +278,8 @@ func (s *Store) Reparent(ctx context.Context, child, newParent string) error {
 		return err
 	}
 
-	var parent any
-	if newParent != "" {
-		parent = newParent
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE categories SET parent_id = $2, updated_at = now() WHERE id = $1`,
-		child, parent); err != nil {
+	if err := q.SetCategoryParent(ctx, commerceq.SetCategoryParentParams{
+		ID: child, ParentID: nullable(newParent)}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -364,38 +307,34 @@ type Category struct {
 	SortOrder int
 }
 
+func categoryFromRow(r commerceq.CategoriesRow) Category {
+	return Category{ID: r.ID, ParentID: r.ParentID, Name: r.Name, Slug: r.Slug, SortOrder: int(r.SortOrder)}
+}
+
 // Categories lists them all, in display order. 수십 행이라 전부 읽는다.
 func (s *Store) Categories(ctx context.Context) ([]Category, error) {
-	const q = `
-		SELECT id, COALESCE(parent_id::text, ''), name, slug, sort_order
-		FROM categories ORDER BY sort_order, name, id`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.q.Categories(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Category
-	for rows.Next() {
-		var c Category
-		if err := rows.Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug, &c.SortOrder); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
+	for _, r := range rows {
+		out = append(out, categoryFromRow(r))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // CategoryBySlug is P-302's read.
 func (s *Store) CategoryBySlug(ctx context.Context, slug string) (*Category, error) {
-	var c Category
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, COALESCE(parent_id::text, ''), name, slug, sort_order
-		 FROM categories WHERE slug = $1`,
-		slug).Scan(&c.ID, &c.ParentID, &c.Name, &c.Slug, &c.SortOrder)
+	r, err := s.q.CategoryBySlug(ctx, slug)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return &c, err
+	if err != nil {
+		return nil, err
+	}
+	c := categoryFromRow(commerceq.CategoriesRow(r))
+	return &c, nil
 }
 
 // CreateCategory is A-509's write (D19 A-509 「입력 필드」).
@@ -407,11 +346,8 @@ func (s *Store) CategoryBySlug(ctx context.Context, slug string) (*Category, err
 // 상위는 여기서 검사하지 않는다 — 새로 만드는 행은 자손이 없으므로 순환이
 // 성립하지 않고, 존재 확인은 FK 가 한다.
 func (s *Store) CreateCategory(ctx context.Context, c Category) (string, error) {
-	const q = `
-		INSERT INTO categories (parent_id, name, slug, sort_order)
-		VALUES (NULLIF($1,'')::uuid, $2, $3, $4) RETURNING id`
-	var id string
-	err := s.pool.QueryRow(ctx, q, c.ParentID, c.Name, c.Slug, c.SortOrder).Scan(&id)
+	id, err := s.q.CreateCategory(ctx, commerceq.CreateCategoryParams{
+		ParentID: c.ParentID, Name: c.Name, Slug: c.Slug, SortOrder: int32(c.SortOrder)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
@@ -430,7 +366,7 @@ func (s *Store) CreateCategory(ctx context.Context, c Category) (string, error) 
 // 하고 여기서는 그 코드를 옮긴다 (D19 A-509 「거부 조건」). 사전 조회로 세면
 // 세는 것과 지우는 것 사이에 다른 요청이 상품을 붙일 수 있다.
 func (s *Store) DeleteCategory(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, id)
+	n, err := s.q.DeleteCategory(ctx, id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "23001") {
 		return ErrCategoryInUse
@@ -438,7 +374,7 @@ func (s *Store) DeleteCategory(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -452,32 +388,16 @@ func (s *Store) DeleteCategory(ctx context.Context, id string) error {
 func (s *Store) SearchProducts(ctx context.Context, term string, page int) ([]Product, error) {
 	q := ProductQuery{VisibleOnly: true, Page: page}
 	limit, offset := q.clamp()
-	const stmt = `
-		SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
-		       COALESCE(v.min_delta, 0), COALESCE(v.in_stock, false)
-		FROM products p
-		LEFT JOIN LATERAL (
-			SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
-			FROM product_variants WHERE product_id = p.id AND is_visible
-		) v ON true
-		WHERE p.is_visible AND p.search_tsv @@ to_tsquery('simple', $1)
-		ORDER BY ts_rank(p.search_tsv, to_tsquery('simple', $1)) DESC, p.id
-		LIMIT $2 OFFSET $3`
-	rows, err := s.pool.Query(ctx, stmt, ToPrefixQuery(term), limit, offset)
+	rows, err := s.q.SearchProducts(ctx, commerceq.SearchProductsParams{
+		Query: ToPrefixQuery(term), Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Product
-	for rows.Next() {
-		var p Product
-		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
-			&p.BasePrice, &p.Visible, &p.MinDelta, &p.InStock); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
+	for _, r := range rows {
+		out = append(out, productFromList(commerceq.ListProductsRow(r)))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // ToPrefixQuery turns user text into a tsquery.
