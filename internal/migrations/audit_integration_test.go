@@ -114,6 +114,9 @@ func TestAuditIndexes(t *testing.T) {
 		"posts_board_title_desc_idx": 1,
 		"posts_board_published_idx":  1,
 		"users_created_idx":          1,
+		// 성능 (커머스)
+		"orders_created_idx":         1,
+		"webhook_events_history_idx": 1,
 	} {
 		if n := count(t, pool, `SELECT count(*) FROM pg_indexes WHERE indexname = $1`, name); n != want {
 			t.Errorf("인덱스 %s: %d개, want %d", name, n, want)

@@ -84,8 +84,18 @@ CREATE INDEX posts_board_published_idx ON posts (board_id) WHERE status = 'publi
 -- A-401 회원 목록의 정렬. 없으면 쪽마다 회원 전부를 정렬한다.
 CREATE INDEX users_created_idx ON users (created_at DESC, id);
 
+-- ── 성능: 커머스 ───────────────────────────────────────────────────────────
+
+-- A-505 주문 목록을 상태 필터 없이 열 때의 정렬. orders_status_idx 는 상태가 앞이라
+-- 「전체」에는 쓰이지 않았다 — 쪽마다 주문 전부를 정렬했다.
+CREATE INDEX orders_created_idx ON orders (created_at DESC, id);
+-- A-603 웹훅 이력: 미처리(수신)를 앞에, 그다음 최신순. 정렬식 그대로의 인덱스다.
+CREATE INDEX webhook_events_history_idx ON webhook_events ((status = '수신') DESC, created_at DESC);
+
 -- +goose Down
 
+DROP INDEX webhook_events_history_idx;
+DROP INDEX orders_created_idx;
 DROP INDEX users_created_idx;
 DROP INDEX posts_board_published_idx;
 DROP INDEX posts_board_title_desc_idx;

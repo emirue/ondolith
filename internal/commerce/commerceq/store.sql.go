@@ -192,23 +192,32 @@ const listProducts = `-- name: ListProducts :many
 
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
-FROM products p
+FROM (
+    SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible, p.created_at
+    FROM products p
+    WHERE ($1::boolean IS NOT TRUE OR p.is_visible)
+      AND ($2::uuid IS NULL OR EXISTS (
+            SELECT 1 FROM product_categories pc
+            WHERE pc.product_id = p.id AND pc.category_id = $2))
+    ORDER BY
+        CASE WHEN $3::text = 'price'      THEN p.base_price END,
+        CASE WHEN $3::text = 'price_desc' THEN p.base_price END DESC,
+        CASE WHEN $3::text = 'name'       THEN p.name END,
+        CASE WHEN $3::text IN ('', 'new') THEN p.created_at END DESC,
+        p.id
+    LIMIT $5::int OFFSET $4::int
+) p
 LEFT JOIN LATERAL (
     SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
     FROM product_variants
     WHERE product_id = p.id AND is_visible
 ) v ON true
-WHERE ($1::boolean IS NOT TRUE OR p.is_visible)
-  AND ($2::uuid IS NULL OR EXISTS (
-        SELECT 1 FROM product_categories pc
-        WHERE pc.product_id = p.id AND pc.category_id = $2))
 ORDER BY
     CASE WHEN $3::text = 'price'      THEN p.base_price END,
     CASE WHEN $3::text = 'price_desc' THEN p.base_price END DESC,
     CASE WHEN $3::text = 'name'       THEN p.name END,
     CASE WHEN $3::text IN ('', 'new') THEN p.created_at END DESC,
     p.id
-LIMIT $5::int OFFSET $4::int
 `
 
 type ListProductsParams struct {
@@ -231,6 +240,9 @@ type ListProductsRow struct {
 }
 
 // 상품·조합·카테고리·검색 (store.go). 정렬 키는 CASE 로 한 질의에 담는다 (D22 6절).
+// **쪽을 먼저 고르고, 조합 요약은 그 행에만 붙인다** (ListProducts·SearchProducts).
+// 한 층으로 쓰면 정렬이 인덱스를 못 타는 순간 걸러진 상품 **전부**의 조합을 집계하고
+// 나서 정렬한다. 바깥 ORDER BY 는 안쪽과 같다 — 조인이 순서를 지켜 준다는 보장은 없다.
 func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]ListProductsRow, error) {
 	rows, err := q.db.Query(ctx, listProducts,
 		arg.VisibleOnly,
@@ -316,14 +328,19 @@ func (q *Queries) ProductBySlug(ctx context.Context, arg ProductBySlugParams) (P
 const searchProducts = `-- name: SearchProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
-FROM products p
+FROM (
+    SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
+           ts_rank(p.search_tsv, to_tsquery('simple', $1)) AS rank
+    FROM products p
+    WHERE p.is_visible AND p.search_tsv @@ to_tsquery('simple', $1)
+    ORDER BY rank DESC, p.id
+    LIMIT $3::int OFFSET $2::int
+) p
 LEFT JOIN LATERAL (
     SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
     FROM product_variants WHERE product_id = p.id AND is_visible
 ) v ON true
-WHERE p.is_visible AND p.search_tsv @@ to_tsquery('simple', $1)
-ORDER BY ts_rank(p.search_tsv, to_tsquery('simple', $1)) DESC, p.id
-LIMIT $3::int OFFSET $2::int
+ORDER BY p.rank DESC, p.id
 `
 
 type SearchProductsParams struct {

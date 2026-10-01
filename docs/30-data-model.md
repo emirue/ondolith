@@ -949,6 +949,7 @@ CHECK (orderer_email <> '')
 CREATE UNIQUE INDEX ON orders (order_no);
 CREATE INDEX ON orders (user_id, created_at DESC);
 CREATE INDEX ON orders (status, created_at DESC);
+CREATE INDEX orders_created_idx ON orders (created_at DESC, id);   -- A-505 「전체」 목록 (00023)
 CREATE INDEX ON orders (delivered_at) WHERE status = '배송완료';
 ```
 
@@ -1183,6 +1184,8 @@ CREATE UNIQUE INDEX ON shipments (return_id) WHERE return_id IS NOT NULL;
 ```sql
 CREATE UNIQUE INDEX ON webhook_events (pg, event_id);
 CREATE INDEX ON webhook_events (status, created_at DESC) WHERE status <> '처리완료';
+-- A-603 이력의 정렬식 그대로다: 미처리(수신)가 앞, 그다음 최신순 (00023).
+CREATE INDEX webhook_events_history_idx ON webhook_events ((status = '수신') DESC, created_at DESC);
 ```
 
 UNIQUE가 `(pg, event_id)` **복합**인 이유: 어댑터가 여럿이라는 것이 FR-605의 전제이고,

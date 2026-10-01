@@ -1,8 +1,10 @@
 package commerce
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -390,5 +392,199 @@ func TestOpenOrdersCountsOnlyNonTerminal(t *testing.T) {
 	}
 	if n != 2 {
 		t.Errorf("미완결 주문 %d건, want 2", n)
+	}
+}
+
+// 상품 목록은 쪽을 안쪽 질의에서 고른 뒤 조합 요약을 그 행에만 붙이고 바깥에서 다시
+// 정렬한다. 정렬 키마다 쪽을 이어 붙인 순서가 「키 → id」 전순서와 같고, 요약 값이
+// 제 상품의 것이어야 한다.
+func TestProductListPagesInTheSameTotalOrder(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+
+	// 이름은 ASCII 소문자다 — DB 콜레이션과 Go 의 비교가 같은 순서를 낸다.
+	// 가격은 일부러 겹친다: 동률은 id 가 가른다.
+	type row struct {
+		id, name string
+		price    int
+		created  time.Time
+	}
+	var all []row
+	for name, price := range map[string]int{"delta": 5000, "alpha": 9000, "echo": 5000, "bravo": 1000, "charlie": 5000} {
+		id, _ := seedProduct(t, pool, name, price, 0, 3)
+		all = append(all, row{id: id, name: name, price: price})
+	}
+	hidden, _ := seedProduct(t, pool, "foxtrot", 100, 0, 3)
+	if _, err := pool.Exec(ctx, `UPDATE products SET is_visible = false WHERE id = $1`, hidden); err != nil {
+		t.Fatal(err)
+	}
+	for i := range all {
+		if err := pool.QueryRow(ctx, `SELECT created_at FROM products WHERE id = $1`, all[i].id).Scan(&all[i].created); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := func(sort string, rows []row) []string {
+		sorted := slices.Clone(rows)
+		slices.SortFunc(sorted, func(a, b row) int {
+			var c int
+			switch sort {
+			case "price":
+				c = cmp.Compare(a.price, b.price)
+			case "price_desc":
+				c = cmp.Compare(b.price, a.price)
+			case "name":
+				c = cmp.Compare(a.name, b.name)
+			default: // "", "new"
+				c = b.created.Compare(a.created)
+			}
+			if c == 0 {
+				c = cmp.Compare(a.id, b.id) // id 는 언제나 오름차순
+			}
+			return c
+		})
+		var ids []string
+		for _, r := range sorted {
+			ids = append(ids, r.id)
+		}
+		return ids
+	}
+	collect := func(q ProductQuery) []string {
+		t.Helper()
+		var ids []string
+		for page := 1; page <= 3; page++ { // 2건씩 세 쪽 = 5건
+			q.Page, q.PerPage = page, 2
+			list, err := s.ListProducts(ctx, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range list {
+				ids = append(ids, p.ID)
+			}
+		}
+		return ids
+	}
+	for _, sort := range []string{"", "new", "price", "price_desc", "name"} {
+		if got, w := collect(ProductQuery{VisibleOnly: true, Sort: sort}), want(sort, all); !slices.Equal(got, w) {
+			t.Errorf("sort=%q:\n got %v\nwant %v", sort, got, w)
+		}
+	}
+
+	// 카테고리 필터도 안쪽에 있다 — 쪽을 고르기 전에 걸러야 쪽이 찬다.
+	var cat string
+	if err := pool.QueryRow(ctx, `INSERT INTO categories (name, slug) VALUES ('c', 'c') RETURNING id`).Scan(&cat); err != nil {
+		t.Fatal(err)
+	}
+	inCat := []row{all[0], all[2], all[4]}
+	for _, r := range inCat {
+		if _, err := pool.Exec(ctx, `INSERT INTO product_categories (product_id, category_id) VALUES ($1, $2)`, r.id, cat); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, w := collect(ProductQuery{VisibleOnly: true, CategoryID: cat, Sort: "price"}), want("price", inCat); !slices.Equal(got, w) {
+		t.Errorf("카테고리 + price:\n got %v\nwant %v", got, w)
+	}
+
+	// 조합 요약은 제 상품의 것이다. 조합 둘(-500·품절, +300·재고) 과 조합 없는 상품.
+	two, none := all[0].id, all[1].id
+	if _, err := pool.Exec(ctx, `DELETE FROM product_variants WHERE product_id = ANY($1)`, []string{two, none}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO product_variants (product_id, option_values, price_delta, stock) VALUES
+		($1, '{"크기":"S"}', -500, 0), ($1, '{"크기":"L"}', 300, 2)`, two); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListProducts(ctx, ProductQuery{VisibleOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := map[string]Product{}
+	for _, p := range list {
+		summary[p.ID] = p
+	}
+	if p := summary[two]; p.MinDelta != -500 || !p.InStock {
+		t.Errorf("조합 둘인 상품의 요약 (차액 %d, 재고 %v), want (-500, true)", p.MinDelta, p.InStock)
+	}
+	if p := summary[none]; p.MinDelta != 0 || p.InStock {
+		t.Errorf("조합 없는 상품의 요약 (차액 %d, 재고 %v), want (0, false)", p.MinDelta, p.InStock)
+	}
+	if _, ok := summary[hidden]; ok {
+		t.Error("미노출 상품이 공개 목록에 나왔다")
+	}
+}
+
+// A-603 웹훅 이력은 미처리(수신)가 앞이고 그다음 최신순이다. 00023 의 인덱스는 이
+// 정렬식 그대로다 — 식이 어긋나면 인덱스는 남고 순서만 조용히 느려진다.
+func TestWebhookHistoryPutsUnhandledFirst(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	for i, status := range []string{"처리완료", "수신", "실패", "수신"} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO webhook_events (pg, event_id, status, payload, created_at)
+			VALUES ('toss', $1, $2, '{}', now() - make_interval(mins => $3))`,
+			"e"+itoa(i), status, 10-i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.WebhookHistory(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range got {
+		ids = append(ids, r.EventID)
+	}
+	// 수신 둘(최신 e3 → e1), 그다음 나머지 중 최신(e2). 상한 3.
+	if want := []string{"e3", "e1", "e2"}; !slices.Equal(ids, want) {
+		t.Errorf("웹훅 이력 %v, want %v", ids, want)
+	}
+
+	var def string
+	if err := pool.QueryRow(ctx,
+		`SELECT indexdef FROM pg_indexes WHERE indexname = 'webhook_events_history_idx'`).Scan(&def); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(def, "((status = '수신'::text)) DESC, created_at DESC") {
+		t.Errorf("인덱스가 정렬식과 다르다: %s", def)
+	}
+}
+
+// 상품 검색은 **순위로 쪽을 고른다.** 안쪽 질의가 순위 없이 자르면 가장 잘 맞는
+// 상품이 id 순서에 밀려 뒤 쪽으로 간다 — 한 쪽에 다 들어오는 검색에서는 보이지 않는다.
+func TestSearchProductsRanksBeforePaging(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	for i := range 21 {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO products (slug, name, base_price, is_visible)
+			VALUES ($1, '쪽나눔 상품', 1000, true)`, "plain-"+itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// id 가 가장 뒤인데 순위는 가장 높다.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO products (id, slug, name, description, base_price, is_visible)
+		VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'best', '쪽나눔 쪽나눔', '쪽나눔 쪽나눔', 1000, true)`); err != nil {
+		t.Fatal(err)
+	}
+	page1, err := s.SearchProducts(ctx, "쪽나눔", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1) != 20 || page1[0].Slug != "best" {
+		t.Errorf("1쪽 %d건, 첫 항목 %q — want 20건, 첫 항목 best", len(page1), page1[0].Slug)
+	}
+	page2, err := s.SearchProducts(ctx, "쪽나눔", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page2) != 2 {
+		t.Errorf("2쪽 %d건, want 2건", len(page2))
+	}
+	for _, p := range page2 {
+		if p.Slug == "best" {
+			t.Error("순위가 가장 높은 상품이 2쪽에 있다")
+		}
 	}
 }

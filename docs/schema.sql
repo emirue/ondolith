@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 8lWRvvhdAB7SuT4HG09gzFyjuXdgUDIKCRWbXGKwfeG0sQScXVDh0cupoZp3DMB
+\restrict q00NGj4TeYB2vp85BfB2iYg0viiuD8flxkgpSKty7x95XB1StMFnxoZgT3iklRL
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1426,6 +1426,13 @@ CREATE INDEX order_items_variant_idx ON public.order_items USING btree (variant_
 
 
 --
+-- Name: orders_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX orders_created_idx ON public.orders USING btree (created_at DESC, id);
+
+
+--
 -- Name: orders_delivered_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1710,6 +1717,13 @@ CREATE INDEX user_roles_role_id_idx ON public.user_roles USING btree (role_id);
 --
 
 CREATE INDEX users_created_idx ON public.users USING btree (created_at DESC, id);
+
+
+--
+-- Name: webhook_events_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX webhook_events_history_idx ON public.webhook_events USING btree (((status = '수신'::text)) DESC, created_at DESC);
 
 
 --
@@ -2153,5 +2167,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 8lWRvvhdAB7SuT4HG09gzFyjuXdgUDIKCRWbXGKwfeG0sQScXVDh0cupoZp3DMB
+\unrestrict q00NGj4TeYB2vp85BfB2iYg0viiuD8flxkgpSKty7x95XB1StMFnxoZgT3iklRL
 

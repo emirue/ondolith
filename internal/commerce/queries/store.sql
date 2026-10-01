@@ -1,25 +1,37 @@
 -- 상품·조합·카테고리·검색 (store.go). 정렬 키는 CASE 로 한 질의에 담는다 (D22 6절).
 
+-- **쪽을 먼저 고르고, 조합 요약은 그 행에만 붙인다** (ListProducts·SearchProducts).
+-- 한 층으로 쓰면 정렬이 인덱스를 못 타는 순간 걸러진 상품 **전부**의 조합을 집계하고
+-- 나서 정렬한다. 바깥 ORDER BY 는 안쪽과 같다 — 조인이 순서를 지켜 준다는 보장은 없다.
 -- name: ListProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
-FROM products p
+FROM (
+    SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible, p.created_at
+    FROM products p
+    WHERE (sqlc.arg('visible_only')::boolean IS NOT TRUE OR p.is_visible)
+      AND (sqlc.narg('category_id')::uuid IS NULL OR EXISTS (
+            SELECT 1 FROM product_categories pc
+            WHERE pc.product_id = p.id AND pc.category_id = sqlc.narg('category_id')))
+    ORDER BY
+        CASE WHEN sqlc.arg('sort')::text = 'price'      THEN p.base_price END,
+        CASE WHEN sqlc.arg('sort')::text = 'price_desc' THEN p.base_price END DESC,
+        CASE WHEN sqlc.arg('sort')::text = 'name'       THEN p.name END,
+        CASE WHEN sqlc.arg('sort')::text IN ('', 'new') THEN p.created_at END DESC,
+        p.id
+    LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
+) p
 LEFT JOIN LATERAL (
     SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
     FROM product_variants
     WHERE product_id = p.id AND is_visible
 ) v ON true
-WHERE (sqlc.arg('visible_only')::boolean IS NOT TRUE OR p.is_visible)
-  AND (sqlc.narg('category_id')::uuid IS NULL OR EXISTS (
-        SELECT 1 FROM product_categories pc
-        WHERE pc.product_id = p.id AND pc.category_id = sqlc.narg('category_id')))
 ORDER BY
     CASE WHEN sqlc.arg('sort')::text = 'price'      THEN p.base_price END,
     CASE WHEN sqlc.arg('sort')::text = 'price_desc' THEN p.base_price END DESC,
     CASE WHEN sqlc.arg('sort')::text = 'name'       THEN p.name END,
     CASE WHEN sqlc.arg('sort')::text IN ('', 'new') THEN p.created_at END DESC,
-    p.id
-LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
+    p.id;
 
 -- name: ProductBySlug :one
 SELECT id, slug, name, description, base_price, is_visible
@@ -77,11 +89,16 @@ DELETE FROM categories WHERE id = $1;
 -- name: SearchProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
-FROM products p
+FROM (
+    SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
+           ts_rank(p.search_tsv, to_tsquery('simple', sqlc.arg('query'))) AS rank
+    FROM products p
+    WHERE p.is_visible AND p.search_tsv @@ to_tsquery('simple', sqlc.arg('query'))
+    ORDER BY rank DESC, p.id
+    LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
+) p
 LEFT JOIN LATERAL (
     SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
     FROM product_variants WHERE product_id = p.id AND is_visible
 ) v ON true
-WHERE p.is_visible AND p.search_tsv @@ to_tsquery('simple', sqlc.arg('query'))
-ORDER BY ts_rank(p.search_tsv, to_tsquery('simple', sqlc.arg('query'))) DESC, p.id
-LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
+ORDER BY p.rank DESC, p.id;
