@@ -120,7 +120,7 @@ func (d *Deps) Stocktake(w http.ResponseWriter, r *http.Request) {
 	// **장부·실측·조정 셋을 모두 남긴다** (D15 7절). 하나라도 빠지면 나중에
 	// 무엇을 근거로 재고가 바뀌었는지 재구성할 수 없다.
 	d.log(r, c, "product.manage", "variant", scanned,
-		"재고 실사 장부 "+strconv.Itoa(res.Ledger)+
+		"재고 조사 장부 "+strconv.Itoa(res.Ledger)+
 			" · 실측 "+strconv.Itoa(res.Counted)+
 			" · 조정 "+strconv.Itoa(res.Delta))
 	notice := "차이 없음."

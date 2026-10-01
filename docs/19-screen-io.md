@@ -3075,7 +3075,7 @@ D15 7절 표를 고친다 — 화면마다 즉석에서 정하면 이 문서가 
 
 ---
 
-### A-508 결제 대사 (SC-6 · `payment.view` · GET, POST)
+### A-508 결제 목록 (SC-6 · `payment.view` · GET, POST)
 
 **입력 필드**
 
@@ -3384,7 +3384,7 @@ D15 7절 표를 고친다 — 화면마다 즉석에서 정하면 이 문서가 
 
 ---
 
-### A-515 재고 실사 (SC-5 · `product.manage` · GET, POST)
+### A-515 재고 조사 (SC-5 · `product.manage` · GET, POST)
 
 **입력 필드**
 
