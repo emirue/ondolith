@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/emirue/ondolith/internal/auth/authq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -29,22 +30,15 @@ type SocialAccount struct {
 
 // SocialAccounts lists what one user has linked.
 func (s *Store) SocialAccounts(ctx context.Context, userID string) ([]SocialAccount, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT provider, provider_uid FROM social_accounts
-		 WHERE user_id = $1 ORDER BY provider`, userID)
+	rows, err := s.q.SocialAccounts(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []SocialAccount
-	for rows.Next() {
-		var a SocialAccount
-		if err := rows.Scan(&a.Provider, &a.UID); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
+	for _, r := range rows {
+		out = append(out, SocialAccount{Provider: r.Provider, UID: r.ProviderUid})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // UserBySocial finds the account a provider identity is linked to.
@@ -53,10 +47,7 @@ func (s *Store) SocialAccounts(ctx context.Context, userID string) ([]SocialAcco
 // 이메일의 로컬 계정에 자동으로 붙이면, 프로바이더 계정 하나를 뚫는 것이 곧
 // 우리 계정을 뚫는 것이 된다 (D18 닫은 결정, D12 P-107).
 func (s *Store) UserBySocial(ctx context.Context, provider, uid string) (*User, error) {
-	var id string
-	err := s.pool.QueryRow(ctx,
-		`SELECT user_id FROM social_accounts WHERE provider = $1 AND provider_uid = $2`,
-		provider, uid).Scan(&id)
+	id, err := s.q.UserIDBySocial(ctx, authq.UserIDBySocialParams{Provider: provider, ProviderUid: uid})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNoUser
 	}
@@ -80,9 +71,7 @@ func (s *Store) UserBySocial(ctx context.Context, provider, uid string) (*User, 
 // **연결은 로그인한 계정 주인만 만든다.** 콜백이 스스로 만들지 않는다 —
 // 그것이 곧 자동 연결이다.
 func (s *Store) LinkSocial(ctx context.Context, userID, provider, uid string) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO social_accounts (user_id, provider, provider_uid) VALUES ($1, $2, $3)`,
-		userID, provider, uid)
+	err := s.q.LinkSocial(ctx, authq.LinkSocialParams{UserID: userID, Provider: provider, ProviderUid: uid})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		// 어느 유니크에 걸렸는지 구분한다. 접으면 "이미 연결됨" 과 "남의
@@ -109,33 +98,30 @@ func (s *Store) UnlinkSocial(ctx context.Context, userID, provider string) error
 		return err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
 	// 계정 행을 잠근다. 비밀번호 유무와 연결 수를 함께 읽어야 하고, 그 사이
 	// 비밀번호가 지워지면 판단이 거짓이 된다.
-	var hasPassword bool
-	err = tx.QueryRow(ctx,
-		`SELECT password_hash <> '' FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&hasPassword)
+	hasPassword, err := q.LockUserHasPassword(ctx, userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNoUser
 	}
 	if err != nil {
 		return err
 	}
-	var links int
-	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM social_accounts WHERE user_id = $1`, userID).Scan(&links); err != nil {
+	links, err := q.CountSocialAccounts(ctx, userID)
+	if err != nil {
 		return err
 	}
 	if !hasPassword && links <= 1 {
 		return fmt.Errorf("%w: 비밀번호를 먼저 설정하세요", ErrLastLoginMethod)
 	}
 
-	tag, err := tx.Exec(ctx,
-		`DELETE FROM social_accounts WHERE user_id = $1 AND provider = $2`, userID, provider)
+	n, err := q.UnlinkSocial(ctx, authq.UnlinkSocialParams{UserID: userID, Provider: provider})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return ErrNoUser
 	}
 	return tx.Commit(ctx)
@@ -147,9 +133,7 @@ func (s *Store) UnlinkSocial(ctx context.Context, userID, provider string) error
 // UnlinkSocial 이다** — 여기서 true 를 받아도 그 사이 비밀번호가 지워질 수
 // 있고, 그래서 판단과 삭제가 한 트랜잭션에 있다.
 func (s *Store) HasPassword(ctx context.Context, userID string) (bool, error) {
-	var has bool
-	err := s.pool.QueryRow(ctx,
-		`SELECT password_hash <> '' FROM users WHERE id = $1`, userID).Scan(&has)
+	has, err := s.q.HasPassword(ctx, userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, ErrNoUser
 	}

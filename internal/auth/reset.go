@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/emirue/ondolith/internal/auth/authq"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,15 +29,13 @@ func (s *Store) IssueResetToken(ctx context.Context, userID string) (string, err
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
-	if _, err := tx.Exec(ctx,
-		`UPDATE password_reset_tokens SET used_at = now(), updated_at = now()
-		 WHERE user_id = $1 AND used_at IS NULL`, userID); err != nil {
+	if err := q.InvalidateResetTokens(ctx, userID); err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-		userID, hashToken(raw), time.Now().Add(PasswordResetTTL)); err != nil {
+	if err := q.InsertResetToken(ctx, authq.InsertResetTokenParams{
+		UserID: userID, TokenHash: hashToken(raw), ExpiresAt: time.Now().Add(PasswordResetTTL)}); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -63,15 +62,12 @@ func (s *Store) ResetPassword(ctx context.Context, raw, hash string) (time.Time,
 		return zero, err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
 	// Same single-statement burn as ConsumeToken: two simultaneous clicks both
 	// reach the database and exactly one updates a row, so two people cannot
 	// set the password from one link.
-	var userID string
-	err = tx.QueryRow(ctx, `
-		UPDATE password_reset_tokens SET used_at = now(), updated_at = now()
-		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
-		RETURNING user_id`, hashToken(raw)).Scan(&userID)
+	userID, err := q.ConsumeResetToken(ctx, hashToken(raw))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return zero, ErrTokenInvalid
 	}
@@ -82,10 +78,7 @@ func (s *Store) ResetPassword(ctx context.Context, raw, hash string) (time.Time,
 	// sessions_valid_from moves with the password (D15 5.4): a reset is what
 	// someone does when they think the account is taken, so every session that
 	// existed before this moment has to stop working.
-	var cutoff time.Time
-	err = tx.QueryRow(ctx, `
-		UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
-		WHERE id = $1 AND is_active RETURNING sessions_valid_from`, userID, hash).Scan(&cutoff)
+	cutoff, err := q.ResetActiveUserPassword(ctx, authq.ResetActiveUserPasswordParams{ID: userID, PasswordHash: hash})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return zero, ErrTokenInvalid
 	}
@@ -109,10 +102,7 @@ func (s *Store) ResetPassword(ctx context.Context, raw, hash string) (time.Time,
 // holding a token can tell it was real — which they already know, because they
 // are holding it.
 func (s *Store) ConsumeVerifyToken(ctx context.Context, raw string) (userID string, already bool, err error) {
-	err = s.pool.QueryRow(ctx, `
-		UPDATE email_verification_tokens SET used_at = now(), updated_at = now()
-		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
-		RETURNING user_id`, hashToken(raw)).Scan(&userID)
+	userID, err = s.q.ConsumeVerifyToken(ctx, hashToken(raw))
 	if err == nil {
 		return userID, false, nil
 	}
@@ -123,10 +113,7 @@ func (s *Store) ConsumeVerifyToken(ctx context.Context, raw string) (userID stri
 	// The miss path, and only the miss path, asks the second question. An
 	// expired token is NOT "already": the link is dead either way and D19 puts
 	// expiry in the 400 row.
-	var spent bool
-	err = s.pool.QueryRow(ctx, `
-		SELECT used_at IS NOT NULL FROM email_verification_tokens
-		WHERE token_hash = $1 AND expires_at > now()`, hashToken(raw)).Scan(&spent)
+	spent, err := s.q.VerifyTokenSpent(ctx, hashToken(raw))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, ErrTokenInvalid
 	}

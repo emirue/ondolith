@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/emirue/ondolith/internal/auth/authq"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -25,6 +26,11 @@ const (
 )
 
 // TokenKind selects the table.
+//
+// A table name cannot be a bind parameter and sqlc fixes the SQL at generation
+// time, so queries/token.sql carries each statement once per table and the
+// methods below pick the pair by kind — a closed set of two, never request
+// input.
 type TokenKind int
 
 const (
@@ -32,6 +38,8 @@ const (
 	KindEmailVerify
 )
 
+// table names the kind's table. No query is built from it any more — the SQL
+// is generated per table — but it is still the natural label for a kind.
 func (k TokenKind) table() string {
 	if k == KindEmailVerify {
 		return "email_verification_tokens"
@@ -92,14 +100,23 @@ func (s *Store) IssueToken(ctx context.Context, kind TokenKind, userID string) (
 		return "", err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // 커밋됐으면 무의미하다
-	if _, err := tx.Exec(ctx,
-		`UPDATE `+kind.table()+` SET used_at = now()
-		 WHERE user_id = $1 AND used_at IS NULL`, userID); err != nil {
-		return "", err
+	q := s.q.WithTx(tx)
+
+	tokenHash, expiresAt := hashToken(raw), time.Now().Add(kind.ttl())
+	if kind == KindEmailVerify {
+		if err := q.BurnUnusedVerifyTokens(ctx, userID); err != nil {
+			return "", err
+		}
+		err = q.InsertVerifyToken(ctx, authq.InsertVerifyTokenParams{
+			UserID: userID, TokenHash: tokenHash, ExpiresAt: expiresAt})
+	} else {
+		if err := q.BurnUnusedResetTokens(ctx, userID); err != nil {
+			return "", err
+		}
+		err = q.InsertResetToken(ctx, authq.InsertResetTokenParams{
+			UserID: userID, TokenHash: tokenHash, ExpiresAt: expiresAt})
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO `+kind.table()+` (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-		userID, hashToken(raw), time.Now().Add(kind.ttl())); err != nil {
+	if err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -116,12 +133,13 @@ func (s *Store) IssueToken(ctx context.Context, kind TokenKind, userID string) (
 // would let both through, which for a password-reset link means two people can
 // set the password.
 func (s *Store) ConsumeToken(ctx context.Context, kind TokenKind, raw string) (string, error) {
-	const q = `
-		UPDATE %s SET used_at = now(), updated_at = now()
-		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
-		RETURNING user_id`
 	var userID string
-	err := s.pool.QueryRow(ctx, sprintfTable(q, kind.table()), hashToken(raw)).Scan(&userID)
+	var err error
+	if kind == KindEmailVerify {
+		userID, err = s.q.ConsumeVerifyToken(ctx, hashToken(raw))
+	} else {
+		userID, err = s.q.ConsumeResetToken(ctx, hashToken(raw))
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Expired, already used, or never existed — one answer for all three.
 		// Distinguishing them tells a guesser which of their attempts was
@@ -134,9 +152,10 @@ func (s *Store) ConsumeToken(ctx context.Context, kind TokenKind, raw string) (s
 	return userID, nil
 }
 
-// sprintfTable substitutes a table name that is NOT caller input: it comes from
-// TokenKind, a closed set of two. Table names cannot be bind parameters, so the
-// safety here is that no request value ever reaches this function.
+// sprintfTable substituted a table name into a query before the token SQL
+// moved to sqlc (W5-02). Nothing in this package builds SQL text any more; it
+// stays only because token_test.go still exercises it, and goes out together
+// with that test.
 func sprintfTable(q, table string) string {
 	out := make([]byte, 0, len(q)+len(table))
 	for i := 0; i < len(q); i++ {
@@ -152,10 +171,7 @@ func sprintfTable(q, table string) string {
 
 // MarkEmailVerified records that the account passed verification (FR-214).
 func (s *Store) MarkEmailVerified(ctx context.Context, userID string) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE users SET email_verified_at = now(), updated_at = now()
-		 WHERE id = $1 AND email_verified_at IS NULL`, userID)
-	return err
+	return s.q.MarkEmailVerified(ctx, userID)
 }
 
 // SetPassword replaces the hash, ends every other session, and returns the new
@@ -172,9 +188,6 @@ func (s *Store) MarkEmailVerified(ctx context.Context, userID string) error {
 // they own. One clock, handed back, removes the question. It comes back as a
 // [DBTime] so the caller cannot substitute its own clock and still compile.
 func (s *Store) SetPassword(ctx context.Context, userID, hash string) (DBTime, error) {
-	var cutoff time.Time
-	err := s.pool.QueryRow(ctx,
-		`UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
-		 WHERE id = $1 RETURNING sessions_valid_from`, userID, hash).Scan(&cutoff)
+	cutoff, err := s.q.SetPassword(ctx, authq.SetPasswordParams{ID: userID, PasswordHash: hash})
 	return DBTime{cutoff}, err
 }

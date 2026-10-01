@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/emirue/ondolith/internal/auth/authq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,9 +22,15 @@ var (
 
 // Store is the database side of authentication. The judgement lives in
 // permission.go and escalation.go; this file only fetches and writes.
-type Store struct{ pool *pgxpool.Pool }
+//
+// The SQL lives in queries/*.sql and q is what sqlc generated from it (D22
+// 6절); pool is kept only to open transactions.
+type Store struct {
+	pool *pgxpool.Pool
+	q    *authq.Queries
+}
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: authq.New(pool)} }
 
 // User is what a request needs to know about its caller.
 type User struct {
@@ -45,30 +52,11 @@ type User struct {
 // Nothing is cached beyond the request: a revoked role must bite on the next
 // request, not after the session expires (D15 4.3-1).
 func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permissions, error) {
-	const q = `
-		WITH effective AS (
-		    SELECT r.id, r.is_superuser
-		    FROM roles r
-		    WHERE r.key IN ('anonymous', 'member')
-		       OR r.id IN (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id = $1)
-		)
-		SELECT
-		    bool_or(e.is_superuser) AS superuser,
-		    coalesce(
-		        array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
-		            FILTER (WHERE p.key IS NOT NULL),
-		        '{}'
-		    ) AS perms
-		FROM effective e
-		LEFT JOIN role_permissions rp ON rp.role_id = e.id
-		LEFT JOIN permissions p       ON p.id = rp.permission_id`
-
-	var superuser *bool
-	var keys []string
-	if err := s.pool.QueryRow(ctx, q, userID).Scan(&superuser, &keys); err != nil {
+	row, err := s.q.LoadPermissions(ctx, userID)
+	if err != nil {
 		return nil, err
 	}
-	return NewPermissions(superuser != nil && *superuser, parseGrants(keys)), nil
+	return NewPermissions(row.Superuser, parseGrants(row.Perms)), nil
 }
 
 // parseGrants splits the "<permission> <board_id>" pairs the queries above pack
@@ -91,17 +79,8 @@ func parseGrants(rows []string) []Grant {
 // that the anonymous path is a query, not an empty set assumed in a handler —
 // an installation may grant permissions to `anonymous` (D15 2.5).
 func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, error) {
-	const q = `
-		SELECT coalesce(
-		    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
-		        FILTER (WHERE p.key IS NOT NULL),
-		    '{}')
-		FROM roles r
-		LEFT JOIN role_permissions rp ON rp.role_id = r.id
-		LEFT JOIN permissions p       ON p.id = rp.permission_id
-		WHERE r.key = 'anonymous'`
-	var keys []string
-	if err := s.pool.QueryRow(ctx, q).Scan(&keys); err != nil {
+	keys, err := s.q.LoadAnonymousPermissions(ctx)
+	if err != nil {
 		return nil, err
 	}
 	return NewPermissions(false, parseGrants(keys)), nil
@@ -112,39 +91,27 @@ func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, err
 // check would otherwise log in a deactivated account, and there is no way to
 // forget a predicate that is not there to forget.
 func (s *Store) FindActiveUserByEmail(ctx context.Context, email string) (*User, string, error) {
-	const q = `
-		SELECT id, email, display_name, is_active, sessions_valid_from,
-		       email_verified_at, password_hash
-		FROM users
-		WHERE email = $1 AND is_active`
-	var u User
-	var hash string
-	err := s.pool.QueryRow(ctx, q, email).Scan(
-		&u.ID, &u.Email, &u.DisplayName, &u.IsActive, &u.SessionsValidFrom,
-		&u.EmailVerifiedAt, &hash)
+	r, err := s.q.FindActiveUserByEmail(ctx, email)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", ErrNoUser
 	}
 	if err != nil {
 		return nil, "", err
 	}
-	return &u, hash, nil
+	return &User{ID: r.ID, Email: r.Email, DisplayName: r.DisplayName, IsActive: r.IsActive,
+		SessionsValidFrom: r.SessionsValidFrom, EmailVerifiedAt: r.EmailVerifiedAt}, r.PasswordHash, nil
 }
 
 // FindUserByID loads the session's subject. It does NOT filter on is_active:
 // the middleware needs to tell "no such user" from "deactivated while logged
 // in", and the second must end the session rather than look like a stale ID.
 func (s *Store) FindUserByID(ctx context.Context, id string) (*User, error) {
-	const q = `
-		SELECT id, email, display_name, is_active, sessions_valid_from, email_verified_at
-		FROM users WHERE id = $1`
-	var u User
-	err := s.pool.QueryRow(ctx, q, id).Scan(
-		&u.ID, &u.Email, &u.DisplayName, &u.IsActive, &u.SessionsValidFrom, &u.EmailVerifiedAt)
+	r, err := s.q.FindUserByID(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNoUser
 	}
-	return &u, err
+	return &User{ID: r.ID, Email: r.Email, DisplayName: r.DisplayName, IsActive: r.IsActive,
+		SessionsValidFrom: r.SessionsValidFrom, EmailVerifiedAt: r.EmailVerifiedAt}, err
 }
 
 // PermissionKeys lists every permission the database holds. The boot check
@@ -152,20 +119,7 @@ func (s *Store) FindUserByID(ctx context.Context, id string) (*User, error) {
 // judges always-false, and one nobody names is dead weight in the role editor
 // (D15 4.4).
 func (s *Store) PermissionKeys(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT key FROM permissions ORDER BY key`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
-			return nil, err
-		}
-		out = append(out, k)
-	}
-	return out, rows.Err()
+	return s.q.PermissionKeys(ctx)
 }
 
 // UserRow is one line of A-401. It is deliberately narrower than User: a list
@@ -189,47 +143,28 @@ type UserRow struct {
 // the screen most likely to grow, and a per-row query turns it into N+1 the
 // moment it does.
 func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]UserRow, error) {
-	const q = `
-		SELECT u.id, u.email, u.display_name, u.is_active,
-		       u.email_verified_at IS NOT NULL,
-		       coalesce(array_agg(r.key ORDER BY r.key) FILTER (WHERE r.key IS NOT NULL), '{}'),
-		       u.custom_fields
-		FROM users u
-		LEFT JOIN user_roles ur ON ur.user_id = u.id
-		LEFT JOIN roles r ON r.id = ur.role_id
-		GROUP BY u.id
-		ORDER BY u.created_at DESC, u.id
-		LIMIT $1 OFFSET $2`
-	rows, err := s.pool.Query(ctx, q, limit, offset)
+	rows, err := s.q.ListUsers(ctx, authq.ListUsersParams{Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []UserRow
-	for rows.Next() {
-		var u UserRow
-		var raw []byte
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.IsActive,
-			&u.Verified, &u.Roles, &raw); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(raw, &u.Custom); err != nil {
+	for _, r := range rows {
+		u := UserRow{ID: r.ID, Email: r.Email, DisplayName: r.DisplayName,
+			IsActive: r.IsActive, Verified: r.Verified, Roles: r.Roles}
+		if err := json.Unmarshal(r.CustomFields, &u.Custom); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // CreateUser inserts and lets the database decide on duplicates. Checking first
 // and inserting after lets two simultaneous signups both pass the check; the
 // UNIQUE index is the only thing that actually serialises them.
 func (s *Store) CreateUser(ctx context.Context, email, hash, displayName string) (string, error) {
-	const q = `
-		INSERT INTO users (email, password_hash, display_name)
-		VALUES ($1, $2, $3) RETURNING id`
-	var id string
-	err := s.pool.QueryRow(ctx, q, email, hash, displayName).Scan(&id)
+	id, err := s.q.CreateUser(ctx, authq.CreateUserParams{
+		Email: email, PasswordHash: hash, DisplayName: displayName})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrEmailTaken
@@ -264,17 +199,14 @@ func (d DBTime) Time() time.Time { return d.t }
 
 // Now reads the database's clock. See DBTime for why this is not time.Now().
 func (s *Store) Now(ctx context.Context) (DBTime, error) {
-	var t time.Time
-	err := s.pool.QueryRow(ctx, `SELECT now()`).Scan(&t)
+	t, err := s.q.DBNow(ctx)
 	return DBTime{t}, err
 }
 
 // InvalidateSessions moves the cutoff forward, ending every session issued
 // before now. Used on password change and on forced logout (D15 5.4).
 func (s *Store) InvalidateSessions(ctx context.Context, userID string) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE users SET sessions_valid_from = now(), updated_at = now() WHERE id = $1`, userID)
-	return err
+	return s.q.InvalidateSessions(ctx, userID)
 }
 
 // withLastSuperuserGuard runs apply in a transaction that has every active
@@ -291,28 +223,8 @@ func (s *Store) withLastSuperuserGuard(ctx context.Context, userID string, apply
 	}
 	defer tx.Rollback(ctx)
 
-	const lockHolders = `
-		SELECT u.id
-		FROM users u
-		JOIN user_roles ur ON ur.user_id = u.id
-		JOIN roles r       ON r.id = ur.role_id
-		WHERE r.is_superuser AND u.is_active
-		FOR UPDATE`
-	rows, err := tx.Query(ctx, lockHolders)
+	holders, err := s.q.WithTx(tx).LockSuperuserHolders(ctx)
 	if err != nil {
-		return err
-	}
-	var holders []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		holders = append(holders, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return err
 	}
 
@@ -337,14 +249,10 @@ func (s *Store) withLastSuperuserGuard(ctx context.Context, userID string, apply
 // last superuser holder.
 func (s *Store) SetActive(ctx context.Context, userID string, active bool) error {
 	if active {
-		_, err := s.pool.Exec(ctx,
-			`UPDATE users SET is_active = true, updated_at = now() WHERE id = $1`, userID)
-		return err
+		return s.q.ActivateUser(ctx, userID)
 	}
 	return s.withLastSuperuserGuard(ctx, userID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx,
-			`UPDATE users SET is_active = false, updated_at = now() WHERE id = $1`, userID)
-		return err
+		return s.q.WithTx(tx).DeactivateUser(ctx, userID)
 	})
 }
 
@@ -357,7 +265,7 @@ func (s *Store) SetActive(ctx context.Context, userID string, active bool) error
 // behaviour, not a failure.
 func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 	return s.withLastSuperuserGuard(ctx, userID, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		n, err := s.q.WithTx(tx).DeleteUser(ctx, userID)
 		var pgErr *pgconn.PgError
 		// 23503 은 FK 위반, **23001 은 RESTRICT 위반**이다. 둘은 다른 코드다 —
 		// `orders.user_id` 가 RESTRICT 이므로(00018) 여기서 오는 것은 23001 이고,
@@ -369,7 +277,7 @@ func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
+		if n == 0 {
 			return ErrNoUser
 		}
 		return nil
@@ -390,13 +298,16 @@ func (s *Store) UpdateProfile(ctx context.Context, userID, name string, custom m
 	if custom == nil {
 		custom = map[string]any{}
 	}
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE users SET display_name = $2, custom_fields = $3, updated_at = now()
-		 WHERE id = $1`, userID, name, custom)
+	raw, err := json.Marshal(custom)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	n, err := s.q.UpdateProfile(ctx, authq.UpdateProfileParams{
+		ID: userID, DisplayName: name, CustomFields: raw})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
 		return ErrNoUser
 	}
 	return nil
@@ -404,9 +315,7 @@ func (s *Store) UpdateProfile(ctx context.Context, userID, name string, custom m
 
 // CustomFields reads one user's profile item values.
 func (s *Store) CustomFields(ctx context.Context, userID string) (map[string]any, error) {
-	var raw []byte
-	err := s.pool.QueryRow(ctx,
-		`SELECT custom_fields FROM users WHERE id = $1`, userID).Scan(&raw)
+	raw, err := s.q.CustomFields(ctx, userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNoUser
 	}
@@ -426,14 +335,7 @@ func (s *Store) CustomFields(ctx context.Context, userID string) (map[string]any
 // the role is blocked while switching off its holder is not, and the two reach
 // the same end (D15 5.1).
 func (s *Store) HoldsSuperuser(ctx context.Context, userID string) (bool, error) {
-	var yes bool
-	err := s.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1 FROM user_roles ur
-		    JOIN roles r ON r.id = ur.role_id
-		    WHERE ur.user_id = $1 AND r.is_superuser
-		)`, userID).Scan(&yes)
-	return yes, err
+	return s.q.HoldsSuperuser(ctx, userID)
 }
 
 // ErrNoRole reports an unknown role key.
@@ -441,53 +343,29 @@ var ErrNoRole = errors.New("auth: 역할이 없습니다")
 
 // Roles lists every role for A-403.
 func (s *Store) Roles(ctx context.Context) ([]Role, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT r.key, r.name, r.is_superuser,
-		       coalesce(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), '{}')
-		FROM roles r
-		LEFT JOIN role_permissions rp ON rp.role_id = r.id
-		LEFT JOIN permissions p       ON p.id = rp.permission_id
-		GROUP BY r.id, r.key, r.name, r.is_superuser
-		ORDER BY r.key`)
+	rows, err := s.q.Roles(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Role
-	for rows.Next() {
-		var r Role
-		var name string
-		if err := rows.Scan(&r.Key, &name, &r.Superuser, &r.Permissions); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+	for _, r := range rows {
+		out = append(out, Role{Key: r.Key, Superuser: r.IsSuperuser, Permissions: r.Permissions})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // RoleByKey loads one role with its permissions, which R2 and R5 both need.
 func (s *Store) RoleByKey(ctx context.Context, key string) (Role, error) {
-	var r Role
-	err := s.pool.QueryRow(ctx, `
-		SELECT r.key, r.is_superuser,
-		       coalesce(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), '{}')
-		FROM roles r
-		LEFT JOIN role_permissions rp ON rp.role_id = r.id
-		LEFT JOIN permissions p       ON p.id = rp.permission_id
-		WHERE r.key = $1
-		GROUP BY r.id, r.key, r.is_superuser`, key).
-		Scan(&r.Key, &r.Superuser, &r.Permissions)
+	r, err := s.q.RoleByKey(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Role{}, ErrNoRole
 	}
-	return r, err
+	return Role{Key: r.Key, Superuser: r.IsSuperuser, Permissions: r.Permissions}, err
 }
 
 // PermissionIsScoped reports whether a permission may carry a board_id.
 func (s *Store) PermissionIsScoped(ctx context.Context, key string) (bool, error) {
-	var scoped bool
-	err := s.pool.QueryRow(ctx,
-		`SELECT is_scoped FROM permissions WHERE key = $1`, key).Scan(&scoped)
+	scoped, err := s.q.PermissionIsScoped(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, errors.New("auth: 권한이 없습니다: " + key)
 	}
@@ -499,22 +377,13 @@ func (s *Store) PermissionIsScoped(ctx context.Context, key string) (bool, error
 // 권한이 전역으로 저장되고, A-403 목록은 범위를 보여주지 않아 그 사실이
 // 보이지 않는다 — 받은 쪽은 모든 게시판에서 그 권한을 갖는다.
 func (s *Store) GrantPermission(ctx context.Context, roleKey, permKey string, board BoardID) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO role_permissions (role_id, permission_id, board_id)
-		SELECT r.id, p.id, NULLIF($3, '')::uuid FROM roles r, permissions p
-		WHERE r.key = $1 AND p.key = $2
-		ON CONFLICT ON CONSTRAINT role_permissions_uniq DO NOTHING`,
-		roleKey, permKey, string(board))
-	return err
+	return s.q.GrantPermission(ctx, authq.GrantPermissionParams{
+		RoleKey: roleKey, PermKey: permKey, Board: string(board)})
 }
 
 // AssignRole gives a user a role, ignoring a repeat.
 func (s *Store) AssignRole(ctx context.Context, userID, roleKey string) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO user_roles (user_id, role_id)
-		SELECT $1, r.id FROM roles r WHERE r.key = $2 AND r.is_assignable
-		ON CONFLICT ON CONSTRAINT user_roles_uniq DO NOTHING`, userID, roleKey)
-	return err
+	return s.q.AssignRole(ctx, authq.AssignRoleParams{UserID: userID, RoleKey: roleKey})
 }
 
 // BoardsWithGrants reports which boards have at least one scoped grant.
@@ -523,19 +392,13 @@ func (s *Store) AssignRole(ctx context.Context, userID, roleKey string) error {
 // made it (D14 4.2), and A-304 marks those rows — without the mark the operator
 // sees a normal-looking board and goes looking for the bug somewhere else.
 func (s *Store) BoardsWithGrants(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT board_id::text FROM role_permissions WHERE board_id IS NOT NULL`)
+	ids, err := s.q.BoardsWithGrants(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
+	for _, id := range ids {
 		out[id] = true
 	}
-	return out, rows.Err()
+	return out, nil
 }
