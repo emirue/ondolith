@@ -77,3 +77,23 @@ func TestReconcileReportsGatewayError(t *testing.T) {
 		t.Fatalf("조회 실패가 행에 남지 않았다: %+v", out)
 	}
 }
+
+// **전액 환불한 주문은 차이가 아니다.** 토스는 취소된 결제를 CANCELED 로 돌려주는데
+// 그것을 '실패' 로 접으면 환불이 끝난 주문마다 「상태 불일치」가 떠서 진짜 차이가
+// 묻힌다 — 2026-10-01 실측에서 그랬다. 비교 대상은 PG 잔고와 우리 잔여다.
+func TestReconcileAcceptsAFullyCancelledPayment(t *testing.T) {
+	ours := []ReconcileRow{{PaymentKey: "k1", OurStatus: "승인", OurAmount: 1000, OurRefunded: 1000}}
+
+	gw := &fakeGateway{getResponse: &Payment{Status: PaymentCancelled, Amount: 1000, Balance: 0}}
+	out := (&Store{}).Reconcile(context.Background(), gw, ours)
+	if out[0].Diff != "" {
+		t.Fatalf("전액 환불·전액 취소인데 차이로 잡혔다: %q", out[0].Diff)
+	}
+
+	// PG 에 잔고가 남아 있으면 우리가 더 돌려준 셈이다 — 그건 차이다.
+	gw = &fakeGateway{getResponse: &Payment{Status: PaymentCancelled, Amount: 1000, Balance: 500}}
+	out = (&Store{}).Reconcile(context.Background(), gw, ours)
+	if out[0].Diff != "환불액 불일치" {
+		t.Fatalf("잔고 500 vs 우리 잔여 0 인데 %q", out[0].Diff)
+	}
+}

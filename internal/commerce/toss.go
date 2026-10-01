@@ -222,6 +222,7 @@ func (t *Toss) do(httpReq *http.Request) (*Payment, error) {
 		OrderID     string `json:"orderId"`
 		Status      string `json:"status"`
 		TotalAmount int    `json:"totalAmount"`
+		Balance     int    `json:"balanceAmount"`
 		Secret      string `json:"secret"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -232,6 +233,7 @@ func (t *Toss) do(httpReq *http.Request) (*Payment, error) {
 		OrderNo:    p.OrderID,
 		Status:     tossStatus(p.Status),
 		Amount:     p.TotalAmount,
+		Balance:    p.Balance,
 		Raw:        raw,
 		Secret:     p.Secret,
 	}, nil
@@ -268,7 +270,11 @@ func tossStatus(s string) PaymentStatus {
 	switch s {
 	case "DONE":
 		return PaymentApproved
-	case "CANCELED", "PARTIAL_CANCELED", "ABORTED", "EXPIRED":
+	case "CANCELED", "PARTIAL_CANCELED":
+		// 승인됐던 결제다. '실패' 로 접으면 전액 환불한 주문마다 A-508 이
+		// 「상태 불일치」를 띄워 진짜 차이가 묻힌다 — 2026-10-01 실측에서 그랬다.
+		return PaymentCancelled
+	case "ABORTED", "EXPIRED":
 		return PaymentFailed
 	default:
 		return PaymentPending

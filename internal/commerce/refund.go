@@ -300,28 +300,7 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 		return "", err
 	}
 
-	// 재고를 되돌린다. 주문 생성이 차감했으므로 취소는 같은 만큼 푼다 — 풀지
-	// 않으면 재고가 조용히 잠긴다 (D14 「교환 재고」와 같은 이유).
-	rows, err := tx.Query(ctx,
-		`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`, orderID)
-	if err != nil {
-		return "", err
-	}
-	var deltas []StockDelta
-	for rows.Next() {
-		var variantID string
-		var qty int
-		if err := rows.Scan(&variantID, &qty); err != nil {
-			rows.Close()
-			return "", err
-		}
-		deltas = append(deltas, StockDelta{VariantID: variantID, Delta: qty})
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
+	if err := s.restockOrder(ctx, tx, orderID); err != nil {
 		return "", err
 	}
 
@@ -382,6 +361,91 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 		return "", err
 	}
 	return refundID, nil
+}
+
+// restockOrder returns every item of the order to stock. 주문 생성이 차감했으므로
+// 취소는 같은 만큼 푼다 — 풀지 않으면 재고가 조용히 잠긴다 (D14 「교환 재고」와
+// 같은 이유). 배송 뒤 환불에는 쓰지 않는다 — 물건은 구매자에게 있다.
+func (s *Store) restockOrder(ctx context.Context, tx pgx.Tx, orderID string) error {
+	rows, err := tx.Query(ctx,
+		`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`, orderID)
+	if err != nil {
+		return err
+	}
+	var deltas []StockDelta
+	for rows.Next() {
+		var variantID string
+		var qty int
+		if err := rows.Scan(&variantID, &qty); err != nil {
+			rows.Close()
+			return err
+		}
+		deltas = append(deltas, StockDelta{VariantID: variantID, Delta: qty})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return s.AdjustStock(ctx, tx, deltas)
+}
+
+// SettleFullRefund closes an order whose 주문결제 has now been refunded in full
+// (D14 5절, D19 A-507 「목표 상태는 상태머신이 정한다」): 배송 전이면 취소 —
+// 재고도 되돌린다 — 배송 뒤면 환불. 부분 환불이거나 상태머신이 두 전이를
+// 모두 막는 상태면 아무것도 바꾸지 않고 "" 를 돌려준다.
+//
+// A-507 이 품목 단위로 환불하므로 전액에 이르는 순간이 따로 없었다 — 돈은
+// 전부 돌아갔는데 주문은 결제완료로 남아 발송 대기 줄에 서 있었다
+// (2026-10-01 실측).
+func (s *Store) SettleFullRefund(ctx context.Context, orderNo string, actor Actor) (Status, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	var orderID, status string
+	err = tx.QueryRow(ctx,
+		`SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE`, orderNo).Scan(&orderID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	var approved, refunded int
+	err = tx.QueryRow(ctx, `
+		SELECT approved_amount, refunded_amount FROM payments
+		WHERE order_id = $1 AND kind = '주문결제' AND status = '승인'`, orderID).Scan(&approved, &refunded)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && refunded < approved) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var to Status
+	switch {
+	case CanTransition(Status(status), StatusCancelled, actor) == nil:
+		to = StatusCancelled
+		if err := s.restockOrder(ctx, tx, orderID); err != nil {
+			return "", err
+		}
+	case CanTransition(Status(status), StatusRefunded, actor) == nil:
+		to = StatusRefunded
+	default:
+		return "", nil
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE order_items SET settled_quantity = quantity, updated_at = now() WHERE order_id = $1`,
+		orderID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
+		orderID, string(to), status); err != nil {
+		return "", err
+	}
+	return to, tx.Commit(ctx)
 }
 
 // requesterOf maps a screen id to refunds.requester.

@@ -1600,3 +1600,44 @@ func TestAdminRefundIsExecutedAtThePG(t *testing.T) {
 		t.Errorf("접수 뒤 환불 상태 %s, want 완료 — PG 를 부르지 않았다", status)
 	}
 }
+
+// **전액이 돌아가면 주문도 끝난다** (D14 결제완료 → 취소: A-507). 품목 단위로
+// 환불하다 보니 전액에 이르는 순간이 없었다 — 돈은 전부 돌아갔는데 주문은
+// 결제완료로 남아 발송 대기 줄에 서 있었고, 재고도 잠겨 있었다.
+func TestAdminFullRefundClosesTheOrderAndRestocks(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	order, _ := paidAdminOrder(t, d, pool) // 수량 2, 재고 10 → 8
+	ctx := context.Background()
+	item := order.Items[0]
+	refund := func(qty string) int {
+		return postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
+			map[string]string{"no": order.OrderNo},
+			url.Values{"item_id": {item.ID}, "qty_" + item.ID: {qty}}).Code
+	}
+	state := func() (status string, stock int) {
+		if err := pool.QueryRow(ctx, `SELECT status FROM orders WHERE order_no = $1`, order.OrderNo).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT stock FROM product_variants`).Scan(&stock); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	// 부분 환불은 주문을 두고 재고도 두고 간다 — 남은 하나는 아직 간다.
+	if code := refund("1"); code != http.StatusSeeOther {
+		t.Fatalf("부분 환불 HTTP %d", code)
+	}
+	if status, stock := state(); status != "결제완료" || stock != 8 {
+		t.Fatalf("부분 환불 뒤 상태 %s, 재고 %d (결제완료, 8 이어야)", status, stock)
+	}
+	// 나머지까지 돌아가면 취소다. 재고도 돌아온다.
+	if code := refund("1"); code != http.StatusSeeOther {
+		t.Fatalf("잔여 환불 HTTP %d", code)
+	}
+	if status, stock := state(); status != "취소" || stock != 10 {
+		t.Fatalf("전액 환불 뒤 상태 %s, 재고 %d (취소, 10 이어야)", status, stock)
+	}
+}

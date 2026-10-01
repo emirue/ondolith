@@ -262,8 +262,8 @@ func assertConfined(t *testing.T, path string) {
 func TestUnknownGatewayStatusFoldsToPending(t *testing.T) {
 	cases := map[string]PaymentStatus{
 		"DONE":                PaymentApproved,
-		"CANCELED":            PaymentFailed,
-		"PARTIAL_CANCELED":    PaymentFailed,
+		"CANCELED":            PaymentCancelled,
+		"PARTIAL_CANCELED":    PaymentCancelled,
 		"ABORTED":             PaymentFailed,
 		"EXPIRED":             PaymentFailed,
 		"IN_PROGRESS":         PaymentPending,

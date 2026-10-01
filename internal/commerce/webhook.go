@@ -209,6 +209,7 @@ type ReconcileRow struct {
 	// Ours 는 우리가 승인으로 기록한 금액이다. Theirs 는 조회 API 가 말한 것.
 	OurStatus   string
 	OurAmount   int
+	OurRefunded int
 	TheirStatus string
 	TheirAmount int
 	// Diff 는 사람이 읽을 차이 설명이다. 비면 일치다.
@@ -224,7 +225,7 @@ type ReconcileRow struct {
 func (s *Store) PaymentsToReconcile(ctx context.Context, since, until time.Time) ([]ReconcileRow, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id, p.payment_key, o.order_no, p.pg, p.kind, p.status,
-		       p.approved_amount, p.created_at
+		       p.approved_amount, p.refunded_amount, p.created_at
 		FROM payments p JOIN orders o ON o.id = p.order_id
 		WHERE p.created_at >= $1 AND p.created_at < $2
 		ORDER BY (p.status = '대기') DESC, p.created_at DESC
@@ -237,7 +238,7 @@ func (s *Store) PaymentsToReconcile(ctx context.Context, since, until time.Time)
 	for rows.Next() {
 		var r ReconcileRow
 		if err := rows.Scan(&r.PaymentID, &r.PaymentKey, &r.OrderNo, &r.PG, &r.Kind,
-			&r.OurStatus, &r.OurAmount, &r.CreatedAt); err != nil {
+			&r.OurStatus, &r.OurAmount, &r.OurRefunded, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -295,6 +296,15 @@ func (s *Store) Reconcile(ctx context.Context, gw Gateway, rows []ReconcileRow) 
 			case r.OurStatus == "대기" && got.Status == PaymentApproved:
 				// **가장 위험한 상태다** (D50). 돈은 나갔는데 주문은 결제대기다.
 				r.Diff = "PG 는 승인, 우리는 대기 — 돈이 나갔는데 주문에 반영되지 않았다"
+			case got.Status == PaymentCancelled:
+				// 전액·부분 취소. 우리 쪽 상태는 여전히 '승인' 이고 환불누적액이
+				// 그만큼 올라 있어야 한다 — PG 잔고와 우리 잔여가 같으면 일치다.
+				switch {
+				case r.OurStatus != string(PaymentApproved):
+					r.Diff = "상태 불일치"
+				case got.Balance != r.OurAmount-r.OurRefunded:
+					r.Diff = "환불액 불일치"
+				}
 			case string(got.Status) != r.OurStatus:
 				r.Diff = "상태 불일치"
 			case got.Amount != r.OurAmount:

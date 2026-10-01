@@ -48,6 +48,10 @@ const (
 	PaymentPending  PaymentStatus = "대기"
 	PaymentApproved PaymentStatus = "승인"
 	PaymentFailed   PaymentStatus = "실패"
+	// PaymentCancelled 는 PG 조회에서만 온다 — 승인된 결제가 전부 또는 일부
+	// 취소된 상태다. payments.status 에는 저장하지 않는다(CHECK 가 셋뿐이다).
+	// A-508 대사가 우리 환불누적액과 PG 잔고를 맞춰 보는 데 쓴다.
+	PaymentCancelled PaymentStatus = "취소"
 )
 
 // ConfirmRequest is what the caller has already verified.
@@ -82,6 +86,9 @@ type Payment struct {
 	// Amount 는 PG 가 확정한 금액이다. 요청 금액과 다를 수 있고, 다르면
 	// 호출자가 거부한다 (FR-607).
 	Amount int
+	// Balance 는 PG 에 남은 잔고(취소 가능 금액)다. 취소 뒤에는 Amount 가
+	// 아니라 이것이 우리 「승인금액 − 환불누적액」과 같아야 한다 (A-508).
+	Balance int
 	// Raw 는 응답 원문이다. D50 「10분 만료와 복구」의 "승인 성공했으나 우리 DB
 	// 기록 실패" 가 가장 위험한 경우이고, 사후 대조의 유일한 근거가 이것이다.
 	// 어댑터가 카드 필드를 마스킹한 뒤 넣는다 (DEC-3.7).
