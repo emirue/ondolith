@@ -196,8 +196,15 @@ func (d *shopDeps) checkoutPay(w http.ResponseWriter, r *http.Request) {
 	}
 	// 금액은 저장된 값이다 (FR-607). clientKey 는 공개 키이고 시크릿은 어떤
 	// 경로로도 화면에 오지 않는다 (D19 P-407).
+	// customerKey 는 결제위젯이 구매자를 구분하는 값이다. 회원이면 사용자 id,
+	// 아니면 비워 두고 테마 JS 가 ANONYMOUS 를 쓴다. 이메일·전화처럼 유추되는
+	// 값은 쓰지 않는다 (토스 SDK 안내).
+	var customerKey string
+	if a := ActorFrom(r.Context()); a.User != nil {
+		customerKey = a.User.ID
+	}
 	d.renderPage(w, r, "shop/pay.html", http.StatusOK, d.shopView(r, "결제", map[string]any{
-		"Order": order, "ClientKey": d.pgClientKey(),
+		"Order": order, "ClientKey": d.pgClientKey(), "CustomerKey": customerKey,
 	}))
 }
 

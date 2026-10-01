@@ -687,3 +687,22 @@ type connectionLike struct {
 	Linked        bool
 	CanDisconnect bool
 }
+
+// **결제 화면은 결제창을 실제로 연다.** P-407 은 공개 키와 금액을 `data-`
+// 속성으로 내고 「테마의 JS 가 읽는다」고 적어 두었는데, 그 JS 가 없었다 —
+// 승인 콜백만 있고 결제창이 뜨지 않아 돈이 오가는 길이 끊겨 있었다.
+func TestBuiltinPayPageOpensTheTossWidget(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "shop/pay.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`https://js.tosspayments.com/v2/standard`, // 공식 v2 SDK
+		`widgets.requestPayment(`,                 // 결제창 호출
+		`"/checkout/success"`, `"/checkout/fail"`, // P-408·P-409 로 돌아온다
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("shop/pay.html 에 %s 가 없다 — 결제창이 열리지 않는다", want)
+		}
+	}
+}

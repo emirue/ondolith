@@ -6,15 +6,58 @@
   <dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
   {{end}}
   {{/* 결제창은 브라우저 SDK 가 연다. 서버는 **공개 클라이언트 키**와 저장된
-       금액만 넘긴다 — successUrl·failUrl 은 서버가 구성하고, 시크릿은 어떤
-       경로로도 여기 오지 않는다 (D19 P-407).
+       금액만 넘긴다 — successUrl·failUrl 은 이 화면의 origin 으로 고정이고,
+       시크릿은 어떤 경로로도 여기 오지 않는다 (D19 P-407).
 
-       키를 `data-` 속성으로 낸다: 테마의 JS 가 여기서 읽는다. 이것을 그리지
-       않으면 A-209 에 키를 넣어도 결제창을 열 방법이 없다 — 핸들러가 넘겨도
+       값은 `data-` 속성으로 내고 아래 JS 가 dataset 으로 읽는다 — JS 문맥에
+       템플릿 값을 직접 찍지 않는다. 토스 결제위젯 v2 (js.tosspayments.com/
+       v2/standard): setAmount → renderPaymentMethods·renderAgreement →
+       requestPayment 순서가 공식 샘플(tosspayments/tosspayments-sample
+       express-javascript/public/widget/checkout.html, 2026-09)이다. 이 JS 가
+       없으면 A-209 에 키를 넣어도 결제창을 열 방법이 없다 — 핸들러가 넘겨도
        화면이 안 쓰면 넘긴 적 없는 것과 같다. */}}
   {{with .ClientKey}}
-  <div id="payment-widget" data-client-key="{{.}}"
-       {{with $.Data.Order}}data-order-no="{{.OrderNo}}" data-amount="{{.Total}}"{{end}}></div>
+  <div id="payment-widget" data-client-key="{{.}}" data-customer-key="{{$.Data.CustomerKey}}"
+       {{with $.Data.Order}}data-order-no="{{.OrderNo}}" data-amount="{{.Total}}"{{end}}>
+    <div id="payment-method"></div>
+    <div id="agreement"></div>
+    <button type="button" id="payment-button" disabled>결제하기</button>
+    <p class="error" role="alert" id="payment-error" hidden></p>
+  </div>
+  <script src="https://js.tosspayments.com/v2/standard"></script>
+  <script>
+    (async function () {
+      var el = document.getElementById("payment-widget");
+      var button = document.getElementById("payment-button");
+      var errorBox = document.getElementById("payment-error");
+      function fail(err) {
+        errorBox.textContent = (err && err.message) ? err.message : "결제창을 열지 못했습니다.";
+        errorBox.hidden = false;
+      }
+      try {
+        var tossPayments = TossPayments(el.dataset.clientKey);
+        var widgets = tossPayments.widgets({
+          customerKey: el.dataset.customerKey || TossPayments.ANONYMOUS
+        });
+        await widgets.setAmount({ currency: "KRW", value: Number(el.dataset.amount) });
+        await Promise.all([
+          widgets.renderPaymentMethods({ selector: "#payment-method", variantKey: "DEFAULT" }),
+          widgets.renderAgreement({ selector: "#agreement", variantKey: "AGREEMENT" })
+        ]);
+        button.disabled = false;
+        button.addEventListener("click", async function () {
+          try {
+            await widgets.requestPayment({
+              orderId: el.dataset.orderNo,
+              orderName: "주문 " + el.dataset.orderNo,
+              successUrl: window.location.origin + "/checkout/success",
+              failUrl: window.location.origin + "/checkout/fail"
+            });
+          } catch (err) { fail(err); }
+        });
+      } catch (err) { fail(err); }
+    })();
+  </script>
   {{else}}
   <p class="error" role="alert">
     결제 수단이 설정되지 않았습니다. 관리자에게 문의하세요.
