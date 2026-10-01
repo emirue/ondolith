@@ -1,0 +1,57 @@
+# sqlc — SQL 을 그대로 두고 타입 안전한 Go 코드를 생성한다 (DEC-1 「sqlc」, D22 6절).
+# 스키마는 goose 마이그레이션 디렉터리다: sqlc 가 `-- +goose Up` 만 읽는다.
+# 생성 코드(internal/*/*q/)는 손으로 고치지 않는다 — `make sqlc` 가 다시 쓴다.
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "internal/migrations"
+    queries: "internal/content/queries"
+    gen:
+      go:
+        package: "contentq"
+        out: "internal/content/contentq"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides: &overrides
+          # 기존 코드는 uuid 를 string 으로, timestamptz 를 time.Time 으로 다룬다.
+          - db_type: "uuid"
+            go_type: "string"
+          - db_type: "uuid"
+            nullable: true
+            go_type: { type: "string", pointer: true }
+          - db_type: "pg_catalog.timestamptz"
+            go_type: "time.Time"
+          - db_type: "pg_catalog.timestamptz"
+            nullable: true
+            go_type: { type: "time.Time", pointer: true }
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type: { type: "time.Time", pointer: true }
+  - engine: "postgresql"
+    schema: "internal/migrations"
+    queries: "internal/auth/queries"
+    gen:
+      go:
+        package: "authq"
+        out: "internal/auth/authq"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - engine: "postgresql"
+    schema: "internal/migrations"
+    queries: "internal/commerce/queries"
+    gen:
+      go:
+        package: "commerceq"
+        out: "internal/commerce/commerceq"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides: *overrides

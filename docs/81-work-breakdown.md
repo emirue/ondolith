@@ -402,6 +402,36 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 ## Phase 간 의존
 
 **Phase 경계를 넘는 의존을 별도로 적는다.** Phase 안에서만 보면 안 보인다.
+## Phase 5 — 질의 타입 안전화 (sqlc)
+
+**목적:** 저장소 계층의 SQL 을 질의 파일 한 곳에 모으고, 질의와 Go 타입이 어긋나면 컴파일이 잡게 한다. 설계(잠금·제약·PG 문법)는 바꾸지 않는다 — 전수 조사는 `.ai/ORM-INVENTORY.md`.
+
+### 작업 목록
+
+| ID | 작업 | 선행 | 산출물 | 완료 기준 |
+|---|---|---|---|---|
+| W5-01 | 기반 — sqlc 도입·게이트·파일럿 **(완료)** | Phase 4 W4-13 | `sqlc.yaml`, `Makefile`, `scripts/selftest.sh`, `internal/content/queries/oplog.sql` | `make sqlc` 가 세 패키지의 생성 코드를 쓰고 `make check` 의 `sqlc-check` 가 어긋남을 잡는다(selftest 주입). 타입 오버라이드(uuid→string, timestamptz→time.Time, nullable→포인터)가 기존 Go 타입과 같다. 작업 로그 3개 질의가 생성 코드로 돌고 content·admin 테스트가 통과한다 |
+| W5-02 | auth 45곳 | W5-01 | `internal/auth/queries/*.sql`, `authq` | `pool.Query*` 직접 호출 0. `withLastSuperuserGuard` 등 트랜잭션 5개가 `WithTx` 로 간다. 동적 테이블명(token.go)은 질의 2벌로 푼다. auth·app 로그인 테스트 통과 |
+| W5-03 | content 65곳 | W5-01 | `internal/content/queries/*.sql`, `contentq` | 직접 호출 0. `postListColumns`·`OrderBy()` 동적 조립은 CASE 정렬 한 질의로. 봉인 훅(Settings/PutSettings)이 생성 질의 위에서 그대로 동작. content·admin·app 게시판 테스트 통과 |
+| W5-04 | commerce — 장바구니·상품·카테고리·약관·스캔 (store·cart·product_admin·terms·scan, 53곳) | W5-01 | `internal/commerce/queries/*.sql`, `commerceq` | 직접 호출 0. `ListProducts` 정렬 허용목록이 CASE 로. `AdjustStock`·`cartID` 등 tx 헬퍼가 `WithTx`. 해당 통합 테스트 통과 |
+| W5-05 | commerce — 주문·결제·웹훅 (order·payment·webhook, 46곳) | W5-04 | 같은 디렉터리 | 직접 호출 0. `ConfirmPayment` 의 트랜잭션 둘·`moveOrder` 가 `WithTx`. 결제 선점·만료 경쟁 테스트 통과 |
+| W5-06 | commerce — 환불·반품 (refund·returns, 81곳) | W5-05 | 같은 디렉터리 | 직접 호출 0. `FOR UPDATE OF 별칭`·CHECK 위반 코드 분기·부분 유니크 23505 가 전부 생성 질의에서 같은 오류값으로 돈다. 환불·반품 통합 테스트 통과 |
+| W5-07 | 설치 마법사 1문장 + 마무리 | W5-02~06 | `internal/install`, `D22`, `CHANGELOG` | 설치의 관리자 생성 CTE 가 생성 질의로. 세 패키지에 남은 직접 호출 목록이 0 이거나 주석으로 설명된다. `make check`·`make test-integration` 통과 |
+
+### 임계 경로
+
+**W5-01 → W5-04 → W5-05 → W5-06 → W5-07.** auth·content 는 W5-01 뒤 병렬이다. commerce 는 한 패키지라 순서대로 간다 — 생성 디렉터리를 셋이 동시에 쓰면 빌드가 서로 깨진다.
+
+### 이 Phase에서 처음 생기는 위험
+
+| 위험 | 언제 드러나나 | 미리 할 수 있는 것 |
+|---|---|---|
+| **오류 의미가 바뀐다** — `pgx.ErrNoRows`·`pgconn.PgError` 코드 분기가 생성 코드 뒤에서 사라지면 404 가 500 이 된다 | 핸들러 통합 테스트에서 상태코드로 | 생성 질의도 pgx 오류를 그대로 돌려준다. 각 작업의 완료 기준이 「같은 오류값」을 못 박는다 |
+| **동적 정렬을 CASE 로 바꾸며 인덱스 정렬을 잃는다** | 큰 목록에서 느려진 뒤 | 목록은 페이지당 상수 질의(NFR-105)이고 정렬 대상이 작다. 느려지면 질의 2벌로 되돌린다 — D22 6절이 그 길을 열어 둔다 |
+| **세 에이전트가 같은 생성 디렉터리를 동시에 쓴다** | 빌드가 번갈아 깨진다 | commerce 는 순차(W5-04→06). auth·content 는 디렉터리가 다르다. DB 테스트는 패키지별 별도 데이터베이스(`ondolith_auth` 등)로 돈다 |
+
+---
+
 
 | 의존 | 내용 |
 |---|---|
@@ -421,4 +451,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 2 — 게시판 | 26 | 5 (W2-04, W2-22~25) | W2-02 게시판 스키마 마이그레이션 |
 | Phase 3 — 커머스 | 41 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
-| **합계** | **127** | **7** | — |
+| Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
+| **합계** | **134** | **7** | — |

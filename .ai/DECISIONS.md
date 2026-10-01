@@ -32,6 +32,7 @@ MySQL 동시 지원은 배제됐다. JSONB 없이 커스텀 필드를 재설계�
 | 세션 | `alexedwards/scs/v2` + `scs/pgxstore` | v2.9.0 / v0.0.0-20251002162104 |
 | 마이그레이션 | `pressly/goose/v3` | v3.27.3 |
 | DB 드라이버 | `jackc/pgx/v5` (+ `pgx/v5/stdlib` 브리지) | v5.10.0 |
+| SQL → Go 생성 | `sqlc` (`sql_package: pgx/v5`) — 빌드 도구, go.mod 밖 | v1.31.1 (2026-10-02 확인) |
 | 인터랙션 | htmx **2.0.9 내장** | `internal/theme/builtin/static/js/`. CDN 아님 — DEC-2.2 |
 | 소셜 로그인 | `markbates/goth` | v1.82.0 (Phase 1) |
 | 정적 자산 | `embed.FS` | stdlib |
@@ -40,6 +41,14 @@ MySQL 동시 지원은 배제됐다. JSONB 없이 커스텀 필드를 재설계�
 라우팅을 지원한다. `chi`가 더 주는 것은 `Route`/`Use` 그룹 설탕 정도이고, 그건
 20줄짜리 헬퍼로 대체된다. 단일 바이너리·최소 의존성이라는 목표에 stdlib가 맞다.
 gin/echo/fiber는 애초에 배제 (미들웨어 생태계를 끌고 오면 단일 바이너리 이점이 희석).
+
+**ORM 대신 sqlc 를 쓴다 (2026-10-02):** 질의 291곳을 전수 조사했더니 잠금(`FOR UPDATE`
+31곳)·부분 유니크 인덱스에 기댄 멱등(17곳)·CHECK 위반 코드 분기·`RETURNING`·`ON CONFLICT`·
+`LATERAL`·tsvector 가 설계의 핵심이었다 (`.ai/ORM-INVENTORY.md`). GORM·Bun·ent 는 이것들이
+raw SQL 로 남아 「ORM 인데 반은 SQL」이 되고, `database/sql` 을 거치며 스캔 타입이 바뀐다.
+sqlc 는 SQL 을 그대로 두고 타입 안전한 코드를 생성하며 pgx 풀·트랜잭션을 그대로 쓴다.
+**MySQL 전환은 여전히 범위 밖이다** (위 단락) — JSONB·부분 인덱스·전문검색이 스키마에
+있는 한 어떤 ORM 도 그 전환을 자동으로 해 주지 않는다.
 
 **pgx 단일 커넥션 풀 사용:** `pgxpool.Pool` 하나를 앱·세션 스토어가 공유하고,
 goose에는 `stdlib.OpenDBFromPool(pool)`로 `*sql.DB`를 만들어 넘긴다. 접속 설정이

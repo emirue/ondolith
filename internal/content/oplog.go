@@ -3,8 +3,11 @@ package content
 import (
 	"context"
 	"net"
+	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 // OpLog is D15 7절's audit trail.
@@ -75,14 +78,30 @@ func Redacted(summary string) (string, bool) {
 // worse than one that is missing: the gap looks like "nothing happened".
 func (l *OpLog) Record(ctx context.Context, e Entry) error {
 	summary, _ := Redacted(e.Summary)
-	const q = `
-		INSERT INTO operation_logs
-		    (actor_user_id, actor_email, action, target_type, target_id, summary, ip)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := l.store.pool.Exec(ctx, q,
-		nullIfEmpty(e.ActorID), e.ActorEmail, e.Action, e.TargetType,
-		nullIfEmpty(e.TargetID), summary, nullIfEmpty(normaliseIP(e.IP)))
-	return err
+	return l.store.q.RecordOpLog(ctx, contentq.RecordOpLogParams{
+		ActorUserID: strPtr(e.ActorID), ActorEmail: e.ActorEmail,
+		Action: e.Action, TargetType: e.TargetType,
+		TargetID: strPtr(e.TargetID), Summary: summary, Ip: ipOrNil(e.IP),
+	})
+}
+
+// strPtr is the nullable-text parameter shape sqlc generates: nil for "", so
+// the column stays NULL rather than holding an empty string.
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// ipOrNil keeps the inet column NULL for anything that is not an address —
+// normaliseIP 가 비주소를 떨어뜨리는 것과 같은 이유다.
+func ipOrNil(s string) *netip.Addr {
+	a, err := netip.ParseAddr(normaliseIP(s))
+	if err != nil {
+		return nil
+	}
+	return &a
 }
 
 // normaliseIP drops anything that is not an address. The column is `inet`, so a
@@ -116,29 +135,20 @@ type LogEntry struct {
 // the screen that needs it can add one, and an unused parameter is a shape
 // nobody checked.
 func (l *OpLog) Recent(ctx context.Context, limit, offset int) ([]LogEntry, error) {
-	const q = `
-		SELECT id, actor_email, action, target_type, coalesce(target_id, ''),
-		       summary, coalesce(host(ip), ''), created_at
-		FROM operation_logs ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`
-	rows, err := l.store.pool.Query(ctx, q, limit, offset)
+	rows, err := l.store.q.RecentOpLog(ctx, contentq.RecentOpLogParams{
+		Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []LogEntry
-	for rows.Next() {
-		var e LogEntry
-		if err := rows.Scan(&e.ID, &e.ActorEmail, &e.Action, &e.TargetType,
-			&e.TargetID, &e.Summary, &e.IP, &e.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
+	for _, r := range rows {
+		out = append(out, LogEntry{ID: r.ID, ActorEmail: r.ActorEmail, Action: r.Action,
+			TargetType: r.TargetType, TargetID: r.TargetID, Summary: r.Summary,
+			IP: r.Ip, CreatedAt: r.CreatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (l *OpLog) Count(ctx context.Context) (int64, error) {
-	var n int64
-	err := l.store.pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs`).Scan(&n)
-	return n, err
+	return l.store.q.CountOpLog(ctx)
 }

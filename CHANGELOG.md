@@ -18,6 +18,9 @@
 
 ### Changed
 
+- 저장소 계층의 SQL 을 `internal/<pkg>/queries/*.sql` 로 모으고 sqlc 로 Go 코드를 생성한다
+  ([DEC-1](.ai/DECISIONS.md) sqlc, [D22](docs/22-dev-standards.md) 6절). 동작·스키마는 그대로다.
+  `make check` 가 생성 코드 어긋남을 잡는다.
 - 관리자 메뉴 표시명을 운영자가 아는 말로 바꿨다 — 「결제 대사」→「결제 목록」(A-508),
   「재고 실사」→「재고 조사」(A-515). 하는 일은 그대로다. 문서의 「대사」는 PG 대조 동작을
   가리키는 용어로 남는다.

@@ -126,6 +126,7 @@ curl -s https://api.osv.dev/v1/query -d '{"package":{"name":"<module>","ecosyste
 | htmx 2.0.9 | 프런트 인터랙션. **CDN 아닌 내장** (`internal/theme/builtin/static/js/`). 버전·sha256 은 같은 디렉터리 `htmx.VERSION`. 근거 [DEC-2.2](../.ai/DECISIONS.md) |
 | PostgreSQL 18 | `make test-integration`이 **`ONDOLITH_TEST_DSN`이 없으면 Docker로 직접 띄운다** (`scripts/testdb.sh`, `postgres:18-alpine`). 컨테이너는 다음 실행을 위해 남으며 `make test-db-down`으로 지운다. DSN을 명시하면 그쪽이 우선한다 |
 | `jq` | `gofmt` 훅이 후크 페이로드를 읽는다 |
+| sqlc v1.31.1 | `make sqlc` 가 `go run …@v1.31.1` 로 받아 돌린다 — 설치 불필요, 첫 실행만 빌드 시간이 든다. 생성 코드가 저장소에 있어 빌드·테스트에는 필요 없다. 근거 [DEC-1](../.ai/DECISIONS.md) |
 | `perl` | `checkdocs.sh`의 패턴 추출 |
 | Docker (선택) | 통합 테스트용 PostgreSQL |
 

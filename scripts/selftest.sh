@@ -1089,6 +1089,19 @@ else
 	ok "훅이 비-Go 파일을 건드리지 않았다"
 fi
 
+# ---- sqlc-check 가 질의와 생성 코드의 어긋남을 실제로 잡는가 ------------------
+# 질의 이름 하나를 바꾸면 생성 코드의 함수 이름이 달라져야 한다. 그걸 못 잡으면
+# `make sqlc` 를 잊은 커밋이 그대로 들어간다.
+# 복사본($REPO)에서 한다 — 실제 트리의 질의 파일을 건드리면 그 사이 다른
+# 검사가 어긋난 파일을 본다.
+SQLQ=$REPO/internal/content/queries/oplog.sql
+sed -i.bak 's/-- name: CountOpLog :one/-- name: CountOpLogDrift :one/' "$SQLQ" && rm -f "$SQLQ.bak"
+if (cd "$REPO" && make -s sqlc-check >/dev/null 2>&1); then
+	err "sqlc-check 가 질의와 생성 코드의 어긋남을 통과시켰다"
+else
+	ok "탐지: sqlc 생성 코드 어긋남"
+fi
+
 if [ "$fail" -ne 0 ]; then
 	printf '\nselftest 실패\n'
 	exit 1

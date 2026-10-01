@@ -15,8 +15,19 @@ build: ## 로컬 바이너리 빌드
 run: build ## 빌드 후 실행
 	./$(BIN)
 
-check: build vet fmt test docs selftest ## 품질 게이트 — 완료 선언 전 필수 (NFR-404)
+check: build vet fmt sqlc-check test docs selftest ## 품질 게이트 — 완료 선언 전 필수 (NFR-404)
 	@echo "check ok  $(VERSION)"
+
+# sqlc 는 Go 의존성이 아니라 빌드 도구다 — go.mod 에 넣지 않고 버전을 여기 고정한다.
+# 생성 코드가 저장소에 들어 있으므로 빌드·테스트에는 sqlc 가 필요 없고, 질의를
+# 고친 사람만 `make sqlc` 를 돌린다. sqlc-check 는 그걸 잊은 커밋을 잡는다.
+SQLC = go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+sqlc: ## queries/*.sql 에서 internal/*/*q/ 생성 코드를 다시 쓴다 (D22 6절)
+	@$(SQLC) generate
+
+sqlc-check: ## 생성 코드가 질의 파일과 같은지 — 다르면 `make sqlc` 를 잊은 것
+	@$(SQLC) diff >/dev/null 2>&1 || { echo "sqlc-check: 생성 코드가 queries/*.sql 과 다르다 — make sqlc 를 돌려 커밋하세요"; $(SQLC) diff; exit 1; }
 
 docs: ## 문서 규칙 검증 — 규칙 본문은 docs/90-conventions.md (NFR-407)
 	@sh scripts/checkdocs.sh

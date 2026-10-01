@@ -102,7 +102,9 @@ Phase 1 이후 추가될 자리는 [D20](20-architecture.md)에 있다.
 | 바인딩 불가한 값 | 정렬 컬럼 같은 것은 **허용 목록**으로 검사한다. 이스케이프하지 않는다 |
 | 소유권 | `WHERE`에 넣는다. 조회 후 Go에서 비교하지 않는다 ([D15](15-access-control.md) P4) |
 | N+1 | 목록 조회는 상수 개수의 쿼리여야 한다 (NFR-105) |
-| 트랜잭션 | 여러 행의 불변식이 걸린 작업은 트랜잭션 안에서. `defer tx.Rollback(ctx)`를 먼저 건다 |
+| 트랜잭션 | 여러 행의 불변식이 걸린 작업은 트랜잭션 안에서. `defer tx.Rollback(ctx)`를 먼저 건다. 생성 질의는 `q.WithTx(tx)` 로 같은 트랜잭션을 탄다 |
+| 질의의 자리 | **`internal/<pkg>/queries/*.sql`** 에 적고 `make sqlc` 로 `internal/<pkg>/<pkg>q/` 를 생성한다. 생성 코드는 손으로 고치지 않는다 — `make check` 의 `sqlc-check` 가 어긋남을 잡는다 ([DEC-1](../.ai/DECISIONS.md) sqlc) |
+| 생성할 수 없는 질의 | 정렬 컬럼처럼 실행 시점에 정해지는 것은 `ORDER BY CASE WHEN sqlc.arg('sort') = '…' THEN … END` 로 한 질의에 담는다. 그래도 안 되면 Go 에 남기되 **왜 생성할 수 없는지 주석**을 단다 |
 | 마이그레이션 | 규칙은 [D30](30-data-model.md). 모든 파일에 `-- +goose Down` (NFR-303) |
 
 ---

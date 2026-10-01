@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 var (
@@ -27,9 +29,12 @@ var (
 type Store struct {
 	pool   *pgxpool.Pool
 	sealer Sealer
+	// q 는 sqlc 가 queries/*.sql 에서 생성한 질의다 (D22 6절). 손으로 스캔하는
+	// 코드를 여기서 하나씩 옮긴다 — 트랜잭션 안에서는 q.WithTx(tx).
+	q *contentq.Queries
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: contentq.New(pool)} }
 
 // Sealer is what seals a secret setting on the way in and opens it on the way
 // out. secretbox.Box satisfies it; the store does not import that package so
