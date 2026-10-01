@@ -125,8 +125,8 @@ func RefundableAmount(lineAmount, discount, quantity, settled, qty int) (int, er
 
 // share is floor(net * n / q).
 //
-// 곱이 넘치지 않는다: net 은 금액 상한(100억) 이하이고 n 은 수량 상한(999)
-// 이하라 곱이 10^13 이다. int64 상한 9.2×10^18 과 다섯 자리 차이다.
+// 곱이 넘치지 않는다: net 은 금액 상한(20억) 이하이고 n 은 수량 상한(999)
+// 이하라 곱이 2×10^12 이다. int64 상한 9.2×10^18 과 여섯 자리 차이다.
 //
 // Apportion 쪽은 사정이 다르다 — 거기서는 금액 × 할인액이라 10^20 이 되어
 // 실제로 넘친다. 그래서 그쪽만 나눗셈을 먼저 한다.

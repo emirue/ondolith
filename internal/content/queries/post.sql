@@ -180,5 +180,5 @@ LEFT JOIN users u ON u.id = p.author_id
 WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[])
   AND p.status = 'published'
   AND (NOT p.is_secret OR p.board_id = ANY(sqlc.arg('secret_in')::uuid[]) OR p.author_id = sqlc.narg('viewer_id'))
-ORDER BY p.created_at DESC
+ORDER BY p.created_at DESC, p.id DESC
 LIMIT $1;

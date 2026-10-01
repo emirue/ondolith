@@ -13,7 +13,7 @@ WHERE id = $1;
 DELETE FROM products WHERE id = $1;
 
 -- name: LockVariantOfProduct :one
-SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE;
+SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR NO KEY UPDATE;
 
 -- name: EditVariant :execrows
 UPDATE product_variants

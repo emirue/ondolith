@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/commerce/commerceq"
@@ -192,8 +194,12 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		// 것만으로 유리한 기준을 고를 수 있게 된다.
 		oldDelta int
 	}
+	// **잠금 순서는 order_item_id 오름차순이다** (RequestRefund 와 같다). 폼이 준
+	// 순서대로 잡으면 같은 주문의 환불 요청과 서로의 품목을 기다린다.
+	sorted := slices.Clone(req.Lines)
+	slices.SortFunc(sorted, func(a, b RefundLine) int { return strings.Compare(a.OrderItemID, b.OrderItemID) })
 	var lines []line
-	for _, l := range req.Lines {
+	for _, l := range sorted {
 		if l.Quantity < 1 {
 			return nil, fmt.Errorf("%w: %d", ErrQuantityRange, l.Quantity)
 		}
@@ -803,8 +809,9 @@ func (s *Store) ExchangeDiffDue(ctx context.Context, orderNo, returnNo, userID s
 // 시점에 다시 계산하지 않는다 — 그 사이 관리자가 가격을 바꾸면 값이 달라지고,
 // 구매자가 본 금액과 청구된 금액이 어긋난다.
 //
-// 두 번째 승인은 `UNIQUE (order_id, return_id) WHERE kind='교환차액'` 이 막는다.
-// 애플리케이션 검사를 지워도 두 번째가 실패해야 한다 (FR-608).
+// 두 번째 승인은 `UNIQUE (order_id, return_id) WHERE kind='교환차액' AND
+// status <> '실패'` 가 막는다. 애플리케이션 검사를 지워도 두 번째가 실패해야
+// 한다 (FR-608). 실패한 시도는 자리를 비우므로 다시 결제할 수 있다.
 func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, orderNo,
 	returnNo, userID, paymentKey string, amount int, now time.Time) (err error) {
 
@@ -825,6 +832,11 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 		ApprovedAmount: int32(d.Amount)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		// ConfirmPayment 와 같은 구분이다: 승인 키가 겹친 것은 「이미 결제됨」이
+		// 아니라 다른 결제의 키가 다시 온 것이다.
+		if pgErr.ConstraintName == "payments_pg_key_idx" {
+			return fmt.Errorf("%w: %s/%s", ErrPaymentKeyReused, pgName, paymentKey)
+		}
 		return ErrAlreadyPaid
 	}
 	if err != nil {

@@ -200,12 +200,16 @@ func TestRefundableAmountRefusesOverRefund(t *testing.T) {
 
 // 금액 상한 근처에서도 곱이 넘치지 않는다.
 //
-// Apportion 은 `품목금액 × 할인액` 을 계산하는데, 둘 다 상한(100억)이면 10^20
+// Apportion 은 `품목금액 × 할인액` 을 계산하는데, 둘 다 100억이면 10^20
 // 이라 int64 를 넘는다 — 나눗셈을 먼저 하지 않으면 배분이 음수가 되거나
 // 합계가 어긋난다.
+//
+// 100억은 예전 금액 상한이다. 지금 상한(MaxAmount, 20억)에서는 곱이 4×10^18 이라
+// 넘치지 않으므로, maxAmount 를 쓰면 이 검사가 128비트 곱셈을 더는 지키지 못한다.
 func TestApportionDoesNotOverflowAtTheAmountCeiling(t *testing.T) {
-	lines := []int{maxAmount, maxAmount, 1}
-	discount := maxAmount
+	const big = 10_000_000_000
+	lines := []int{big, big, 1}
+	discount := big
 	got, err := Apportion(lines, discount)
 	if err != nil {
 		t.Fatal(err)

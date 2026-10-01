@@ -267,9 +267,12 @@ func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]L
 }
 
 const lockVariantStock = `-- name: LockVariantStock :one
-SELECT stock FROM product_variants WHERE id = $1 FOR UPDATE
+SELECT stock FROM product_variants WHERE id = $1 FOR NO KEY UPDATE
 `
 
+// FOR NO KEY UPDATE: 뒤따르는 UPDATE 는 키 컬럼을 바꾸지 않는다. FOR UPDATE 는
+// 외래키 검사(FOR KEY SHARE)까지 막아, 재고를 잠근 동안 그 조합을 장바구니에 담는
+// INSERT 가 줄을 선다.
 func (q *Queries) LockVariantStock(ctx context.Context, id string) (int32, error) {
 	row := q.db.QueryRow(ctx, lockVariantStock, id)
 	var stock int32

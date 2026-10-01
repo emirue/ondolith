@@ -43,8 +43,11 @@ func TestTermsVersionIsUniquePerKind(t *testing.T) {
 		t.Fatalf("= %v, want ErrTermsVersionTaken", err)
 	}
 	// 다른 버전은 들어간다 — 위 단언이 "두 번째는 늘 막힌다" 가 아니다.
+	// 시행 시각은 달라야 한다: 같은 종류·같은 시각은 00023 부터 따로 거부된다
+	// (TestTermsWithTheSameEffectiveTimeAreRefused).
 	next := base
 	next.Version = "1.1"
+	next.EffectiveAt = base.EffectiveAt.Add(24 * time.Hour)
 	if _, err := s.AddTerms(ctx, next, now); err != nil {
 		t.Errorf("다음 버전이 막혔다: %v", err)
 	}

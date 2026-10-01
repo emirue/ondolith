@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict b1TTRZK0m0RatOUQnsAd815qsdF613QJAcLQqVJL39G1JSKG1FST9nI5ezymQgm
+\restrict jJcC3LrjWE6nUPSXcW2K6y3WfbpFXbzcCksHaF1bPWFP2MgmVjfXGkMOAaEadG7
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -29,6 +29,19 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
+
+--
+-- Name: money_rows_no_delete(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.money_rows_no_delete() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION '% 행은 지울 수 없습니다 (D30 3-1)', TG_TABLE_NAME;
+END;
+$$;
+
 
 --
 -- Name: operation_logs_append_only(); Type: FUNCTION; Schema: public; Owner: -
@@ -1237,6 +1250,14 @@ ALTER TABLE ONLY public.user_fields
 
 
 --
+-- Name: user_fields user_fields_options_shape; Type: CHECK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE public.user_fields
+    ADD CONSTRAINT user_fields_options_shape CHECK (((jsonb_typeof(options) = 'array'::text) AND (octet_length((options)::text) <= 4096))) NOT VALID;
+
+
+--
 -- Name: user_fields user_fields_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1258,6 +1279,14 @@ ALTER TABLE ONLY public.user_roles
 
 ALTER TABLE ONLY public.user_roles
     ADD CONSTRAINT user_roles_uniq UNIQUE (user_id, role_id);
+
+
+--
+-- Name: users users_custom_fields_shape; Type: CHECK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE public.users
+    ADD CONSTRAINT users_custom_fields_shape CHECK (((jsonb_typeof(custom_fields) = 'object'::text) AND (octet_length((custom_fields)::text) <= 16384))) NOT VALID;
 
 
 --
@@ -1435,7 +1464,7 @@ CREATE INDEX payments_created_idx ON public.payments USING btree (created_at DES
 -- Name: payments_exchange_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX payments_exchange_idx ON public.payments USING btree (order_id, return_id) WHERE (kind = '교환차액'::text);
+CREATE UNIQUE INDEX payments_exchange_idx ON public.payments USING btree (order_id, return_id) WHERE ((kind = '교환차액'::text) AND (status <> '실패'::text));
 
 
 --
@@ -1579,10 +1608,10 @@ CREATE UNIQUE INDEX return_items_open_idx ON public.return_items USING btree (or
 
 
 --
--- Name: return_items_return_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: returns_new_variant_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX return_items_return_idx ON public.return_items USING btree (return_id);
+CREATE INDEX returns_new_variant_idx ON public.returns USING btree (new_variant_id) WHERE (new_variant_id IS NOT NULL);
 
 
 --
@@ -1604,6 +1633,13 @@ CREATE INDEX returns_status_idx ON public.returns USING btree (status, created_a
 --
 
 CREATE INDEX role_permissions_board_id_idx ON public.role_permissions USING btree (board_id) WHERE (board_id IS NOT NULL);
+
+
+--
+-- Name: role_permissions_permission_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX role_permissions_permission_id_idx ON public.role_permissions USING btree (permission_id);
 
 
 --
@@ -1642,10 +1678,10 @@ CREATE UNIQUE INDEX shipments_return_idx ON public.shipments USING btree (return
 
 
 --
--- Name: terms_kind_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: terms_kind_effective_uniq; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX terms_kind_idx ON public.terms USING btree (kind, effective_at DESC);
+CREATE UNIQUE INDEX terms_kind_effective_uniq ON public.terms USING btree (kind, effective_at DESC);
 
 
 --
@@ -1684,6 +1720,13 @@ CREATE TRIGGER operation_logs_no_delete BEFORE DELETE ON public.operation_logs F
 
 
 --
+-- Name: operation_logs operation_logs_no_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operation_logs_no_truncate BEFORE TRUNCATE ON public.operation_logs FOR EACH STATEMENT EXECUTE FUNCTION public.operation_logs_append_only();
+
+
+--
 -- Name: operation_logs operation_logs_no_update; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1695,6 +1738,34 @@ CREATE TRIGGER operation_logs_no_update BEFORE UPDATE ON public.operation_logs F
 --
 
 CREATE TRIGGER operation_logs_no_update_cols BEFORE UPDATE OF id, actor_email, action, target_type, target_id, summary, ip, created_at ON public.operation_logs FOR EACH ROW EXECUTE FUNCTION public.operation_logs_append_only();
+
+
+--
+-- Name: order_items order_items_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER order_items_no_delete BEFORE DELETE ON public.order_items FOR EACH ROW EXECUTE FUNCTION public.money_rows_no_delete();
+
+
+--
+-- Name: orders orders_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER orders_no_delete BEFORE DELETE ON public.orders FOR EACH ROW EXECUTE FUNCTION public.money_rows_no_delete();
+
+
+--
+-- Name: payments payments_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER payments_no_delete BEFORE DELETE ON public.payments FOR EACH ROW EXECUTE FUNCTION public.money_rows_no_delete();
+
+
+--
+-- Name: refunds refunds_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER refunds_no_delete BEFORE DELETE ON public.refunds FOR EACH ROW EXECUTE FUNCTION public.money_rows_no_delete();
 
 
 --
@@ -2061,5 +2132,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict b1TTRZK0m0RatOUQnsAd815qsdF613QJAcLQqVJL39G1JSKG1FST9nI5ezymQgm
+\unrestrict jJcC3LrjWE6nUPSXcW2K6y3WfbpFXbzcCksHaF1bPWFP2MgmVjfXGkMOAaEadG7
 

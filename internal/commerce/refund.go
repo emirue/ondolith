@@ -206,13 +206,19 @@ func (s *Store) RejectRefund(ctx context.Context, refundID, reason string) error
 	if err != nil {
 		return err
 	}
-	if err := q.ReleaseRefundAmount(ctx, commerceq.ReleaseRefundAmountParams{
-		ID: rejected.PaymentID, Amount: rejected.Amount}); err != nil {
+	// **잠금 순서: order_items(id 오름차순) → payments** (RequestRefund 와 같다).
+	// 결제를 먼저 잡으면, 품목을 잡고 결제를 기다리는 환불 요청과 서로를
+	// 기다린다 — 실측으로 교착이 났다.
+	if _, err := q.LockOrderItems(ctx, rejected.OrderID); err != nil {
 		return err
 	}
-	// 소진 수량도 되돌린다. 금액만 되돌리면 그 품목은 영영 다시 환불할 수
+	// 소진 수량을 되돌린다. 금액만 되돌리면 그 품목은 영영 다시 환불할 수
 	// 없으면서 한도만 살아 있는 상태가 되고, 아무 오류도 나지 않는다.
 	if err := q.UnsettleRefundItems(ctx, refundID); err != nil {
+		return err
+	}
+	if err := q.ReleaseRefundAmount(ctx, commerceq.ReleaseRefundAmountParams{
+		ID: rejected.PaymentID, Amount: rejected.Amount}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -274,6 +280,13 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 
 	if _, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
 		ID: orderID, ToStatus: string(StatusCancelled), FromStatus: status}); err != nil {
+		return "", err
+	}
+
+	// **잠금 순서: order_items(id 오름차순) → payments** (RequestRefund 와 같다).
+	// 결제를 먼저 잡고 품목을 나중에 고치면, 품목을 잡고 결제를 기다리는 환불
+	// 요청과 서로를 기다린다 — 실측으로 교착이 났다.
+	if _, err := q.LockOrderItems(ctx, orderID); err != nil {
 		return "", err
 	}
 
@@ -375,6 +388,11 @@ func (s *Store) SettleFullRefund(ctx context.Context, orderNo string, actor Acto
 		to = StatusRefunded
 	default:
 		return "", nil
+	}
+	// 품목은 id 오름차순으로 잡는다 (RequestRefund 와 같은 순서). 아래 UPDATE 가
+	// 제 순서대로 잡게 두면 품목이 둘 이상인 주문에서 환불 요청과 교착한다.
+	if _, err := q.LockOrderItems(ctx, orderID); err != nil {
+		return "", err
 	}
 	if err := q.SettleAllOrderItems(ctx, orderID); err != nil {
 		return "", err

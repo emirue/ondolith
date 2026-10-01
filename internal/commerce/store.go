@@ -215,6 +215,9 @@ func (s *Store) AdjustStock(ctx context.Context, tx pgx.Tx, deltas []StockDelta)
 
 // CreateProduct is A-502's write.
 func (s *Store) CreateProduct(ctx context.Context, p Product) (string, error) {
+	if err := checkBasePrice(p.BasePrice); err != nil {
+		return "", err
+	}
 	id, err := s.q.CreateProduct(ctx, commerceq.CreateProductParams{
 		Slug: p.Slug, Name: p.Name, Description: p.Description,
 		BasePrice: int32(p.BasePrice), IsVisible: p.Visible})

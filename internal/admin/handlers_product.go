@@ -62,10 +62,11 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, "이름과 주소를 입력하세요.")
 		return
 	}
+	// 상한(commerce.MaxAmount)은 저장 계층이 본다 — 아래 두 switch 가 그 오류를
+	// 같은 422 로 옮긴다. 여기서 한 번 더 재면 같은 규칙이 두 곳에 생긴다.
 	price, err := strconv.Atoi(strings.TrimSpace(r.PostFormValue("base_price")))
 	if err != nil || price < 0 {
-		d.renderProduct(w, r, p, http.StatusUnprocessableEntity,
-			"가격은 0 이상의 정수여야 합니다.")
+		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, priceRangeMessage)
 		return
 	}
 	p.BasePrice = price
@@ -75,6 +76,9 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, commerce.ErrSlugTaken):
 			d.renderProduct(w, r, p, http.StatusConflict, "이미 쓰이는 주소입니다.")
+			return
+		case errors.Is(err, commerce.ErrPriceNegative), errors.Is(err, commerce.ErrAmountTooBig):
+			d.renderProduct(w, r, p, http.StatusUnprocessableEntity, priceRangeMessage)
 			return
 		case err != nil:
 			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
@@ -91,9 +95,8 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	case errors.Is(err, commerce.ErrSlugTaken):
 		d.renderProduct(w, r, p, http.StatusConflict, "이미 쓰이는 주소입니다.")
-	case errors.Is(err, commerce.ErrPriceNegative):
-		d.renderProduct(w, r, p, http.StatusUnprocessableEntity,
-			"가격은 0 이상의 정수여야 합니다.")
+	case errors.Is(err, commerce.ErrPriceNegative), errors.Is(err, commerce.ErrAmountTooBig):
+		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, priceRangeMessage)
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 	default:
@@ -102,6 +105,9 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/products/"+p.ID, http.StatusSeeOther)
 	}
 }
+
+// priceRangeMessage 는 A-502 의 가격 범위 오류다 (0 ~ commerce.MaxAmount).
+const priceRangeMessage = "가격은 0 이상 20억 이하의 정수여야 합니다."
 
 // ProductDelete is A-502 DELETE (POST + action).
 //
@@ -217,6 +223,13 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrOutOfStock):
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"재고가 0 보다 작아집니다. 백오더는 없습니다.")
+	// 아래 둘은 저장 계층이 판정한다 (범위: commerce.MaxAmount, SKU: DB CHECK).
+	// 예전에는 SKU 가 긴 것도 위의 「재고 부족」으로 나갔다.
+	case errors.Is(err, commerce.ErrSkuLength):
+		d.renderVariants(w, r, http.StatusUnprocessableEntity, "SKU 는 64자 이하여야 합니다.")
+	case errors.Is(err, commerce.ErrAmountTooBig), errors.Is(err, commerce.ErrQuantityRange):
+		d.renderVariants(w, r, http.StatusUnprocessableEntity,
+			"재고 증감과 가격 차액은 ±20억 이내여야 합니다.")
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 	default:

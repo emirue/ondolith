@@ -369,7 +369,7 @@ func (q *Queries) PermissionIsScoped(ctx context.Context, key string) (bool, err
 
 const roleByKey = `-- name: RoleByKey :one
 SELECT r.key, r.is_superuser,
-       coalesce(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions
+       coalesce(array_agg(DISTINCT p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions
 FROM roles r
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
@@ -392,7 +392,7 @@ func (q *Queries) RoleByKey(ctx context.Context, key string) (RoleByKeyRow, erro
 
 const roles = `-- name: Roles :many
 SELECT r.key, r.name, r.is_superuser,
-       coalesce(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions
+       coalesce(array_agg(DISTINCT p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions
 FROM roles r
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
@@ -407,6 +407,8 @@ type RolesRow struct {
 	Permissions []string
 }
 
+// DISTINCT: 게시판 범위 권한은 게시판마다 한 행이라, 없으면 같은 키가 게시판 수만큼
+// 나와 「N개 권한」이 부풀려진다.
 func (q *Queries) Roles(ctx context.Context) ([]RolesRow, error) {
 	rows, err := q.db.Query(ctx, roles)
 	if err != nil {

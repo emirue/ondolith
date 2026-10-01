@@ -198,6 +198,32 @@ func (q *Queries) LockOrderItemForRefund(ctx context.Context, arg LockOrderItemF
 	return i, err
 }
 
+const lockOrderItems = `-- name: LockOrderItems :many
+SELECT id FROM order_items WHERE order_id = $1 ORDER BY id FOR UPDATE
+`
+
+// 잠금 순서의 앞 절반이다: **order_items(id 오름차순) → payments.** 환불·취소·반품
+// 경로가 전부 이 순서로 잡아야 서로를 기다리지 않는다.
+func (q *Queries) LockOrderItems(ctx context.Context, orderID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, lockOrderItems, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockRefundForExecute = `-- name: LockRefundForExecute :one
 SELECT r.status, r.reason, r.request_key, r.amount, p.payment_key
 FROM refunds r JOIN payments p ON p.id = r.payment_id
@@ -279,7 +305,7 @@ SELECT rf.id FROM refunds rf
 JOIN returns rt ON rt.id = rf.return_id
 JOIN orders o ON o.id = rf.order_id
 WHERE o.order_no = $1 AND rt.return_no = $2
-ORDER BY rf.created_at DESC LIMIT 1
+ORDER BY rf.created_at DESC, rf.id DESC LIMIT 1
 `
 
 type RefundForReturnParams struct {
@@ -355,7 +381,7 @@ func (q *Queries) Refunds(ctx context.Context, orderID string) ([]RefundsRow, er
 
 const rejectRefund = `-- name: RejectRefund :one
 UPDATE refunds SET status = '거부', reason = $2, updated_at = now()
-WHERE id = $1 AND status = '요청' RETURNING payment_id, amount
+WHERE id = $1 AND status = '요청' RETURNING order_id, payment_id, amount
 `
 
 type RejectRefundParams struct {
@@ -364,6 +390,7 @@ type RejectRefundParams struct {
 }
 
 type RejectRefundRow struct {
+	OrderID   string
 	PaymentID string
 	Amount    int32
 }
@@ -371,7 +398,7 @@ type RejectRefundRow struct {
 func (q *Queries) RejectRefund(ctx context.Context, arg RejectRefundParams) (RejectRefundRow, error) {
 	row := q.db.QueryRow(ctx, rejectRefund, arg.ID, arg.Reason)
 	var i RejectRefundRow
-	err := row.Scan(&i.PaymentID, &i.Amount)
+	err := row.Scan(&i.OrderID, &i.PaymentID, &i.Amount)
 	return i, err
 }
 

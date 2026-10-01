@@ -104,6 +104,11 @@ func (s *Store) Stocktake(ctx context.Context, variantID string, counted, ledger
 	if counted < 0 || counted > 1000000 {
 		return nil, fmt.Errorf("%w: 실측 %d", ErrQuantityRange, counted)
 	}
+	// 장부 값도 폼에서 온다. 재고는 integer 라 그 밖의 값은 맞을 수 없고,
+	// int32 변환이 그것을 다른 수로 접는다.
+	if ledger < 0 || ledger > MaxAmount {
+		return nil, fmt.Errorf("%w: 장부 %d", ErrQuantityRange, ledger)
+	}
 
 	delta := counted - ledger
 	if delta == 0 {

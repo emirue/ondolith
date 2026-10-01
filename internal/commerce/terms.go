@@ -18,6 +18,9 @@ var (
 	// ErrTermsBackdated 는 시행일이 과거인 경우다. 소급이 되면 "주문 시점에
 	// 유효했던 약관" 이 나중에 바뀔 수 있다 (D50).
 	ErrTermsBackdated = errors.New("commerce: 시행일은 오늘 이후여야 합니다")
+	// ErrTermsEffectiveTaken 은 같은 종류에 시행 시각이 같은 버전이 이미 있다는
+	// 뜻이다. 둘이 같으면 어느 쪽이 시행본인지 정해지지 않는다.
+	ErrTermsEffectiveTaken = errors.New("commerce: 같은 종류에 시행일이 같은 버전이 이미 있습니다")
 )
 
 // Terms is one row of terms.
@@ -81,6 +84,9 @@ func (s *Store) AddTerms(ctx context.Context, t Terms, now time.Time) (string, e
 	var pgErr *pgconn.PgError
 	switch {
 	case errors.As(err, &pgErr) && pgErr.Code == "23505":
+		if pgErr.ConstraintName == "terms_kind_effective_uniq" {
+			return "", ErrTermsEffectiveTaken
+		}
 		return "", ErrTermsVersionTaken
 	case errors.As(err, &pgErr) && pgErr.ConstraintName == "terms_no_backdate":
 		return "", ErrTermsBackdated
@@ -90,7 +96,8 @@ func (s *Store) AddTerms(ctx context.Context, t Terms, now time.Time) (string, e
 	return id, nil
 }
 
-// RequiredTerms is what P-405 shows for agreement: 종류마다 시행된 최신 필수 약관.
+// RequiredTerms is what P-405 shows for agreement: 종류마다 시행 중인 버전이
+// 필수이면 그것.
 //
 // 시행일이 미래인 버전은 아직 유효하지 않다 — 등록해 두고 그날부터 적용된다.
 func (s *Store) RequiredTerms(ctx context.Context, now time.Time) ([]Terms, error) {

@@ -613,7 +613,7 @@ LEFT JOIN users u ON u.id = p.author_id
 WHERE p.board_id = ANY($2::uuid[])
   AND p.status = 'published'
   AND (NOT p.is_secret OR p.board_id = ANY($3::uuid[]) OR p.author_id = $4)
-ORDER BY p.created_at DESC
+ORDER BY p.created_at DESC, p.id DESC
 LIMIT $1
 `
 

@@ -625,14 +625,15 @@ func (s *Store) expireOne(ctx context.Context, orderID string) error {
 // FR-710 전환 규칙 calls 미완결. A-201 refuses `shop → cms` while any exist:
 // unregistering the commerce routes with a buyer mid-payment strands them.
 //
-// 종료 상태 목록은 상태머신에서 뽑는다. 손으로 적으면 상태가 늘 때 낡는다.
+// 미완결 상태 목록은 상태머신에서 뽑는다. 손으로 적으면 상태가 늘 때 낡는다.
+// `= ANY(미완결)` 로 묻는다 — `<> ALL(종료)` 는 orders_status_idx 를 쓰지 못한다.
 func (s *Store) OpenOrders(ctx context.Context) (int, error) {
-	var terminal []string
+	var open []string
 	for st := range transitions {
-		if Terminal(st) {
-			terminal = append(terminal, string(st))
+		if !Terminal(st) {
+			open = append(open, string(st))
 		}
 	}
-	n, err := s.q.OpenOrders(ctx, terminal)
+	n, err := s.q.OpenOrders(ctx, open)
 	return int(n), err
 }

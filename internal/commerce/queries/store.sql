@@ -37,8 +37,11 @@ SELECT v.id, v.product_id, v.option_values, COALESCE(v.sku, '')::text AS sku, v.
 FROM product_variants v JOIN products p ON p.id = v.product_id
 WHERE v.id = $1;
 
+-- FOR NO KEY UPDATE: 뒤따르는 UPDATE 는 키 컬럼을 바꾸지 않는다. FOR UPDATE 는
+-- 외래키 검사(FOR KEY SHARE)까지 막아, 재고를 잠근 동안 그 조합을 장바구니에 담는
+-- INSERT 가 줄을 선다.
 -- name: LockVariantStock :one
-SELECT stock FROM product_variants WHERE id = $1 FOR UPDATE;
+SELECT stock FROM product_variants WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: AddVariantStock :exec
 UPDATE product_variants SET stock = stock + sqlc.arg('delta'), updated_at = now() WHERE id = sqlc.arg('id');

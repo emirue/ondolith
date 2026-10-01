@@ -121,7 +121,7 @@ func (q *Queries) InsertVariantIfMissing(ctx context.Context, arg InsertVariantI
 }
 
 const lockVariantOfProduct = `-- name: LockVariantOfProduct :one
-SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE
+SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR NO KEY UPDATE
 `
 
 type LockVariantOfProductParams struct {

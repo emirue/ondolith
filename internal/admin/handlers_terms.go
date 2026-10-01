@@ -58,6 +58,9 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, commerce.ErrTermsVersionTaken):
 		d.renderTerms(w, r, http.StatusConflict, "이미 있는 종류·버전입니다.")
+	case errors.Is(err, commerce.ErrTermsEffectiveTaken):
+		d.renderTerms(w, r, http.StatusConflict,
+			"같은 종류에 시행일이 같은 버전이 이미 있습니다. 시행일을 다르게 잡으세요.")
 	case errors.Is(err, commerce.ErrTermsBackdated):
 		d.renderTerms(w, r, http.StatusUnprocessableEntity,
 			"시행일은 오늘 이후여야 합니다. 소급 시행은 동의 이력을 거짓으로 만듭니다.")

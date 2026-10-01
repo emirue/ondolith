@@ -29,7 +29,7 @@ INSERT INTO refund_items (refund_id, order_item_id, quantity) VALUES ($1,$2,$3);
 
 -- name: RejectRefund :one
 UPDATE refunds SET status = '거부', reason = $2, updated_at = now()
-WHERE id = $1 AND status = '요청' RETURNING payment_id, amount;
+WHERE id = $1 AND status = '요청' RETURNING order_id, payment_id, amount;
 
 -- name: ReleaseRefundAmount :exec
 UPDATE payments SET refunded_amount = refunded_amount - sqlc.arg('amount'), updated_at = now()
@@ -52,6 +52,11 @@ WHERE o.order_no = $1 AND p.kind = '주문결제' AND p.status = '승인';
 
 -- name: LockOrderForCancel :one
 SELECT id, status, total_amount FROM orders WHERE order_no = $1 FOR UPDATE;
+
+-- 잠금 순서의 앞 절반이다: **order_items(id 오름차순) → payments.** 환불·취소·반품
+-- 경로가 전부 이 순서로 잡아야 서로를 기다리지 않는다.
+-- name: LockOrderItems :many
+SELECT id FROM order_items WHERE order_id = $1 ORDER BY id FOR UPDATE;
 
 -- name: LockApprovedPayment :one
 SELECT id, approved_amount, refunded_amount FROM payments
@@ -92,4 +97,4 @@ SELECT rf.id FROM refunds rf
 JOIN returns rt ON rt.id = rf.return_id
 JOIN orders o ON o.id = rf.order_id
 WHERE o.order_no = $1 AND rt.return_no = $2
-ORDER BY rf.created_at DESC LIMIT 1;
+ORDER BY rf.created_at DESC, rf.id DESC LIMIT 1;

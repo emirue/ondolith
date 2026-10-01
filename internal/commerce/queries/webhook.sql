@@ -25,7 +25,7 @@ WHERE id = sqlc.arg('id') AND status = '대기';
 SELECT w.id, w.pg, w.event_id, COALESCE(o.order_no, '')::text AS order_no, w.status,
        w.payload::text AS payload, COALESCE(w.error, '')::text AS error, w.created_at
 FROM webhook_events w LEFT JOIN orders o ON o.id = w.order_id
-ORDER BY (w.status = '수신') DESC, w.created_at DESC
+ORDER BY (w.status = '수신') DESC, w.created_at DESC, w.id
 LIMIT sqlc.arg('limit')::int;
 
 -- name: PaymentsToReconcile :many

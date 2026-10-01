@@ -12,10 +12,16 @@ WHERE (sqlc.narg('user_id')::uuid IS NOT NULL AND c.user_id = sqlc.narg('user_id
 ORDER BY ci.created_at, ci.id
 FOR UPDATE OF ci;
 
+-- **시행본을 먼저 고르고, 그다음에 필수인지 본다.** 필수만 걸러 놓고 최신을 고르면
+-- 필수 → 선택으로 개정된 종류에서 옛 필수본이 계속 요구되는데, 주문서(TermsInForce)
+-- 는 그 버전을 보여 주지 않는다 — 모든 주문이 ErrTermsRequired 로 끝난다.
 -- name: RequiredTermIDs :many
-SELECT DISTINCT ON (kind) id FROM terms
-WHERE is_required AND effective_at <= sqlc.arg('now')
-ORDER BY kind, effective_at DESC;
+SELECT t.id FROM terms t
+WHERE t.is_required AND t.id IN (
+    SELECT DISTINCT ON (f.kind) f.id FROM terms f
+    WHERE f.effective_at <= sqlc.arg('now')
+    ORDER BY f.kind, f.effective_at DESC, f.created_at DESC, f.id)
+ORDER BY t.kind;
 
 -- name: InsertOrder :one
 INSERT INTO orders (order_no, user_id, status, total_amount, discount_amount,
@@ -41,7 +47,7 @@ WHERE ci.cart_id IN (SELECT id FROM carts
 -- name: TermsInForce :many
 SELECT DISTINCT ON (kind) id, kind, version, body, is_required
 FROM terms WHERE effective_at <= sqlc.arg('now')
-ORDER BY kind, effective_at DESC;
+ORDER BY kind, effective_at DESC, created_at DESC, id;
 
 -- name: OrderByNo :one
 SELECT id, order_no, status, total_amount, discount_amount,
@@ -127,4 +133,4 @@ UPDATE orders SET status = sqlc.arg('to_status'), updated_at = now()
 WHERE id = sqlc.arg('id') AND status = sqlc.arg('from_status');
 
 -- name: OpenOrders :one
-SELECT count(*) FROM orders WHERE status <> ALL(sqlc.arg('terminal')::text[]);
+SELECT count(*) FROM orders WHERE status = ANY(sqlc.arg('open')::text[]);

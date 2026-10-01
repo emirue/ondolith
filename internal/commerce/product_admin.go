@@ -24,7 +24,33 @@ var (
 	ErrOptionDuplicate = errors.New("commerce: 같은 그룹에 중복된 옵션 값이 있습니다")
 	// ErrStockVersion 은 낙관적 잠금 버전이 어긋난 경우다 (409).
 	ErrStockVersion = errors.New("commerce: 다른 사람이 먼저 바꿨습니다")
+	// ErrSkuLength 는 SKU 가 64자를 넘은 경우다 (D30). 막는 것은 DB 의 CHECK
+	// (product_variants_sku_check) 이고, 이 이름은 그것을 옮긴 것이다.
+	ErrSkuLength = errors.New("commerce: SKU 가 너무 깁니다")
 )
+
+// checkBasePrice 는 기본가가 저장할 수 있는 범위인지 본다. 저장이 int32 변환을
+// 거치므로, 여기를 지나지 않은 값은 조용히 접힌다 (MaxAmount).
+func checkBasePrice(price int) error {
+	if price < 0 {
+		return fmt.Errorf("%w: 기본가 %d", ErrPriceNegative, price)
+	}
+	if price > MaxAmount {
+		return fmt.Errorf("%w: 기본가 %d", ErrAmountTooBig, price)
+	}
+	return nil
+}
+
+// checkVariantInput 은 조합 편집 값의 범위다 — 차액·재고 증감은 음수일 수 있다.
+func checkVariantInput(priceDelta, stockDelta int) error {
+	if priceDelta < -MaxAmount || priceDelta > MaxAmount {
+		return fmt.Errorf("%w: 가격 차액 %d", ErrAmountTooBig, priceDelta)
+	}
+	if stockDelta < -MaxAmount || stockDelta > MaxAmount {
+		return fmt.Errorf("%w: 재고 증감 %d", ErrQuantityRange, stockDelta)
+	}
+	return nil
+}
 
 // ProductByID reads one product for A-502.
 func (s *Store) ProductByID(ctx context.Context, id string) (*Product, error) {
@@ -44,8 +70,8 @@ func (s *Store) ProductByID(ctx context.Context, id string) (*Product, error) {
 // 재고 절대값을 덮어쓰는 경로가 하나 더 생긴다. 그것은 A-503 소관이고,
 // A-503 도 절대값을 받지 않는다.
 func (s *Store) UpdateProduct(ctx context.Context, p Product) error {
-	if p.BasePrice < 0 {
-		return fmt.Errorf("%w: 기본가 %d", ErrPriceNegative, p.BasePrice)
+	if err := checkBasePrice(p.BasePrice); err != nil {
+		return err
 	}
 	n, err := s.q.UpdateProduct(ctx, commerceq.UpdateProductParams{
 		ID: p.ID, Slug: p.Slug, Name: p.Name, Description: p.Description,
@@ -107,6 +133,11 @@ type VariantEdit struct {
 // 잠금 순서는 variant id 오름차순이다 (AdjustStock 과 같은 이유): 순서를
 // 요청자가 정하면 역순 요청 두 건이 교착한다.
 func (s *Store) EditVariants(ctx context.Context, productID string, edits []VariantEdit) error {
+	for _, e := range edits {
+		if err := checkVariantInput(e.PriceDelta, e.StockDelta); err != nil {
+			return err
+		}
+	}
 	ordered := append([]VariantEdit(nil), edits...)
 	for i := 1; i < len(ordered); i++ {
 		for j := i; j > 0 && ordered[j].ID < ordered[j-1].ID; j-- {
@@ -147,8 +178,15 @@ func (s *Store) EditVariants(ctx context.Context, productID string, edits []Vari
 		case errors.As(err, &pgErr) && pgErr.Code == "23505":
 			return ErrSkuTaken
 		case errors.As(err, &pgErr) && pgErr.Code == "23514":
-			// CHECK (stock >= 0). 백오더는 없다 (D50).
-			return ErrOutOfStock
+			// **어느 CHECK 인지 본다.** 전부 「재고 부족」으로 접으면 SKU 가
+			// 긴 것도 재고 문제로 보고된다.
+			switch pgErr.ConstraintName {
+			case "product_variants_stock_check": // 백오더는 없다 (D50)
+				return ErrOutOfStock
+			case "product_variants_sku_check":
+				return ErrSkuLength
+			}
+			return err
 		case err != nil:
 			return err
 		case n == 0:
@@ -168,6 +206,9 @@ func (s *Store) AddVariant(ctx context.Context, productID string, options map[st
 	if len(options) == 0 {
 		return "", ErrOptionDuplicate
 	}
+	if err := checkVariantInput(priceDelta, 0); err != nil {
+		return "", err
+	}
 	raw, err := json.Marshal(options)
 	if err != nil {
 		return "", err
@@ -182,6 +223,9 @@ func (s *Store) AddVariant(ctx context.Context, productID string, options map[st
 			return "", ErrSkuTaken
 		}
 		return "", ErrOptionDuplicate
+	}
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "product_variants_sku_check" {
+		return "", ErrSkuLength
 	}
 	return id, err
 }

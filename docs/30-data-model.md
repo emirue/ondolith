@@ -156,6 +156,8 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `board_fields.key` | 32 | 폼 필드명이자 **모든 글의 JSONB 키**라 행 크기에 직접 들어간다 |
 | `user_fields.key` | 32 | `board_fields.key`와 같은 이유·같은 상한 — 모든 회원 행의 JSONB 키가 된다 |
 | `user_fields.label` | 100 | `board_fields.label`과 같은 상한 |
+| `user_fields.options` | 4,096 바이트 | `board_fields.options`와 같은 상한·같은 이유. `user_fields_options_shape` (00023, NOT VALID — 아래 Phase 1 절) |
+| `users.custom_fields` | 16,384 바이트 | `posts.custom_fields`와 같은 상한. `users_custom_fields_shape` (00023, NOT VALID) |
 | `board_fields.options` | 4,096 바이트 | 항목당 100자 × 최대 50개. **항목 수·길이는 핸들러가, 총량은 DB가** 막는다 |
 | `posts.title` | 200 | 메타·OG 제목 + 목록 한 열 |
 | `posts.body` | 50,000 | 한글 5만 자 ≈ 146 KiB. 더 큰 문서는 첨부의 몫이다 |
@@ -165,8 +167,8 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `attachments.original_name` | 255 | 대부분 파일시스템의 파일명 상한 |
 | `attachments.mime_type` | 128 | 허용목록 밖 값이 들어올 수 없다 |
 | `operation_logs.actor_email` | 254 | `users.email`과 같은 상한 |
-| `operation_logs.action` · `target_type` · `target_id` | 64 / 32 / 64 | 정규식과 함께. `target_id`는 uuid 36자 + 슬러그·설정 키를 함께 담는다 |
-| `operation_logs.summary` | 500 | 한 줄 요약. 원문은 로그 파일이 갖는다 |
+| `operation_logs.action` · `target_type` · `target_id` | 64 / 32 / 255 | 앞의 둘은 정규식과 함께 핸들러가 지키는 값이고, `target_id`만 DB CHECK 가 있다 (255). uuid 36자 + 슬러그·설정 키를 함께 담는다 |
+| `operation_logs.summary` | 2,000 | 한 줄 요약. 원문은 로그 파일이 갖는다. DB CHECK 가 2,000 이다 — 이 표가 500 이라고 적고 있었다 |
 
 **Phase 3**
 
@@ -191,7 +193,7 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `refunds.request_key` | 100 | 서버 발급 멱등 키 |
 | `shipments.tracking_no` | 64 | 택배사 송장 최대 표기 |
 | `terms.kind` · `terms.version` | 50 / 20 | D19 A-207이 이미 "50자"로 명시 |
-| `carts.guest_key` | 64 | 난수 base64 |
+| `carts.guest_key` | 16~128 | 난수 base64. 하한이 있다 — 짧은 키는 추측된다. DB CHECK 가 16~128 이다 (이 표가 64 라고 적고 있었다) |
 
 > **상한 없는 `text`는 규칙 위반이다.** PostgreSQL의 `text`는 무제한이라 상한을 안 정하면
 > 폼 하나가 디스크를 채운다 — 1 vCPU / 512MB 인스턴스(NFR-101)에서는 그것으로 충분하다.
@@ -292,7 +294,7 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `is_active` | boolean | NOT NULL DEFAULT true | 삭제보다 비활성이 기본 ([D15](15-access-control.md) 5.3) |
 | `sessions_valid_from` | timestamptz | NOT NULL DEFAULT now() | 이 시각보다 오래된 세션을 다음 요청에서 거부 (D15 5.4) |
 | `email_verified_at` | timestamptz | NULL | NULL이면 미인증 (FR-214) |
-| `custom_fields` | jsonb | NOT NULL DEFAULT `'{}'` | A-406이 정의한 회원 항목의 값 (FR-215). 정의를 지워도 여기 남은 값은 지우지 않는다 |
+| `custom_fields` | jsonb | NOT NULL DEFAULT `'{}'` | A-406이 정의한 회원 항목의 값 (FR-215). 정의를 지워도 여기 남은 값은 지우지 않는다. `users_custom_fields_shape`: 객체이고 16,384바이트 이하 (00023) |
 
 `sessions_valid_from`을 NULL 허용으로 두면 "컷오프 없음"이 NULL이 되어 비교가 **fail-open**이
 된다. NOT NULL + 기본값이면 판정이 언제나 단순 비교 하나다.
@@ -359,6 +361,7 @@ ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_uniq
 ALTER TABLE role_permissions DROP CONSTRAINT role_permissions_uniq;
 ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_uniq
   UNIQUE NULLS NOT DISTINCT (role_id, permission_id, board_id);
+-- 00023 이 만들었다. 이 줄은 그전부터 여기 적혀 있었지만 마이그레이션에는 없었다.
 CREATE INDEX role_permissions_permission_id_idx ON role_permissions (permission_id);
 -- 부분 인덱스다. 전역 부여(board_id IS NULL)가 행의 대부분이고 스코프 판정은
 -- board_id 가 있는 행만 찾으므로, NULL 행을 색인에 넣으면 크기만 커지고 답은
@@ -385,9 +388,16 @@ CREATE INDEX role_permissions_board_id_idx ON role_permissions (board_id)
 | `field_type` | text | NOT NULL CHECK 8종 (`board_fields`와 **같은 목록**) |
 | `is_required` | boolean | NOT NULL DEFAULT false |
 | `show_in_list` | boolean | NOT NULL DEFAULT false |
-| `options` | jsonb | NOT NULL DEFAULT `'[]'` |
+| `options` | jsonb | NOT NULL DEFAULT `'[]'`. `user_fields_options_shape`: 배열이고 4,096바이트 이하 (00023) |
 | `sort_order` | integer | NOT NULL DEFAULT 0 |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+> **00023 의 두 모양 제약(`users_custom_fields_shape`·`user_fields_options_shape`)은 `NOT VALID` 로
+> 건다.** 그전에는 상한이 없었으므로 이미 넘는 행이 있을 수 있고, 그 한 행 때문에 업그레이드가
+> 부팅에서 멈추면 안 된다. 새로 쓰거나 고치는 행에는 그대로 적용된다.
+>
+> `board_fields_options_when`(select·multiselect ⇔ 선택지 있음)에 해당하는 제약은 `user_fields`에
+> **없다** — `SaveUserField` 가 그것을 보장하지 않아, 걸면 지금 저장되는 정의가 제약 위반이 된다.
 
 `board_fields`와 나란한 표다. `field_type`의 목록이 **같아야** 한다 —
 `partials/field.html` 하나가 두 곳의 폼을 다 그리므로, 한쪽에만 타입을 늘리면
@@ -733,6 +743,15 @@ CREATE TRIGGER operation_logs_no_delete BEFORE DELETE ON operation_logs
 CREATE TRIGGER operation_logs_no_update BEFORE UPDATE ON operation_logs
     FOR EACH ROW WHEN (NEW.actor_user_id IS NOT NULL OR OLD.actor_user_id IS NULL)
     EXECUTE FUNCTION operation_logs_append_only();
+-- 00021: 위 WHEN 절은 「actor 를 NULL 로 바꾸는 UPDATE」가 다른 컬럼도 함께 바꾸는 것을
+-- 막지 못했다. actor_user_id 를 뺀 컬럼이 SET 에 있으면 무조건 거부한다.
+CREATE TRIGGER operation_logs_no_update_cols
+    BEFORE UPDATE OF id, actor_email, action, target_type, target_id, summary, ip, created_at
+    ON operation_logs
+    FOR EACH ROW EXECUTE FUNCTION operation_logs_append_only();
+-- 00023: 행 트리거는 TRUNCATE 를 보지 못한다.
+CREATE TRIGGER operation_logs_no_truncate BEFORE TRUNCATE ON operation_logs
+    FOR EACH STATEMENT EXECUTE FUNCTION operation_logs_append_only();
 ```
 
 > **측정한 것 — 단순한 `BEFORE UPDATE OR DELETE` 트리거는 사용자 삭제를 통째로 막았다.**
@@ -890,7 +909,7 @@ CREATE UNIQUE INDEX ON cart_items (cart_id, variant_id);
 |---|---|---|
 | `id` | uuid | PK |
 | `order_no` | text | NOT NULL UNIQUE — `crypto/rand` 기반, **순번이 아니다** |
-| `user_id` | uuid | NULL REFERENCES `users(id)` ON DELETE SET NULL |
+| `user_id` | uuid | NULL REFERENCES `users(id)` ON DELETE RESTRICT (00018 — 3-1 참조. 00012 는 SET NULL 로 만들었다) |
 | `status` | text | NOT NULL DEFAULT '결제대기', `CHECK` 아래 |
 | `total_amount` | integer | NOT NULL `CHECK (>= 0)` — P-408 금액 대조의 단일 출처. **할인을 뺀 값**이다 |
 | `discount_amount` | integer | NOT NULL DEFAULT 0 `CHECK (>= 0)` — 주문 단위 할인 (FR-626) |
@@ -996,7 +1015,7 @@ CHECK ((kind = '교환차액') = (return_id IS NOT NULL))
 CREATE UNIQUE INDEX ON payments (order_id)
   WHERE kind = '주문결제' AND status <> '실패';        -- 주문당 승인 1건 (FR-608)
 CREATE UNIQUE INDEX ON payments (order_id, return_id)
-  WHERE kind = '교환차액';                             -- 교환 건당 차액 1건 (FR-618)
+  WHERE kind = '교환차액' AND status <> '실패';        -- 교환 건당 살아 있는 차액 1건 (FR-618, 00023)
 CREATE UNIQUE INDEX ON payments (pg, payment_key);
 CREATE INDEX ON payments (status, created_at) WHERE status = '대기';  -- A-508 대사
 ```
@@ -1006,6 +1025,9 @@ CREATE INDEX ON payments (status, created_at) WHERE status = '대기';  -- A-508
 > 남기기 위해서다"라고 못박았다. 동시 두 건은 둘 다 `대기`로 들어가려다 하나만 성공하므로
 > FR-608은 그대로 성립한다. 타임아웃(결과 불명)은 `대기`로 남겨 D50의 "재승인 시도 금지 →
 > 조회 API"와 A-508 대사 대상이 자동으로 일치한다.
+>
+> **교환차액 유니크에도 같은 절이 붙는다** (00023). 00013 은 그것 없이 만들었고, 차액 승인이
+> 한 번 실패한 교환 건은 재결제가 영영 「이미 결제된 주문」으로 끝났다.
 
 **카드번호·유효기간·CVC는 컬럼도 없고 `raw_response`에도 넣지 않는다** ([DEC-3.7](../.ai/DECISIONS.md),
 PCI DSS). 정기결제가 필요해지면 빌링키 컬럼을 그때 더한다.
@@ -1095,7 +1117,12 @@ CHECK (fault <> '판매자' OR shipping_fee_amount = 0)
 ```sql
 UNIQUE (return_id, order_item_id)
 CREATE UNIQUE INDEX ON return_items (order_item_id) WHERE is_open;   -- 품목당 처리 중 1건
+CREATE INDEX returns_new_variant_idx ON returns (new_variant_id)
+  WHERE new_variant_id IS NOT NULL;                                  -- 00023: FK 인데 인덱스가 없었다
 ```
+
+`return_items (return_id)` 단독 인덱스는 없다 — 위 유니크의 앞 컬럼이 같은 일을 한다
+(00014 가 만들었던 `return_items_return_idx` 를 00023 이 지웠다).
 
 **`is_open`은 비정규화이고 이유가 하나뿐이다** — PostgreSQL 부분 인덱스의 술어는 **같은
 테이블의 컬럼만** 참조할 수 있어 `returns.status`를 볼 수 없다. "같은 품목에 처리 중인 건이
@@ -1178,12 +1205,18 @@ UNIQUE가 `(pg, event_id)` **복합**인 이유: 어댑터가 여럿이라는 �
 ```sql
 ALTER TABLE terms ADD CONSTRAINT terms_kind_version_uniq UNIQUE (kind, version);
 ALTER TABLE terms ADD CONSTRAINT terms_no_backdate CHECK (effective_at >= created_at);
-CREATE INDEX ON terms (kind, effective_at DESC);
+CREATE UNIQUE INDEX terms_kind_effective_uniq ON terms (kind, effective_at DESC);  -- 00023
 CREATE INDEX ON order_agreements (terms_id);
 ```
 
 `terms`에 `updated_at`이 없다 — 배포된 버전은 수정하지 않고 개정은 새 행이다.
 `UNIQUE (kind, version)`이 없으면 "어느 본문에 동의했는지"를 특정할 수 없다.
+
+**`(kind, effective_at)`도 유일하다** (00023). 한 종류에 시행 시각이 같은 버전이 둘이면
+「시행 중인 버전」이 정해지지 않는다 — 주문서가 보여 준 버전과 주문이 요구한 버전이 다를 수
+있었다. 「시행 중」의 판정은 **종류마다 시행 시각이 가장 늦은 한 행을 먼저 고르고, 그 행이
+필수인지를 본다**: 필수만 걸러 놓고 최신을 고르면 필수 → 선택으로 개정된 종류에서 옛
+필수본이 계속 요구된다.
 
 **약관 본문을 복사하지 않는다** — `terms` 행이 불변이고 `terms_id RESTRICT`가 삭제를 막으므로
 참조만으로 FR-619의 "나중에 재현된다"가 성립한다. 복사하면 주문 수만큼 본문이 복제된다.
@@ -1196,7 +1229,7 @@ CREATE INDEX ON order_agreements (terms_id);
 |---|---|---|
 | 환불 누적 ≤ 승인금액 | `payments` CHECK | 결제액보다 많은 돈이 나간다 (FR-611) |
 | 주문당 승인 1건 | 부분 UNIQUE | 동시 콜백 두 건이 이중 승인 (FR-608) |
-| 교환 건당 차액 승인 1건 | 부분 UNIQUE | 차액이 두 번 결제된다 |
+| 교환 건당 살아 있는 차액 결제 1건 | 부분 UNIQUE (`status <> '실패'`) | 차액이 두 번 결제된다. 실패 행까지 세면 재결제가 막힌다 |
 | 교환차액 행은 반드시 교환 건을 가리킨다 | CHECK | `return_id`가 NULL이면 위 유니크를 통째로 우회한다 |
 | 같은 승인이 두 행으로 기록되지 않음 | `UNIQUE (pg, payment_key)` | A-508이 무엇이 진짜인지 판정 못한다 |
 | 재고 음수 금지 | CHECK `stock >= 0` | 백오더가 조용히 생긴다 |
@@ -1208,8 +1241,10 @@ CREATE INDEX ON order_agreements (terms_id);
 | 품목 금액 = 단가 × 수량 | GENERATED STORED | 합계와 품목이 어긋난 주문서가 재발행된다 |
 | 수거 확인 시 배송비 스냅샷 존재 | CHECK | A-512 변경만으로 과거 환불액이 달라진다 |
 | 판매자 귀책이면 배송비 0 | CHECK | 하자 상품의 반품비를 구매자가 문다 |
-| 주문·품목·결제·환불 행이 지워지지 않음 | FK RESTRICT (3-1) | 정산·분쟁 근거가 사라진다 |
+| 주문·품목·결제·환불 행이 지워지지 않음 | FK RESTRICT (3-1) + `BEFORE DELETE` 트리거 (00023) | 정산·분쟁 근거가 사라진다. RESTRICT 만으로는 **자식이 없는 행**과 자식부터 지우는 순서를 막지 못했다 |
 | 약관 (종류, 버전) 유일 | UNIQUE | 어느 본문에 동의했는지 특정 불가 (FR-619) |
+| 약관 (종류, 시행 시각) 유일 | UNIQUE (00023) | 시행 중인 버전이 정해지지 않는다 |
+| 작업 로그 수정·삭제·비우기 금지 | 트리거 넷 (위 `operation_logs`) | 기록을 고쳐 쓴다 (D15 7절) |
 | 소급 시행 금지 | `terms` CHECK | 끝난 주문에 나중 약관이 소급된다 |
 | 환불 요청 멱등 | `UNIQUE (request_key)` | 새로고침 한 번이 이중 환불이 된다 |
 
@@ -1218,6 +1253,23 @@ CREATE INDEX ON order_agreements (terms_id);
 교환 새 조합이 **같은 상품**인지(FR-618) · `refunds.amount = SUM(스냅샷 계산액) − 배송비` ·
 `return_id`가 있는 `refunds`에 `refund_items`를 만들지 않기 · `raw_response`·`payload`의 카드
 필드 마스킹 · 카테고리 순환·깊이 10 · 메뉴 순환.
+
+### 잠금 순서
+
+환불·취소·반품 경로는 여러 표의 행을 잠근다. **순서는 하나다:**
+
+```
+orders (한 행) → product_variants (id 오름차순) → order_items (id 오름차순) → payments
+```
+
+- 품목은 **id 오름차순**으로 잡는다. 폼이 준 순서대로 잡으면 요청자가 교착을 만든다
+- 결제 행은 **품목 다음**이다. `RequestRefund` 가 품목 → 결제 순이므로, 결제를 먼저 잡는
+  경로(예전의 `CancelOrder`·`RejectRefund`)는 그것과 서로를 기다린다 — 실측으로 교착이 났다
+- 재고 잠금은 `FOR NO KEY UPDATE` 다. 갱신이 키를 바꾸지 않으므로, 그 조합을 장바구니에 담는
+  INSERT(외래키 검사)를 막을 이유가 없다
+
+새 경로를 더할 때 이 순서를 지킨다. `internal/commerce/audit_integration_test.go` 가 세 경로
+(`CancelOrder`·`RejectRefund`·`OpenReturn`)를 관측으로 확인한다.
 
 ## 참조
 

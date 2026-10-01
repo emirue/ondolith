@@ -358,7 +358,8 @@ func (q *Queries) Settings(ctx context.Context, keys []string) ([]SettingsRow, e
 }
 
 const updateMenuItem = `-- name: UpdateMenuItem :execrows
-UPDATE menus SET title = $2, url = $3, parent_id = nullif($5::text, '')::uuid, sort_order = $4
+UPDATE menus SET title = $2, url = $3, parent_id = nullif($5::text, '')::uuid, sort_order = $4,
+       updated_at = now()
 WHERE id = $1
 `
 

@@ -58,7 +58,8 @@ INSERT INTO menus (title, url, parent_id, sort_order)
 VALUES ($1, $2, nullif(sqlc.arg('parent_id')::text, '')::uuid, $3) RETURNING id;
 
 -- name: UpdateMenuItem :execrows
-UPDATE menus SET title = $2, url = $3, parent_id = nullif(sqlc.arg('parent_id')::text, '')::uuid, sort_order = $4
+UPDATE menus SET title = $2, url = $3, parent_id = nullif(sqlc.arg('parent_id')::text, '')::uuid, sort_order = $4,
+       updated_at = now()
 WHERE id = $1;
 
 -- name: DeleteMenuItem :execrows

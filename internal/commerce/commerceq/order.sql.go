@@ -460,11 +460,11 @@ func (q *Queries) MyOrders(ctx context.Context, arg MyOrdersParams) ([]MyOrdersR
 }
 
 const openOrders = `-- name: OpenOrders :one
-SELECT count(*) FROM orders WHERE status <> ALL($1::text[])
+SELECT count(*) FROM orders WHERE status = ANY($1::text[])
 `
 
-func (q *Queries) OpenOrders(ctx context.Context, terminal []string) (int64, error) {
-	row := q.db.QueryRow(ctx, openOrders, terminal)
+func (q *Queries) OpenOrders(ctx context.Context, open []string) (int64, error) {
+	row := q.db.QueryRow(ctx, openOrders, open)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -625,11 +625,17 @@ func (q *Queries) OrderItems(ctx context.Context, orderID string) ([]OrderItemsR
 }
 
 const requiredTermIDs = `-- name: RequiredTermIDs :many
-SELECT DISTINCT ON (kind) id FROM terms
-WHERE is_required AND effective_at <= $1
-ORDER BY kind, effective_at DESC
+SELECT t.id FROM terms t
+WHERE t.is_required AND t.id IN (
+    SELECT DISTINCT ON (f.kind) f.id FROM terms f
+    WHERE f.effective_at <= $1
+    ORDER BY f.kind, f.effective_at DESC, f.created_at DESC, f.id)
+ORDER BY t.kind
 `
 
+// **시행본을 먼저 고르고, 그다음에 필수인지 본다.** 필수만 걸러 놓고 최신을 고르면
+// 필수 → 선택으로 개정된 종류에서 옛 필수본이 계속 요구되는데, 주문서(TermsInForce)
+// 는 그 버전을 보여 주지 않는다 — 모든 주문이 ErrTermsRequired 로 끝난다.
 func (q *Queries) RequiredTermIDs(ctx context.Context, now time.Time) ([]string, error) {
 	rows, err := q.db.Query(ctx, requiredTermIDs, now)
 	if err != nil {
@@ -704,7 +710,7 @@ func (q *Queries) Shipments(ctx context.Context, orderID string) ([]ShipmentsRow
 const termsInForce = `-- name: TermsInForce :many
 SELECT DISTINCT ON (kind) id, kind, version, body, is_required
 FROM terms WHERE effective_at <= $1
-ORDER BY kind, effective_at DESC
+ORDER BY kind, effective_at DESC, created_at DESC, id
 `
 
 type TermsInForceRow struct {
