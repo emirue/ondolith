@@ -227,29 +227,33 @@
 |---|---|---|---|---|---|---|---|
 | A-501 | 상품 목록 | `/admin/products` | GET | 권한:product.view | 없음 | SC-4 | FR-601, FR-706 |
 | A-502 | 상품 편집 | `/admin/products/{id}` | GET, POST | 권한:product.manage | 있음 | SC-7 | FR-601, NFR-206 |
-| A-503 | 옵션·재고 편집기 | `/admin/products/{id}/variants` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-602 |
-| A-504 | 주문 목록 | `/admin/orders` | GET | 권한:order.view | 없음 | SC-4 | FR-508, FR-604, FR-706 |
+| A-503 | 옵션·재고 편집기 | `/admin/products/{id}/variants` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-602, FR-627 |
+| A-504 | 주문 목록 | `/admin/orders` | GET | 권한:order.view | 없음 | SC-4 | FR-508, FR-604, FR-706, FR-712 |
 | A-505 | 주문 상세 | `/admin/orders/{no}` | GET | 권한:order.view | 없음 | SC-4 | FR-604, FR-612 |
 | A-506 | 주문 상태 변경 | `/admin/orders/{no}/transition` | POST | 권한:order.update | 있음 | SC-5 | FR-604 |
 | A-507 | 취소·환불 처리 | `/admin/orders/{no}/refund` | GET, POST | 권한:order.refund | 있음 | SC-6 | FR-604, FR-611, FR-625 |
-| A-508 | 결제 목록 | `/admin/reconcile` | GET | 권한:payment.view | 있음 | SC-6 | FR-608, FR-609, FR-610 |
+| A-508 | 결제 목록 | `/admin/reconcile` | GET | 권한:payment.view | 있음 | SC-6 | FR-608, FR-609, FR-610, FR-712 |
 | A-509 | 상품 카테고리 관리 | `/admin/categories` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-615 |
 | A-510 | 배송 정보·송장 입력 | `/admin/orders/{no}/shipping` | GET, POST | 권한:order.update | 있음 | SC-5 | FR-616 |
 | A-511 | 반품·교환 처리 | `/admin/orders/{no}/returns` | GET, POST | 권한:order.return | 있음 | SC-6 | FR-617, FR-618 |
 | A-512 | 커머스 정책 설정 | `/admin/commerce/policy` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-617, FR-618, FR-604 |
-| A-513 | QR 라벨 발행 | `/admin/products/{id}/labels` | GET | 권한:product.manage | 없음 | SC-4 | FR-620 |
+| A-513 | QR 라벨 발행 | `/admin/products/{id}/labels` | GET | 권한:product.view | 없음 | SC-4 | FR-620 |
 | A-514 | 스캔 입고 | `/admin/scan/receive` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-621 |
 | A-515 | 재고 조사 | `/admin/scan/stocktake` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-622 |
 | A-516 | 출고 피킹 대조 | `/admin/orders/{no}/pick` | GET, POST | 권한:order.update | 있음 | SC-5 | FR-623 |
 | A-517 | 스캔 재고 조회 | `/admin/scan/lookup` | GET | 권한:product.view | 없음 | SC-4 | FR-624 |
 
+> **A-514·A-515·A-517은 통합 재고 화면으로 개편이 정해졌다** (2026-10-02, [D13](13-screens-admin.md)
+> 「A-513~A-517 재고 관리」, W3-44). 이 표의 경로·이름은 **구현 커밋에서 함께 바꾼다** — 이 표의
+> 경로는 `tree.go`와 대조되므로([D90](90-conventions.md) 28b) 문서만 먼저 바꾸면 `make check`가 깨진다.
+
 ### A-6xx 운영
 
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
-| A-601 | 작업 로그 | `/admin/oplog` | GET | 권한:log.view | 없음 | SC-4 | FR-707 |
+| A-601 | 작업 로그 | `/admin/oplog` | GET | 권한:log.view | 없음 | SC-4 | FR-707, FR-712 |
 | A-602 | 시스템 정보 | `/admin/system` | GET | 권한:settings.view | 없음 | SC-4 | NFR-302, NFR-303, NFR-305 |
-| A-603 | 웹훅 수신 이력 | `/admin/webhooks` | GET | 권한:payment.view | 없음 | SC-4 | FR-610 |
+| A-603 | 웹훅 수신 이력 | `/admin/webhooks` | GET | 권한:payment.view | 없음 | SC-4 | FR-610, FR-712 |
 
 ---
 

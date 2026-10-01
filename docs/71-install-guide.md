@@ -14,6 +14,7 @@
 | PostgreSQL | 18 | `psql --version` |
 | 리눅스 서버 | 1 vCPU / 512MB | [D70 「자원」](70-operations.md)의 실측 참조 |
 | 열린 포트 | 8080 (또는 프록시 뒤) | |
+| 서버 시간대 | 운영 지역의 시간대 (한국이면 `Asia/Seoul`) | `timedatectl` 의 `Time zone` |
 
 바이너리 외에 설치할 것은 없다 (NFR-102). 런타임·패키지 매니저·컨테이너가 필요 없다.
 
@@ -30,6 +31,21 @@ psql --version    # → psql (PostgreSQL) 18.x
 
 512MB 인스턴스에서 기본 설정(`shared_buffers` 128MB)으로 기동됐고 앱까지 올린 뒤 가용
 메모리가 약 180MB 남았다 (2026-09-02 실측, `nano_3_0`).
+
+**서버 시간대를 운영 지역에 맞춘다.** 관리자 화면의 기간 조회는 **서버 시간대로 하루를 자른다**
+([D19](19-screen-io.md) 0.6). **서울 리전 Lightsail 도 기본은 UTC 다** — 2026-10-02 `ap-northeast-2a`
+에 `ubuntu_24_04` · `nano_3_0` 로 새로 띄운 인스턴스가 `Time zone: Etc/UTC` 였다. 그대로 두면
+한국 날짜와 9시간 어긋나, 오전 9시 전에 들어온 주문이 전날 주문으로 조회된다.
+
+```bash
+sudo timedatectl set-timezone Asia/Seoul
+timedatectl | grep 'Time zone'   # → Time zone: Asia/Seoul (KST, +0900)
+```
+
+같은 인스턴스에서 바꾼 뒤 systemd 서비스 환경(`systemd-run`)의 `date` 가 KST 였고, 재부팅 뒤에도
+유지됐다. 기간 조회는 Go 의 `time.Local` 로 하루를 자르게 구현한다(W3-45). 이 값은 `TZ` 환경변수가
+없으면 `/etc/localtime` 을 따른다([Go 공식 문서](https://pkg.go.dev/time#Location)) — `timedatectl` 이 바꾸는 것이 그 파일이다.
+옛 호환 파일 `/etc/timezone` 은 바꾼 뒤에도 `Etc/UTC` 로 남았지만 앱과 무관하다.
 
 ---
 

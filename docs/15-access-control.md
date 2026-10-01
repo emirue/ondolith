@@ -121,8 +121,8 @@ superuser가 없을 경우 모든 설치처가 "관리자에게 새 권한을 �
 | `post.read_secret` | 비밀글 열람 | ✔ | 2 | P-204 |
 | `comment.write` | 댓글·대댓글 작성 | ✔ | 2 | P-208 |
 | `comment.moderate` | **남의 댓글** 수정·삭제 | ✔ | 2 | A-308 |
-| `product.view` | 상품 관리 조회 | – | 3 | A-501, A-517 |
-| `product.manage` | 상품·옵션·재고 편집 | – | 3 | A-502, A-503, A-509, A-513, A-514, A-515 |
+| `product.view` | 상품 관리 조회 | – | 3 | A-501, A-513, A-517 |
+| `product.manage` | 상품·옵션·재고 편집 | – | 3 | A-502, A-503, A-509, A-514, A-515 |
 | `order.view` | **전체** 주문 조회 | – | 3 | A-504, A-505 |
 | `order.update` | 주문 상태 전이 | – | 3 | A-506, A-510, A-516 |
 | `order.cancel` | 주문 취소 | – | 3 | A-507 |

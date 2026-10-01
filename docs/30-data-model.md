@@ -177,6 +177,7 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `products.description` · `terms.body` | 20,000 | 본문 계열. 상품 1만 개 × 20KB ≈ 200MB — 이보다 크면 디스크 계획이 불가능하다 |
 | `product_options.name` | 50 | 옵션 라벨 한 줄 |
 | `product_variants.sku` | 64 | 외부 창고·정산 코드 |
+| `product_variants.barcode` | 64 | 제조사 바코드. EAN-13·UPC 는 12~13자리지만 Code128 등 가변 길이 체계를 위해 SKU 와 같은 상한을 쓴다 (W3-43) |
 | `orders.order_no` · `returns.return_no` | 32 | 서버 생성값이지만 **사람이 입력한다**(P-504) |
 | `orders.receiver_name` | 100 | 이름 계열 |
 | `orders.receiver_phone` · `orderer_phone` | 20 | 국가번호·하이픈 포함 |
@@ -781,6 +782,7 @@ CREATE TRIGGER operation_logs_no_update BEFORE UPDATE ON operation_logs
 | `product_id` | uuid | NOT NULL REFERENCES `products(id)` ON DELETE CASCADE |
 | `option_values` | jsonb | NOT NULL, `CHECK (jsonb_typeof='object' AND ≤4096바이트)` |
 | `sku` | text | NULL. 있을 때만 UNIQUE |
+| `barcode` | text | NULL. 있을 때만 UNIQUE. 상품 포장의 제조사 바코드 (FR-627) — **Phase 3에서 추가** (W3-43, 마이그레이션 전) |
 | `price_delta` | integer | NOT NULL DEFAULT 0 — **음수 허용** |
 | `stock` | integer | NOT NULL DEFAULT 0 `CHECK (>= 0)` |
 | `is_visible` | boolean | NOT NULL DEFAULT true |
@@ -795,6 +797,7 @@ CREATE INDEX ON products USING GIN (search_tsv);
 CREATE UNIQUE INDEX ON product_options (product_id, name);
 CREATE UNIQUE INDEX ON product_variants (product_id, option_values);
 CREATE UNIQUE INDEX ON product_variants (sku) WHERE sku IS NOT NULL;
+CREATE UNIQUE INDEX ON product_variants (barcode) WHERE barcode IS NOT NULL;  -- W3-43, 마이그레이션 전
 CREATE INDEX ON product_variants (product_id) WHERE is_visible AND stock > 0;
 ```
 
