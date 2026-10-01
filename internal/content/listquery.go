@@ -11,9 +11,9 @@ import (
 // values a visitor controls have been clamped to something the database can be
 // asked safely.
 type ListQuery struct {
-	// Sort is a column name that has already been checked against the allow
-	// list. It is interpolated into SQL — that is exactly why nothing else may
-	// reach it (D22 6절: an allow list, never escaping).
+	// Sort is a key that has already been checked against the allow list. It
+	// reaches SQL as a bind parameter that an ORDER BY CASE chain compares
+	// (D22 6절) — the column names live in queries/post.sql, not here.
 	Sort string
 	// Desc is the direction. Kept separate from Sort so the allow list has one
 	// entry per column instead of two.
@@ -40,17 +40,19 @@ type Cursor struct {
 
 func (c Cursor) IsZero() bool { return c.ID == "" }
 
-// sortColumns is the allow list. The value on the right is what goes into the
-// ORDER BY clause; the key is what a URL may say.
+// sortKeys is the allow list: what a URL may say. Each key is one CASE branch
+// in the ORDER BY of queries/post.sql (ListPosts·ListPostsSearch·SearchPosts);
+// a key not in that chain sorts nothing, so the set here and the chain there
+// must name the same keys.
 //
-// This is a map and not a `strings.Contains` check on purpose: an allow list
+// This is a set and not a `strings.Contains` check on purpose: an allow list
 // answers "is this one of the things I wrote down", which stays true when
-// somebody adds a column. Escaping answers "does this look dangerous", which
+// somebody adds a key. Escaping answers "does this look dangerous", which
 // stops being true the first time it is wrong.
-var sortColumns = map[string]string{
-	"created": "created_at",
-	"views":   "view_count",
-	"title":   "title",
+var sortKeys = map[string]bool{
+	"created": true,
+	"views":   true,
+	"title":   true,
 }
 
 // SortKeys lists what a URL may ask for, for the screen to render its options.
@@ -84,7 +86,7 @@ func ParseListQuery(q url.Values, boardPerPage int) ListQuery {
 
 	if s := q.Get("sort"); s != "" {
 		key := strings.TrimPrefix(s, "-")
-		if _, ok := sortColumns[key]; ok {
+		if sortKeys[key] {
 			out.Sort = key
 			// A leading '-' is descending. Title reads better ascending, so an
 			// explicit direction wins and the default follows the column.
@@ -123,25 +125,17 @@ func ParseListQuery(q url.Values, boardPerPage int) ListQuery {
 	return out
 }
 
-// OrderBy renders the ORDER BY clause.
+// sortKey is what the query's ORDER BY CASE chain is handed.
 //
-// The column comes from the allow list, so it is a constant this package wrote,
-// not request text. Pinned posts lead regardless of the sort — that is what
-// pinning means — and id is the tiebreaker that makes the keyset comparison
-// total (D30).
-func (l ListQuery) OrderBy() string {
-	col, ok := sortColumns[l.Sort]
-	if !ok {
-		// Unreachable through ParseListQuery. Kept as a floor because this
-		// string reaches SQL: a future caller building a ListQuery by hand must
-		// not be able to choose the column.
-		col = "created_at"
+// Unknown keys are unreachable through ParseListQuery. Kept as a floor because
+// a future caller building a ListQuery by hand must not be able to turn the
+// sort off: a key the chain does not name matches no CASE, and the list would
+// come back in pinned-then-id order with nobody noticing.
+func (l ListQuery) sortKey() string {
+	if sortKeys[l.Sort] {
+		return l.Sort
 	}
-	dir := "ASC"
-	if l.Desc {
-		dir = "DESC"
-	}
-	return "is_pinned DESC, " + col + " " + dir + ", id " + dir
+	return "created"
 }
 
 // Offset is for the numbered-page path. Keyset paging uses After instead.

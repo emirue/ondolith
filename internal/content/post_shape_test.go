@@ -5,137 +5,147 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 )
 
-// columnMark 는 펼친 SQL 안에서 `postColumns` 가 있던 자리다. 식별자는 값이
-// 아니므로 자리만 남기고, 그 자리가 있는지로 「상수를 썼다」를 판정한다.
-const columnMark = "«postColumns»"
-
-// flattenSQL 은 `"…" + ident + "…"` 로 쪼개진 문자열을 한 덩어리로 만든다.
+// **`posts` 를 읽는 질의는 같은 열 목록을 쓰고, Post 를 만드는 곳은 하나다.**
 //
-// **이것이 없으면 검사가 헛돈다.** Go 소스에서 “ `SELECT ` + postColumns + `
-// FROM posts p` “ 는 AST 상 세 노드이고, 어느 리터럴도 "SELECT" 와
-// "FROM posts" 를 **동시에** 갖지 않는다. 리터럴 하나씩만 보던 앞 판은 대상
-// 쿼리 다섯을 하나도 못 봤고, 「검사가 헛돌지 않았다」는 우연히 안 쪼개진
-// COUNT 쿼리 둘로 채워지고 있었다.
-func flattenSQL(e ast.Expr) string {
-	switch v := e.(type) {
-	case *ast.BasicLit:
-		if v.Kind != token.STRING {
-			return ""
-		}
-		s, err := strconv.Unquote(v.Value)
-		if err != nil {
-			return v.Value
-		}
-		return s
-	case *ast.Ident:
-		// postListColumns 는 본문만 뺀 같은 모양이다 — 목록 질의는 그것을 쓴다.
-		if v.Name == "postColumns" || v.Name == "postListColumns" {
-			return columnMark
-		}
-		return " "
-	case *ast.BinaryExpr:
-		if v.Op != token.ADD {
-			return ""
-		}
-		return flattenSQL(v.X) + flattenSQL(v.Y)
-	case *ast.ParenExpr:
-		return flattenSQL(v.X)
-	}
-	return ""
-}
-
-// **`posts` 를 읽는 SELECT 는 postColumns 를 쓰고, 읽기는 scanPost 로 한다.**
-//
-// 목록과 스캔 순서는 한 쌍이다. 둘이 갈라지면 컴파일은 되고, 런타임에 타입
-// 오류가 나거나 — 더 나쁘게는 — 같은 타입끼리 자리가 바뀌어 **조용히 틀린 값**이
-// 나온다. `is_pinned` 와 `is_secret` 이 뒤바뀌면 비밀글이 공지로 뜬다.
+// 열 목록과 스캔이 한 쌍인 것은 sqlc 가 보장한다 — 생성 행 타입이 질의에서
+// 나온다. 보장되지 않는 것은 **여섯 질의가 서로 같은 목록인가**다: 한 질의만
+// `is_pinned, is_secret` 을 바꿔 적어도 둘 다 bool 이라 postRow 변환은
+// 컴파일되고, 그 화면에서만 비밀글이 공지로 뜬다. 그래서 질의 파일을 읽어
+// 목록을 비교한다.
 //
 // 실제로 네 함수가 같은 15개 컬럼을 손으로 적고 있었고, 그중 셋은 공유 스캐너를
-// 쓰고 있었다 — 상수를 만들어 놓고 새 함수에만 쓴 결과다.
-func TestPostQueriesShareColumnsAndScanner(t *testing.T) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "post.go", nil, 0)
+// 쓰고 있었다 — 상수를 만들어 놓고 새 함수에만 쓴 결과다. 그 상수는 sqlc 로
+// 옮기며 사라졌고, 이 검사가 같은 자리를 지킨다.
+func TestPostQueriesShareColumnsAndConverter(t *testing.T) {
+	queries := postReadingQueries(t)
+
+	// 위반을 **먼저** 보고한다. 헛돌기 가드가 앞에 있으면, 한 질의에서 열을
+	// 뺀 변이가 「목록이 다르다」가 아니라 「헛돌았다」로 실패해 겨냥한 단언이
+	// 무엇인지 알 수 없게 된다 (M15).
+	var first, firstName string
+	for name, cols := range queries {
+		if first == "" {
+			first, firstName = cols, name
+			continue
+		}
+		if cols != first {
+			t.Errorf("%s 의 열 목록이 %s 와 다르다:\n  %s\n  %s", name, firstName, cols, first)
+		}
+	}
+
+	// **헛돌기 방지는 대상 질의로 한다.** posts 를 Post 로 읽는 질의는 여섯이다;
+	// 더 적게 찾았으면 질의를 못 본 것이지 검사가 통과한 것이 아니다.
+	if len(queries) < 6 {
+		t.Fatalf("posts 를 읽는 질의를 %d 개밖에 못 찾았다 — 검사가 헛돌았다: %v",
+			len(queries), queries)
+	}
+
+	// Post 를 만드는 곳도 하나여야 한다. 행 타입이 여섯이라도 변환이 둘이면
+	// custom_fields 를 푸는 규칙이 갈라진다.
+	if n := postLiterals(t); n != 1 {
+		t.Errorf("post.go 에서 Post{…} 를 만드는 곳이 %d 곳 — postOf 하나여야 한다", n)
+	}
+}
+
+// **정렬할 수 있는 셋은 같은 ORDER BY 를 쓰고, 그 사슬은 허용 목록의 키를 전부
+// 안다.** D22 6절의 CASE 사슬은 키가 사슬에 없으면 조용히 아무것도 정렬하지
+// 않는다 — 허용 목록에 키를 더하고 사슬을 잊으면 그 정렬은 「되는 것처럼」
+// 보이면서 고정·id 순으로 나온다.
+func TestSortableQueriesShareTheCaseChain(t *testing.T) {
+	sortable := []string{"ListPosts", "ListPostsSearch", "SearchPosts"}
+	chains := map[string]string{}
+	for name, body := range namedQueries(t) {
+		i := strings.Index(body, "ORDER BY")
+		if i < 0 || !strings.Contains(body, "sqlc.arg('sort')") {
+			continue
+		}
+		chains[name] = normalizeSQL(body[i:strings.Index(body, "LIMIT")])
+	}
+	for _, name := range sortable {
+		if chains[name] == "" {
+			t.Fatalf("%s 에 sort 인자를 받는 ORDER BY 가 없다", name)
+		}
+		if chains[name] != chains[sortable[0]] {
+			t.Errorf("%s 의 ORDER BY 가 %s 와 다르다:\n  %s\n  %s", name, sortable[0],
+				chains[name], chains[sortable[0]])
+		}
+	}
+	if len(chains) != len(sortable) {
+		t.Errorf("sort 인자를 받는 질의가 %d 개 — %v 여야 한다", len(chains), sortable)
+	}
+
+	chain := chains[sortable[0]]
+	if !strings.HasPrefix(chain, "ORDER BY p.is_pinned DESC,") {
+		t.Errorf("고정 글이 먼저 오지 않는다: %s", chain)
+	}
+	for _, key := range SortKeys() {
+		if !strings.Contains(chain, "= '"+key+"'") {
+			t.Errorf("허용 목록의 %q 가 ORDER BY 사슬에 없다 — 그 정렬은 조용히 꺼진다", key)
+		}
+	}
+	// id 가 타이브레이커로, 같은 방향으로 남아야 순서가 전순서가 된다 (D30).
+	if !strings.HasSuffix(chain, "THEN p.id END ASC") || !strings.Contains(chain, "THEN p.id END DESC") {
+		t.Errorf("id 타이브레이커가 양방향으로 없다: %s", chain)
+	}
+}
+
+// postReadingQueries returns name → normalised column list for every named
+// query in queries/post.sql whose SELECT reads posts into a Post. 목록 질의는
+// body 자리만 ” 라, 그 자리를 p.body 로 돌려 같은 모양으로 비교한다.
+func postReadingQueries(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for name, body := range namedQueries(t) {
+		from := strings.Index(body, "\nFROM posts p\n")
+		if from < 0 || !strings.HasPrefix(body, "SELECT ") {
+			continue
+		}
+		cols := normalizeSQL(strings.TrimPrefix(body[:from], "SELECT "))
+		if !strings.Contains(cols, "p.title") {
+			continue // count(*) 류
+		}
+		out[name] = strings.Replace(cols, "''::text AS body", "p.body", 1)
+	}
+	return out
+}
+
+// namedQueries splits queries/post.sql into name → SQL text.
+func namedQueries(t *testing.T) map[string]string {
+	t.Helper()
+	b, err := os.ReadFile("queries/post.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
+	out := map[string]string{}
+	for _, block := range strings.Split(string(b), "-- name: ")[1:] {
+		head, body, _ := strings.Cut(block, "\n")
+		name, _, _ := strings.Cut(head, " ")
+		out[name] = strings.TrimSpace(body)
+	}
+	return out
+}
 
-	// 손으로 적은 컬럼 목록의 지문. 한 조각만 봐도 충분하다 — 이 문자열이
-	// 나오는 이유는 목록을 베껴 적었을 때뿐이다.
-	const handwritten = "p.title, p.body, p.custom_fields"
+func normalizeSQL(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-	var bad []string
-	usesConstant := 0
-	seen := map[token.Pos]bool{}
-
-	ast.Inspect(f, func(n ast.Node) bool {
-		var e ast.Expr
-		switch v := n.(type) {
-		case *ast.BinaryExpr:
-			e = v
-		case *ast.BasicLit:
-			e = v
-		default:
-			return true
-		}
-		// 바깥 BinaryExpr 을 이미 봤으면 그 안쪽은 건너뛴다.
-		if seen[e.Pos()] {
-			return true
-		}
-		sql := flattenSQL(e)
-		if !strings.Contains(sql, "SELECT") || !strings.Contains(sql, "FROM posts") {
-			return true
-		}
-		// 이 식 안의 모든 자식을 본 것으로 표시한다.
-		ast.Inspect(e, func(c ast.Node) bool {
-			if c != nil {
-				seen[c.Pos()] = true
+// postLiterals counts `Post{…}` composite literals in post.go.
+func postLiterals(t *testing.T) int {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), "post.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	ast.Inspect(f, func(node ast.Node) bool {
+		if lit, ok := node.(*ast.CompositeLit); ok {
+			if id, ok := lit.Type.(*ast.Ident); ok && id.Name == "Post" {
+				n++
 			}
-			return true
-		})
-
-		switch {
-		case strings.Contains(sql, columnMark):
-			usesConstant++
-		case strings.Contains(sql, handwritten):
-			bad = append(bad, fset.Position(e.Pos()).String())
 		}
 		return true
 	})
-
-	// 위반을 **먼저** 보고한다. 헛돌기 가드가 앞에 있으면, 컬럼 하나를 손으로
-	// 되돌린 변이가 「손으로 적었다」가 아니라 「헛돌았다」로 실패해 겨냥한
-	// 단언이 무엇인지 알 수 없게 된다 (M15).
-	if len(bad) > 0 {
-		t.Errorf("컬럼 목록을 손으로 적은 곳 — postColumns 를 쓸 것: %v", bad)
-	}
-
-	// **헛돌기 방지는 대상 쿼리로 한다.** COUNT 쿼리가 우연히 조건에 걸려
-	// "무언가는 봤다" 가 되는 것으로는 이 검사가 무엇을 봤는지 알 수 없다.
-	//
-	// `postColumns` 를 쓰는 것과 손으로 적은 것의 **합**을 센다: 위반이 있을
-	// 때도 대상 쿼리는 다섯이므로, 이 가드는 「쿼리 자체를 못 찾은 경우」에만
-	// 운다.
-	if usesConstant+len(bad) < 5 {
-		t.Fatalf("posts 를 읽는 쿼리를 %d 개밖에 못 찾았다 — 검사가 헛돌았다",
-			usesConstant+len(bad))
-	}
-
-	// 스캔도 한 곳이어야 한다. 목록만 모으고 스캔이 여럿이면 어긋남은 그대로다.
-	if n := strings.Count(readFile(t, "post.go"), "&p.CommentCount, &p.HasAttachment"); n != 1 {
-		t.Errorf("Post 를 읽는 Scan 이 %d 곳 — scanPost 하나여야 한다", n)
-	}
-}
-
-func readFile(t *testing.T, name string) string {
-	t.Helper()
-	b, err := os.ReadFile(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
+	return n
 }

@@ -30,8 +30,7 @@ type Store struct {
 	pool   *pgxpool.Pool
 	sealer Sealer
 	// q 는 sqlc 가 queries/*.sql 에서 생성한 질의다 (D22 6절). 트랜잭션 안에서는
-	// q.WithTx(tx). 손으로 스캔하는 코드는 post.go 의 글 읽기 여섯 곳뿐이다 —
-	// 이유는 그쪽 postColumns 주석에 있다.
+	// q.WithTx(tx). 이 패키지에 손으로 스캔하는 질의는 없다 — pool 은 Begin 에만 쓴다.
 	q *contentq.Queries
 }
 

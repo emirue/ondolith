@@ -232,6 +232,189 @@ func (q *Queries) DeletePost(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const listPosts = `-- name: ListPosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = $1
+  AND p.status = 'published'
+ORDER BY p.is_pinned DESC,
+         CASE WHEN $2::text = 'created' AND $3::bool THEN p.created_at END DESC,
+         CASE WHEN $2::text = 'created' AND NOT $3::bool THEN p.created_at END ASC,
+         CASE WHEN $2::text = 'views' AND $3::bool THEN p.view_count END DESC,
+         CASE WHEN $2::text = 'views' AND NOT $3::bool THEN p.view_count END ASC,
+         CASE WHEN $2::text = 'title' AND $3::bool THEN p.title END DESC,
+         CASE WHEN $2::text = 'title' AND NOT $3::bool THEN p.title END ASC,
+         CASE WHEN $3::bool THEN p.id END DESC,
+         CASE WHEN NOT $3::bool THEN p.id END ASC
+LIMIT $5::int OFFSET $4::int
+`
+
+type ListPostsParams struct {
+	BoardID string
+	Sort    string
+	Desc    bool
+	Offset  int32
+	Limit   int32
+}
+
+type ListPostsRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPostsRow, error) {
+	rows, err := q.db.Query(ctx, listPosts,
+		arg.BoardID,
+		arg.Sort,
+		arg.Desc,
+		arg.Offset,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPostsRow{}
+	for rows.Next() {
+		var i ListPostsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.AuthorID,
+			&i.AuthorName,
+			&i.Title,
+			&i.Body,
+			&i.CustomFields,
+			&i.Status,
+			&i.IsPinned,
+			&i.IsSecret,
+			&i.ViewCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CommentCount,
+			&i.HasAttachment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPostsSearch = `-- name: ListPostsSearch :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = $1
+  AND p.status = 'published'
+  AND p.search_vector @@ to_tsquery('simple', $2)
+ORDER BY p.is_pinned DESC,
+         CASE WHEN $3::text = 'created' AND $4::bool THEN p.created_at END DESC,
+         CASE WHEN $3::text = 'created' AND NOT $4::bool THEN p.created_at END ASC,
+         CASE WHEN $3::text = 'views' AND $4::bool THEN p.view_count END DESC,
+         CASE WHEN $3::text = 'views' AND NOT $4::bool THEN p.view_count END ASC,
+         CASE WHEN $3::text = 'title' AND $4::bool THEN p.title END DESC,
+         CASE WHEN $3::text = 'title' AND NOT $4::bool THEN p.title END ASC,
+         CASE WHEN $4::bool THEN p.id END DESC,
+         CASE WHEN NOT $4::bool THEN p.id END ASC
+LIMIT $6::int OFFSET $5::int
+`
+
+type ListPostsSearchParams struct {
+	BoardID string
+	Search  string
+	Sort    string
+	Desc    bool
+	Offset  int32
+	Limit   int32
+}
+
+type ListPostsSearchRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams) ([]ListPostsSearchRow, error) {
+	rows, err := q.db.Query(ctx, listPostsSearch,
+		arg.BoardID,
+		arg.Search,
+		arg.Sort,
+		arg.Desc,
+		arg.Offset,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPostsSearchRow{}
+	for rows.Next() {
+		var i ListPostsSearchRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.AuthorID,
+			&i.AuthorName,
+			&i.Title,
+			&i.Body,
+			&i.CustomFields,
+			&i.Status,
+			&i.IsPinned,
+			&i.IsSecret,
+			&i.ViewCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CommentCount,
+			&i.HasAttachment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const moderateComments = `-- name: ModerateComments :many
 SELECT c.id, c.post_id, coalesce(c.parent_id::text, '')::text AS parent_id,
        coalesce(c.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
@@ -278,6 +461,315 @@ func (q *Queries) ModerateComments(ctx context.Context, arg ModerateCommentsPara
 			&i.Body,
 			&i.DeletedAt,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const moderatePosts = `-- name: ModeratePosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = $1
+ORDER BY p.is_pinned DESC, p.created_at DESC, p.id DESC
+LIMIT $2
+`
+
+type ModeratePostsParams struct {
+	BoardID string
+	Limit   int32
+}
+
+type ModeratePostsRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([]ModeratePostsRow, error) {
+	rows, err := q.db.Query(ctx, moderatePosts, arg.BoardID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ModeratePostsRow{}
+	for rows.Next() {
+		var i ModeratePostsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.AuthorID,
+			&i.AuthorName,
+			&i.Title,
+			&i.Body,
+			&i.CustomFields,
+			&i.Status,
+			&i.IsPinned,
+			&i.IsSecret,
+			&i.ViewCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CommentCount,
+			&i.HasAttachment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const postByID = `-- name: PostByID :one
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.id = $1 AND ($2::bool OR NOT p.is_secret OR p.author_id = $3)
+`
+
+type PostByIDParams struct {
+	ID        string
+	CanSecret bool
+	ViewerID  *string
+}
+
+type PostByIDRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) PostByID(ctx context.Context, arg PostByIDParams) (PostByIDRow, error) {
+	row := q.db.QueryRow(ctx, postByID, arg.ID, arg.CanSecret, arg.ViewerID)
+	var i PostByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.BoardID,
+		&i.AuthorID,
+		&i.AuthorName,
+		&i.Title,
+		&i.Body,
+		&i.CustomFields,
+		&i.Status,
+		&i.IsPinned,
+		&i.IsSecret,
+		&i.ViewCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CommentCount,
+		&i.HasAttachment,
+	)
+	return i, err
+}
+
+const recentPosts = `-- name: RecentPosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = ANY($2::uuid[])
+  AND p.status = 'published'
+  AND (NOT p.is_secret OR p.board_id = ANY($3::uuid[]) OR p.author_id = $4)
+ORDER BY p.created_at DESC
+LIMIT $1
+`
+
+type RecentPostsParams struct {
+	Limit    int32
+	Readable []string
+	SecretIn []string
+	ViewerID *string
+}
+
+type RecentPostsRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) RecentPosts(ctx context.Context, arg RecentPostsParams) ([]RecentPostsRow, error) {
+	rows, err := q.db.Query(ctx, recentPosts,
+		arg.Limit,
+		arg.Readable,
+		arg.SecretIn,
+		arg.ViewerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecentPostsRow{}
+	for rows.Next() {
+		var i RecentPostsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.AuthorID,
+			&i.AuthorName,
+			&i.Title,
+			&i.Body,
+			&i.CustomFields,
+			&i.Status,
+			&i.IsPinned,
+			&i.IsSecret,
+			&i.ViewCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CommentCount,
+			&i.HasAttachment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchPosts = `-- name: SearchPosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = ANY($1::uuid[])
+  AND p.status = 'published'
+  AND (NOT p.is_secret OR p.board_id = ANY($2::uuid[]) OR p.author_id = $3)
+  AND p.search_vector @@ to_tsquery('simple', $4)
+ORDER BY p.is_pinned DESC,
+         CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
+         CASE WHEN $5::text = 'created' AND NOT $6::bool THEN p.created_at END ASC,
+         CASE WHEN $5::text = 'views' AND $6::bool THEN p.view_count END DESC,
+         CASE WHEN $5::text = 'views' AND NOT $6::bool THEN p.view_count END ASC,
+         CASE WHEN $5::text = 'title' AND $6::bool THEN p.title END DESC,
+         CASE WHEN $5::text = 'title' AND NOT $6::bool THEN p.title END ASC,
+         CASE WHEN $6::bool THEN p.id END DESC,
+         CASE WHEN NOT $6::bool THEN p.id END ASC
+LIMIT $8::int OFFSET $7::int
+`
+
+type SearchPostsParams struct {
+	Readable []string
+	SecretIn []string
+	ViewerID *string
+	Search   string
+	Sort     string
+	Desc     bool
+	Offset   int32
+	Limit    int32
+}
+
+type SearchPostsRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) SearchPosts(ctx context.Context, arg SearchPostsParams) ([]SearchPostsRow, error) {
+	rows, err := q.db.Query(ctx, searchPosts,
+		arg.Readable,
+		arg.SecretIn,
+		arg.ViewerID,
+		arg.Search,
+		arg.Sort,
+		arg.Desc,
+		arg.Offset,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchPostsRow{}
+	for rows.Next() {
+		var i SearchPostsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.AuthorID,
+			&i.AuthorName,
+			&i.Title,
+			&i.Body,
+			&i.CustomFields,
+			&i.Status,
+			&i.IsPinned,
+			&i.IsSecret,
+			&i.ViewCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CommentCount,
+			&i.HasAttachment,
 		); err != nil {
 			return nil, err
 		}

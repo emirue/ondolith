@@ -64,44 +64,24 @@ func (c Comment) IsTombstone() bool { return !c.DeletedAt.IsZero() }
 // decision left to make. Search is the one that keeps the filter, because its
 // results carry an excerpt of the body.
 func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]Post, error) {
-	// The ORDER BY comes from the allow list (listquery.go). Everything else is
-	// a bind parameter.
+	// The sort key comes from the allow list (listquery.go) and reaches SQL as
+	// a bind parameter that an ORDER BY CASE chain compares (D22 6절).
 	//
 	// **검색 절은 검색어가 있을 때만 붙는다.** `($2 = '' OR … @@ …)` 한 줄로
 	// 두면 준비된 문장이 일반 계획으로 넘어간 뒤 OR 의 한쪽이 인덱스를 못 타
 	// GIN 인덱스(posts_search_idx)가 버려지고, 게시판 전체를 훑으며 @@ 를
-	// 평가한다 — SearchPosts 가 같은 조건을 OR 없이 쓰는 이유다. 두 문장이
-	// 머리를 공유하지 않고 통째로 적혀 있는 것은 post_shape_test 가 문자열
-	// 리터럴만 읽기 때문이다: 변수로 합치면 그 검사가 이 질의를 보지 못한다.
+	// 평가한다 — SearchPosts 가 같은 조건을 OR 없이 쓰는 이유다. 그래서
+	// queries/post.sql 에 ListPosts 와 ListPostsSearch 가 따로 있다.
 	if q.Search == "" {
-		rows, err := s.pool.Query(ctx, `
-			SELECT `+postListColumns+`
-			FROM posts p
-			LEFT JOIN users u ON u.id = p.author_id
-			WHERE p.board_id = $1
-			  AND p.status = 'published'
-			ORDER BY `+q.OrderBy()+`
-			LIMIT $2 OFFSET $3`, boardID, q.PerPage, q.Offset())
-		if err != nil {
-			return nil, err
-		}
-		return scanPosts(rows)
+		return postsOf(s.q.ListPosts(ctx, contentq.ListPostsParams{
+			BoardID: boardID, Sort: q.sortKey(), Desc: q.Desc,
+			Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
 	}
 	// A prefix query is what actually matches Korean text: the stored token
 	// carries the particle, so the exact term misses (D30 measured this).
-	rows, err := s.pool.Query(ctx, `
-		SELECT `+postListColumns+`
-		FROM posts p
-		LEFT JOIN users u ON u.id = p.author_id
-		WHERE p.board_id = $1
-		  AND p.status = 'published'
-		  AND p.search_vector @@ to_tsquery('simple', $2)
-		ORDER BY `+q.OrderBy()+`
-		LIMIT $3 OFFSET $4`, boardID, toPrefixQuery(q.Search), q.PerPage, q.Offset())
-	if err != nil {
-		return nil, err
-	}
-	return scanPosts(rows)
+	return postsOf(s.q.ListPostsSearch(ctx, contentq.ListPostsSearchParams{
+		BoardID: boardID, Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+		Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
 }
 
 // CountPosts is the total for the pager. It counts exactly what ListPosts
@@ -145,15 +125,15 @@ func (s *Store) SitemapPosts(ctx context.Context, boardIDs []string, perBoard in
 // PostByID reads one post. Secret posts are filtered in SQL, not after the
 // fetch: a row that must not be shown should not leave the database (SC-1 4항).
 func (s *Store) PostByID(ctx context.Context, id, viewerID string, canSecret bool) (*Post, error) {
-	const q = `
-		SELECT ` + postColumns + `
-		FROM posts p
-		LEFT JOIN users u ON u.id = p.author_id
-		WHERE p.id = $1 AND ($2 OR NOT p.is_secret OR p.author_id = $3)`
-	p, err := scanPost(s.pool.QueryRow(ctx, q, id, canSecret, nullIfEmpty(viewerID)))
+	r, err := s.q.PostByID(ctx, contentq.PostByIDParams{
+		ID: id, CanSecret: canSecret, ViewerID: strPtr(viewerID)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
+	if err != nil {
+		return nil, err
+	}
+	p, err := postOf(postRow(r))
 	if err != nil {
 		return nil, err
 	}
@@ -280,15 +260,6 @@ func marshalFields(m map[string]any) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// nullIfEmpty turns "" into a SQL NULL. An empty string in a uuid column is a
-// type error at best and a row nobody can join at worst.
-func nullIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
 // toPrefixQuery builds the tsquery. Every term gets `:*` because the stored
 // token carries the Korean particle — `게시판` misses a body that says
 // `게시판을`, and `게시판:*` finds it (D30 measured both).
@@ -372,22 +343,10 @@ func (s *Store) SearchPosts(ctx context.Context, readable, secretIn []string,
 	if len(readable) == 0 || q.Search == "" {
 		return nil, nil
 	}
-	sql := `
-		SELECT ` + postColumns + `
-		FROM posts p
-		LEFT JOIN users u ON u.id = p.author_id
-		WHERE p.board_id = ANY($1)
-		  AND p.status = 'published'
-		  AND (NOT p.is_secret OR p.board_id = ANY($2) OR p.author_id = $3)
-		  AND p.search_vector @@ to_tsquery('simple', $4)
-		ORDER BY ` + q.OrderBy() + `
-		LIMIT $5 OFFSET $6`
-	rows, err := s.pool.Query(ctx, sql, readable, secretIn,
-		nullIfEmpty(viewerID), toPrefixQuery(q.Search), q.PerPage, q.Offset())
-	if err != nil {
-		return nil, err
-	}
-	return scanPosts(rows)
+	return postsOf(s.q.SearchPosts(ctx, contentq.SearchPostsParams{
+		Readable: readable, SecretIn: secretIn, ViewerID: strPtr(viewerID),
+		Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+		Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
 }
 
 func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []string,
@@ -405,18 +364,8 @@ func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []strin
 // included. That is what moderating means — a moderator who cannot see the
 // hidden post cannot un-hide it.
 func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit int) ([]Post, error) {
-	const q = `
-		SELECT ` + postListColumns + `
-		FROM posts p
-		LEFT JOIN users u ON u.id = p.author_id
-		WHERE p.board_id = $1
-		ORDER BY p.is_pinned DESC, p.created_at DESC, p.id DESC
-		LIMIT $2`
-	rows, err := s.pool.Query(ctx, q, boardID, limit)
-	if err != nil {
-		return nil, err
-	}
-	return scanPosts(rows)
+	return postsOf(s.q.ModeratePosts(ctx, contentq.ModeratePostsParams{
+		BoardID: boardID, Limit: int32(limit)}))
 }
 
 // ModerateComments is A-308's list, newest first across one board.
@@ -433,72 +382,63 @@ func (s *Store) ModerateComments(ctx context.Context, boardID string, limit int)
 	return out, nil
 }
 
-// postColumns is the SELECT list every post listing uses.
-//
-// 목록마다 베껴 적으면 컬럼 하나를 더할 때 한 곳을 빠뜨리고, 그 화면만 조용히
-// 옛 모양으로 남는다 — 스캔 순서가 어긋나면 그때는 런타임 오류다.
-//
-// sqlc 불가: posts 를 Post 로 읽는 여섯 질의(ListPosts 둘·PostByID·SearchPosts·
-// ModeratePosts·RecentPosts)와 scanPost 는 post_shape_test 가 이 파일의 AST 와
-// 본문을 읽어 「postColumns 를 쓰는 SELECT 다섯 이상 + Scan 한 곳」을 요구한다.
-// queries/post.sql 로 옮기면 그 검사가 질의를 못 찾아 실패한다 — 생성 코드는
-// 열 목록과 스캔을 한 쌍으로 만들어 그 검사가 지키던 것을 타입으로 보장하므로,
-// 검사를 거두는 커밋에서 이 여섯과 ListQuery.OrderBy 의 허용 목록을 함께 옮긴다
-// (정렬은 D22 6절의 `ORDER BY CASE WHEN sqlc.arg('sort') = …` 로).
-const postColumns = `
-	p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
-	p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-	p.view_count, p.created_at, p.updated_at,
-	(SELECT count(*) FROM comments c WHERE c.post_id = p.id),
-	EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)`
+// postRow is the shape every posts-reading query in queries/post.sql returns.
+// 목록 질의는 body 자리만 ” 이고 모양은 같다 — 열 목록과 스캔은 sqlc 가 한
+// 쌍으로 만들고, 여섯 질의의 열 목록이 서로 같은 것은 post_shape_test 가 질의
+// 파일을 읽어 지킨다. sqlc 는 질의마다 행 타입을 따로 내므로 postRows 의 구조체
+// 변환으로 여기 모은다.
+type postRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
 
-// postListColumns is postColumns with the body left out. 목록·최근 글·중재 목록은
-// 본문을 그리지 않는데, 페이지마다 최대 100개의 본문이 DB→앱→GC 를 오갔다.
-// 모양은 같아서 scanPost 가 그대로 읽는다.
-const postListColumns = `
-	p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
-	p.title, '' AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-	p.view_count, p.created_at, p.updated_at,
-	(SELECT count(*) FROM comments c WHERE c.post_id = p.id),
-	EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)`
+type postRows interface {
+	contentq.ListPostsRow | contentq.ListPostsSearchRow | contentq.SearchPostsRow |
+		contentq.ModeratePostsRow | contentq.RecentPostsRow
+}
 
-// postScanner is what pgx.Row and pgx.Rows share — 한 행을 읽는 것.
-type postScanner interface{ Scan(dest ...any) error }
-
-// scanPost reads one row shaped by postColumns.
-//
-// **컬럼 목록과 스캔 순서는 한 쌍이다.** 둘이 갈라지면 컴파일은 되고 런타임에
-// 타입 오류가 나거나, 더 나쁘게는 같은 타입끼리 자리가 바뀌어 조용히 틀린
-// 값이 나온다. 그래서 목록도 스캔도 각각 한 곳에만 둔다.
-func scanPost(row postScanner) (Post, error) {
-	var p Post
-	var raw []byte
-	if err := row.Scan(&p.ID, &p.BoardID, &p.AuthorID, &p.AuthorName,
-		&p.Title, &p.Body, &raw, &p.Status, &p.IsPinned, &p.IsSecret,
-		&p.ViewCount, &p.CreatedAt, &p.UpdatedAt,
-		&p.CommentCount, &p.HasAttachment); err != nil {
-		return p, err
-	}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &p.CustomFields); err != nil {
+// postOf is the ONE place a posts row becomes a Post. 생성 행 타입이 여섯이라도
+// Post 를 만드는 곳이 둘이면 custom_fields 풀기 같은 규칙이 갈라진다.
+func postOf(r postRow) (Post, error) {
+	p := Post{ID: r.ID, BoardID: r.BoardID, AuthorID: r.AuthorID, AuthorName: r.AuthorName,
+		Title: r.Title, Body: r.Body, Status: r.Status, IsPinned: r.IsPinned, IsSecret: r.IsSecret,
+		ViewCount: int64(r.ViewCount), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		CommentCount: r.CommentCount, HasAttachment: r.HasAttachment}
+	if len(r.CustomFields) > 0 {
+		if err := json.Unmarshal(r.CustomFields, &p.CustomFields); err != nil {
 			return p, err
 		}
 	}
 	return p, nil
 }
 
-// scanPosts reads rows shaped by postColumns.
-func scanPosts(rows pgx.Rows) ([]Post, error) {
-	defer rows.Close()
+// postsOf wraps a :many call: rows → Posts, error passed through.
+func postsOf[R postRows](rows []R, err error) ([]Post, error) {
+	if err != nil {
+		return nil, err
+	}
 	var out []Post
-	for rows.Next() {
-		p, err := scanPost(rows)
+	for _, r := range rows {
+		p, err := postOf(postRow(r))
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // RecentPosts lists the newest published posts across the boards the caller may
@@ -513,17 +453,6 @@ func (s *Store) RecentPosts(ctx context.Context, readable, secretIn []string,
 	if len(readable) == 0 || limit <= 0 {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT `+postListColumns+`
-		FROM posts p
-		LEFT JOIN users u ON u.id = p.author_id
-		WHERE p.board_id = ANY($1)
-		  AND p.status = 'published'
-		  AND (NOT p.is_secret OR p.board_id = ANY($2) OR p.author_id = $3)
-		ORDER BY p.created_at DESC
-		LIMIT $4`, readable, secretIn, nullIfEmpty(viewerID), limit)
-	if err != nil {
-		return nil, err
-	}
-	return scanPosts(rows)
+	return postsOf(s.q.RecentPosts(ctx, contentq.RecentPostsParams{
+		Readable: readable, SecretIn: secretIn, ViewerID: strPtr(viewerID), Limit: int32(limit)}))
 }

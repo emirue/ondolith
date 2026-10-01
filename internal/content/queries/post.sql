@@ -80,3 +80,105 @@ WHERE id = $1 AND deleted_at IS NULL;
 -- name: UpdateComment :execrows
 UPDATE comments SET body = $2, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: ListPosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = $1
+  AND p.status = 'published'
+ORDER BY p.is_pinned DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND NOT sqlc.arg('desc')::bool THEN p.created_at END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND sqlc.arg('desc')::bool THEN p.view_count END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND NOT sqlc.arg('desc')::bool THEN p.view_count END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND sqlc.arg('desc')::bool THEN p.title END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND NOT sqlc.arg('desc')::bool THEN p.title END ASC,
+         CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
+         CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
+LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
+
+-- name: ListPostsSearch :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = $1
+  AND p.status = 'published'
+  AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
+ORDER BY p.is_pinned DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND NOT sqlc.arg('desc')::bool THEN p.created_at END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND sqlc.arg('desc')::bool THEN p.view_count END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND NOT sqlc.arg('desc')::bool THEN p.view_count END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND sqlc.arg('desc')::bool THEN p.title END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND NOT sqlc.arg('desc')::bool THEN p.title END ASC,
+         CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
+         CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
+LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
+
+-- name: SearchPosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[])
+  AND p.status = 'published'
+  AND (NOT p.is_secret OR p.board_id = ANY(sqlc.arg('secret_in')::uuid[]) OR p.author_id = sqlc.narg('viewer_id'))
+  AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
+ORDER BY p.is_pinned DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND NOT sqlc.arg('desc')::bool THEN p.created_at END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND sqlc.arg('desc')::bool THEN p.view_count END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND NOT sqlc.arg('desc')::bool THEN p.view_count END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND sqlc.arg('desc')::bool THEN p.title END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND NOT sqlc.arg('desc')::bool THEN p.title END ASC,
+         CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
+         CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
+LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
+
+-- name: PostByID :one
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.id = $1 AND (sqlc.arg('can_secret')::bool OR NOT p.is_secret OR p.author_id = sqlc.narg('viewer_id'));
+
+-- name: ModeratePosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = $1
+ORDER BY p.is_pinned DESC, p.created_at DESC, p.id DESC
+LIMIT $2;
+
+-- name: RecentPosts :many
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM posts p
+LEFT JOIN users u ON u.id = p.author_id
+WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[])
+  AND p.status = 'published'
+  AND (NOT p.is_secret OR p.board_id = ANY(sqlc.arg('secret_in')::uuid[]) OR p.author_id = sqlc.narg('viewer_id'))
+ORDER BY p.created_at DESC
+LIMIT $1;

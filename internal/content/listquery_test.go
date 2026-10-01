@@ -33,53 +33,22 @@ func TestSortColumnIsAnAllowList(t *testing.T) {
 		if got.Sort != "created" {
 			t.Errorf("sort=%q 가 %q 로 통과했다", s, got.Sort)
 		}
-		clause := got.OrderBy()
-		for _, bad := range []string{";", "--", "/*", "(", "'", "DROP"} {
-			if strings.Contains(clause, bad) {
-				t.Errorf("sort=%q → ORDER BY 에 %q 가 들어갔다: %s", s, bad, clause)
-			}
-		}
 	}
 
-	for key, want := range map[string]string{"created": "created_at", "views": "view_count", "title": "title"} {
+	for _, key := range SortKeys() {
 		got := ParseListQuery(q("sort="+key), 20)
-		if got.Sort != key {
+		if got.Sort != key || got.sortKey() != key {
 			t.Errorf("sort=%s 가 거부됐다", key)
 		}
-		if !strings.Contains(got.OrderBy(), want) {
-			t.Errorf("sort=%s → %q, %q 가 없다", key, got.OrderBy(), want)
-		}
 	}
 }
 
-// 손으로 만든 ListQuery 도 컬럼을 고르지 못한다. 이 문자열은 SQL 에 닿는다.
-func TestOrderByRefusesAColumnItDidNotWrite(t *testing.T) {
+// 손으로 만든 ListQuery 도 정렬을 끄지 못한다: 사슬에 없는 키는 CASE 에 하나도
+// 걸리지 않아 고정·id 순으로만 나오는데, 그것을 아무도 눈치채지 못한다.
+func TestSortKeyFallsBackForAKeyItDidNotWrite(t *testing.T) {
 	l := ListQuery{Sort: "created_at); DROP TABLE posts --", Desc: true}
-	clause := l.OrderBy()
-	if strings.Contains(clause, "DROP") || strings.Contains(clause, ";") {
-		t.Errorf("ORDER BY 에 요청 문자열이 그대로 들어갔다: %s", clause)
-	}
-	if !strings.Contains(clause, "created_at") {
-		t.Errorf("기본 컬럼으로 떨어지지 않았다: %s", clause)
-	}
-}
-
-// 고정 글은 어떤 정렬에서도 먼저 온다. 그게 고정의 뜻이다. 그리고 id 가
-// tiebreaker 로 남아야 키셋 비교가 전순서가 된다 (D30).
-func TestOrderByAlwaysPinsAndTiebreaks(t *testing.T) {
-	for _, s := range []string{"created", "views", "title", "-title"} {
-		clause := ParseListQuery(q("sort="+s), 20).OrderBy()
-		if !strings.HasPrefix(clause, "is_pinned DESC,") {
-			t.Errorf("sort=%s: 고정 글이 먼저 오지 않는다: %s", s, clause)
-		}
-		if !strings.Contains(clause, "id ") {
-			t.Errorf("sort=%s: id tiebreaker 가 없다: %s", s, clause)
-		}
-	}
-	// 방향은 세 컬럼이 같아야 인덱스로 내려간다 (D30 측정).
-	clause := ParseListQuery(q("sort=created"), 20).OrderBy()
-	if strings.Count(clause, "DESC") != 3 {
-		t.Errorf("정렬 방향이 섞였다: %s", clause)
+	if got := l.sortKey(); got != "created" {
+		t.Errorf("기본 키로 떨어지지 않았다: %q", got)
 	}
 }
 
