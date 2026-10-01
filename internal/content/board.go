@@ -2,11 +2,14 @@ package content
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 var (
@@ -26,6 +29,24 @@ type Board struct {
 	PerPage          int
 }
 
+// boardOf is the one place a boards row becomes a Board (pageOf 와 같은 이유).
+func boardOf(r contentq.Board) Board {
+	return Board{ID: r.ID, Slug: r.Slug, Name: r.Name, Skin: r.Skin,
+		AllowAttachments: r.AllowAttachments, AllowComments: r.AllowComments,
+		AllowSecret: r.AllowSecret, PerPage: int(r.PerPage)}
+}
+
+func oneBoard(r contentq.Board, err error) (*Board, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	b := boardOf(r)
+	return &b, nil
+}
+
 // CreateBoard writes the board and its preset grants in ONE transaction.
 //
 // D14 4.2 requires this. A board that exists with no grants is invisible to
@@ -43,13 +64,12 @@ func (s *Store) CreateBoard(ctx context.Context, b Board, preset BoardPreset) (s
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
-	const insert = `
-		INSERT INTO boards (slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
-	var id string
-	err = tx.QueryRow(ctx, insert, b.Slug, b.Name, b.Skin,
-		b.AllowAttachments, b.AllowComments, b.AllowSecret, b.PerPage).Scan(&id)
+	id, err := q.CreateBoard(ctx, contentq.CreateBoardParams{
+		Slug: b.Slug, Name: b.Name, Skin: b.Skin,
+		AllowAttachments: b.AllowAttachments, AllowComments: b.AllowComments,
+		AllowSecret: b.AllowSecret, PerPage: int32(b.PerPage)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrSlugTakenBoard
@@ -61,19 +81,16 @@ func (s *Store) CreateBoard(ctx context.Context, b Board, preset BoardPreset) (s
 	// The role and permission are looked up by key inside the same statement.
 	// Reading their ids first would be two round trips and a window in which a
 	// role could be deleted between the read and the write.
-	const grant = `
-		INSERT INTO role_permissions (role_id, permission_id, board_id)
-		SELECT r.id, p.id, $3 FROM roles r, permissions p
-		WHERE r.key = $1 AND p.key = $2 AND p.is_scoped`
 	for _, g := range grants {
-		tag, err := tx.Exec(ctx, grant, g.Role, g.Permission, id)
+		n, err := q.GrantBoardPreset(ctx, contentq.GrantBoardPresetParams{
+			BoardID: id, Role: g.Role, Permission: g.Permission})
 		if err != nil {
 			return "", err
 		}
 		// SELECT-driven INSERT writes nothing when the WHERE matches nothing —
 		// a renamed role or a permission that is not scoped would silently
 		// produce a board with fewer grants than the preset promised.
-		if tag.RowsAffected() != 1 {
+		if n != 1 {
 			return "", fmt.Errorf("content: 프리셋 부여 실패 (%s / %s): 역할 또는 스코프 권한이 없다",
 				g.Role, g.Permission)
 		}
@@ -85,55 +102,28 @@ func (s *Store) CreateBoard(ctx context.Context, b Board, preset BoardPreset) (s
 }
 
 func (s *Store) Boards(ctx context.Context) ([]Board, error) {
-	const q = `
-		SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page
-		FROM boards ORDER BY name, id`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.q.Boards(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Board
-	for rows.Next() {
-		var b Board
-		if err := rows.Scan(&b.ID, &b.Slug, &b.Name, &b.Skin,
-			&b.AllowAttachments, &b.AllowComments, &b.AllowSecret, &b.PerPage); err != nil {
-			return nil, err
-		}
-		out = append(out, b)
+	for _, r := range rows {
+		out = append(out, boardOf(r))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) BoardBySlug(ctx context.Context, slug string) (*Board, error) {
-	const q = `
-		SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page
-		FROM boards WHERE slug = $1`
-	var b Board
-	err := s.pool.QueryRow(ctx, q, slug).Scan(&b.ID, &b.Slug, &b.Name, &b.Skin,
-		&b.AllowAttachments, &b.AllowComments, &b.AllowSecret, &b.PerPage)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	return &b, err
+	return oneBoard(s.q.BoardBySlug(ctx, slug))
 }
 
 // UpdateBoard changes settings. It does not touch the slug: the slug is in
 // every link anyone has saved, and D19 A-305 keeps it out of the edit form.
 func (s *Store) UpdateBoard(ctx context.Context, id string, b Board) error {
-	const q = `
-		UPDATE boards SET name = $2, skin = $3, allow_attachments = $4,
-		       allow_comments = $5, allow_secret = $6, per_page = $7, updated_at = now()
-		WHERE id = $1`
-	tag, err := s.pool.Exec(ctx, q, id, b.Name, b.Skin,
-		b.AllowAttachments, b.AllowComments, b.AllowSecret, b.PerPage)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.UpdateBoard(ctx, contentq.UpdateBoardParams{
+		ID: id, Name: b.Name, Skin: b.Skin,
+		AllowAttachments: b.AllowAttachments, AllowComments: b.AllowComments,
+		AllowSecret: b.AllowSecret, PerPage: int32(b.PerPage)}))
 }
 
 // DeleteBoard removes a board, its posts and its scoped grants — all by
@@ -144,46 +134,66 @@ func (s *Store) UpdateBoard(ctx context.Context, id string, b Board) error {
 // 함께 삭제됩니다" is the only thing that makes that step mean anything.
 func (s *Store) DeleteBoard(ctx context.Context, id string, force bool) error {
 	if !force {
-		var posts int
-		if err := s.pool.QueryRow(ctx,
-			`SELECT count(*) FROM posts WHERE board_id = $1`, id).Scan(&posts); err != nil {
+		posts, err := s.q.CountBoardPosts(ctx, id)
+		if err != nil {
 			return err
 		}
 		if posts > 0 {
 			return fmt.Errorf("%w: 글 %d건", ErrBoardInUse, posts)
 		}
 	}
-	tag, err := s.pool.Exec(ctx, `DELETE FROM boards WHERE id = $1`, id)
-	if err != nil {
-		return err
+	return affected(s.q.DeleteBoard(ctx, id))
+}
+
+// fieldRow is the shape board_fields and user_fields share. sqlc 는 질의마다
+// 행 타입을 따로 내므로, 필드가 같은 구조체 변환 `fieldRow(r)` 로 한 곳에 모은다.
+type fieldRow struct {
+	Key        string
+	Label      string
+	FieldType  string
+	IsRequired bool
+	ShowInList bool
+	Options    []byte
+	SortOrder  int32
+}
+
+// fieldOf turns a row into a FieldSchema. options 는 jsonb 라 생성 코드가
+// []byte 로 준다 — 풀어서 []string 으로.
+func fieldOf(r fieldRow) (FieldSchema, error) {
+	f := FieldSchema{Key: r.Key, Label: r.Label, Type: FieldType(r.FieldType),
+		Required: r.IsRequired, ShowInList: r.ShowInList, Sort: int(r.SortOrder)}
+	if len(r.Options) > 0 {
+		if err := json.Unmarshal(r.Options, &f.Options); err != nil {
+			return f, err
+		}
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	return f, nil
+}
+
+// fieldOptions is the jsonb value for FieldSchema.Options: never SQL NULL, an
+// empty list when nothing was given.
+func fieldOptions(opts []string) ([]byte, error) {
+	if opts == nil {
+		opts = []string{}
 	}
-	return nil
+	return json.Marshal(opts)
 }
 
 // BoardFields reads one board's custom field schema, in display order.
 func (s *Store) BoardFields(ctx context.Context, boardID string) ([]FieldSchema, error) {
-	const q = `
-		SELECT key, label, field_type, is_required, show_in_list, options, sort_order
-		FROM board_fields WHERE board_id = $1 ORDER BY sort_order, key`
-	rows, err := s.pool.Query(ctx, q, boardID)
+	rows, err := s.q.BoardFields(ctx, boardID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []FieldSchema
-	for rows.Next() {
-		var f FieldSchema
-		var opts []string
-		if err := rows.Scan(&f.Key, &f.Label, &f.Type, &f.Required, &f.ShowInList, &opts, &f.Sort); err != nil {
+	for _, r := range rows {
+		f, err := fieldOf(fieldRow(r))
+		if err != nil {
 			return nil, err
 		}
-		f.Options = opts
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // SaveBoardField inserts or updates one field definition.
@@ -195,47 +205,23 @@ func (s *Store) SaveBoardField(ctx context.Context, boardID string, f FieldSchem
 	if err := ValidateFieldKey(f.Key); err != nil {
 		return err
 	}
-	opts := f.Options
-	if opts == nil {
-		opts = []string{}
+	opts, err := fieldOptions(f.Options)
+	if err != nil {
+		return err
 	}
-	const q = `
-		INSERT INTO board_fields (board_id, key, label, field_type, is_required, show_in_list, options, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (board_id, key) DO UPDATE SET
-			label = EXCLUDED.label, field_type = EXCLUDED.field_type,
-			is_required = EXCLUDED.is_required, show_in_list = EXCLUDED.show_in_list,
-			options = EXCLUDED.options, sort_order = EXCLUDED.sort_order, updated_at = now()`
-	_, err := s.pool.Exec(ctx, q, boardID, f.Key, f.Label, f.Type,
-		f.Required, f.ShowInList, opts, f.Sort)
-	return err
+	return s.q.SaveBoardField(ctx, contentq.SaveBoardFieldParams{
+		BoardID: boardID, Key: f.Key, Label: f.Label, FieldType: string(f.Type),
+		IsRequired: f.Required, ShowInList: f.ShowInList, Options: opts, SortOrder: int32(f.Sort)})
 }
 
 // DeleteBoardField removes a definition. The values already stored in
 // posts.custom_fields are left alone — D14 3절 규칙 4 makes deleting a field
 // stop it being shown, not destroy what people wrote.
 func (s *Store) DeleteBoardField(ctx context.Context, boardID, key string) error {
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM board_fields WHERE board_id = $1 AND key = $2`, boardID, key)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.DeleteBoardField(ctx, contentq.DeleteBoardFieldParams{BoardID: boardID, Key: key}))
 }
 
 // BoardByID is A-305's read.
 func (s *Store) BoardByID(ctx context.Context, id string) (*Board, error) {
-	const q = `
-		SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page
-		FROM boards WHERE id = $1`
-	var b Board
-	err := s.pool.QueryRow(ctx, q, id).Scan(&b.ID, &b.Slug, &b.Name, &b.Skin,
-		&b.AllowAttachments, &b.AllowComments, &b.AllowSecret, &b.PerPage)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	return &b, err
+	return oneBoard(s.q.BoardByID(ctx, id))
 }

@@ -3,3 +3,41 @@
 //   sqlc v1.31.1
 
 package contentq
+
+import (
+	"time"
+)
+
+type Attachment struct {
+	ID           string
+	PostID       string
+	StoredPath   string
+	OriginalName string
+	MimeType     string
+	ByteSize     int64
+	CreatedAt    time.Time
+}
+
+type Board struct {
+	ID               string
+	Slug             string
+	Name             string
+	Skin             string
+	AllowAttachments bool
+	AllowComments    bool
+	AllowSecret      bool
+	PerPage          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type Page struct {
+	ID        string
+	Slug      string
+	Title     string
+	Body      string
+	Status    string
+	Template  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}

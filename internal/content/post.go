@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 // Post is one row of posts, plus the counts a list screen shows.
@@ -106,18 +108,11 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 // returns — a pager whose total disagrees with its pages tells the visitor
 // there is a page that is not there. 검색 절은 ListPosts 와 같은 이유로 조건부다.
 func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (int64, error) {
-	var n int64
 	if q.Search == "" {
-		err := s.pool.QueryRow(ctx, `
-			SELECT count(*) FROM posts p
-			WHERE p.board_id = $1 AND p.status = 'published'`, boardID).Scan(&n)
-		return n, err
+		return s.q.CountPosts(ctx, boardID)
 	}
-	err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM posts p
-		WHERE p.board_id = $1 AND p.status = 'published'
-		  AND p.search_vector @@ to_tsquery('simple', $2)`, boardID, toPrefixQuery(q.Search)).Scan(&n)
-	return n, err
+	return s.q.CountPostsSearch(ctx, contentq.CountPostsSearchParams{
+		BoardID: boardID, Search: toPrefixQuery(q.Search)})
 }
 
 // SitemapEntry is all P-901 needs of a post: where it lives and when it changed.
@@ -135,28 +130,16 @@ func (s *Store) SitemapPosts(ctx context.Context, boardIDs []string, perBoard in
 	if len(boardIDs) == 0 || perBoard <= 0 {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, board_id, updated_at FROM (
-			SELECT id, board_id, updated_at,
-			       row_number() OVER (PARTITION BY board_id ORDER BY created_at DESC, id DESC) AS rn
-			FROM posts
-			WHERE board_id = ANY($1) AND status = 'published' AND NOT is_secret
-		) t
-		WHERE rn <= $2
-		ORDER BY board_id, rn`, boardIDs, perBoard)
+	rows, err := s.q.SitemapPosts(ctx, contentq.SitemapPostsParams{
+		BoardIds: boardIDs, PerBoard: int32(perBoard)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []SitemapEntry
-	for rows.Next() {
-		var e SitemapEntry
-		if err := rows.Scan(&e.ID, &e.BoardID, &e.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
+	for _, r := range rows {
+		out = append(out, SitemapEntry{ID: r.ID, BoardID: r.BoardID, UpdatedAt: r.UpdatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // PostByID reads one post. Secret posts are filtered in SQL, not after the
@@ -182,13 +165,9 @@ func (s *Store) CreatePost(ctx context.Context, p Post) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	const q = `
-		INSERT INTO posts (board_id, author_id, title, body, custom_fields, is_secret)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
-	var id string
-	err = s.pool.QueryRow(ctx, q, p.BoardID, nullIfEmpty(p.AuthorID),
-		p.Title, p.Body, fields, p.IsSecret).Scan(&id)
-	return id, err
+	return s.q.CreatePost(ctx, contentq.CreatePostParams{
+		BoardID: p.BoardID, AuthorID: strPtr(p.AuthorID), Title: p.Title, Body: p.Body,
+		CustomFields: fields, IsSecret: p.IsSecret})
 }
 
 // UpdatePost does not touch is_pinned or status: pinning and hiding are
@@ -199,17 +178,8 @@ func (s *Store) UpdatePost(ctx context.Context, id string, p Post) error {
 	if err != nil {
 		return err
 	}
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE posts SET title = $2, body = $3, custom_fields = $4, is_secret = $5,
-		       updated_at = now()
-		WHERE id = $1`, id, p.Title, p.Body, fields, p.IsSecret)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.UpdatePost(ctx, contentq.UpdatePostParams{
+		ID: id, Title: p.Title, Body: p.Body, CustomFields: fields, IsSecret: p.IsSecret}))
 }
 
 // SetPostFlags is the moderator's edit (A-307).
@@ -217,16 +187,8 @@ func (s *Store) SetPostFlags(ctx context.Context, id string, pinned bool, status
 	if status != "published" && status != "hidden" {
 		return errors.New("content: 알 수 없는 글 상태")
 	}
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE posts SET is_pinned = $2, status = $3, updated_at = now() WHERE id = $1`,
-		id, pinned, status)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.SetPostFlags(ctx, contentq.SetPostFlagsParams{
+		ID: id, IsPinned: pinned, Status: status}))
 }
 
 // DeletePost 는 글을 물리 삭제한다 (OPEN-40 결정, D30 3절).
@@ -235,14 +197,7 @@ func (s *Store) SetPostFlags(ctx context.Context, id string, pinned bool, status
 // 지우는 것은 `Attachments.DeletePost` 이고, 화면은 그쪽을 부른다. 이 메서드는
 // 첨부를 쓰지 않는 경로(P-210 툼스톤 정리 등)만 쓴다.
 func (s *Store) DeletePost(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM posts WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.DeletePost(ctx, id))
 }
 
 // BumpViewCount increases the counter.
@@ -252,52 +207,51 @@ func (s *Store) DeletePost(ctx context.Context, id string) error {
 // it has already counted) — putting it here would need the store to know about
 // sessions, and FR-305 keeps that out.
 func (s *Store) BumpViewCount(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE posts SET view_count = view_count + 1 WHERE id = $1`, id)
-	return err
+	return s.q.BumpViewCount(ctx, id)
+}
+
+// commentRow is the shape Comments and ModerateComments share (fieldRow 와
+// 같은 수법 — 질의마다 다른 생성 타입을 구조체 변환으로 한 곳에 모은다).
+type commentRow struct {
+	ID         string
+	PostID     string
+	ParentID   string
+	AuthorID   string
+	AuthorName string
+	Body       string
+	DeletedAt  time.Time
+	CreatedAt  time.Time
+}
+
+// commentOf is the one place a comments row becomes a Comment. The query
+// coalesces deleted_at to the epoch, so the epoch means "not deleted".
+func commentOf(r commentRow) Comment {
+	c := Comment{ID: r.ID, PostID: r.PostID, ParentID: r.ParentID, AuthorID: r.AuthorID,
+		AuthorName: r.AuthorName, Body: r.Body, CreatedAt: r.CreatedAt}
+	if !r.DeletedAt.Equal(time.Unix(0, 0).UTC()) {
+		c.DeletedAt = r.DeletedAt
+	}
+	return c
 }
 
 // Comments reads a post's comments in ONE query, ordered so that a one-level
 // reply tree can be assembled in memory. D30 caps replies at one level
 // (parent_id is set at insert and no screen changes it), so no recursion.
 func (s *Store) Comments(ctx context.Context, postID string) ([]Comment, error) {
-	const q = `
-		SELECT c.id, c.post_id, coalesce(c.parent_id::text, ''),
-		       coalesce(c.author_id::text, ''), coalesce(u.display_name, ''),
-		       c.body, coalesce(c.deleted_at, 'epoch'::timestamptz), c.created_at
-		FROM comments c
-		LEFT JOIN users u ON u.id = c.author_id
-		WHERE c.post_id = $1
-		ORDER BY coalesce(c.parent_id, c.id), c.created_at, c.id`
-	rows, err := s.pool.Query(ctx, q, postID)
+	rows, err := s.q.Comments(ctx, postID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Comment
-	for rows.Next() {
-		var c Comment
-		var del time.Time
-		if err := rows.Scan(&c.ID, &c.PostID, &c.ParentID, &c.AuthorID, &c.AuthorName,
-			&c.Body, &del, &c.CreatedAt); err != nil {
-			return nil, err
-		}
-		if !del.Equal(time.Unix(0, 0).UTC()) {
-			c.DeletedAt = del
-		}
-		out = append(out, c)
+	for _, r := range rows {
+		out = append(out, commentOf(commentRow(r)))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) CreateComment(ctx context.Context, c Comment) (string, error) {
-	const q = `
-		INSERT INTO comments (post_id, parent_id, author_id, body)
-		VALUES ($1, $2, $3, $4) RETURNING id`
-	var id string
-	err := s.pool.QueryRow(ctx, q, c.PostID, nullIfEmpty(c.ParentID),
-		nullIfEmpty(c.AuthorID), c.Body).Scan(&id)
-	return id, err
+	return s.q.CreateComment(ctx, contentq.CreateCommentParams{
+		PostID: c.PostID, ParentID: strPtr(c.ParentID), AuthorID: strPtr(c.AuthorID), Body: c.Body})
 }
 
 // DeleteComment is two-branched because the foreign key makes it so (D30).
@@ -311,27 +265,12 @@ func (s *Store) CreateComment(ctx context.Context, c Comment) (string, error) {
 // 가 외래키에 걸려 500 이었다 — 외래키의 거절 자체가 판정이므로 먼저 지워 보고,
 // 23503 이면 묘비로 간다.
 func (s *Store) DeleteComment(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM comments WHERE id = $1`, id)
+	n, err := s.q.DeleteComment(ctx, id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-		tag, err := s.pool.Exec(ctx,
-			`UPDATE comments SET body = '', deleted_at = now(), updated_at = now()
-			 WHERE id = $1 AND deleted_at IS NULL`, id)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
-		}
-		return nil
+		return affected(s.q.TombstoneComment(ctx, id))
 	}
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(n, err)
 }
 
 func marshalFields(m map[string]any) ([]byte, error) {
@@ -392,23 +331,15 @@ func isWordRune(r rune) bool {
 
 // CommentByID reads one comment.
 func (s *Store) CommentByID(ctx context.Context, id string) (*Comment, error) {
-	const q = `
-		SELECT id, post_id, coalesce(parent_id::text, ''), coalesce(author_id::text, ''),
-		       body, coalesce(deleted_at, 'epoch'::timestamptz), created_at
-		FROM comments WHERE id = $1`
-	var c Comment
-	var del time.Time
-	err := s.pool.QueryRow(ctx, q, id).Scan(&c.ID, &c.PostID, &c.ParentID,
-		&c.AuthorID, &c.Body, &del, &c.CreatedAt)
+	r, err := s.q.CommentByID(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !del.Equal(time.Unix(0, 0).UTC()) {
-		c.DeletedAt = del
-	}
+	c := commentOf(commentRow{ID: r.ID, PostID: r.PostID, ParentID: r.ParentID,
+		AuthorID: r.AuthorID, Body: r.Body, DeletedAt: r.DeletedAt, CreatedAt: r.CreatedAt})
 	return &c, nil
 }
 
@@ -416,33 +347,13 @@ func (s *Store) CommentByID(ctx context.Context, id string) (*Comment, error) {
 // the WHERE clause: bringing back a body the author removed is the one edit
 // that must not be possible.
 func (s *Store) UpdateComment(ctx context.Context, id, body string) error {
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE comments SET body = $2, updated_at = now()
-		 WHERE id = $1 AND deleted_at IS NULL`, id, body)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.UpdateComment(ctx, contentq.UpdateCommentParams{ID: id, Body: body}))
 }
 
 // BoardByPost finds the board a post belongs to. P-209 and P-210 have no slug
 // in their path, so the board — and its permission — is reached this way.
 func (s *Store) BoardByPost(ctx context.Context, postID string) (*Board, error) {
-	const q = `
-		SELECT b.id, b.slug, b.name, b.skin, b.allow_attachments, b.allow_comments,
-		       b.allow_secret, b.per_page
-		FROM boards b JOIN posts p ON p.board_id = b.id
-		WHERE p.id = $1`
-	var b Board
-	err := s.pool.QueryRow(ctx, q, postID).Scan(&b.ID, &b.Slug, &b.Name, &b.Skin,
-		&b.AllowAttachments, &b.AllowComments, &b.AllowSecret, &b.PerPage)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	return &b, err
+	return oneBoard(s.q.BoardByPost(ctx, postID))
 }
 
 // SearchPosts is P-212. The readable board ids come from the caller; a board
@@ -485,14 +396,9 @@ func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []strin
 	if len(readable) == 0 || q.Search == "" {
 		return 0, nil // 위와 같은 이유 — 절약이지 검사가 아니다
 	}
-	var n int64
-	err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM posts p
-		WHERE p.board_id = ANY($1) AND p.status = 'published'
-		  AND (NOT p.is_secret OR p.board_id = ANY($2) OR p.author_id = $3)
-		  AND p.search_vector @@ to_tsquery('simple', $4)`,
-		readable, secretIn, nullIfEmpty(viewerID), toPrefixQuery(q.Search)).Scan(&n)
-	return n, err
+	return s.q.CountSearchPosts(ctx, contentq.CountSearchPostsParams{
+		Readable: readable, SecretIn: secretIn, ViewerID: strPtr(viewerID),
+		Search: toPrefixQuery(q.Search)})
 }
 
 // ModeratePosts is A-307's list: everything on one board, hidden and secret
@@ -515,41 +421,30 @@ func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit int) ([
 
 // ModerateComments is A-308's list, newest first across one board.
 func (s *Store) ModerateComments(ctx context.Context, boardID string, limit int) ([]Comment, error) {
-	const q = `
-		SELECT c.id, c.post_id, coalesce(c.parent_id::text, ''),
-		       coalesce(c.author_id::text, ''), coalesce(u.display_name, ''),
-		       c.body, coalesce(c.deleted_at, 'epoch'::timestamptz), c.created_at
-		FROM comments c
-		JOIN posts p ON p.id = c.post_id
-		LEFT JOIN users u ON u.id = c.author_id
-		WHERE p.board_id = $1
-		ORDER BY c.created_at DESC, c.id DESC
-		LIMIT $2`
-	rows, err := s.pool.Query(ctx, q, boardID, limit)
+	rows, err := s.q.ModerateComments(ctx, contentq.ModerateCommentsParams{
+		BoardID: boardID, Limit: int32(limit)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Comment
-	for rows.Next() {
-		var c Comment
-		var del time.Time
-		if err := rows.Scan(&c.ID, &c.PostID, &c.ParentID, &c.AuthorID, &c.AuthorName,
-			&c.Body, &del, &c.CreatedAt); err != nil {
-			return nil, err
-		}
-		if !del.Equal(time.Unix(0, 0).UTC()) {
-			c.DeletedAt = del
-		}
-		out = append(out, c)
+	for _, r := range rows {
+		out = append(out, commentOf(commentRow(r)))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // postColumns is the SELECT list every post listing uses.
 //
 // 목록마다 베껴 적으면 컬럼 하나를 더할 때 한 곳을 빠뜨리고, 그 화면만 조용히
 // 옛 모양으로 남는다 — 스캔 순서가 어긋나면 그때는 런타임 오류다.
+//
+// sqlc 불가: posts 를 Post 로 읽는 여섯 질의(ListPosts 둘·PostByID·SearchPosts·
+// ModeratePosts·RecentPosts)와 scanPost 는 post_shape_test 가 이 파일의 AST 와
+// 본문을 읽어 「postColumns 를 쓰는 SELECT 다섯 이상 + Scan 한 곳」을 요구한다.
+// queries/post.sql 로 옮기면 그 검사가 질의를 못 찾아 실패한다 — 생성 코드는
+// 열 목록과 스캔을 한 쌍으로 만들어 그 검사가 지키던 것을 타입으로 보장하므로,
+// 검사를 거두는 커밋에서 이 여섯과 ListQuery.OrderBy 의 허용 목록을 함께 옮긴다
+// (정렬은 D22 6절의 `ORDER BY CASE WHEN sqlc.arg('sort') = …` 로).
 const postColumns = `
 	p.id, p.board_id, coalesce(p.author_id::text, ''), coalesce(u.display_name, ''),
 	p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,

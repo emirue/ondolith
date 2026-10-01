@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 // Attachment is one row of attachments (D30).
@@ -23,6 +25,20 @@ type Attachment struct {
 	MIMEType     string
 	ByteSize     int64
 	CreatedAt    time.Time
+}
+
+func attachmentOf(r contentq.Attachment) Attachment {
+	return Attachment{ID: r.ID, PostID: r.PostID, StoredPath: r.StoredPath,
+		OriginalName: r.OriginalName, MIMEType: r.MimeType, ByteSize: r.ByteSize,
+		CreatedAt: r.CreatedAt}
+}
+
+func attachmentsOf(rows []contentq.Attachment) []Attachment {
+	var out []Attachment
+	for _, r := range rows {
+		out = append(out, attachmentOf(r))
+	}
+	return out
 }
 
 // Attachments is the store's view of the upload directory.
@@ -52,12 +68,11 @@ func (a *Attachments) Save(ctx context.Context, postID, name string, r io.Reader
 	}
 	// **개수를 먼저 센다.** 파일을 쓴 뒤에 세면 상한을 넘긴 그 파일이 디스크에
 	// 다녀갔다 지워지는데, 상한의 목적이 바로 그 디스크 사용이다.
-	var n int
-	if err := a.store.pool.QueryRow(ctx,
-		`SELECT count(*) FROM attachments WHERE post_id = $1`, postID).Scan(&n); err != nil {
+	n, err := a.store.q.CountAttachments(ctx, postID)
+	if err != nil {
 		return Attachment{}, err
 	}
-	if n >= limits.MaxPerPost {
+	if n >= int64(limits.MaxPerPost) {
 		return Attachment{}, fmt.Errorf("%w: 글당 %d개", ErrUploadTooMany, limits.MaxPerPost)
 	}
 
@@ -66,58 +81,38 @@ func (a *Attachments) Save(ctx context.Context, postID, name string, r io.Reader
 		return Attachment{}, err
 	}
 
-	const q = `
-		INSERT INTO attachments (post_id, stored_path, original_name, mime_type, byte_size)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`
-	var out Attachment
-	err = a.store.pool.QueryRow(ctx, q, postID, stored.StoredPath,
-		stored.OriginalName, stored.MIMEType, stored.ByteSize).Scan(&out.ID, &out.CreatedAt)
+	row, err := a.store.q.CreateAttachment(ctx, contentq.CreateAttachmentParams{
+		PostID: postID, StoredPath: stored.StoredPath, OriginalName: stored.OriginalName,
+		MimeType: stored.MIMEType, ByteSize: stored.ByteSize})
 	if err != nil {
 		// The row did not land, so the bytes must not stay: nothing will ever
 		// point at them and nobody could tell them from a live attachment.
 		_ = a.removeFile(stored.StoredPath)
 		return Attachment{}, err
 	}
-	out.PostID = postID
-	out.StoredPath = stored.StoredPath
-	out.OriginalName = stored.OriginalName
-	out.MIMEType = stored.MIMEType
-	out.ByteSize = stored.ByteSize
-	return out, nil
+	return Attachment{ID: row.ID, CreatedAt: row.CreatedAt, PostID: postID,
+		StoredPath: stored.StoredPath, OriginalName: stored.OriginalName,
+		MIMEType: stored.MIMEType, ByteSize: stored.ByteSize}, nil
 }
 
 func (a *Attachments) List(ctx context.Context, postID string) ([]Attachment, error) {
-	const q = `
-		SELECT id, post_id, stored_path, original_name, mime_type, byte_size, created_at
-		FROM attachments WHERE post_id = $1 ORDER BY created_at, id`
-	rows, err := a.store.pool.Query(ctx, q, postID)
+	rows, err := a.store.q.Attachments(ctx, postID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Attachment
-	for rows.Next() {
-		var at Attachment
-		if err := rows.Scan(&at.ID, &at.PostID, &at.StoredPath, &at.OriginalName,
-			&at.MIMEType, &at.ByteSize, &at.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, at)
-	}
-	return out, rows.Err()
+	return attachmentsOf(rows), nil
 }
 
 func (a *Attachments) ByID(ctx context.Context, id string) (*Attachment, error) {
-	const q = `
-		SELECT id, post_id, stored_path, original_name, mime_type, byte_size, created_at
-		FROM attachments WHERE id = $1`
-	var at Attachment
-	err := a.store.pool.QueryRow(ctx, q, id).Scan(&at.ID, &at.PostID, &at.StoredPath,
-		&at.OriginalName, &at.MIMEType, &at.ByteSize, &at.CreatedAt)
+	r, err := a.store.q.AttachmentByID(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return &at, err
+	if err != nil {
+		return nil, err
+	}
+	at := attachmentOf(r)
+	return &at, nil
 }
 
 // Open returns the file for download.
@@ -146,12 +141,8 @@ func (a *Attachments) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	tag, err := a.store.pool.Exec(ctx, `DELETE FROM attachments WHERE id = $1`, id)
-	if err != nil {
+	if err := affected(a.store.q.DeleteAttachment(ctx, id)); err != nil {
 		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
 	}
 	// Reported, not returned: the row is already gone and the caller cannot
 	// undo it. The file is now orphaned, which A-309 accepts.
@@ -169,22 +160,8 @@ func (a *Attachments) Delete(ctx context.Context, id string) error {
 // 정한 것과 같은 이유로, 행보다 파일이 오래 남는 것은 쓰레기이고 그 반대는
 // 500 을 내는 다운로드다.
 func (a *Attachments) DeletePost(ctx context.Context, postID string) error {
-	rows, err := a.store.pool.Query(ctx,
-		`SELECT stored_path FROM attachments WHERE post_id = $1`, postID)
+	paths, err := a.store.q.AttachmentPaths(ctx, postID)
 	if err != nil {
-		return err
-	}
-	var paths []string
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			rows.Close()
-			return err
-		}
-		paths = append(paths, p)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return err
 	}
 
@@ -259,27 +236,10 @@ func (a *Attachments) removeFile(rel string) error {
 // first. The board scopes it because post.moderate does (D15 2.4) — "every
 // attachment on the site" is a list nobody has permission for as a whole.
 func (s *Store) BoardAttachments(ctx context.Context, boardID string, limit int) ([]Attachment, error) {
-	const q = `
-		SELECT a.id, a.post_id, a.stored_path, a.original_name, a.mime_type,
-		       a.byte_size, a.created_at
-		FROM attachments a
-		JOIN posts p ON p.id = a.post_id
-		WHERE p.board_id = $1
-		ORDER BY a.created_at DESC, a.id DESC
-		LIMIT $2`
-	rows, err := s.pool.Query(ctx, q, boardID, limit)
+	rows, err := s.q.BoardAttachments(ctx, contentq.BoardAttachmentsParams{
+		BoardID: boardID, Limit: int32(limit)})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Attachment
-	for rows.Next() {
-		var at Attachment
-		if err := rows.Scan(&at.ID, &at.PostID, &at.StoredPath, &at.OriginalName,
-			&at.MIMEType, &at.ByteSize, &at.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, at)
-	}
-	return out, rows.Err()
+	return attachmentsOf(rows), nil
 }

@@ -29,12 +29,25 @@ var (
 type Store struct {
 	pool   *pgxpool.Pool
 	sealer Sealer
-	// q 는 sqlc 가 queries/*.sql 에서 생성한 질의다 (D22 6절). 손으로 스캔하는
-	// 코드를 여기서 하나씩 옮긴다 — 트랜잭션 안에서는 q.WithTx(tx).
+	// q 는 sqlc 가 queries/*.sql 에서 생성한 질의다 (D22 6절). 트랜잭션 안에서는
+	// q.WithTx(tx). 손으로 스캔하는 코드는 post.go 의 글 읽기 여섯 곳뿐이다 —
+	// 이유는 그쪽 postColumns 주석에 있다.
 	q *contentq.Queries
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: contentq.New(pool)} }
+
+// affected turns an :execrows result into the store's contract: a statement
+// that matched nothing is ErrNotFound.
+func affected(n int64, err error) error {
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
 // Sealer is what seals a secret setting on the way in and opens it on the way
 // out. secretbox.Box satisfies it; the store does not import that package so
@@ -69,73 +82,68 @@ type Page struct {
 	Template string
 }
 
+// pageOf is the one place a pages row becomes a Page. 읽기 질의가 전부 열
+// 전체를 고르는 것은 이 때문이다 — sqlc 가 모델 하나를 돌려주고 변환도 하나다.
+func pageOf(r contentq.Page) Page {
+	return Page{ID: r.ID, Slug: r.Slug, Title: r.Title, Body: r.Body,
+		Status: PageStatus(r.Status), Template: r.Template}
+}
+
+func pagesOf(rows []contentq.Page) []Page {
+	var out []Page
+	for _, r := range rows {
+		out = append(out, pageOf(r))
+	}
+	return out
+}
+
+func onePage(r contentq.Page, err error) (*Page, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	p := pageOf(r)
+	return &p, nil
+}
+
 // PublishedPageBySlug is the public read path (P-202). The status filter is in
 // the WHERE clause, not a Go comparison after the fetch: a draft must not
 // travel out of the database at all, and a predicate that is not there cannot
 // be forgotten by the next caller.
 func (s *Store) PublishedPageBySlug(ctx context.Context, slug string) (*Page, error) {
-	const q = `
-		SELECT id, slug, title, body, status, template
-		FROM pages
-		WHERE slug = $1 AND status = 'published'`
-	return s.scanPage(ctx, q, slug)
+	return onePage(s.q.PublishedPageBySlug(ctx, slug))
 }
 
 // PageBySlug is the admin read path: drafts included, because A-301 lists them.
 func (s *Store) PageBySlug(ctx context.Context, slug string) (*Page, error) {
-	const q = `SELECT id, slug, title, body, status, template FROM pages WHERE slug = $1`
-	return s.scanPage(ctx, q, slug)
-}
-
-func (s *Store) scanPage(ctx context.Context, q string, args ...any) (*Page, error) {
-	var p Page
-	err := s.pool.QueryRow(ctx, q, args...).
-		Scan(&p.ID, &p.Slug, &p.Title, &p.Body, &p.Status, &p.Template)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	return &p, err
+	return onePage(s.q.PageBySlug(ctx, slug))
 }
 
 // Pages lists every page for A-301, drafts included: the admin list is where an
 // unpublished page is found, so filtering by status here would hide the rows the
 // screen exists to show.
 func (s *Store) Pages(ctx context.Context) ([]Page, error) {
-	const q = `
-		SELECT id, slug, title, body, status, coalesce(template, '')
-		FROM pages ORDER BY updated_at DESC, id`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.q.Pages(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Page
-	for rows.Next() {
-		var p Page
-		if err := rows.Scan(&p.ID, &p.Slug, &p.Title, &p.Body, &p.Status, &p.Template); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return pagesOf(rows), nil
 }
 
 // PageByID is A-302's read. Like PageBySlug it does not filter on status: the
 // edit screen is how a draft gets finished.
 func (s *Store) PageByID(ctx context.Context, id string) (*Page, error) {
-	return s.scanPage(ctx,
-		`SELECT id, slug, title, body, status, coalesce(template, '') FROM pages WHERE id = $1`, id)
+	return onePage(s.q.PageByID(ctx, id))
 }
 
 // CreatePage lets UNIQUE (slug) decide on collisions. Checking first and
 // inserting after passes two simultaneous requests; the index is what actually
 // serialises them (D30 pages).
 func (s *Store) CreatePage(ctx context.Context, p Page) (string, error) {
-	const q = `
-		INSERT INTO pages (slug, title, body, template)
-		VALUES ($1, $2, $3, $4) RETURNING id`
-	var id string
-	err := s.pool.QueryRow(ctx, q, p.Slug, p.Title, p.Body, p.Template).Scan(&id)
+	id, err := s.q.CreatePage(ctx, contentq.CreatePageParams{
+		Slug: p.Slug, Title: p.Title, Body: p.Body, Template: p.Template})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrSlugTaken
@@ -147,52 +155,44 @@ func (s *Store) CreatePage(ctx context.Context, p Page) (string, error) {
 // (page.publish vs page.update, D15 2.2); letting an edit carry a status would
 // hand the first permission the second one's power.
 func (s *Store) UpdatePage(ctx context.Context, id string, p Page) error {
-	const q = `
-		UPDATE pages SET slug = $2, title = $3, body = $4, template = $5, updated_at = now()
-		WHERE id = $1`
-	tag, err := s.pool.Exec(ctx, q, id, p.Slug, p.Title, p.Body, p.Template)
+	n, err := s.q.UpdatePage(ctx, contentq.UpdatePageParams{
+		ID: id, Slug: p.Slug, Title: p.Title, Body: p.Body, Template: p.Template})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return ErrSlugTaken
 	}
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(n, err)
 }
 
 // SetPageStatus moves a page between draft and published, refusing anything the
 // state graph does not allow. The current status is read and compared inside
 // one statement so that two publishers cannot both see `draft` and both act.
 func (s *Store) SetPageStatus(ctx context.Context, id string, to PageStatus) error {
-	var from PageStatus
-	err := s.pool.QueryRow(ctx, `SELECT status FROM pages WHERE id = $1`, id).Scan(&from)
+	status, err := s.q.PageStatus(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	from := PageStatus(status)
 	if err := CanTransition(from, to); err != nil {
 		return err
 	}
 	// 비교-교환이다. 위의 `FOR UPDATE` 는 자동 커밋 문장이라 잠금이 문장과 함께
 	// 풀렸다 — 두 발행자가 둘 다 draft 를 읽고 둘 다 지나갈 수 있었다. 읽은
 	// 상태가 그대로일 때만 옮기고, 아니면 지금 상태로 다시 판정한다.
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE pages SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`, id, to, from)
+	n, err := s.q.SetPageStatus(ctx, contentq.SetPageStatusParams{
+		ID: id, To: string(to), From: string(from)})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		var now PageStatus
-		if err := s.pool.QueryRow(ctx, `SELECT status FROM pages WHERE id = $1`, id).Scan(&now); err != nil {
+	if n == 0 {
+		now, err := s.q.PageStatus(ctx, id)
+		if err != nil {
 			return ErrNotFound
 		}
-		if err := CanTransition(now, to); err != nil {
+		if err := CanTransition(PageStatus(now), to); err != nil {
 			return err
 		}
 		return ErrNoRowsSave
@@ -201,44 +201,32 @@ func (s *Store) SetPageStatus(ctx context.Context, id string, to PageStatus) err
 }
 
 func (s *Store) DeletePage(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM pages WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.DeletePage(ctx, id))
 }
 
 // Settings are key/value. The caller names the keys it wants; there is no
 // "fetch everything" because each screen owns its own keys (D30 settings).
 func (s *Store) Settings(ctx context.Context, keys ...string) (map[string]string, error) {
-	const q = `SELECT key, value FROM settings WHERE key = ANY($1)`
-	rows, err := s.pool.Query(ctx, q, keys)
+	rows, err := s.q.Settings(ctx, keys)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := make(map[string]string, len(keys))
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return nil, err
-		}
-		if s.sealer != nil && IsSecretSetting(k) {
+	for _, r := range rows {
+		v := r.Value
+		if s.sealer != nil && IsSecretSetting(r.Key) {
 			// 열리지 않는 값을 평문인 척 돌려주지 않는다 — 키가 바뀐 설정 파일로
 			// 부팅한 경우이고, 그 시크릿으로 PG 를 부르면 401 이 아니라 엉뚱한
 			// 실패가 난다. 오류가 원인을 말한다.
-			pt, _, err := s.sealer.Open(k, v)
+			pt, _, err := s.sealer.Open(r.Key, v)
 			if err != nil {
-				return nil, fmt.Errorf("설정 %s: %w", k, err)
+				return nil, fmt.Errorf("설정 %s: %w", r.Key, err)
 			}
 			v = pt
 		}
-		out[k] = v
+		out[r.Key] = v
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // PutSettings upserts. ON CONFLICT targets the primary key, which is `key`
@@ -252,9 +240,7 @@ func (s *Store) PutSettings(ctx context.Context, kv map[string]string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	const q = `
-		INSERT INTO settings (key, value) VALUES ($1, $2)
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`
+	q := s.q.WithTx(tx)
 	for k, v := range kv {
 		if s.sealer != nil && IsSecretSetting(k) {
 			sealed, err := s.sealer.Seal(k, v)
@@ -263,7 +249,7 @@ func (s *Store) PutSettings(ctx context.Context, kv map[string]string) error {
 			}
 			v = sealed
 		}
-		if _, err := tx.Exec(ctx, q, k, v); err != nil {
+		if err := q.PutSetting(ctx, contentq.PutSettingParams{Key: k, Value: v}); err != nil {
 			return err
 		}
 	}
@@ -277,28 +263,16 @@ func (s *Store) SealLegacySecrets(ctx context.Context) (int, error) {
 	if s.sealer == nil {
 		return 0, nil
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT key, value FROM settings
-		WHERE (key IN ('pg.secret_key', 'mail.smtp_password') OR key LIKE 'social.%.client_secret')
-		  AND value <> '' AND value NOT LIKE 'enc:v1:%'`)
+	rows, err := s.q.LegacySecretSettings(ctx)
 	if err != nil {
 		return 0, err
 	}
-	legacy := map[string]string{}
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		legacy[k] = v
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	if len(legacy) == 0 {
+	if len(rows) == 0 {
 		return 0, nil
+	}
+	legacy := make(map[string]string, len(rows))
+	for _, r := range rows {
+		legacy[r.Key] = r.Value
 	}
 	return len(legacy), s.PutSettings(ctx, legacy)
 }
@@ -310,36 +284,24 @@ func (s *Store) SealLegacySecrets(ctx context.Context) (int, error) {
 // Ordering matches menus_parent_sort_idx so the database can walk the index
 // instead of sorting (D30).
 func (s *Store) MenuItems(ctx context.Context) ([]MenuItem, error) {
-	const q = `
-		SELECT id, coalesce(parent_id::text, ''), title, url, sort_order
-		FROM menus
-		ORDER BY parent_id NULLS FIRST, sort_order, id`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.q.MenuItems(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []MenuItem
-	for rows.Next() {
-		var m MenuItem
-		if err := rows.Scan(&m.ID, &m.ParentID, &m.Title, &m.URL, &m.Sort); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
+	for _, r := range rows {
+		out = append(out, MenuItem{ID: r.ID, ParentID: r.ParentID, Title: r.Title,
+			URL: r.Url, Sort: int(r.SortOrder)})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // CreateMenuItem inserts one row. The parent, if any, must exist — the foreign
 // key says so — but a cycle is only caught when the tree is assembled, because
 // no constraint can see one (D30 3절).
 func (s *Store) CreateMenuItem(ctx context.Context, m MenuItem) (string, error) {
-	const q = `
-		INSERT INTO menus (title, url, parent_id, sort_order)
-		VALUES ($1, $2, nullif($3, '')::uuid, $4) RETURNING id`
-	var id string
-	err := s.pool.QueryRow(ctx, q, m.Title, m.URL, m.ParentID, m.Sort).Scan(&id)
-	return id, err
+	return s.q.CreateMenuItem(ctx, contentq.CreateMenuItemParams{
+		Title: m.Title, Url: m.URL, ParentID: m.ParentID, SortOrder: int32(m.Sort)})
 }
 
 // UpdateMenuItem edits one row, re-parenting included.
@@ -349,49 +311,21 @@ func (s *Store) CreateMenuItem(ctx context.Context, m MenuItem) (string, error) 
 // up when the tree is assembled. The caller checks first (A-204) — the store
 // writes what it is told.
 func (s *Store) UpdateMenuItem(ctx context.Context, id string, m MenuItem) error {
-	const q = `
-		UPDATE menus SET title = $2, url = $3, parent_id = nullif($4, '')::uuid, sort_order = $5
-		WHERE id = $1`
-	tag, err := s.pool.Exec(ctx, q, id, m.Title, m.URL, m.ParentID, m.Sort)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.UpdateMenuItem(ctx, contentq.UpdateMenuItemParams{
+		ID: id, Title: m.Title, Url: m.URL, ParentID: m.ParentID, SortOrder: int32(m.Sort)}))
 }
 
 func (s *Store) DeleteMenuItem(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM menus WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.DeleteMenuItem(ctx, id))
 }
 
 // PublishedPages is the sitemap's page list (FR-510). The status filter is in
 // the WHERE clause for the same reason PublishedPageBySlug has it: a draft must
 // not leave the database.
 func (s *Store) PublishedPages(ctx context.Context) ([]Page, error) {
-	const q = `
-		SELECT id, slug, title, body, status, coalesce(template, '')
-		FROM pages WHERE status = 'published' ORDER BY slug`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.q.PublishedPages(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Page
-	for rows.Next() {
-		var p Page
-		if err := rows.Scan(&p.ID, &p.Slug, &p.Title, &p.Body, &p.Status, &p.Template); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return pagesOf(rows), nil
 }

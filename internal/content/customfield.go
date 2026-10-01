@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 // FieldType is the closed vocabulary D30 gives board_fields.field_type.
@@ -276,26 +278,19 @@ func FieldTypes() []FieldType {
 
 // UserFields lists the profile fields an operator defined, in display order.
 func (s *Store) UserFields(ctx context.Context) ([]FieldSchema, error) {
-	const q = `
-		SELECT key, label, field_type, is_required, show_in_list, options, sort_order
-		FROM user_fields ORDER BY sort_order, key`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.q.UserFields(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []FieldSchema
-	for rows.Next() {
-		var f FieldSchema
-		var opts []string
-		if err := rows.Scan(&f.Key, &f.Label, &f.Type, &f.Required,
-			&f.ShowInList, &opts, &f.Sort); err != nil {
+	for _, r := range rows {
+		f, err := fieldOf(fieldRow(r))
+		if err != nil {
 			return nil, err
 		}
-		f.Options = opts
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // SaveUserField inserts or updates one definition.
@@ -308,31 +303,17 @@ func (s *Store) SaveUserField(ctx context.Context, f FieldSchema) error {
 	if err := ValidateUserFieldKey(f.Key); err != nil {
 		return err
 	}
-	opts := f.Options
-	if opts == nil {
-		opts = []string{}
+	opts, err := fieldOptions(f.Options)
+	if err != nil {
+		return err
 	}
-	const q = `
-		INSERT INTO user_fields (key, label, field_type, is_required, show_in_list, options, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (key) DO UPDATE SET
-			label = EXCLUDED.label, field_type = EXCLUDED.field_type,
-			is_required = EXCLUDED.is_required, show_in_list = EXCLUDED.show_in_list,
-			options = EXCLUDED.options, sort_order = EXCLUDED.sort_order, updated_at = now()`
-	_, err := s.pool.Exec(ctx, q, f.Key, f.Label, f.Type,
-		f.Required, f.ShowInList, opts, f.Sort)
-	return err
+	return s.q.SaveUserField(ctx, contentq.SaveUserFieldParams{
+		Key: f.Key, Label: f.Label, FieldType: string(f.Type),
+		IsRequired: f.Required, ShowInList: f.ShowInList, Options: opts, SortOrder: int32(f.Sort)})
 }
 
 // DeleteUserField removes a definition. **회원이 적어 낸 값은 남는다**
 // (D14 3절 규칙 4) — 항목을 잘못 지운 운영자가 사람들의 입력까지 잃지 않도록.
 func (s *Store) DeleteUserField(ctx context.Context, key string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM user_fields WHERE key = $1`, key)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return affected(s.q.DeleteUserField(ctx, key))
 }
