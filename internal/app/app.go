@@ -115,16 +115,34 @@ func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
 // wrong state has its wrong state discovered by a visitor.
 // rebuild reassembles this tree from the same config and swaps it in; A-201
 // calls it when an assembly-time setting changes (D20 모듈 게이팅).
-func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
-	rebuild func() error,
-) (http.Handler, func(), error) {
-	pcfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+//
+// poolConfig is the operating tree's connection pool settings, apart from New so
+// that a test can open a pool the same way and ask the server what it got.
+func poolConfig(dsn string) (*pgxpool.Config, error) {
+	pcfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, nil, fmt.Errorf("app: pool: %w", err)
+		return nil, err
 	}
 	// 유휴 30분 뒤 첫 요청이 접속부터 여는 지연을 피한다. 상한은 기본값
 	// (max(4, CPU))에 둔다 — NFR-101 의 1 vCPU 상자에서 4 다.
 	pcfg.MinConns = 1
+	// **매 실행마다 인자 값으로 계획한다.** pgx 는 질의를 준비된 문장으로 보내고,
+	// PostgreSQL 은 같은 문장을 다섯 번 실행한 뒤 인자를 모르는 일반 계획으로
+	// 넘어갈 수 있다. 정렬 키를 `ORDER BY CASE WHEN $sort = … END` 로 받는 질의
+	// (D22 6절)는 일반 계획에서 어느 CASE 가 살아 있는지 알 수 없어 인덱스 순서를
+	// 못 쓰고 전부 정렬한다 — 게시판 목록이 0.36ms 에서 318ms 가 됐고, 그 접속이
+	// 살아 있는 동안 계속 그랬다 (실측). 계획 비용은 질의마다 0.1ms 남짓이다.
+	pcfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
+	return pcfg, nil
+}
+
+func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
+	rebuild func() error,
+) (http.Handler, func(), error) {
+	pcfg, err := poolConfig(cfg.DatabaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app: pool: %w", err)
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app: pool: %w", err)

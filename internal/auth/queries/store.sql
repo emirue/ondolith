@@ -36,17 +36,22 @@ WHERE email = $1 AND is_active;
 SELECT id, email, display_name, is_active, sessions_valid_from, email_verified_at
 FROM users WHERE id = $1;
 
+-- 쪽을 먼저 고르고(users_created_idx), 역할은 그 쪽의 회원에게만 모은다. 조인하고
+-- GROUP BY 한 뒤 자르면 회원 전부의 역할을 모으고 나서 한 쪽만 남긴다.
 -- name: ListUsers :many
 SELECT u.id, u.email, u.display_name, u.is_active,
        (u.email_verified_at IS NOT NULL)::bool AS verified,
-       coalesce(array_agg(r.key ORDER BY r.key) FILTER (WHERE r.key IS NOT NULL), '{}')::text[] AS roles,
+       coalesce((SELECT array_agg(r.key ORDER BY r.key)
+                 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                 WHERE ur.user_id = u.id), '{}')::text[] AS roles,
        u.custom_fields
-FROM users u
-LEFT JOIN user_roles ur ON ur.user_id = u.id
-LEFT JOIN roles r ON r.id = ur.role_id
-GROUP BY u.id
-ORDER BY u.created_at DESC, u.id
-LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
+FROM (
+    SELECT uu.id, uu.email, uu.display_name, uu.is_active, uu.email_verified_at, uu.custom_fields, uu.created_at
+    FROM users uu
+    ORDER BY uu.created_at DESC, uu.id
+    LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
+) u
+ORDER BY u.created_at DESC, u.id;
 
 -- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name)

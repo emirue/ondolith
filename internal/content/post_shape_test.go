@@ -44,6 +44,15 @@ func TestPostQueriesShareColumnsAndConverter(t *testing.T) {
 			len(queries), queries)
 	}
 
+	// **목록은 본문을 읽지 않는다.** 바깥 목록의 `''::text AS body` 만으로는
+	// 부족하다 — 안쪽 질의가 p.body 를 고르면 정렬이 본문을 들고 다닌다.
+	all := namedQueries(t)
+	for _, name := range []string{"ListPosts", "ListPostsSearch", "ModeratePosts", "RecentPosts"} {
+		if strings.Contains(all[name], "p.body") {
+			t.Errorf("%s 가 p.body 를 읽는다 — 목록은 본문 없이 그린다", name)
+		}
+	}
+
 	// Post 를 만드는 곳도 하나여야 한다. 행 타입이 여섯이라도 변환이 둘이면
 	// custom_fields 를 푸는 규칙이 갈라진다.
 	if n := postLiterals(t); n != 1 {
@@ -64,6 +73,14 @@ func TestSortableQueriesShareTheCaseChain(t *testing.T) {
 			continue
 		}
 		chains[name] = normalizeSQL(body[i:strings.Index(body, "LIMIT")])
+
+		// **쪽을 고르는 안쪽 질의와 그 행들을 내보내는 바깥 질의가 같은 사슬을 쓴다.**
+		// 위에서 뽑은 것은 안쪽(LIMIT 앞)이다. 바깥이 다르면 쪽은 맞게 골랐는데
+		// 그 안에서 순서가 섞이고, 바깥에 ORDER BY 가 없으면 조인이 정한 순서로
+		// 나온다 — 둘 다 작은 게시판에서는 우연히 맞아 보인다.
+		if n := strings.Count(normalizeSQL(body), chains[name]); n != 2 {
+			t.Errorf("%s: ORDER BY 사슬이 %d 번 나온다 — 안쪽(쪽 선택)과 바깥(출력)에 한 번씩, 같은 글자로 있어야 한다", name, n)
+		}
 	}
 	for _, name := range sortable {
 		if chains[name] == "" {
@@ -96,12 +113,16 @@ func TestSortableQueriesShareTheCaseChain(t *testing.T) {
 // postReadingQueries returns name → normalised column list for every named
 // query in queries/post.sql whose SELECT reads posts into a Post. 목록 질의는
 // body 자리만 ” 라, 그 자리를 p.body 로 돌려 같은 모양으로 비교한다.
+//
+// 비교하는 것은 **바깥 SELECT 의 목록**이다 — 행 타입을 정하는 쪽이다. 정렬되는
+// 셋은 `FROM ( SELECT … FROM posts p … ) p` 로 쪽을 먼저 고르므로, 첫 FROM 이
+// `posts p` 가 아니라 `(` 다.
 func postReadingQueries(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	for name, body := range namedQueries(t) {
-		from := strings.Index(body, "\nFROM posts p\n")
-		if from < 0 || !strings.HasPrefix(body, "SELECT ") {
+		from := strings.Index(body, "\nFROM ")
+		if from < 0 || !strings.HasPrefix(body, "SELECT ") || !strings.Contains(body, "FROM posts p\n") {
 			continue
 		}
 		cols := normalizeSQL(strings.TrimPrefix(body[:from], "SELECT "))

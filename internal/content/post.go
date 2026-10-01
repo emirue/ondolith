@@ -95,6 +95,21 @@ func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (in
 		BoardID: boardID, Search: toPrefixQuery(q.Search)})
 }
 
+// PostPage is P-203's read: one page and the pager total.
+//
+// **먼저 세고, 그 쪽에 행이 없으면 목록 질의를 하지 않는다.** 맞는 글이 없는 검색은
+// LIMIT 을 채우지 못해 게시판 전체를 정렬 순서대로 끝까지 걷는다 (실측 86ms →
+// 0.02ms). 세는 쪽은 GIN 인덱스로 곧바로 0 을 안다. 마지막 쪽을 넘긴 page 인자도
+// 같은 경우다 — 둘은 같은 술어를 쓰므로 합계가 offset 이하이면 목록은 비어 있다.
+func (s *Store) PostPage(ctx context.Context, boardID string, q ListQuery) ([]Post, int64, error) {
+	total, err := s.CountPosts(ctx, boardID, q)
+	if err != nil || total <= int64(q.Offset()) {
+		return nil, total, err
+	}
+	posts, err := s.ListPosts(ctx, boardID, q)
+	return posts, total, err
+}
+
 // SitemapEntry is all P-901 needs of a post: where it lives and when it changed.
 type SitemapEntry struct {
 	ID        string

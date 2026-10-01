@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict jJcC3LrjWE6nUPSXcW2K6y3WfbpFXbzcCksHaF1bPWFP2MgmVjfXGkMOAaEadG7
+\restrict 8lWRvvhdAB7SuT4HG09gzFyjuXdgUDIKCRWbXGKwfeG0sQScXVDh0cupoZp3DMB
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1510,6 +1510,20 @@ CREATE INDEX posts_board_list_idx ON public.posts USING btree (board_id, is_pinn
 
 
 --
+-- Name: posts_board_published_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_board_published_idx ON public.posts USING btree (board_id) WHERE (status = 'published'::text);
+
+
+--
+-- Name: posts_board_title_desc_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_board_title_desc_idx ON public.posts USING btree (board_id, is_pinned DESC, title DESC, id DESC);
+
+
+--
 -- Name: posts_board_title_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1689,6 +1703,13 @@ CREATE UNIQUE INDEX terms_kind_effective_uniq ON public.terms USING btree (kind,
 --
 
 CREATE INDEX user_roles_role_id_idx ON public.user_roles USING btree (role_id);
+
+
+--
+-- Name: users_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX users_created_idx ON public.users USING btree (created_at DESC, id);
 
 
 --
@@ -2132,5 +2153,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict jJcC3LrjWE6nUPSXcW2K6y3WfbpFXbzcCksHaF1bPWFP2MgmVjfXGkMOAaEadG7
+\unrestrict 8lWRvvhdAB7SuT4HG09gzFyjuXdgUDIKCRWbXGKwfeG0sQScXVDh0cupoZp3DMB
 

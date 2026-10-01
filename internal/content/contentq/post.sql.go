@@ -238,10 +238,24 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
-FROM posts p
+FROM (
+    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+           p.view_count, p.created_at, p.updated_at
+    FROM posts p
+    WHERE p.board_id = $1
+      AND p.status = 'published'
+    ORDER BY p.is_pinned DESC,
+             CASE WHEN $2::text = 'created' AND $3::bool THEN p.created_at END DESC,
+             CASE WHEN $2::text = 'created' AND NOT $3::bool THEN p.created_at END ASC,
+             CASE WHEN $2::text = 'views' AND $3::bool THEN p.view_count END DESC,
+             CASE WHEN $2::text = 'views' AND NOT $3::bool THEN p.view_count END ASC,
+             CASE WHEN $2::text = 'title' AND $3::bool THEN p.title END DESC,
+             CASE WHEN $2::text = 'title' AND NOT $3::bool THEN p.title END ASC,
+             CASE WHEN $3::bool THEN p.id END DESC,
+             CASE WHEN NOT $3::bool THEN p.id END ASC
+    LIMIT $5::int OFFSET $4::int
+) p
 LEFT JOIN users u ON u.id = p.author_id
-WHERE p.board_id = $1
-  AND p.status = 'published'
 ORDER BY p.is_pinned DESC,
          CASE WHEN $2::text = 'created' AND $3::bool THEN p.created_at END DESC,
          CASE WHEN $2::text = 'created' AND NOT $3::bool THEN p.created_at END ASC,
@@ -251,7 +265,6 @@ ORDER BY p.is_pinned DESC,
          CASE WHEN $2::text = 'title' AND NOT $3::bool THEN p.title END ASC,
          CASE WHEN $3::bool THEN p.id END DESC,
          CASE WHEN NOT $3::bool THEN p.id END ASC
-LIMIT $5::int OFFSET $4::int
 `
 
 type ListPostsParams struct {
@@ -280,6 +293,11 @@ type ListPostsRow struct {
 	HasAttachment bool
 }
 
+// **쪽을 먼저 고르고, 그 행에만 나머지를 붙인다** (ListPosts·ListPostsSearch·SearchPosts).
+// 안쪽 질의가 WHERE·ORDER BY·LIMIT 으로 한 쪽을 정하고, 바깥이 그 행들에 댓글 수·첨부
+// 여부·작성자를 계산한다. 한 층으로 쓰면 정렬이 인덱스를 못 타는 순간 걸러진 행
+// **전부**에 대해 댓글을 세고 나서 정렬한다. 바깥 ORDER BY 는 안쪽과 같은 사슬이다 —
+// 조인이 순서를 지켜 준다는 보장은 없다 (post_shape_test.go 가 둘이 같은지 본다).
 func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPostsRow, error) {
 	rows, err := q.db.Query(ctx, listPosts,
 		arg.BoardID,
@@ -328,11 +346,25 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
-FROM posts p
+FROM (
+    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+           p.view_count, p.created_at, p.updated_at
+    FROM posts p
+    WHERE p.board_id = $1
+      AND p.status = 'published'
+      AND p.search_vector @@ to_tsquery('simple', $2)
+    ORDER BY p.is_pinned DESC,
+             CASE WHEN $3::text = 'created' AND $4::bool THEN p.created_at END DESC,
+             CASE WHEN $3::text = 'created' AND NOT $4::bool THEN p.created_at END ASC,
+             CASE WHEN $3::text = 'views' AND $4::bool THEN p.view_count END DESC,
+             CASE WHEN $3::text = 'views' AND NOT $4::bool THEN p.view_count END ASC,
+             CASE WHEN $3::text = 'title' AND $4::bool THEN p.title END DESC,
+             CASE WHEN $3::text = 'title' AND NOT $4::bool THEN p.title END ASC,
+             CASE WHEN $4::bool THEN p.id END DESC,
+             CASE WHEN NOT $4::bool THEN p.id END ASC
+    LIMIT $6::int OFFSET $5::int
+) p
 LEFT JOIN users u ON u.id = p.author_id
-WHERE p.board_id = $1
-  AND p.status = 'published'
-  AND p.search_vector @@ to_tsquery('simple', $2)
 ORDER BY p.is_pinned DESC,
          CASE WHEN $3::text = 'created' AND $4::bool THEN p.created_at END DESC,
          CASE WHEN $3::text = 'created' AND NOT $4::bool THEN p.created_at END ASC,
@@ -342,7 +374,6 @@ ORDER BY p.is_pinned DESC,
          CASE WHEN $3::text = 'title' AND NOT $4::bool THEN p.title END ASC,
          CASE WHEN $4::bool THEN p.id END DESC,
          CASE WHEN NOT $4::bool THEN p.id END ASC
-LIMIT $6::int OFFSET $5::int
 `
 
 type ListPostsSearchParams struct {
@@ -689,12 +720,26 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
-FROM posts p
+FROM (
+    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+           p.view_count, p.created_at, p.updated_at
+    FROM posts p
+    WHERE p.board_id = ANY($1::uuid[])
+      AND p.status = 'published'
+      AND (NOT p.is_secret OR p.board_id = ANY($2::uuid[]) OR p.author_id = $3)
+      AND p.search_vector @@ to_tsquery('simple', $4)
+    ORDER BY p.is_pinned DESC,
+             CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
+             CASE WHEN $5::text = 'created' AND NOT $6::bool THEN p.created_at END ASC,
+             CASE WHEN $5::text = 'views' AND $6::bool THEN p.view_count END DESC,
+             CASE WHEN $5::text = 'views' AND NOT $6::bool THEN p.view_count END ASC,
+             CASE WHEN $5::text = 'title' AND $6::bool THEN p.title END DESC,
+             CASE WHEN $5::text = 'title' AND NOT $6::bool THEN p.title END ASC,
+             CASE WHEN $6::bool THEN p.id END DESC,
+             CASE WHEN NOT $6::bool THEN p.id END ASC
+    LIMIT $8::int OFFSET $7::int
+) p
 LEFT JOIN users u ON u.id = p.author_id
-WHERE p.board_id = ANY($1::uuid[])
-  AND p.status = 'published'
-  AND (NOT p.is_secret OR p.board_id = ANY($2::uuid[]) OR p.author_id = $3)
-  AND p.search_vector @@ to_tsquery('simple', $4)
 ORDER BY p.is_pinned DESC,
          CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
          CASE WHEN $5::text = 'created' AND NOT $6::bool THEN p.created_at END ASC,
@@ -704,7 +749,6 @@ ORDER BY p.is_pinned DESC,
          CASE WHEN $5::text = 'title' AND NOT $6::bool THEN p.title END ASC,
          CASE WHEN $6::bool THEN p.id END DESC,
          CASE WHEN NOT $6::bool THEN p.id END ASC
-LIMIT $8::int OFFSET $7::int
 `
 
 type SearchPostsParams struct {
@@ -800,14 +844,15 @@ func (q *Queries) SetPostFlags(ctx context.Context, arg SetPostFlagsParams) (int
 }
 
 const sitemapPosts = `-- name: SitemapPosts :many
-SELECT id, board_id, updated_at FROM (
-    SELECT id, board_id, updated_at,
-           row_number() OVER (PARTITION BY board_id ORDER BY created_at DESC, id DESC) AS rn
-    FROM posts
-    WHERE board_id = ANY($1::uuid[]) AND status = 'published' AND NOT is_secret
-) t
-WHERE rn <= $2::int
-ORDER BY board_id, rn
+SELECT p.id, p.board_id, p.updated_at
+FROM unnest($1::uuid[]) AS b(id)
+CROSS JOIN LATERAL (
+    SELECT id, board_id, updated_at, is_pinned, created_at FROM posts
+    WHERE board_id = b.id AND status = 'published' AND NOT is_secret
+    ORDER BY is_pinned DESC, created_at DESC, id DESC
+    LIMIT $2::int
+) p
+ORDER BY p.board_id, p.is_pinned DESC, p.created_at DESC, p.id DESC
 `
 
 type SitemapPostsParams struct {
@@ -821,6 +866,9 @@ type SitemapPostsRow struct {
 	UpdatedAt time.Time
 }
 
+// 게시판마다 posts_board_list_idx 를 앞에서부터 per_board 건만 읽는다. 창 함수
+// (row_number) 로 쓰면 읽을 수 있는 글 전부에 번호를 매긴 뒤 자른다.
+// **고정 글이 게시판 몫의 앞에 온다** — 인덱스의 순서(고정 → 최신)를 그대로 쓴다.
 func (q *Queries) SitemapPosts(ctx context.Context, arg SitemapPostsParams) ([]SitemapPostsRow, error) {
 	rows, err := q.db.Query(ctx, sitemapPosts, arg.BoardIds, arg.PerBoard)
 	if err != nil {

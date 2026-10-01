@@ -74,7 +74,21 @@ CREATE TRIGGER payments_no_delete BEFORE DELETE ON payments
 CREATE TRIGGER refunds_no_delete BEFORE DELETE ON refunds
     FOR EACH ROW EXECUTE FUNCTION money_rows_no_delete();
 
+-- ── 성능: 게시판·회원 (실측은 CHANGELOG) ───────────────────────────────────
+
+-- 제목 내림차순 정렬. 00022 는 오름차순만 잡았다 — 고정 글이 앞이라 방향이 섞인
+-- 정렬은 인덱스 하나를 거꾸로 걸어서는 되지 않는다.
+CREATE INDEX posts_board_title_desc_idx ON posts (board_id, is_pinned DESC, title DESC, id DESC);
+-- 페이저의 「전체 N건」(CountPosts). 발행 글만 담은 좁은 인덱스로 센다.
+CREATE INDEX posts_board_published_idx ON posts (board_id) WHERE status = 'published';
+-- A-401 회원 목록의 정렬. 없으면 쪽마다 회원 전부를 정렬한다.
+CREATE INDEX users_created_idx ON users (created_at DESC, id);
+
 -- +goose Down
+
+DROP INDEX users_created_idx;
+DROP INDEX posts_board_published_idx;
+DROP INDEX posts_board_title_desc_idx;
 
 DROP TRIGGER refunds_no_delete ON refunds;
 DROP TRIGGER payments_no_delete ON payments;

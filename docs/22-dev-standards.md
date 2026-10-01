@@ -104,7 +104,8 @@ Phase 1 이후 추가될 자리는 [D20](20-architecture.md)에 있다.
 | N+1 | 목록 조회는 상수 개수의 쿼리여야 한다 (NFR-105) |
 | 트랜잭션 | 여러 행의 불변식이 걸린 작업은 트랜잭션 안에서. `defer tx.Rollback(ctx)`를 먼저 건다. 생성 질의는 `q.WithTx(tx)` 로 같은 트랜잭션을 탄다 |
 | 질의의 자리 | **`internal/<pkg>/queries/*.sql`** 에 적고 `make sqlc` 로 `internal/<pkg>/<pkg>q/` 를 생성한다. 생성 코드는 손으로 고치지 않는다 — `make check` 의 `sqlc-check` 가 어긋남을 잡는다 ([DEC-1](../.ai/DECISIONS.md) sqlc) |
-| 생성할 수 없는 질의 | 정렬 컬럼처럼 실행 시점에 정해지는 것은 `ORDER BY CASE WHEN sqlc.arg('sort') = '…' THEN … END` 로 한 질의에 담는다. 그래도 안 되면 Go 에 남기되 **왜 생성할 수 없는지 주석**을 단다 |
+| 생성할 수 없는 질의 | 정렬 컬럼처럼 실행 시점에 정해지는 것은 `ORDER BY CASE WHEN sqlc.arg('sort') = '…' THEN … END` 로 한 질의에 담는다. 그래도 안 되면 Go 에 남기되 **왜 생성할 수 없는지 주석**을 단다. 이 방식은 풀이 `plan_cache_mode = force_custom_plan` 으로 접속하는 것에 기대고 있다 (`internal/app` 의 `poolConfig`) — 일반 계획에서는 어느 CASE 가 살아 있는지 알 수 없어 인덱스 순서를 못 쓴다 |
+| 목록의 모양 | 쪽을 **안쪽 질의에서 먼저 고르고**(WHERE·ORDER BY·LIMIT), 행마다 드는 계산(집계·EXISTS·조인)은 바깥에서 그 행들에만 한다. 바깥에 같은 ORDER BY 를 다시 적는다 |
 | 마이그레이션 | 규칙은 [D30](30-data-model.md). 모든 파일에 `-- +goose Down` (NFR-303) |
 
 ---

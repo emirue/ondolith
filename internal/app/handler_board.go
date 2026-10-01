@@ -83,14 +83,9 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	q := content.ParseListQuery(r.URL.Query(), b.PerPage)
 
 	// 비밀글도 목록에는 나온다 (FR-512). 본문은 P-204 가 지킨다.
-	posts, err := d.content.ListPosts(ctx, b.ID, q)
-	if err != nil {
-		d.serverError(w, r, err)
-		return
-	}
 	// 총수는 화면 요소다 — 내장 테마의 페이저가 「전체 N건」을 그린다
 	// (partials/pagination.html). 한 줄 더 읽어 HasNext 만 아는 것으로는 부족하다.
-	total, err := d.content.CountPosts(ctx, b.ID, q)
+	posts, total, err := d.content.PostPage(ctx, b.ID, q)
 	if err != nil {
 		d.serverError(w, r, err)
 		return

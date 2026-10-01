@@ -296,6 +296,10 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `email_verified_at` | timestamptz | NULL | NULL이면 미인증 (FR-214) |
 | `custom_fields` | jsonb | NOT NULL DEFAULT `'{}'` | A-406이 정의한 회원 항목의 값 (FR-215). 정의를 지워도 여기 남은 값은 지우지 않는다. `users_custom_fields_shape`: 객체이고 16,384바이트 이하 (00023) |
 
+```sql
+CREATE INDEX users_created_idx ON users (created_at DESC, id);   -- A-401 목록의 정렬 (00023)
+```
+
 `sessions_valid_from`을 NULL 허용으로 두면 "컷오프 없음"이 NULL이 되어 비교가 **fail-open**이
 된다. NOT NULL + 기본값이면 판정이 언제나 단순 비교 하나다.
 
@@ -606,6 +610,14 @@ CHECK (jsonb_typeof(custom_fields) = 'object' AND octet_length(custom_fields::te
 
 CREATE INDEX posts_board_list_idx ON posts (board_id, is_pinned DESC, created_at DESC, id DESC);
 CREATE INDEX posts_author_id_idx  ON posts (author_id);
+-- 정렬 키마다 하나 (00022·00023). 고정 글이 앞이라 방향이 섞인 정렬은 인덱스 하나를
+-- 거꾸로 걸어서는 되지 않는다 — 제목은 방향마다 따로 있다.
+CREATE INDEX posts_board_views_idx      ON posts (board_id, is_pinned DESC, view_count DESC, id DESC);
+CREATE INDEX posts_board_title_idx      ON posts (board_id, is_pinned DESC, title ASC, id ASC);
+CREATE INDEX posts_board_title_desc_idx ON posts (board_id, is_pinned DESC, title DESC, id DESC);
+-- 페이저의 「전체 N건」과 홈의 최근 글.
+CREATE INDEX posts_board_published_idx  ON posts (board_id) WHERE status = 'published';
+CREATE INDEX posts_recent_idx           ON posts (created_at DESC, id DESC) WHERE status = 'published';
 CREATE INDEX posts_search_idx     ON posts USING GIN (search_vector);  -- 00008
 ```
 
