@@ -72,20 +72,3 @@ func TestKindMapsToItsOwnTableAndTTL(t *testing.T) {
 		t.Fatal("TTL 이 0 이하다 — 발급 즉시 만료거나 영구 유효다")
 	}
 }
-
-// sprintfTable 은 SQL 문자열을 만든다. 입력이 닫힌 집합이라 안전하다는 것이
-// 근거이므로, 치환이 실제로 그 자리만 바꾸는지는 확인해 둔다.
-func TestSprintfTableSubstitutesOnlyThePlaceholder(t *testing.T) {
-	for _, c := range []struct{ in, table, want string }{
-		{"SELECT 1 FROM %s WHERE id = $1", "tok", "SELECT 1 FROM tok WHERE id = $1"},
-		{"no placeholder", "tok", "no placeholder"},
-		{"%s %s", "t", "t t"},
-		// `%` 하나만 있는 경우와 끝에 오는 경우 — 잘라먹으면 SQL 이 깨진다.
-		{"100%", "t", "100%"},
-		{"a %d b", "t", "a %d b"},
-	} {
-		if got := sprintfTable(c.in, c.table); got != c.want {
-			t.Errorf("sprintfTable(%q, %q) = %q, 기대 %q", c.in, c.table, got, c.want)
-		}
-	}
-}

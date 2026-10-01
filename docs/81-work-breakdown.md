@@ -399,9 +399,6 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 
 ---
 
-## Phase 간 의존
-
-**Phase 경계를 넘는 의존을 별도로 적는다.** Phase 안에서만 보면 안 보인다.
 ## Phase 5 — 질의 타입 안전화 (sqlc)
 
 **목적:** 저장소 계층의 SQL 을 질의 파일 한 곳에 모으고, 질의와 Go 타입이 어긋나면 컴파일이 잡게 한다. 설계(잠금·제약·PG 문법)는 바꾸지 않는다 — 전수 조사는 `.ai/ORM-INVENTORY.md`.
@@ -411,12 +408,12 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
 | W5-01 | 기반 — sqlc 도입·게이트·파일럿 **(완료)** | Phase 4 W4-13 | `sqlc.yaml`, `Makefile`, `scripts/selftest.sh`, `internal/content/queries/oplog.sql` | `make sqlc` 가 세 패키지의 생성 코드를 쓰고 `make check` 의 `sqlc-check` 가 어긋남을 잡는다(selftest 주입). 타입 오버라이드(uuid→string, timestamptz→time.Time, nullable→포인터)가 기존 Go 타입과 같다. 작업 로그 3개 질의가 생성 코드로 돌고 content·admin 테스트가 통과한다 |
-| W5-02 | auth 45곳 | W5-01 | `internal/auth/queries/*.sql`, `authq` | `pool.Query*` 직접 호출 0. `withLastSuperuserGuard` 등 트랜잭션 5개가 `WithTx` 로 간다. 동적 테이블명(token.go)은 질의 2벌로 푼다. auth·app 로그인 테스트 통과 |
-| W5-03 | content 65곳 | W5-01 | `internal/content/queries/*.sql`, `contentq` | 직접 호출 0. `postListColumns`·`OrderBy()` 동적 조립은 CASE 정렬 한 질의로. 봉인 훅(Settings/PutSettings)이 생성 질의 위에서 그대로 동작. content·admin·app 게시판 테스트 통과 |
-| W5-04 | commerce — 장바구니·상품·카테고리·약관·스캔 (store·cart·product_admin·terms·scan, 53곳) | W5-01 | `internal/commerce/queries/*.sql`, `commerceq` | 직접 호출 0. `ListProducts` 정렬 허용목록이 CASE 로. `AdjustStock`·`cartID` 등 tx 헬퍼가 `WithTx`. 해당 통합 테스트 통과 |
-| W5-05 | commerce — 주문·결제·웹훅 (order·payment·webhook, 46곳) | W5-04 | 같은 디렉터리 | 직접 호출 0. `ConfirmPayment` 의 트랜잭션 둘·`moveOrder` 가 `WithTx`. 결제 선점·만료 경쟁 테스트 통과 |
-| W5-06 | commerce — 환불·반품 (refund·returns, 81곳) | W5-05 | 같은 디렉터리 | 직접 호출 0. `FOR UPDATE OF 별칭`·CHECK 위반 코드 분기·부분 유니크 23505 가 전부 생성 질의에서 같은 오류값으로 돈다. 환불·반품 통합 테스트 통과 |
-| W5-07 | 설치 마법사 1문장 + 마무리 | W5-02~06 | `internal/install`, `D22`, `CHANGELOG` | 설치의 관리자 생성 CTE 가 생성 질의로. 세 패키지에 남은 직접 호출 목록이 0 이거나 주석으로 설명된다. `make check`·`make test-integration` 통과 |
+| W5-02 | auth 45곳 **(완료 — 생성 질의 40개)** | W5-01 | `internal/auth/queries/*.sql`, `authq` | `pool.Query*` 직접 호출 0. `withLastSuperuserGuard` 등 트랜잭션 5개가 `WithTx` 로 간다. 동적 테이블명(token.go)은 질의 2벌로 푼다. auth·app 로그인 테스트 통과 |
+| W5-03 | content 65곳 **(완료 — 생성 질의 64개)** | W5-01 | `internal/content/queries/*.sql`, `contentq` | 직접 호출 0. `postListColumns`·`OrderBy()` 동적 조립은 CASE 정렬 한 질의로. 봉인 훅(Settings/PutSettings)이 생성 질의 위에서 그대로 동작. content·admin·app 게시판 테스트 통과 |
+| W5-04 | commerce — 장바구니·상품·카테고리·약관·스캔 (store·cart·product_admin·terms·scan, 53곳) **(완료)** | W5-01 | `internal/commerce/queries/*.sql`, `commerceq` | 직접 호출 0. `ListProducts` 정렬 허용목록이 CASE 로. `AdjustStock`·`cartID` 등 tx 헬퍼가 `WithTx`. 해당 통합 테스트 통과 |
+| W5-05 | commerce — 주문·결제·웹훅 (order·payment·webhook, 46곳) **(완료)** | W5-04 | 같은 디렉터리 | 직접 호출 0. `ConfirmPayment` 의 트랜잭션 둘·`moveOrder` 가 `WithTx`. 결제 선점·만료 경쟁 테스트 통과 |
+| W5-06 | commerce — 환불·반품 (refund·returns, 81곳) **(완료 — commerce 생성 질의 134개)** | W5-05 | 같은 디렉터리 | 직접 호출 0. `FOR UPDATE OF 별칭`·CHECK 위반 코드 분기·부분 유니크 23505 가 전부 생성 질의에서 같은 오류값으로 돈다. 환불·반품 통합 테스트 통과 |
+| W5-07 | 설치 마법사 1문장 + 마무리 **(완료 — 네 패키지에 남은 직접 호출 0)** | W5-02~06 | `internal/install`, `D22`, `CHANGELOG` | 설치의 관리자 생성 CTE 가 생성 질의로. 세 패키지에 남은 직접 호출 목록이 0 이거나 주석으로 설명된다. `make check`·`make test-integration` 통과 |
 
 ### 임계 경로
 
@@ -436,6 +433,9 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | 의존 | 내용 |
 |---|---|
 | Phase 1 릴리즈 → W2-01 | `users.is_admin` 삭제는 **Phase 1이 릴리즈로 나간 뒤에만** 가능하다 (D30 두 릴리즈 규칙). Phase 1과 2를 한 릴리즈로 합치면 다운그레이드 경로가 사라진다 |
+## Phase 간 의존
+
+**Phase 경계를 넘는 의존을 별도로 적는다.** Phase 안에서만 보면 안 보인다.
 | W1-13 (유효 권한 조회) → W2-12, W3-20 | 게시판 스코프 권한과 커머스 권한이 같은 조회 함수를 쓴다. Phase 1에서 쿼리 1회 보장이 깨지면 Phase 2·3에서 N+1이 증식한다 |
 | W1-24 (라우트 등록 헬퍼) → Phase 2·3의 모든 핸들러 | 새 라우트는 예외 없이 권한을 선언한다. 헬퍼를 우회하는 경로를 하나라도 만들면 부팅 자체 점검이 무의미해진다 |
 | W1-36 (`site_mode`) → W3-20 | Phase 1에서 설정 값만 저장하고, Phase 3에서 그 값이 라우트 등록을 가른다. **전환 시 재조립 방식은 Phase 3에서 확정된다** |

@@ -152,23 +152,6 @@ func (s *Store) ConsumeToken(ctx context.Context, kind TokenKind, raw string) (s
 	return userID, nil
 }
 
-// sprintfTable substituted a table name into a query before the token SQL
-// moved to sqlc (W5-02). Nothing in this package builds SQL text any more; it
-// stays only because token_test.go still exercises it, and goes out together
-// with that test.
-func sprintfTable(q, table string) string {
-	out := make([]byte, 0, len(q)+len(table))
-	for i := 0; i < len(q); i++ {
-		if q[i] == '%' && i+1 < len(q) && q[i+1] == 's' {
-			out = append(out, table...)
-			i++
-			continue
-		}
-		out = append(out, q[i])
-	}
-	return string(out)
-}
-
 // MarkEmailVerified records that the account passed verification (FR-214).
 func (s *Store) MarkEmailVerified(ctx context.Context, userID string) error {
 	return s.q.MarkEmailVerified(ctx, userID)
