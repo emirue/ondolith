@@ -28,6 +28,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/httpsec"
+	"github.com/emirue/ondolith/internal/install/installq"
 	"github.com/emirue/ondolith/internal/migrations"
 	"github.com/emirue/ondolith/internal/secretbox"
 )
@@ -256,19 +257,13 @@ func (h *handler) provision(ctx context.Context, cfg *config.Config, f *form) er
 	// CTE 로 묶는 이유: 계정만 만들고 역할 부여에서 실패하면 정확히 위의 잠긴
 	// 상태가 되고, 재설치는 「이미 계정이 존재한다」로 거부된다. 둘은 함께
 	// 성립하거나 함께 없어야 한다.
-	const q = `WITH created AS (
-	               INSERT INTO users (email, password_hash, display_name)
-	               VALUES ($1, $2, $3)
-	               ON CONFLICT (email) DO NOTHING
-	               RETURNING id
-	           )
-	           INSERT INTO user_roles (user_id, role_id)
-	           SELECT created.id, r.id FROM created, roles r WHERE r.key = 'admin'`
-	tag, err := pool.Exec(ctx, q, f.AdminEmail, string(hash), f.displayName())
+	// 문장 자체는 queries/install.sql 에 있다 (D22 6절).
+	n, err := installq.New(pool).CreateFirstAdmin(ctx, installq.CreateFirstAdminParams{
+		Email: f.AdminEmail, PasswordHash: string(hash), DisplayName: f.displayName()})
 	if err != nil {
 		return fmt.Errorf("관리자 계정을 만들지 못했습니다: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return fmt.Errorf("이미 %s 계정이 존재하는 데이터베이스입니다. 빈 데이터베이스를 사용하거나 다른 이메일을 입력하세요", f.AdminEmail)
 	}
 	return nil
