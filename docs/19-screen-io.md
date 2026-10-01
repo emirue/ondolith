@@ -935,6 +935,10 @@
 
 `본인` · `PATCH /cart/items/{id}` · **SC-3** · FR-602, FR-603
 
+> **HTML 폼은 POST 로 온다.** 폼은 PATCH·DELETE 를 보낼 수 없어 내장 테마가 `_method=PATCH`
+> (P-404 는 `DELETE`)를 실은 POST 를 보낸다. 서버는 `/cart/items/` 아래의 POST 에 한해 그 값을
+> 메서드로 받는다 — 다른 경로와 GET 은 대상이 아니다. `_method` 없는 POST 는 405 다.
+
 **입력 필드**
 
 | 필드 | 타입 | 필수 | 검증 | 비고 |

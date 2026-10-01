@@ -171,3 +171,38 @@ func TestCartQuantityOverStockStillReportsStock(t *testing.T) {
 		t.Errorf("재고 초과가 거부됐는데 수량이 %d 로 바뀌었다", qty)
 	}
 }
+
+// **폼은 POST 밖에 못 보낸다.** 내장 테마의 「변경」·「빼기」는 POST 에 `_method`
+// 를 실어 보내는데 그것을 읽는 곳이 없어 실제 브라우저에서 405 였다 — 위
+// 테스트들은 PATCH·DELETE 를 직접 보내서 그걸 못 봤다 (2026-10-02 크롬 실측).
+func TestCartFormsReachPatchAndDeleteThroughPost(t *testing.T) {
+	srv, pool, variant := shopSite(t)
+	c := client()
+	resp := send(t, c, http.MethodPost, srv.URL+"/cart/items", url.Values{
+		"variant_id": {variant}, "quantity": {"1"}})
+	resp.Body.Close()
+	id, _, ok := cartItem(t, pool)
+	if !ok {
+		t.Fatal("담기가 되지 않았다")
+	}
+
+	// 「변경」 폼 그대로.
+	resp = send(t, c, http.MethodPost, srv.URL+"/cart/items/"+id, url.Values{
+		"_method": {"PATCH"}, "quantity": {"3"}})
+	resp.Body.Close()
+	if _, qty, _ := cartItem(t, pool); resp.StatusCode != http.StatusSeeOther || qty != 3 {
+		t.Fatalf("POST+_method=PATCH: HTTP %d, 수량 %d (303, 3 이어야)", resp.StatusCode, qty)
+	}
+	// `_method` 가 없는 POST 는 여전히 없는 경로다 — 아무 POST 나 변경이 되면 안 된다.
+	resp = send(t, c, http.MethodPost, srv.URL+"/cart/items/"+id, url.Values{"quantity": {"9"}})
+	resp.Body.Close()
+	if _, qty, _ := cartItem(t, pool); resp.StatusCode != http.StatusMethodNotAllowed || qty != 3 {
+		t.Fatalf("_method 없는 POST: HTTP %d, 수량 %d (405, 3 이어야)", resp.StatusCode, qty)
+	}
+	// 「빼기」 폼 그대로.
+	resp = send(t, c, http.MethodPost, srv.URL+"/cart/items/"+id, url.Values{"_method": {"DELETE"}})
+	resp.Body.Close()
+	if _, _, exists := cartItem(t, pool); resp.StatusCode != http.StatusSeeOther || exists {
+		t.Fatalf("POST+_method=DELETE: HTTP %d, 항목 남음 %v (303, 삭제돼야)", resp.StatusCode, exists)
+	}
+}

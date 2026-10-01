@@ -77,8 +77,29 @@ func newSessionManager(store scs.Store, secureCookies bool) *scs.SessionManager 
 // outermost first: security headers, CSRF, session load/save, then the routes
 // (docs/20-architecture.md). Split out for the same reason as above — the CSRF
 // layer is NFR-205 and must be testable without a database.
+// methodOverride lets an HTML form reach the cart's PATCH/DELETE routes
+// (P-403·P-404). 폼은 POST 밖에 못 보내서 내장 테마의 「변경」·「빼기」가
+// `_method` 를 싣는데, 그것을 읽는 곳이 없어 실제 브라우저에서는 둘 다 405
+// 였다 — 테스트는 PATCH 를 직접 보내 초록이었다.
+//
+// 좁게 연다: POST 만, `/cart/items/` 아래만, PATCH·DELETE 로만. GET 은 상태
+// 변경이 될 수 없고, CSRF 검사는 바깥에서 이미 이 POST 를 봤다. 본문은 폼
+// 필드 둘뿐이라 64KB 로 자른다 — 여기서 먼저 읽으므로 상한도 여기서 건다.
+func methodOverride(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/cart/items/") {
+			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+			switch m := r.PostFormValue("_method"); m {
+			case http.MethodPatch, http.MethodDelete:
+				r.Method = m
+			}
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
-	h = sessions.LoadAndSave(h)
+	h = sessions.LoadAndSave(methodOverride(h))
 	return httpsec.Headers(http.NewCrossOriginProtection().Handler(h))
 }
 
