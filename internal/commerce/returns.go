@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -60,32 +61,27 @@ var ErrFeeSetting = errors.New("commerce: 반품 배송비 정책값이 올바�
 // 배송비 0 은 "정책을 아직 안 정했다"의 안전한 해석이다.
 func returnFeeSetting(ctx context.Context, tx pgx.Tx) (policy string, amount int, err error) {
 	policy, amount = FeePolicyDeduct, 0
-	rows, err := tx.Query(ctx, `SELECT key, value FROM settings WHERE key = ANY($1)`,
+	rows, err := commerceq.New(tx).ReturnFeeSettings(ctx,
 		[]string{SettingReturnFeePolicy, SettingReturnFeeAmount})
 	if err != nil {
 		return "", 0, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return "", 0, err
-		}
-		switch k {
+	for _, r := range rows {
+		switch r.Key {
 		case SettingReturnFeePolicy:
-			if v != FeePolicyDeduct && v != FeePolicySeparate {
-				return "", 0, fmt.Errorf("%w: 부담 방식 %q", ErrFeeSetting, v)
+			if r.Value != FeePolicyDeduct && r.Value != FeePolicySeparate {
+				return "", 0, fmt.Errorf("%w: 부담 방식 %q", ErrFeeSetting, r.Value)
 			}
-			policy = v
+			policy = r.Value
 		case SettingReturnFeeAmount:
-			n, cerr := strconv.Atoi(v)
+			n, cerr := strconv.Atoi(r.Value)
 			if cerr != nil || n < 0 {
-				return "", 0, fmt.Errorf("%w: 금액 %q", ErrFeeSetting, v)
+				return "", 0, fmt.Errorf("%w: 금액 %q", ErrFeeSetting, r.Value)
 			}
 			amount = n
 		}
 	}
-	return policy, amount, rows.Err()
+	return policy, amount, nil
 }
 
 // Return is one row of returns, as P-513/A-511 draw it.
@@ -163,17 +159,16 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
-	var orderID, status string
-	err = tx.QueryRow(ctx,
-		`SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE`, orderNo).
-		Scan(&orderID, &status)
+	o, err := q.LockOrderByNo(ctx, orderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	orderID, status := o.ID, o.Status
 
 	// 상태 판정은 상태머신이 한다. `배송완료` 에서만, 구매확정 뒤에는 안 된다는
 	// 규칙이 D14 5절 표에 이미 있고, 여기서 다시 적으면 두 벌이 된다.
@@ -202,19 +197,17 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		if l.Quantity < 1 {
 			return nil, fmt.Errorf("%w: %d", ErrQuantityRange, l.Quantity)
 		}
-		var got line
-		got.id, got.qty = l.OrderItemID, l.Quantity
-		err := tx.QueryRow(ctx, `
-			SELECT oi.product_id, oi.quantity, oi.settled_quantity, v.price_delta
-			FROM order_items oi JOIN product_variants v ON v.id = oi.variant_id
-			WHERE oi.id = $1 AND oi.order_id = $2 FOR UPDATE OF oi`,
-			l.OrderItemID, orderID).Scan(&got.productID, &got.quantity, &got.settled, &got.oldDelta)
+		got := line{id: l.OrderItemID, qty: l.Quantity}
+		r, err := q.LockOrderItemForReturn(ctx, commerceq.LockOrderItemForReturnParams{
+			ID: l.OrderItemID, OrderID: orderID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		if err != nil {
 			return nil, err
 		}
+		got.productID, got.quantity, got.settled, got.oldDelta =
+			r.ProductID, int(r.Quantity), int(r.SettledQuantity), int(r.PriceDelta)
 		if got.settled+got.qty > got.quantity {
 			return nil, fmt.Errorf("%w: 소진 %d + 요청 %d > 주문 %d",
 				ErrRefundQuantity, got.settled, got.qty, got.quantity)
@@ -226,23 +219,18 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	// 교환이 곧 교환 가장한 재주문이 되고, 차액 계산의 근거가 사라진다.
 	priceDiff := 0
 	if req.Kind == KindExchange {
-		var newProduct string
-		var newDelta int
 		// 노출 중인 상품의 노출 중인 조합만이다 (D19 P-512: 미노출 조합은
 		// 404). 화면(VariantsForExchange)이 거른 것을 서버가 다시 거르지 않으면
 		// 운영자가 숨긴 조합을 폼 값 하나로 고를 수 있다 — 구매 경로는
 		// VariantForPurchase 가 같은 조건을 본다.
-		err := tx.QueryRow(ctx, `
-			SELECT v.product_id, v.price_delta FROM product_variants v
-			JOIN products p ON p.id = v.product_id
-			WHERE v.id = $1 AND v.is_visible AND p.is_visible`,
-			req.NewVariantID).Scan(&newProduct, &newDelta)
+		target, err := q.ExchangeTarget(ctx, req.NewVariantID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		if err != nil {
 			return nil, err
 		}
+		newProduct, newDelta := target.ProductID, int(target.PriceDelta)
 		for _, l := range lines {
 			if l.productID != newProduct {
 				return nil, ErrExchangeVariant
@@ -277,24 +265,22 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	ret := &Return{ReturnNo: NewReturnNo(now), Kind: req.Kind, Status: target,
 		Reason: req.Reason, NewVariantID: req.NewVariantID, PriceDiff: priceDiff}
 
-	var newVariant, diff any
+	var newVariant *string
+	var diff *int32
 	if req.Kind == KindExchange {
-		newVariant, diff = req.NewVariantID, priceDiff
+		d := int32(priceDiff)
+		newVariant, diff = &req.NewVariantID, &d
 	}
-	err = tx.QueryRow(ctx, `
-		INSERT INTO returns (return_no, order_id, kind, status, reason,
-		                     new_variant_id, price_difference)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		ret.ReturnNo, orderID, string(req.Kind), string(target), req.Reason,
-		newVariant, diff).Scan(&ret.ID)
+	ret.ID, err = q.InsertReturn(ctx, commerceq.InsertReturnParams{
+		ReturnNo: ret.ReturnNo, OrderID: orderID, Kind: string(req.Kind), Status: string(target),
+		Reason: req.Reason, NewVariantID: newVariant, PriceDifference: diff})
 	if err != nil {
 		return nil, err
 	}
 
 	for _, l := range lines {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO return_items (return_id, order_item_id, quantity) VALUES ($1,$2,$3)`,
-			ret.ID, l.id, l.qty); err != nil {
+		if err := q.InsertReturnItem(ctx, commerceq.InsertReturnItemParams{
+			ReturnID: ret.ID, OrderItemID: l.id, Quantity: int32(l.qty)}); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				// 부분 유니크가 잡았다. 같은 품목에 처리 중인 건이 이미 있다.
@@ -305,13 +291,12 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	}
 
 	// 주문 상태도 옮긴다. 비교-교환이라 그 사이 상태가 바뀌었으면 실패한다.
-	tag, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		orderID, string(target), status)
+	n, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
+		ID: orderID, ToStatus: string(target), FromStatus: status})
 	if err != nil {
 		return nil, err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return nil, fmt.Errorf("%w: 접수하는 사이 주문 상태가 바뀌었습니다", ErrTransitionNotAllowed)
 	}
 
@@ -334,35 +319,23 @@ type returnLine struct {
 // `반품수거` 에서 나가는 화살표는 `환불` 하나뿐이라(D14 5절) 그 주문은
 // 애플리케이션 안에서 영영 멈춘다.
 func returnGross(ctx context.Context, tx pgx.Tx, returnID string) (int, []returnLine, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT ri.order_item_id, ri.quantity,
-		       oi.line_amount, oi.discount_amount, oi.quantity, oi.settled_quantity
-		FROM return_items ri
-		JOIN order_items oi ON oi.id = ri.order_item_id
-		WHERE ri.return_id = $1 AND ri.is_open
-		ORDER BY ri.order_item_id
-		FOR UPDATE OF oi`, returnID)
+	rows, err := commerceq.New(tx).LockReturnGross(ctx, returnID)
 	if err != nil {
 		return 0, nil, err
 	}
-	defer rows.Close()
 
 	gross := 0
 	var lines []returnLine
-	for rows.Next() {
-		var itemID string
-		var retQty, lineAmount, discount, quantity, settled int
-		if err := rows.Scan(&itemID, &retQty, &lineAmount, &discount, &quantity, &settled); err != nil {
-			return 0, nil, err
-		}
-		part, err := RefundableAmount(lineAmount, discount, quantity, settled, retQty)
+	for _, r := range rows {
+		part, err := RefundableAmount(int(r.LineAmount), int(r.DiscountAmount),
+			int(r.Quantity), int(r.SettledQuantity), int(r.ReturnQuantity))
 		if err != nil {
 			return 0, nil, err
 		}
 		gross += part
-		lines = append(lines, returnLine{itemID, retQty})
+		lines = append(lines, returnLine{r.OrderItemID, int(r.ReturnQuantity)})
 	}
-	return gross, lines, rows.Err()
+	return gross, lines, nil
 }
 
 // ConfirmPickup is A-511's 수거 확인.
@@ -401,21 +374,18 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault stri
 		feeAmount = 0
 	}
 
-	var id, kind, status, orderID string
+	q := s.q.WithTx(tx)
 	// **그 주문의 반품 건인지 SQL 술어로 대조한다.** 폼의 return_no 를 그대로
 	// 조회 키로 쓰면, 다른 주문 화면에서 보낸 번호로 엉뚱한 건을 조작하고
 	// 원래 주문으로 리다이렉트된다 — 무슨 일이 있었는지 아무도 모른다.
-	err = tx.QueryRow(ctx, `
-		SELECT r.id, r.kind, r.status, r.order_id FROM returns r
-		JOIN orders o ON o.id = r.order_id
-		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`,
-		returnNo, orderNo).Scan(&id, &kind, &status, &orderID)
+	r, err := q.LockReturnForPickup(ctx, commerceq.LockReturnForPickupParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	id, kind, status, orderID := r.ID, r.Kind, r.Status, r.OrderID
 
 	target := StatusReturnPickedUp
 	if ReturnKind(kind) == KindExchange {
@@ -444,16 +414,13 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault stri
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `
-		UPDATE returns SET status = $2, fault = $3,
-		       shipping_fee_policy = $4, shipping_fee_amount = $5, updated_at = now()
-		WHERE id = $1 AND status = $6`,
-		id, string(target), fault, feePolicy, feeAmount, status); err != nil {
+	fee := int32(feeAmount)
+	if err := q.RecordPickup(ctx, commerceq.RecordPickupParams{
+		ID: id, Status: string(target), Fault: &fault, FeePolicy: &feePolicy, FeeAmount: &fee,
+		FromStatus: status}); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`,
-		orderID, string(target)); err != nil {
+	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(target)}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -480,20 +447,15 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	}
 	defer tx.Rollback(ctx)
 
-	var id, kind, status, orderID, feePolicy string
-	var feeAmount int
-	err = tx.QueryRow(ctx, `
-		SELECT r.id, r.kind, r.status, r.order_id,
-		       COALESCE(r.shipping_fee_policy, ''), COALESCE(r.shipping_fee_amount, 0)
-		FROM returns r JOIN orders o ON o.id = r.order_id
-		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`, returnNo, orderNo).
-		Scan(&id, &kind, &status, &orderID, &feePolicy, &feeAmount)
+	q := s.q.WithTx(tx)
+	r, err := q.LockReturnForSettle(ctx, commerceq.LockReturnForSettleParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotFound
 	}
 	if err != nil {
 		return 0, err
 	}
+	id, kind, status, orderID, feePolicy, feeAmount := r.ID, r.Kind, r.Status, r.OrderID, r.FeePolicy, int(r.FeeAmount)
 	if ReturnKind(kind) != KindReturn {
 		return 0, fmt.Errorf("%w: 교환 건은 환불로 정산하지 않습니다", ErrReturnKind)
 	}
@@ -505,10 +467,7 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 		return 0, err
 	}
 
-	var paymentID string
-	err = tx.QueryRow(ctx, `
-		SELECT id FROM payments
-		WHERE order_id = $1 AND kind = '주문결제' AND status = '승인'`, orderID).Scan(&paymentID)
+	paymentID, err := q.ApprovedPaymentID(ctx, orderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNoPayment
 	}
@@ -542,9 +501,8 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	}
 
 	for _, st := range toSettle {
-		if _, err := tx.Exec(ctx, `
-			UPDATE order_items SET settled_quantity = settled_quantity + $2, updated_at = now()
-			WHERE id = $1`, st.itemID, st.qty); err != nil {
+		if err := q.SettleOrderItem(ctx, commerceq.SettleOrderItemParams{
+			ID: st.itemID, Quantity: int32(st.qty)}); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23514" {
 				return 0, ErrRefundQuantity
@@ -555,9 +513,8 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 
 	// 선점. 부분 환불과 **같은 한도**를 나눠 쓴다 — 각각 한도까지 쓰면
 	// 결제액을 넘는 사고가 난다 (D19 P-511).
-	if _, err := tx.Exec(ctx, `
-		UPDATE payments SET refunded_amount = refunded_amount + $2, updated_at = now()
-		WHERE id = $1`, paymentID, amount); err != nil {
+	if err := q.ReserveRefundAmount(ctx, commerceq.ReserveRefundAmountParams{
+		ID: paymentID, Amount: int32(amount)}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23514" {
 			return 0, ErrRefundExceeds
@@ -565,12 +522,8 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 		return 0, err
 	}
 
-	var refundID string
-	err = tx.QueryRow(ctx, `
-		INSERT INTO refunds (order_id, payment_id, return_id, status, requester,
-		                     amount, reason, request_key)
-		VALUES ($1,$2,$3,'요청','관리자',$4,'반품 환불',$5) RETURNING id`,
-		orderID, paymentID, id, amount, requestKey).Scan(&refundID)
+	_, err = q.InsertReturnRefund(ctx, commerceq.InsertReturnRefundParams{
+		OrderID: orderID, PaymentID: paymentID, ReturnID: &id, Amount: int32(amount), RequestKey: requestKey})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return 0, ErrRefundDuplicate
@@ -584,19 +537,13 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 
 	// 처리 중 표시를 내린다. returns 가 종결로 가는 트랜잭션에서 함께 내려야
 	// 부분 인덱스가 다음 반품을 허용한다.
-	if _, err := tx.Exec(ctx,
-		`UPDATE return_items SET is_open = false, updated_at = now() WHERE return_id = $1`,
-		id); err != nil {
+	if err := q.CloseReturnItems(ctx, id); err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE returns SET status = $2, updated_at = now() WHERE id = $1`,
-		id, string(StatusRefunded)); err != nil {
+	if err := q.SetReturnStatus(ctx, commerceq.SetReturnStatusParams{ID: id, Status: string(StatusRefunded)}); err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`,
-		orderID, string(StatusRefunded)); err != nil {
+	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(StatusRefunded)}); err != nil {
 		return 0, err
 	}
 
@@ -616,34 +563,29 @@ func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason stri
 		return err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
-	var id, kind, status, orderID, newVariant string
-	err = tx.QueryRow(ctx, `
-		SELECT r.id, r.kind, r.status, r.order_id, COALESCE(r.new_variant_id::text, '')
-		FROM returns r JOIN orders o ON o.id = r.order_id
-		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`, returnNo, orderNo).
-		Scan(&id, &kind, &status, &orderID, &newVariant)
+	r, err := q.LockReturnForReject(ctx, commerceq.LockReturnForRejectParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	id, kind, status, orderID, newVariant := r.ID, r.Kind, r.Status, r.OrderID, r.NewVariantID
 	if err := CanTransition(Status(status), StatusDelivered, actor); err != nil {
 		return err
 	}
 
 	if ReturnKind(kind) == KindExchange && newVariant != "" {
-		var qty int
-		if err := tx.QueryRow(ctx,
-			`SELECT COALESCE(sum(quantity), 0) FROM return_items WHERE return_id = $1`,
-			id).Scan(&qty); err != nil {
+		qty, err := q.ReturnItemQuantity(ctx, id)
+		if err != nil {
 			return err
 		}
 		if qty > 0 {
 			// reserved 는 예약한 수량 그대로다. Release 가 그것을 넘겨 푸는
 			// 요청을 거부하므로, 여기서 같은 값을 준다.
-			deltas, err := Release(newVariant, qty, qty)
+			deltas, err := Release(newVariant, int(qty), int(qty))
 			if err != nil {
 				return err
 			}
@@ -653,20 +595,14 @@ func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason stri
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `
-		UPDATE returns SET status = '거부', reject_reason = $2, updated_at = now()
-		WHERE id = $1`, id, reason); err != nil {
+	if err := q.RejectReturn(ctx, commerceq.RejectReturnParams{ID: id, RejectReason: reason}); err != nil {
 		return err
 	}
 	// 처리 중 표시를 내려야 그 품목에 다시 반품·교환을 걸 수 있다.
-	if _, err := tx.Exec(ctx,
-		`UPDATE return_items SET is_open = false, updated_at = now() WHERE return_id = $1`,
-		id); err != nil {
+	if err := q.CloseReturnItems(ctx, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`,
-		orderID, string(StatusDelivered)); err != nil {
+	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(StatusDelivered)}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -674,30 +610,13 @@ func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason stri
 
 // Returns lists an order's return/exchange history (P-513).
 func (s *Store) Returns(ctx context.Context, orderID string) ([]Return, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, return_no, kind, status, reason, reject_reason,
-		       COALESCE(fault, ''), COALESCE(shipping_fee_policy, ''),
-		       COALESCE(shipping_fee_amount, 0), COALESCE(new_variant_id::text, ''),
-		       COALESCE(price_difference, 0), created_at
-		FROM returns WHERE order_id = $1 ORDER BY created_at DESC, id`, orderID)
+	rows, err := s.q.Returns(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Return
-	for rows.Next() {
-		var r Return
-		var kind, status string
-		if err := rows.Scan(&r.ID, &r.ReturnNo, &kind, &status, &r.Reason, &r.RejectReason,
-			&r.Fault, &r.FeePolicy, &r.FeeAmount, &r.NewVariantID,
-			&r.PriceDiff, &r.CreatedAt); err != nil {
-			return nil, err
-		}
-		r.Kind, r.Status = ReturnKind(kind), Status(status)
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	for _, r := range rows {
+		out = append(out, returnFromRow(commerceq.ReturnByNoRow(r)))
 	}
 
 	if len(out) == 0 {
@@ -711,65 +630,55 @@ func (s *Store) Returns(ctx context.Context, orderID string) ([]Return, error) {
 		ids[i] = out[i].ID
 		index[out[i].ID] = i
 	}
-	rows, err = s.pool.Query(ctx, `
-		SELECT ri.return_id, ri.order_item_id, oi.product_name, oi.option_label, ri.quantity, ri.is_open
-		FROM return_items ri JOIN order_items oi ON oi.id = ri.order_item_id
-		WHERE ri.return_id = ANY($1) ORDER BY oi.created_at, oi.id`, ids)
+	items, err := s.q.ReturnItemsOf(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var rid string
-		var it ReturnItem
-		if err := rows.Scan(&rid, &it.OrderItemID, &it.ProductName, &it.OptionLabel, &it.Quantity, &it.IsOpen); err != nil {
-			return nil, err
-		}
-		out[index[rid]].Items = append(out[index[rid]].Items, it)
+	for _, it := range items {
+		i := index[it.ReturnID]
+		out[i].Items = append(out[i].Items, returnItemFromRow(commerceq.ReturnItemsRow{
+			OrderItemID: it.OrderItemID, ProductName: it.ProductName, OptionLabel: it.OptionLabel,
+			Quantity: it.Quantity, IsOpen: it.IsOpen}))
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// returnFromRow converts the 12-column return read. Returns 의 행도 같은 모양이라
+// 구조체 변환으로 여기 온다.
+func returnFromRow(r commerceq.ReturnByNoRow) Return {
+	return Return{ID: r.ID, ReturnNo: r.ReturnNo, Kind: ReturnKind(r.Kind), Status: Status(r.Status),
+		Reason: r.Reason, RejectReason: r.RejectReason, Fault: r.Fault, FeePolicy: r.FeePolicy,
+		FeeAmount: int(r.FeeAmount), NewVariantID: r.NewVariantID, PriceDiff: int(r.PriceDifference),
+		CreatedAt: r.CreatedAt}
+}
+
+func returnItemFromRow(r commerceq.ReturnItemsRow) ReturnItem {
+	return ReturnItem{OrderItemID: r.OrderItemID, ProductName: r.ProductName, OptionLabel: r.OptionLabel,
+		Quantity: int(r.Quantity), IsOpen: r.IsOpen}
 }
 
 func (s *Store) returnItems(ctx context.Context, returnID string) ([]ReturnItem, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT ri.order_item_id, oi.product_name, oi.option_label, ri.quantity, ri.is_open
-		FROM return_items ri JOIN order_items oi ON oi.id = ri.order_item_id
-		WHERE ri.return_id = $1 ORDER BY oi.created_at, oi.id`, returnID)
+	rows, err := s.q.ReturnItems(ctx, returnID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []ReturnItem
-	for rows.Next() {
-		var it ReturnItem
-		if err := rows.Scan(&it.OrderItemID, &it.ProductName, &it.OptionLabel,
-			&it.Quantity, &it.IsOpen); err != nil {
-			return nil, err
-		}
-		out = append(out, it)
+	for _, r := range rows {
+		out = append(out, returnItemFromRow(r))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // ReturnByNo reads one return.
 func (s *Store) ReturnByNo(ctx context.Context, returnNo string) (*Return, error) {
-	var r Return
-	var kind, status string
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, return_no, kind, status, reason, reject_reason,
-		       COALESCE(fault, ''), COALESCE(shipping_fee_policy, ''),
-		       COALESCE(shipping_fee_amount, 0), COALESCE(new_variant_id::text, ''),
-		       COALESCE(price_difference, 0), created_at
-		FROM returns WHERE return_no = $1`, returnNo).
-		Scan(&r.ID, &r.ReturnNo, &kind, &status, &r.Reason, &r.RejectReason,
-			&r.Fault, &r.FeePolicy, &r.FeeAmount, &r.NewVariantID, &r.PriceDiff, &r.CreatedAt)
+	row, err := s.q.ReturnByNo(ctx, returnNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	r.Kind, r.Status = ReturnKind(kind), Status(status)
+	r := returnFromRow(row)
 	items, err := s.returnItems(ctx, r.ID)
 	if err != nil {
 		return nil, err
@@ -784,32 +693,20 @@ func (s *Store) ReturnByNo(ctx context.Context, returnNo string) (*Return, error
 // 선택지를 고르지 않는다 — 거부하는 것은 여전히 OpenReturn 이다 (D15 4.3:
 // 숨기는 것은 보안이 아니다).
 func (s *Store) VariantsForExchange(ctx context.Context, orderItemID string) ([]Variant, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT v.id, v.product_id, v.option_values, COALESCE(v.sku, ''),
-		       v.price_delta, v.stock, v.is_visible
-		FROM product_variants v
-		WHERE v.product_id = (SELECT product_id FROM order_items WHERE id = $1)
-		  AND v.id <> (SELECT variant_id FROM order_items WHERE id = $1)
-		  AND v.is_visible AND v.stock > 0
-		ORDER BY v.price_delta, v.id`, orderItemID)
+	rows, err := s.q.VariantsForExchange(ctx, orderItemID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Variant
-	for rows.Next() {
-		var v Variant
-		var raw []byte
-		if err := rows.Scan(&v.ID, &v.ProductID, &raw, &v.SKU,
-			&v.PriceDelta, &v.Stock, &v.Visible); err != nil {
-			return nil, err
-		}
-		if err := unmarshalOptions(raw, &v.OptionValues); err != nil {
+	for _, r := range rows {
+		v := Variant{ID: r.ID, ProductID: r.ProductID, SKU: r.Sku,
+			PriceDelta: int(r.PriceDelta), Stock: int(r.Stock), Visible: r.IsVisible}
+		if err := unmarshalOptions(r.OptionValues, &v.OptionValues); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // CompleteExchange is A-511's 교환 완료 — 수거한 교환 건을 재발송으로 넘긴다.
@@ -828,20 +725,16 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
-	var id, kind, status, orderID string
-	var diff int
-	err = tx.QueryRow(ctx, `
-		SELECT r.id, r.kind, r.status, r.order_id, COALESCE(r.price_difference, 0)
-		FROM returns r JOIN orders o ON o.id = r.order_id
-		WHERE r.return_no = $1 AND o.order_no = $2 FOR UPDATE OF r`, returnNo, orderNo).
-		Scan(&id, &kind, &status, &orderID, &diff)
+	r, err := q.LockReturnForExchange(ctx, commerceq.LockReturnForExchangeParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", err
 	}
+	id, kind, status, orderID, diff := r.ID, r.Kind, r.Status, r.OrderID, int(r.PriceDifference)
 	if ReturnKind(kind) != KindExchange {
 		return "", fmt.Errorf("%w: 반품 건은 교환 완료로 처리하지 않습니다", ErrReturnKind)
 	}
@@ -857,19 +750,15 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 	// 발송으로 바로 가는 경우에만 처리 중 표시를 내린다. 차액 대기는 아직
 	// 끝나지 않았고, 내리면 같은 품목에 새 반품이 걸려 예약 재고와 어긋난다.
 	if target == StatusExchangeShipped {
-		if _, err := tx.Exec(ctx,
-			`UPDATE return_items SET is_open = false WHERE return_id = $1`, id); err != nil {
+		if err := q.CloseReturnItemsNoTouch(ctx, id); err != nil {
 			return "", err
 		}
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE returns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		id, string(target), status); err != nil {
+	if _, err := q.MoveReturnStatus(ctx, commerceq.MoveReturnStatusParams{
+		ID: id, ToStatus: string(target), FromStatus: status}); err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE orders SET status = $2, updated_at = now() WHERE id = $1`,
-		orderID, string(target)); err != nil {
+	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(target)}); err != nil {
 		return "", err
 	}
 	return target, tx.Commit(ctx)
@@ -892,20 +781,16 @@ type ExchangeDiff struct {
 // (D19 P-514), 조회에서 갈리게 두지 않는다 — 애플리케이션에서 나중에 비교하면
 // 그 사이의 오류 메시지가 존재 여부를 알려준다.
 func (s *Store) ExchangeDiffDue(ctx context.Context, orderNo, returnNo, userID string) (*ExchangeDiff, error) {
-	var d ExchangeDiff
-	var status string
-	err := s.pool.QueryRow(ctx, `
-		SELECT r.id, r.return_no, r.order_id, r.status, COALESCE(r.price_difference, 0)
-		FROM returns r JOIN orders o ON o.id = r.order_id
-		WHERE r.return_no = $1 AND o.order_no = $2 AND r.kind = '교환'
-		  AND ($3 = '' OR o.user_id::text = $3)`,
-		returnNo, orderNo, userID).Scan(&d.ReturnID, &d.ReturnNo, &d.OrderID, &status, &d.Amount)
+	r, err := s.q.ExchangeDiffDue(ctx, commerceq.ExchangeDiffDueParams{
+		ReturnNo: returnNo, OrderNo: orderNo, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	d := ExchangeDiff{ReturnID: r.ID, ReturnNo: r.ReturnNo, OrderID: r.OrderID, Amount: int(r.PriceDifference)}
+	status := r.Status
 	if Status(status) != StatusExchangeDiffDue || d.Amount <= 0 {
 		return nil, fmt.Errorf("%w: 상태 %s, 차액 %d", ErrNoPriceDiff, status, d.Amount)
 	}
@@ -935,11 +820,9 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 
 	// 선점 행을 먼저 넣는다. 부분 유니크가 여기서 두 번째를 막으므로,
 	// 게이트웨이를 부르기 전에 중복이 걸러진다.
-	var paymentID string
-	err = s.pool.QueryRow(ctx, `
-		INSERT INTO payments (order_id, return_id, kind, status, pg, payment_key, approved_amount)
-		VALUES ($1, $2, '교환차액', '대기', $3, $4, $5) RETURNING id`,
-		d.OrderID, d.ReturnID, pgName, paymentKey, d.Amount).Scan(&paymentID)
+	paymentID, err := s.q.ReserveExchangePayment(ctx, commerceq.ReserveExchangePaymentParams{
+		OrderID: d.OrderID, ReturnID: &d.ReturnID, Pg: pgName, PaymentKey: paymentKey,
+		ApprovedAmount: int32(d.Amount)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return ErrAlreadyPaid
@@ -951,9 +834,7 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 	res, err := gw.Confirm(ctx, ConfirmRequest{
 		OrderNo: orderNo, PaymentKey: paymentKey, Amount: d.Amount, IdempotencyKey: paymentKey})
 	if err != nil {
-		if _, uerr := s.pool.Exec(ctx,
-			`UPDATE payments SET status = '실패', updated_at = now() WHERE id = $1`,
-			paymentID); uerr != nil {
+		if uerr := s.q.FailPaymentByID(ctx, paymentID); uerr != nil {
 			return errors.Join(err, uerr)
 		}
 		return err
@@ -965,9 +846,8 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 		return err
 	}
 	if res.Status != PaymentApproved {
-		if _, uerr := s.pool.Exec(ctx, `
-			UPDATE payments SET status = '실패', raw_response = $2, updated_at = now()
-			WHERE id = $1`, paymentID, MaskCardFields(res.Raw)); uerr != nil {
+		if uerr := s.q.DeclinePayment(ctx, commerceq.DeclinePaymentParams{
+			ID: paymentID, RawResponse: MaskCardFields(res.Raw)}); uerr != nil {
 			return uerr
 		}
 		if res.Status == PaymentPending {
@@ -981,37 +861,34 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 		return err
 	}
 	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
 
-	if _, err := tx.Exec(ctx, `
-		UPDATE payments SET status = $2, approved_at = now(), raw_response = $3,
-		       secret = NULLIF($4, ''), updated_at = now()
-		WHERE id = $1`, paymentID, string(res.Status), MaskCardFields(res.Raw), res.Secret); err != nil {
+	if err := q.ApproveExchangePayment(ctx, commerceq.ApproveExchangePaymentParams{
+		ID: paymentID, Status: string(res.Status), RawResponse: MaskCardFields(res.Raw),
+		Secret: res.Secret}); err != nil {
 		return err
 	}
 	// 상태 전이는 상태머신을 거친다 (D14 5절). P-514 가 일으키는 유일한 전이다.
 	// **비교-교환이다.** 게이트웨이 왕복 사이에 A-511 이 반려해 주문을 되돌렸을
 	// 수 있고, 조건 없는 UPDATE 는 그 위에 교환발송을 덮어쓴다 — 표에 없는
 	// 전이를 코드가 만드는 경로다.
-	var orderStatus string
-	if err := tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1 FOR UPDATE`,
-		d.OrderID).Scan(&orderStatus); err != nil {
+	orderStatus, err := q.LockOrderStatus(ctx, d.OrderID)
+	if err != nil {
 		return err
 	}
 	if err := s.moveOrder(ctx, tx, d.OrderID, Status(orderStatus), StatusExchangeShipped, "P-514"); err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx,
-		`UPDATE returns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		d.ReturnID, string(StatusExchangeShipped), string(StatusExchangeDiffDue))
+	n, err := q.MoveReturnStatus(ctx, commerceq.MoveReturnStatusParams{
+		ID: d.ReturnID, ToStatus: string(StatusExchangeShipped), FromStatus: string(StatusExchangeDiffDue)})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return fmt.Errorf("%w: 결제하는 사이 반품 상태가 바뀌었습니다", ErrTransitionNotAllowed)
 	}
 	// 차액을 다 받았으므로 처리 중 표시를 내린다 — 그 품목에 다시 걸 수 있다.
-	if _, err := tx.Exec(ctx,
-		`UPDATE return_items SET is_open = false WHERE return_id = $1`, d.ReturnID); err != nil {
+	if err := q.CloseReturnItemsNoTouch(ctx, d.ReturnID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
