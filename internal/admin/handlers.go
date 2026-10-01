@@ -62,6 +62,11 @@ type Deps struct {
 	// renderer can pick it up without a restart (FR-303). Injected because admin
 	// does not import theme.
 	OnThemeChange func(name string)
+	// Rebuild reassembles the operating tree and swaps it in (D20 모듈 게이팅).
+	// A-201 calls it after saving an assembly-time key — 사이트 유형(FR-710),
+	// 관리자 배색 — so the change lands without a restart. nil 이면 재시작이
+	// 필요하다는 뜻이고, 핸들러는 그것을 로그에 남긴다.
+	Rebuild func() error
 	// Attachments is A-309's store. Injected because the upload directory is
 	// configuration (NFR-304) and admin must not resolve it.
 	// Commerce is the Phase 3 store. nil 이면 커머스 화면이 등록되지 않은
@@ -181,8 +186,18 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 	d.Render(w, r, "admin/settings.html", http.StatusOK, map[string]any{"Settings": kv})
 }
 
+// assemblyKeys are read when the operating tree is built, not per request.
+// Changing one is what makes A-201 call Rebuild.
+var assemblyKeys = []string{"site.type", "admin.theme"}
+
+func changed(kv, prev map[string]string, key string) bool {
+	v, ok := kv[key]
+	return ok && v != prev[key]
+}
+
 func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "settings.update"); !ok {
+	c, ok := d.require(w, r, "settings.update")
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -210,11 +225,64 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "관리자 배색은 1a~1e 중 하나여야 합니다.")
 		return
 	}
+	prev, err := d.Content.Settings(r.Context(), assemblyKeys...)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	typeChanged := changed(kv, prev, "site.type")
+	if typeChanged {
+		// 결제 경로를 닫는 전환은 미완결 주문이 있으면 거부한다 (D13 전환
+		// 규칙, D19 A-201 409) — 구매자를 결제 중간에 가두지 않는다.
+		// ponytail: 세는 것과 교체 사이에 P-406 이 끼어들 수 있다. D19 의
+		// FOR UPDATE/FOR SHARE 잠금 쌍은 아직 없다 (D85 GAP-10).
+		if kv["site.type"] == "cms" && d.Commerce != nil {
+			n, err := d.Commerce.OpenOrders(r.Context())
+			if err != nil {
+				http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+				return
+			}
+			if n > 0 {
+				d.log(r, c, "settings.update", "settings", "site.type",
+					"사이트 유형 전환 거부: 미완결 주문 "+strconv.Itoa(n)+"건")
+				d.renderSettings(w, r, "admin/settings.html", siteSettingKeys, http.StatusConflict,
+					"완결되지 않은 주문이 "+strconv.Itoa(n)+"건 있습니다. 완결 후 다시 시도하세요.")
+				return
+			}
+		}
+		// 파괴적 전환이다 (D15 SC-5 4항, D19 A-201 거부 조건).
+		if !reauthOK(c, r) {
+			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+				http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+			return
+		}
+	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	if typeChanged {
+		d.log(r, c, "settings.update", "settings", "site.type",
+			"사이트 유형 "+prev["site.type"]+" → "+kv["site.type"])
+	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
+	if !typeChanged && !changed(kv, prev, "admin.theme") {
+		return
+	}
+	// 조립 시점 키가 바뀌었다 — 운영 트리를 다시 조립해 원자 교체한다 (D20).
+	// **응답을 먼저 쓴다.** 세션 커밋은 첫 WriteHeader 에서 옛 풀로 일어나고,
+	// 교체는 옛 풀을 닫는다. 응답은 핸들러가 돌아갈 때 나가므로 사람은 다음
+	// 요청부터 새 트리를 본다. 조립이 실패하면 교체하지 않는다 — 옛 트리가
+	// 계속 서비스하고, 로그가 재시작하라고 말한다.
+	if d.Rebuild == nil {
+		if d.Logger != nil {
+			d.Logger.Warn("운영 트리 재조립 장치가 없다 — 재시작해야 반영된다")
+		}
+		return
+	}
+	if err := d.Rebuild(); err != nil && d.Logger != nil {
+		d.Logger.Error("운영 트리 재조립 실패 — 재시작하면 반영된다", "err", err)
+	}
 }
 
 // ---- A-205 / A-206 자격증명 설정 ---------------------------------------------

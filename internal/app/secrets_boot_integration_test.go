@@ -50,7 +50,7 @@ func TestBootSealsLegacyPlaintextSecrets(t *testing.T) {
 		t.Fatal("전제가 깨졌다: 설정에 이미 키가 있다")
 	}
 	var logs strings.Builder
-	_, cleanup, err := New(ctx, cfg, "1.0.0", slog.New(slog.NewTextHandler(&logs, nil)))
+	_, cleanup, err := New(ctx, cfg, "1.0.0", slog.New(slog.NewTextHandler(&logs, nil)), nil)
 	if err != nil {
 		t.Fatalf("기동 실패: %v", err)
 	}

@@ -163,9 +163,13 @@ func run() error {
 
 	rt := &root{}
 
-	// startOperating builds the operating tree and makes it live.
-	startOperating := func(cfg *config.Config) error {
-		h, cleanup, err := app.New(ctx, cfg, versionString(), log)
+	// startOperating builds the operating tree and makes it live. The tree
+	// gets startOperating back as its rebuild hook: A-201 saving 사이트 유형
+	// (FR-710) reassembles and swaps the same way the install did (D20).
+	var startOperating func(cfg *config.Config) error
+	startOperating = func(cfg *config.Config) error {
+		h, cleanup, err := app.New(ctx, cfg, versionString(), log,
+			func() error { return startOperating(cfg) })
 		if err != nil {
 			return err
 		}

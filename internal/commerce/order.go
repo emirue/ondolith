@@ -775,3 +775,21 @@ func (s *Store) expireOne(ctx context.Context, orderID string) error {
 	}
 	return tx.Commit(ctx)
 }
+
+// OpenOrders counts orders that have not reached a terminal state — what D13's
+// FR-710 전환 규칙 calls 미완결. A-201 refuses `shop → cms` while any exist:
+// unregistering the commerce routes with a buyer mid-payment strands them.
+//
+// 종료 상태 목록은 상태머신에서 뽑는다. 손으로 적으면 상태가 늘 때 낡는다.
+func (s *Store) OpenOrders(ctx context.Context) (int, error) {
+	var terminal []string
+	for st := range transitions {
+		if Terminal(st) {
+			terminal = append(terminal, string(st))
+		}
+	}
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM orders WHERE status <> ALL($1)`, terminal).Scan(&n)
+	return n, err
+}

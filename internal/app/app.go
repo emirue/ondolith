@@ -92,7 +92,11 @@ func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
 // The boot self-check runs before a single route serves, and a failure returns
 // an error rather than starting anyway (FR-110): a server that comes up in the
 // wrong state has its wrong state discovered by a visitor.
-func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger) (http.Handler, func(), error) {
+// rebuild reassembles this tree from the same config and swaps it in; A-201
+// calls it when an assembly-time setting changes (D20 모듈 게이팅).
+func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
+	rebuild func() error,
+) (http.Handler, func(), error) {
 	pcfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app: pool: %w", err)
@@ -345,6 +349,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		// 검증·교체)이 서로 다른 것을 가리키고, 검증에 통과한 테마가 그려지지
 		// 않는다 — 그 셋이 어긋난 상태를 통합 테스트가 잡았다.
 		OnThemeChange: func(name string) { loaderRef.Store(newLoader(themePath(cfg, name))) },
+		Rebuild:       rebuild,
 		InstallTheme: func(name string, rd io.ReaderAt, size int64, replace bool) error {
 			return theme.Install(cfg.Themes(), name, rd, size, replace)
 		},

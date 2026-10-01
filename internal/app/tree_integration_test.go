@@ -54,7 +54,7 @@ func liveSiteWith(t *testing.T, tweak ...func(*config.Config)) (*httptest.Server
 		f(cfg)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h, cleanup, err := New(ctx, cfg, "1.0.0", log)
+	h, cleanup, err := New(ctx, cfg, "1.0.0", log, nil)
 	if err != nil {
 		t.Fatalf("기동 실패: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestBootRefusesWhenARouteNamesAMissingPermission(t *testing.T) {
 
 	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트"}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h, cleanup, err := New(ctx, cfg, "1.0.0", log)
+	h, cleanup, err := New(ctx, cfg, "1.0.0", log, nil)
 	if cleanup != nil {
 		cleanup()
 	}
