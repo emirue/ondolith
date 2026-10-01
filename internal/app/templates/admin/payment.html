@@ -33,6 +33,12 @@
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>
   </form>
+  {{/* 저장된 키로 결제사에 묻는다. 값은 보내지도 받지도 않는다 — 결과 한 줄뿐. */}}
+  <form method="post" action="/admin/settings/payment" class="adm-actions">
+    <input type="hidden" name="action" value="verify">
+    <button class="adm-btn" {{if not (index .SecretSaved "pg.secret_key")}}disabled{{end}}>연결 확인</button>
+    <span class="adm-hint">저장된 시크릿 키를 결제사가 받아들이는지 확인합니다. 결제를 만들지 않습니다.</span>
+  </form>
   <p class="adm-hint">
     토스페이먼츠 개발자센터에서 발급한 키를 넣습니다. 테스트 키(<code>test_</code> 로
     시작)로 먼저 확인한 뒤 라이브 키로 바꾸세요. 시크릿 키는 저장된 뒤 어떤 화면에도

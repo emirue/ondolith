@@ -614,3 +614,16 @@ func walkPipe(p *parse.PipeNode, fn func(*parse.CommandNode)) {
 		}
 	}
 }
+
+// **핸들러에 있는 분기는 템플릿에도 있어야 한다.** A-209 의 `action=verify`
+// 분기(연결 확인)는 핸들러·문서·테스트가 다 있었는데 템플릿에 폼이 없었다 —
+// 사용자는 버튼을 못 보고, 핸들러 테스트는 폼 없이 POST 하므로 초록이었다.
+func TestPaymentTemplateHasVerifyForm(t *testing.T) {
+	b, err := adminFS.ReadFile("templates/admin/payment.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `name="action" value="verify"`) {
+		t.Fatal("payment.html 에 연결 확인 폼(action=verify)이 없다 — 핸들러 분기에 닿을 버튼이 없다")
+	}
+}
