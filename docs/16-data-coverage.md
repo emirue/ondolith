@@ -46,6 +46,7 @@
 | `pages` | A-302 | P-202 | 발행 상태는 A-303 |
 | `boards` | A-305 | P-203 | |
 | `board_fields` | A-306 | P-203, P-205 | 스키마가 폼과 목록을 만든다 (FR-503) |
+| `user_fields` | A-406 | P-103, P-108 | 회원가입과 내 정보의 추가 항목을 만든다 (FR-215). 값은 `users.custom_fields` 에 산다 |
 | `posts` | P-205 | P-203, P-204 | 관리는 A-307 |
 | `comments` | P-208 | P-204 | 관리는 A-308 |
 | `attachments` | P-205 | P-211, A-309 | |

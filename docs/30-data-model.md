@@ -206,11 +206,11 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | Phase | 테이블 |
 |---|---|
 | Phase 0 | `users` · `sessions` |
-| Phase 1 | `roles` · `permissions` · `role_permissions` · `user_roles` · `pages` · `settings` · `menus` · `password_reset_tokens` · `email_verification_tokens` · `social_accounts` |
+| Phase 1 | `roles` · `permissions` · `role_permissions` · `user_roles` · `pages` · `settings` · `menus` · `password_reset_tokens` · `email_verification_tokens` · `social_accounts` · `user_fields` |
 | Phase 2 | `boards` · `board_fields` · `posts` · `comments` · `attachments` · `operation_logs` |
 | Phase 3 | `products` · `product_options` · `product_variants` · `categories` · `product_categories` · `carts` · `cart_items` · `orders` · `order_items` · `payments` · `refunds` · `refund_items` · `shipments` · `returns` · `return_items` · `webhook_events` · `terms` · `order_agreements` |
 
-전 36개. 테이블을 더하면 **같은 커밋에서** 이 표와 D16에 함께 추가한다.
+전 37개. 테이블을 더하면 **같은 커밋에서** 이 표와 D16에 함께 추가한다.
 
 ## 마이그레이션 규칙
 
