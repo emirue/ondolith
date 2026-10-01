@@ -321,3 +321,44 @@ func TestVerifyWebhookParsesAndBuildsAnEventID(t *testing.T) {
 		t.Errorf("%d바이트 본문 = %v, want ErrWebhookUnverified", len(huge), err)
 	}
 }
+
+// A-209 「연결 확인」: 존재할 수 없는 결제를 조회해 인증만 본다. 404 는 키가
+// 맞다는 뜻이고, 401·400 의 키 오류 코드만 ErrGatewayCredentials 다 — 403 의
+// 인코딩 오류는 우리 버그라 키 문제로 보고하지 않는다.
+func TestVerifyCredentialsReadsAuthFromTheErrorCode(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		code   string
+		want   error // nil = 성공, ErrGatewayCredentials, 그 외 = 다른 오류
+	}{
+		{404, "NOT_FOUND_PAYMENT", nil},
+		{401, "UNAUTHORIZED_KEY", ErrGatewayCredentials},
+		{400, "INVALID_API_KEY", ErrGatewayCredentials},
+		{403, "INCORRECT_BASIC_AUTH_FORMAT", errors.New("other")},
+		{500, "", errors.New("other")},
+	} {
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte(`{"code":"` + tc.code + `","message":"` + testSecret + `"}`))
+		}))
+		tp := NewToss(testSecret, srv.URL, time.Second)
+		err := tp.VerifyCredentials(context.Background())
+		srv.Close()
+		if !strings.HasPrefix(gotAuth, "Basic ") {
+			t.Errorf("[%d %s] 인증 헤더 없이 물었다", tc.status, tc.code)
+		}
+		switch {
+		case tc.want == nil && err != nil:
+			t.Errorf("[%d %s] = %v, want nil", tc.status, tc.code, err)
+		case tc.want != nil && errors.Is(tc.want, ErrGatewayCredentials) && !errors.Is(err, ErrGatewayCredentials):
+			t.Errorf("[%d %s] = %v, want ErrGatewayCredentials", tc.status, tc.code, err)
+		case tc.want != nil && !errors.Is(tc.want, ErrGatewayCredentials) && (err == nil || errors.Is(err, ErrGatewayCredentials)):
+			t.Errorf("[%d %s] = %v, want 다른 오류", tc.status, tc.code, err)
+		}
+		if err != nil && strings.Contains(err.Error(), testSecret) {
+			t.Errorf("[%d %s] 오류 문자열에 시크릿이 있다", tc.status, tc.code)
+		}
+	}
+}

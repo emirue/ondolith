@@ -258,3 +258,17 @@ func TestAllowSweepsIdleBucketsOnceLarge(t *testing.T) {
 		t.Error("30분 쉰 버킷이 지워져 다시 가득 찼어야 하는데, 지워지지 않았다면 토큰이 남아 있어야 한다")
 	}
 }
+
+func BenchmarkLimiterNewKeyWithActiveBuckets(b *testing.B) {
+	l := NewLimiter()
+	lim := Limit{Burst: 1, Window: time.Hour}
+	for i := 0; i < sweepAt; i++ {
+		l.Allow(fmt.Sprintf("existing:%d", i), lim)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		l.Allow("new-key", lim)
+		l.Forget("new-key")
+	}
+}

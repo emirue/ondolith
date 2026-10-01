@@ -50,7 +50,7 @@ func TestStaticDiskOverridesBuiltin(t *testing.T) {
 // 403 — which paths exist is itself information (D15 SC-1 4항).
 func TestStaticRefusesEscape(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, "css/style.css", "ok")
+	write(t, dir, "static/css/style.css", "ok")
 	outside := filepath.Join(filepath.Dir(dir), "secret.txt")
 	if err := os.WriteFile(outside, []byte("비밀"), 0o600); err != nil {
 		t.Fatal(err)
@@ -81,13 +81,13 @@ func TestStaticRefusesSymlinkOutOfTheme(t *testing.T) {
 		t.Skip("symlink")
 	}
 	dir := t.TempDir()
-	write(t, dir, "css/style.css", "ok")
+	write(t, dir, "static/css/style.css", "ok")
 	secretDir := t.TempDir()
 	secret := filepath.Join(secretDir, "secret.txt")
 	if err := os.WriteFile(secret, []byte("비밀"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(secret, filepath.Join(dir, "leak.txt")); err != nil {
+	if err := os.Symlink(secret, filepath.Join(dir, "static/leak.txt")); err != nil {
 		t.Skipf("symlink 불가: %v", err)
 	}
 
@@ -105,5 +105,39 @@ func TestStaticMissingIs404(t *testing.T) {
 	l := New(fakeBuiltin(), "", false, nil)
 	if rec := get(t, l.StaticHandler("/static"), "/static/none.css"); rec.Code != http.StatusNotFound {
 		t.Errorf("HTTP %d, want 404", rec.Code)
+	}
+}
+
+func TestStaticCachePolicyMatchesContentAndMode(t *testing.T) {
+	l := New(fakeBuiltin(), "", false, nil)
+	for _, tc := range []struct{ target, want string }{
+		{l.AssetURL("css/style.css"), "public, max-age=31536000, immutable"},
+		{"/static/css/style.css", "public, max-age=3600"},
+		{"/static/css/style.css?v=old-theme", "no-store"},
+		{"/static/missing.css?v=old-theme", ""},
+	} {
+		if got := get(t, l.StaticHandler("/static/"), tc.target).Header().Get("Cache-Control"); got != tc.want {
+			t.Errorf("%s: Cache-Control=%q, want %q", tc.target, got, tc.want)
+		}
+	}
+	dev := New(fakeBuiltin(), "", true, nil)
+	if got := get(t, dev.StaticHandler("/static/"), dev.AssetURL("css/style.css")).Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("개발 모드 Cache-Control=%q, want no-store", got)
+	}
+}
+
+func TestStaticOnlyAcceptsReadMethods(t *testing.T) {
+	l := New(fakeBuiltin(), "", false, nil)
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+		rec := httptest.NewRecorder()
+		l.StaticHandler("/static/").ServeHTTP(rec, httptest.NewRequest(method, "/static/css/style.css", nil))
+		if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != "GET, HEAD" {
+			t.Errorf("%s: HTTP %d, Allow=%q", method, rec.Code, rec.Header().Get("Allow"))
+		}
+	}
+	rec := httptest.NewRecorder()
+	l.StaticHandler("/static/").ServeHTTP(rec, httptest.NewRequest(http.MethodHead, "/static/css/style.css", nil))
+	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
+		t.Errorf("HEAD: HTTP %d, body=%q", rec.Code, rec.Body.String())
 	}
 }

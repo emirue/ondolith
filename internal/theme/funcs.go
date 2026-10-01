@@ -5,10 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -205,18 +204,24 @@ func newAssetHasher(builtin fs.FS, dir string) *assetHasher {
 
 // URL returns /static/<name>?v=<hash8>, or /static/<name> when the file cannot
 // be read — a missing asset must not stop the page from rendering.
-func (a *assetHasher) URL(name string) string {
+func (a *assetHasher) URL(name string, cache bool) string {
 	if err := validName(name); err != nil {
 		return ""
 	}
-	a.mu.RLock()
-	h, ok := a.seen[name]
-	a.mu.RUnlock()
+	var h string
+	var ok bool
+	if cache {
+		a.mu.RLock()
+		h, ok = a.seen[name]
+		a.mu.RUnlock()
+	}
 	if !ok {
 		h = a.hash(name)
-		a.mu.Lock()
-		a.seen[name] = h
-		a.mu.Unlock()
+		if cache {
+			a.mu.Lock()
+			a.seen[name] = h
+			a.mu.Unlock()
+		}
 	}
 	if h == "" {
 		return "/static/" + name
@@ -236,28 +241,24 @@ func (a *assetHasher) hash(name string) string {
 	// lives at `static/css/style.css` (D17). Hashing a path the handler would
 	// not serve produces a URL that 404s with a version string on it.
 	name = path.Join("static", name)
-	var b []byte
-	if a.dir != "" {
-		p := filepath.Join(a.dir, filepath.FromSlash(name))
-		if withinDir(a.dir, p) {
-			if data, err := os.ReadFile(p); err == nil {
-				b = data
-			}
-		}
+	f, _, err := openThemeFile(a.builtin, a.dir, name)
+	if err != nil {
+		return ""
 	}
-	if b == nil {
-		data, err := fs.ReadFile(a.builtin, path.Clean(name))
-		if err != nil {
-			return ""
-		}
-		b = data
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		return ""
 	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])[:8]
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))[:8]
 }
 
 // AssetURL exposes the hasher to Deps.
-func (l *Loader) AssetURL(name string) string { return l.assets.URL(name) }
+func (l *Loader) AssetURL(name string) string { return l.assets.URL(name, !l.dev) }
 
 // ForgetAsset drops one cached hash (dev mode).
 func (l *Loader) ForgetAsset(name string) { l.assets.Forget(name) }

@@ -1,12 +1,10 @@
 package theme
 
 import (
+	"bytes"
 	"io"
-	"io/fs"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 )
 
@@ -22,6 +20,11 @@ import (
 // paths exist is itself information (D15 SC-1 4항).
 func (l *Loader) StaticHandler(prefix string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "허용되지 않는 메서드입니다.", http.StatusMethodNotAllowed)
+			return
+		}
 		name := strings.TrimPrefix(r.URL.Path, prefix)
 		name = strings.TrimPrefix(name, "/")
 
@@ -32,58 +35,39 @@ func (l *Loader) StaticHandler(prefix string) http.Handler {
 		// D17 puts assets under the theme's `static/` directory, and only that
 		// directory is served. Without this the whole theme is reachable —
 		// `/static/page.html` would return the raw template, `{{...}}` and all.
-		name = path.Join("static", name)
-		// 주소가 곧 ETag 다: 템플릿의 `asset` 이 내용 해시를 `?v=` 로 붙이므로
-		// 그 주소는 내용이 바뀌면 주소도 바뀐다 — 영구 캐시가 안전하다. 해시
-		// 없는 주소(직접 친 것)는 한 시간이다. 내장 자산은 ModTime 이 0 이라
-		// Last-Modified 조차 없었고, 매 방문마다 전부 다시 받았다.
-		if r.URL.Query().Get("v") != "" {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else {
-			w.Header().Set("Cache-Control", "public, max-age=3600")
-		}
-
-		if l.dir != "" {
-			p := filepath.Join(l.dir, filepath.FromSlash(name))
-			if !withinDir(l.dir, p) {
-				http.NotFound(w, r)
-				return
-			}
-			// A symlink inside the theme can still point outside it; the
-			// resolved path is what decides.
-			real, err := filepath.EvalSymlinks(p)
-			if err == nil && !withinDir(l.root(), real) {
-				http.NotFound(w, r)
-				return
-			}
-			if err == nil {
-				if st, serr := os.Stat(real); serr == nil && st.Mode().IsRegular() {
-					http.ServeFile(w, r, real)
-					return
-				}
-			}
-		}
-
-		f, err := l.builtin.Open(path.Clean(name))
+		f, _, err := openThemeFile(l.builtin, l.dir, path.Join("static", name))
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
 		defer f.Close()
 		st, err := f.Stat()
-		if err != nil || st.IsDir() {
+		if err != nil || !st.Mode().IsRegular() {
 			// A directory listing would enumerate the theme; 404 instead.
 			http.NotFound(w, r)
 			return
 		}
+		// A stale theme hash must not make a different theme's bytes immutable.
+		// Errors also stay out of the asset cache: a missing file may be added.
+		v := r.URL.Query().Get("v")
+		switch {
+		case l.dev:
+			w.Header().Set("Cache-Control", "no-store")
+		case v == "":
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		case l.AssetURL(name) == "/static/"+name+"?v="+v:
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		default:
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		rs, ok := f.(io.ReadSeeker)
 		if !ok {
-			data, err := fs.ReadFile(l.builtin, path.Clean(name))
+			data, err := io.ReadAll(f)
 			if err != nil {
 				http.NotFound(w, r)
 				return
 			}
-			http.ServeContent(w, r, st.Name(), st.ModTime(), strings.NewReader(string(data)))
+			http.ServeContent(w, r, st.Name(), st.ModTime(), bytes.NewReader(data))
 			return
 		}
 		http.ServeContent(w, r, st.Name(), st.ModTime(), rs)

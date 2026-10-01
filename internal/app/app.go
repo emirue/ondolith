@@ -134,12 +134,12 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	if cfg.SecretKey == "" {
 		k, err := secretbox.NewKey()
 		if err != nil {
-			return nil, nil, fmt.Errorf("app: secret_key: %w", err)
+			return fail(fmt.Errorf("app: secret_key: %w", err))
 		}
 		cfg.SecretKey = k
 		if cfg.Path != "" {
 			if err := config.Save(cfg.Path, cfg); err != nil {
-				return nil, nil, fmt.Errorf("app: secret_key 를 %s 에 저장하지 못했습니다 — 봉인한 시크릿을 다음 부팅이 열 수 없다: %w", cfg.Path, err)
+				return fail(fmt.Errorf("app: secret_key 를 %s 에 저장하지 못했습니다 — 봉인한 시크릿을 다음 부팅이 열 수 없다: %w", cfg.Path, err))
 			}
 			log.Warn("secret_key 를 만들어 저장했습니다 — 설정 파일을 DB 와 함께 백업하세요 (D72 5절)", "path", cfg.Path)
 		} else {
@@ -148,11 +148,11 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 	box, err := secretbox.New(cfg.SecretKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("app: secret_key: %w", err)
+		return fail(fmt.Errorf("app: secret_key: %w", err))
 	}
 	contentStore.UseSealer(box)
 	if n, err := contentStore.SealLegacySecrets(ctx); err != nil {
-		return nil, nil, fmt.Errorf("app: 평문 시크릿 봉인: %w", err)
+		return fail(fmt.Errorf("app: 평문 시크릿 봉인: %w", err))
 	} else if n > 0 {
 		log.Info("평문으로 저장돼 있던 자격증명을 봉인했습니다", "count", n)
 	}
@@ -227,19 +227,9 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// instead of having its template set change underneath it.
 	var loaderRef atomic.Pointer[theme.Loader]
 	loader := loaderRef.Load
-	// asset() has to reach the loader that is current when the template runs,
-	// and the loader owns the func map — so the closure reads the pointer
-	// rather than capturing a loader that does not exist yet. Passing an empty
-	// theme.Deps here is how every stylesheet URL came out as "" before.
-	funcs := theme.FuncMap(theme.Deps{
-		AssetURL: func(name string) string {
-			if l := loader(); l != nil {
-				return l.AssetURL(name)
-			}
-			return ""
-		},
-		URLFor: urlFor,
-	})
+	// Each loader binds asset() to itself, so a render started before a theme
+	// switch retains the matching asset hashes.
+	funcs := theme.FuncMap(theme.Deps{URLFor: urlFor})
 	newLoader := func(dir string) *theme.Loader {
 		return theme.New(theme.Builtin(), dir, dev, funcs)
 	}

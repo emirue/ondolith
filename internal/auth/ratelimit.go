@@ -28,8 +28,9 @@ type Limiter struct {
 	// flaky when the machine is busy.
 	now func() time.Time
 
-	mu      sync.Mutex
-	buckets map[string]*bucket
+	mu        sync.Mutex
+	buckets   map[string]*bucket
+	nextSweep time.Time
 }
 
 type bucket struct {
@@ -64,8 +65,11 @@ func (l *Limiter) Allow(key string, lim Limit) bool {
 		// 4.3-2 의 어느 창(최대 1시간)에서도 이미 가득 찼으므로 지우는 것과
 		// 있는 것이 같다 — 손실 없는 정리다. 이것이 없으면 IP 마다 하나씩
 		// 영원히 남는다: Sweep 을 부르는 곳이 실제로 없었다.
-		if len(l.buckets) >= sweepAt {
+		if len(l.buckets) >= sweepAt && !now.Before(l.nextSweep) {
 			l.sweepLocked(now, time.Hour)
+			// A map full of active clients has nothing to remove. Scanning it
+			// for every new key turns a burst of distinct keys into O(n²) work.
+			l.nextSweep = now.Add(time.Minute)
 		}
 		// A new key starts full, then immediately spends one.
 		l.buckets[key] = &bucket{tokens: float64(lim.Burst) - 1, last: now}

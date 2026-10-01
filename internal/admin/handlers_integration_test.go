@@ -1505,3 +1505,61 @@ func TestUserListOffersNextOnlyWhenThereIsOne(t *testing.T) {
 		}
 	}
 }
+
+type verifyingGateway struct {
+	reconcileGateway
+	err   error
+	calls int
+}
+
+func (g *verifyingGateway) VerifyCredentials(context.Context) error { g.calls++; return g.err }
+
+// A-209 「연결 확인」: 저장된 키가 맞는지 관리자 화면에서 안다. 값은 드러나지
+// 않고, 결과는 작업 로그에 남는다.
+func TestPaymentVerifyReportsWithoutRevealingTheKey(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}, id: "", email: "op@example.com"})
+	ctx := context.Background()
+	if err := d.Content.PutSettings(ctx, map[string]string{"pg.provider": "toss", "pg.secret_key": "test_sk_live_value"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		code int
+		text string
+	}{
+		{"성공", nil, http.StatusOK, "받아들였습니다"},
+		{"키 거부", commerce.ErrGatewayCredentials, http.StatusUnprocessableEntity, "거부했습니다"},
+		{"불명", commerce.ErrPaymentUnknown, http.StatusBadGateway, "닿지 못했거나"},
+	} {
+		gw := &verifyingGateway{err: tc.err}
+		d.Gateway = func() commerce.Gateway { return gw }
+		rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil,
+			url.Values{"action": {"verify"}})
+		if rec.Code != tc.code {
+			t.Errorf("[%s] HTTP %d, want %d: %s", tc.name, rec.Code, tc.code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), tc.text) {
+			t.Errorf("[%s] 본문에 %q 가 없다: %s", tc.name, tc.text, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "test_sk_live_value") {
+			t.Errorf("[%s] 시크릿 값이 화면에 실렸다", tc.name)
+		}
+		if gw.calls != 1 {
+			t.Errorf("[%s] 결제사에 %d번 물었다", tc.name, gw.calls)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs WHERE summary LIKE '결제 설정 연결 확인%'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Errorf("연결 확인이 작업 로그에 %d건, want 3", n)
+	}
+	// 결제사가 없으면 묻지 않는다.
+	d.Gateway = func() commerce.Gateway { return nil }
+	rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil, url.Values{"action": {"verify"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("결제사 없음 → HTTP %d, want 422", rec.Code)
+	}
+}

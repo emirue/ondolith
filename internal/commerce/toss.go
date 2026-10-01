@@ -3,8 +3,11 @@ package commerce
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -130,6 +133,49 @@ func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, err
 		Amount:     raw.Data.TotalAmount,
 		Raw:        body,
 	}, nil
+}
+
+// VerifyCredentials asks the PG whether the stored secret is accepted, without
+// touching any payment: a lookup of a key that cannot exist.
+//
+//	404 NOT_FOUND_PAYMENT          → 인증은 통과했고 결제만 없다 = 키가 맞다
+//	401 UNAUTHORIZED_KEY · 400 INVALID_API_KEY → 키가 틀렸다 (ErrGatewayCredentials)
+//	403 INCORRECT_BASIC_AUTH_FORMAT → 우리 인코딩 버그 — 키 문제로 보고하면 운영자가
+//	                                   맞는 키를 의심한다
+//
+// 코드는 토스 오류 코드 문서(2026-10-01 확인)의 것이다. 응답 본문은 메시지에
+// 싣지 않는다 — PG 가 되돌려 보내는 문자열에 시크릿이 섞일 수 있다.
+func (t *Toss) VerifyCredentials(ctx context.Context) error {
+	probe := make([]byte, 8)
+	if _, err := rand.Read(probe); err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		t.baseURL+"/v1/payments/ondolith-probe-"+hex.EncodeToString(probe), nil)
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Authorization", t.authHeader())
+	resp, err := t.client.Do(httpReq)
+	if err != nil {
+		return ErrPaymentUnknown
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, tossMaxBody))
+	var e struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(raw, &e)
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return nil
+	case e.Code == "UNAUTHORIZED_KEY", e.Code == "INVALID_API_KEY":
+		return fmt.Errorf("%w (%s)", ErrGatewayCredentials, e.Code)
+	case resp.StatusCode == http.StatusOK:
+		return errors.New("commerce: 존재할 수 없는 결제가 조회됐다 — 어댑터 점검 필요")
+	default:
+		return fmt.Errorf("commerce: 결제사 응답 HTTP %d (%s)", resp.StatusCode, e.Code)
+	}
 }
 
 func (t *Toss) post(ctx context.Context, path string, body map[string]any, idem string) (*Payment, error) {

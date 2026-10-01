@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-func allow(...string) bool { return true }
-
 // names flattens a tree to "a>b" paths so the assertions read as the menu does.
 func names(nodes []*MenuNode, prefix string) []string {
 	var out []string

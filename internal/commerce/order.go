@@ -747,6 +747,17 @@ func (s *Store) expireOne(ctx context.Context, orderID string) error {
 	if Status(status) != StatusPaymentPending {
 		return nil // 목록을 뽑은 뒤 결제됐다. 손대지 않는다
 	}
+	// A confirmation can reserve a payment after the expiry list was read.
+	// Recheck under the same order lock ConfirmPayment uses for reservation.
+	var pending bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM payments WHERE order_id = $1 AND kind = '주문결제' AND status = '대기'
+	)`, orderID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		return nil
+	}
 	if err := CanTransition(StatusPaymentPending, StatusPaymentFailed, ActorSystem); err != nil {
 		return err
 	}

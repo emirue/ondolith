@@ -164,6 +164,60 @@ func assertOrderStatus(t *testing.T, pool *pgxpool.Pool, orderNo string, want St
 	}
 }
 
+func TestConfirmRefusesOrderChangedAfterCheckout(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "expired-before-confirm", 1)
+	if _, err := pool.Exec(ctx, `UPDATE orders SET status = '결제실패' WHERE order_no = $1`, orderNo); err != nil {
+		t.Fatal(err)
+	}
+	gw := okGateway()
+	if _, err := s.ConfirmPayment(ctx, gw, "toss", orderNo, "pk-expired", total, time.Now()); !errors.Is(err, ErrTransitionNotAllowed) {
+		t.Fatalf("종료된 주문 승인 = %v, want ErrTransitionNotAllowed", err)
+	}
+	if gw.count() != 0 {
+		t.Error("종료된 주문에 승인 API 를 호출했다")
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM payments`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("실패한 상태 검증이 결제 선점 %d건을 남겼다", n)
+	}
+}
+
+func TestExpiryRechecksPaymentReservedAfterSelection(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "expiry-during-confirm", 2)
+	var id string
+	if err := pool.QueryRow(ctx, `SELECT id FROM orders WHERE order_no = $1`, orderNo).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	gw := okGateway()
+	gw.onConfirm = func() {
+		// The expiry worker already selected id; the gateway call starts only
+		// after the payment reservation commits and releases the order lock.
+		if err := s.expireOne(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		assertOrderStatus(t, pool, orderNo, StatusPaymentPending)
+	}
+	if _, err := s.ConfirmPayment(ctx, gw, "toss", orderNo, "pk-race", total, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusPaid)
+	var stock int
+	if err := pool.QueryRow(ctx, `SELECT v.stock FROM product_variants v
+		JOIN products p ON p.id = v.product_id WHERE p.slug = 'expiry-during-confirm'`).Scan(&stock); err != nil {
+		t.Fatal(err)
+	}
+	if stock != 8 {
+		t.Errorf("진행 중인 결제의 재고가 복원됐다: stock=%d, want 8", stock)
+	}
+}
+
 // FR-608: 멱등성은 DB 유니크가 막는다. 애플리케이션 검사가 아니다.
 func TestSecondConfirmIsRefusedByTheDatabase(t *testing.T) {
 	s, pool := testStore(t)

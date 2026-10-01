@@ -156,10 +156,36 @@ func TestAssetURLUsesContentHash(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(css, "style.css"), []byte("a{color:red}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l.ForgetAsset("css/style.css")
 	second := l.AssetURL("css/style.css")
 	if first == second {
 		t.Error("파일을 고쳤는데 자산 URL 이 그대로다 — 캐시가 안 깨진다")
+	}
+}
+
+func TestAssetHashRefusesSymlinkOutsideTheme(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "static/css/style.css", "body{}")
+	outside := filepath.Join(t.TempDir(), "secret.css")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "static/css/leak.css")); err != nil {
+		t.Fatal(err)
+	}
+	l := New(fakeBuiltin(), dir, false, nil)
+	if got := l.AssetURL("css/leak.css"); got != "/static/css/leak.css" {
+		t.Errorf("테마 밖 파일의 해시가 공개됐다: %q", got)
+	}
+}
+
+func TestProductionAssetHashRemainsCached(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "static/css/style.css", "first{}")
+	l := New(fakeBuiltin(), dir, false, nil)
+	first := l.AssetURL("css/style.css")
+	write(t, dir, "static/css/style.css", "second{}")
+	if got := l.AssetURL("css/style.css"); got != first {
+		t.Errorf("운영 모드에서 캐시가 바뀌었다: %q → %q", first, got)
 	}
 }
 

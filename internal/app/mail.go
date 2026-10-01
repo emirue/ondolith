@@ -40,6 +40,9 @@ func (s settingsSender) Send(ctx context.Context, to, subject, body string) erro
 	port := kv["mail.smtp_port"]
 	if port == "" {
 		port = "587"
+		if kv["mail.tls_mode"] == "tls" {
+			port = "465"
+		}
 	}
 	from := kv["mail.from_address"]
 	if from == "" {
@@ -55,7 +58,7 @@ func (s settingsSender) Send(ctx context.Context, to, subject, body string) erro
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\n"+
 		"Content-Type: text/plain; charset=utf-8\r\n\r\n%s",
 		formatFrom(kv["mail.from_name"], from), to, subject, body)
-	return sendMail(ctx, host+":"+port, host, auth, from, []string{to}, []byte(msg))
+	return sendMail(ctx, net.JoinHostPort(host, port), host, kv["mail.tls_mode"], auth, from, []string{to}, []byte(msg))
 }
 
 // ErrMailHostBlocked is what an SMTP host inside 169.254.0.0/16 gets.
@@ -82,24 +85,50 @@ func blockMetadataAddr(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
-// sendMail is smtp.SendMail with the dial replaced so blockMetadataAddr can
-// see the resolved address. The exchange below is the standard library's, step
-// for step; smtp.SendMail owns its own dial and offers no hook.
+// sendMail dials through the metadata-address guard before applying the
+// operator's TLS mode. smtp.SendMail owns its dial and offers no such hook.
 //
 // **기한이 있다.** 접속 10초, 교환 전체 30초. 없으면 방화벽이 조용히 버리는
 // SMTP 호스트 하나가 시도마다 고루틴을 OS 접속 시한(리눅스 ~2분)×재시도만큼
 // 붙들고, 받아 놓고 답하지 않는 서버는 영원히 붙든다 — Mailer 가 건네는 30초
 // ctx 는 여기서 읽지 않으면 종이에만 있는 시한이다.
-func sendMail(ctx context.Context, addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
+func sendMail(ctx context.Context, addr, host, mode string, auth smtp.Auth, from string, to []string, msg []byte) error {
 	d := net.Dialer{Timeout: 10 * time.Second, Control: blockMetadataAddr}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
+	return sendSMTP(ctx, conn, host, mode, auth, from, to, msg)
+}
+
+// sendSMTP owns the connected transport. Keeping the protocol separate from
+// dialing also lets tests exercise it without opening a listening socket.
+func sendSMTP(ctx context.Context, conn net.Conn, host, mode string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	defer conn.Close()
+	transport := conn
+	stop := context.AfterFunc(ctx, func() { _ = transport.Close() })
+	defer stop()
+	if mode == "" {
+		mode = "starttls"
+	}
+	if mode != "none" && mode != "starttls" && mode != "tls" {
+		return errors.New("app: SMTP TLS 모드가 올바르지 않습니다")
+	}
+	// Even a longer caller deadline must not extend the exchange past 30s.
+	deadline := time.Now().Add(30 * time.Second)
 	if dl, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(dl)
-	} else {
-		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+		if dl.Before(deadline) {
+			deadline = dl
+		}
+	}
+	_ = conn.SetDeadline(deadline)
+	tlsConfig := &tls.Config{ServerName: host}
+	if mode == "tls" {
+		secure := tls.Client(conn, tlsConfig)
+		if err := secure.HandshakeContext(ctx); err != nil {
+			return err
+		}
+		conn = secure
 	}
 	c, err := smtp.NewClient(conn, host)
 	if err != nil {
@@ -111,8 +140,11 @@ func sendMail(ctx context.Context, addr, host string, auth smtp.Auth, from strin
 	if err := c.Hello("localhost"); err != nil {
 		return err
 	}
-	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+	if mode == "starttls" {
+		if ok, _ := c.Extension("STARTTLS"); !ok {
+			return errors.New("app: SMTP 서버가 STARTTLS 를 지원하지 않습니다")
+		}
+		if err := c.StartTLS(tlsConfig); err != nil {
 			return err
 		}
 	}

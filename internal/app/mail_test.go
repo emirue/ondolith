@@ -38,7 +38,7 @@ func TestBlockMetadataAddr(t *testing.T) {
 // into the dialer sendMail uses. Nothing listens on that address; Control runs
 // before connect, so the call returns our error rather than a timeout.
 func TestSendMailRefusesMetadataHost(t *testing.T) {
-	err := sendMail(context.Background(), "169.254.169.254:25", "169.254.169.254", nil,
+	err := sendMail(context.Background(), "169.254.169.254:25", "169.254.169.254", "none", nil,
 		"a@example.com", []string{"b@example.com"}, []byte("hi"))
 	if !errors.Is(err, ErrMailHostBlocked) {
 		t.Fatalf("sendMail to the metadata address: %v, want ErrMailHostBlocked", err)
@@ -67,7 +67,7 @@ func TestSendMailDeliversToServer(t *testing.T) {
 	}()
 
 	msg := []byte("Subject: 확인\r\n\r\n본문입니다")
-	err = sendMail(context.Background(), ln.Addr().String(), "127.0.0.1", nil,
+	err = sendMail(context.Background(), ln.Addr().String(), "127.0.0.1", "none", nil,
 		"from@example.com", []string{"to@example.com"}, msg)
 	if err != nil {
 		t.Fatalf("sendMail: %v", err)
@@ -92,6 +92,10 @@ func TestSendMailDeliversToServer(t *testing.T) {
 // client sent. It advertises no extension, so STARTTLS and AUTH stay out of
 // the path this test is about.
 func fakeSMTP(conn net.Conn) string {
+	return fakeSMTPWithSTARTTLS(conn, false)
+}
+
+func fakeSMTPWithSTARTTLS(conn net.Conn, startTLS bool) string {
 	var seen strings.Builder
 	r := bufio.NewReader(conn)
 	write := func(s string) { _, _ = conn.Write([]byte(s + "\r\n")) }
@@ -115,7 +119,11 @@ func fakeSMTP(conn net.Conn) string {
 		}
 		switch {
 		case strings.HasPrefix(line, "EHLO"), strings.HasPrefix(line, "HELO"):
-			write("250 fake")
+			if startTLS {
+				write("250-fake\r\n250 STARTTLS")
+			} else {
+				write("250 fake")
+			}
 		case strings.HasPrefix(line, "MAIL FROM"), strings.HasPrefix(line, "RCPT TO"):
 			write("250 2.0.0 OK")
 		case line == "DATA":

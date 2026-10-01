@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -180,6 +181,46 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// **PG 자격증명은 결제를 통째로 가른다.** 바꿔치기하면 이후 모든 결제가
 	// 공격자의 상점으로 간다 — 돈이 나가는 것은 아니지만 들어오는 돈이
 	// 사라진다 (D15 5.3-1 이 재인증을 요구하는 것과 같은 종류의 위험이다).
+	// 「연결 확인」은 저장이 아니다: 저장된 키로 PG 에 묻고 답만 그린다. 상태를
+	// 바꾸지 않고 값도 드러내지 않으므로 재인증은 받지 않는다 — 같은 경로를 쓰는
+	// 이유는 D11 의 라우트를 늘리지 않기 위해서다.
+	if r.PostFormValue("action") == "verify" {
+		// 운영자가 키를 넣고 나서 그것이 맞는지 알 길이 셸(`make test-toss`)뿐이었다
+		// — 관리자 화면에서 끝나야 운영이다. 결과만 말한다: 키 값도, PG 의 응답
+		// 본문도 화면에 싣지 않는다. 분기가 여기 있는 것은 D19 의 오류 식별자
+		// 대조(checkdocs 30-2)가 라우트 핸들러 본문을 보기 때문이다.
+		var gw commerce.Gateway
+		if d.Gateway != nil {
+			gw = d.Gateway()
+		}
+		if gw == nil {
+			d.renderPayment(w, r, http.StatusUnprocessableEntity, "결제사와 시크릿 키를 먼저 저장하세요.")
+			return
+		}
+		v, ok := gw.(commerce.CredentialVerifier)
+		if !ok {
+			d.renderPayment(w, r, http.StatusUnprocessableEntity, "이 결제사는 연결 확인을 지원하지 않습니다.")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		err := v.VerifyCredentials(ctx)
+		switch {
+		case err == nil:
+			d.log(r, c, "settings.update", "settings", "payment", "결제 설정 연결 확인: 성공")
+			d.renderPaymentWith(w, r, http.StatusOK, "", "결제사가 저장된 시크릿 키를 받아들였습니다.")
+		case errors.Is(err, commerce.ErrGatewayCredentials):
+			d.log(r, c, "settings.update", "settings", "payment", "결제 설정 연결 확인: 키 거부")
+			d.renderPayment(w, r, http.StatusUnprocessableEntity,
+				"결제사가 시크릿 키를 거부했습니다. 개발자센터의 키와 테스트/라이브 구분을 확인하세요.")
+		default:
+			d.Logger.Warn("결제 설정 연결 확인", "err", err)
+			d.log(r, c, "settings.update", "settings", "payment", "결제 설정 연결 확인: 실패")
+			d.renderPayment(w, r, http.StatusBadGateway,
+				"결제사에 닿지 못했거나 예상 밖의 응답입니다. 잠시 후 다시 시도하세요.")
+		}
+		return
+	}
 	if !reauthOK(c, r) {
 		d.renderPayment(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
@@ -225,6 +266,10 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	d.renderPaymentWith(w, r, code, msg, "")
+}
+
+func (d *Deps) renderPaymentWith(w http.ResponseWriter, r *http.Request, code int, msg, notice string) {
 	kv, err := d.Content.Settings(r.Context(), paymentSettingKeys...)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
@@ -241,7 +286,7 @@ func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, m
 		shown[k] = v
 	}
 	data := map[string]any{"Settings": shown, "SecretSaved": saved,
-		"Providers": pgProviders, "Error": msg}
+		"Providers": pgProviders, "Error": msg, "Notice": notice}
 	// 클라이언트 키만 있고 시크릿이 없으면 결제창은 뜨는데 승인이 실패한다 —
 	// 구매자가 카드를 넣은 뒤에 실패하는 가장 나쁜 순서다.
 	if shown["pg.client_key"] != "" && !saved["pg.secret_key"] {

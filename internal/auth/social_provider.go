@@ -2,8 +2,10 @@ package auth
 
 import (
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
@@ -66,15 +68,25 @@ func NewSocialProvider(name, clientID, secret, callbackURL string) (goth.Provide
 	if clientID == "" || secret == "" {
 		return nil, fmt.Errorf("auth: %s 의 자격증명이 없습니다", name)
 	}
+	// Goth otherwise falls back to http.DefaultClient, whose timeout is zero.
+	// Both code exchange and profile lookup must release the callback handler
+	// if the provider stops replying.
+	client := &http.Client{Timeout: 15 * time.Second}
 	switch name {
 	case "google":
 		// email 만 받는다. 우리가 쓰는 것은 프로바이더 uid 와 이메일뿐이고,
 		// 더 넓은 scope 는 동의 화면만 무겁게 한다.
-		return google.New(clientID, secret, callbackURL, "email"), nil
+		p := google.New(clientID, secret, callbackURL, "email")
+		p.HTTPClient = client
+		return p, nil
 	case "kakao":
-		return kakao.New(clientID, secret, callbackURL, "account_email"), nil
+		p := kakao.New(clientID, secret, callbackURL, "account_email")
+		p.HTTPClient = client
+		return p, nil
 	case "naver":
-		return naver.New(clientID, secret, callbackURL), nil
+		p := naver.New(clientID, secret, callbackURL)
+		p.HTTPClient = client
+		return p, nil
 	}
 	return nil, fmt.Errorf("auth: 프로바이더 생성이 없습니다: %q", name)
 }

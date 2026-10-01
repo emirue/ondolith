@@ -17,7 +17,8 @@ func TestStaticAssetsSkipTheSessionAndAreCacheable(t *testing.T) {
 	if err != nil || len(names) == 0 {
 		t.Fatalf("내장 테마에 css 가 없다: %v", err)
 	}
-	path := "/" + names[0] + "?v=abcdef12"
+	l := theme.New(theme.Builtin(), "", false, nil)
+	path := l.AssetURL(strings.TrimPrefix(names[0], "static/"))
 
 	resp, err := srv.Client().Get(srv.URL + path)
 	if err != nil {

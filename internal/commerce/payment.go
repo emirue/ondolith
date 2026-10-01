@@ -65,16 +65,15 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 
 	// (1) 주문을 읽는다.
 	//
-	// 여기에 `FOR UPDATE` 를 두었었는데 지웠다. 이 트랜잭션은 승인 API 를
-	// 부르기 **전에** 커밋하므로 잠금은 그 시점에 풀리고, 아래 (6)의 전이는
-	// 잠금 밖에서 일어난다 — 즉 잠금이 지키는 것이 없었다. 동시 승인 두 건은
-	// 결제 유니크가 막고, 읽은 뒤 상태가 바뀌는 것은 (6)의 비교-교환이 막는다.
+	// 만료 처리도 같은 주문을 잠근다. 상태 조회와 결제 선점을 한 잠금 안에서
+	// 끝내야, 만료된 주문을 승인하거나 진행 중인 결제의 재고를 풀지 않는다.
+	// 잠금은 승인 API 를 부르기 전에 커밋하여 해제한다.
 	var orderID, status string
 	var stored int
 	var createdAt time.Time
 	err = tx.QueryRow(ctx, `
 		SELECT id, status, total_amount, created_at FROM orders
-		WHERE order_no = $1`, orderNo).Scan(&orderID, &status, &stored, &createdAt)
+		WHERE order_no = $1 FOR UPDATE`, orderNo).Scan(&orderID, &status, &stored, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -112,6 +111,13 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 		return nil, ErrAlreadyPaid
 	}
 	if err != nil {
+		return nil, err
+	}
+
+	// Existing live payments still hit the unique constraint above (FR-608).
+	// An order whose state changed without a live payment must stop before
+	// any gateway call; the new reservation is rolled back with this error.
+	if err := CanTransition(Status(status), StatusPaid, "P-408"); err != nil {
 		return nil, err
 	}
 

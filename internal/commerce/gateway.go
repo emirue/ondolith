@@ -18,6 +18,16 @@ import (
 // **이 파일에 토스페이먼츠 고유 이름이 없다.** paymentKey·orderId 같은 필드명은
 // 토스의 것이지만, 여기서는 PaymentKey·OrderNo 라는 중립 이름을 쓰고 어댑터가
 // 옮긴다. 고유 이름이 새어나오면 두 번째 PG 는 "토스 흉내" 를 구현하게 된다.
+// CredentialVerifier is what A-209 「연결 확인」 asks of an adapter: are the
+// stored credentials accepted by the PG? Optional — an adapter that cannot
+// answer cheaply simply does not implement it.
+type CredentialVerifier interface {
+	VerifyCredentials(ctx context.Context) error
+}
+
+// ErrGatewayCredentials: the PG rejected the stored key itself (not a request).
+var ErrGatewayCredentials = errors.New("commerce: 결제사가 시크릿 키를 거부했습니다")
+
 type Gateway interface {
 	// Confirm 은 결제를 확정한다. D50 결제 흐름 6단계.
 	Confirm(ctx context.Context, req ConfirmRequest) (*Payment, error)

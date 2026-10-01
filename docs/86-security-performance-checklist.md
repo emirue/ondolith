@@ -17,6 +17,12 @@
 `staticcheck`·`gosec` 을 돌리고, 결함으로 확인된 것은 고친 뒤 실제 PostgreSQL 로 재현·
 검증했다. 결과는 [CHANGELOG](../CHANGELOG.md) v0.2.0 「Security」「Performance」에 있다.
 
+**2026-09-30 부분 점검:** 부팅 자원 정리, 테마 파일 경계·해시·캐시, SMTP TLS·취소,
+OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만료 경쟁 상황을 다시 확인했다.
+테마·SMTP·OAuth 단위 테스트는 경합 탐지와 함께 실행했다. PostgreSQL 검증은
+[GAP-09](85-gaps.md)에 남아 있으며, 이 환경의 네트워크 제한으로 `govulncheck`의
+최신 취약점 DB 조회도 실행되지 않았다. 위 전수 점검 날짜를 갱신한 것은 아니다.
+
 ---
 
 ## 1. 인증·세션
@@ -37,6 +43,7 @@
 | 1.12 | **프록시 뒤에서 IP 별 제한이 사이트 전체 제한이 된다** | `middleware_gate.go` `clientIP` — `RemoteAddr` 만 | [D72](72-deploy-lightsail.md) 「프록시 뒤의 속도 제한」 | — 코드로는 안 고친다(`X-Forwarded-For` 신뢰는 CloudFront 구성에서 오히려 틀린다). 프록시의 `limit_req` 가 맡는다 |
 | 1.13 | 재인증 창 15분, 위험 작업(테마 업로드·환불·계정 조작·결제 설정)에 요구 | `internal/app/reauth.go`·각 핸들러 | 코드 읽기 | ✓ |
 | 1.14 | FR-214: 켜져 있으면 미인증 계정은 글·댓글·주문 불가 | `handler_board.go`·`handler_comment.go`·`handler_checkout.go` | `TestUnverifiedAccountCannotWriteWhenRequired` | ✓ 2026-09-13 에 고침 |
+| 1.15 | OAuth 외부 요청 시한 | `auth/social_provider.go` | `TestSocialProvidersBoundOutboundRequests` | ✓ 2026-09-30: 세 프로바이더의 코드 교환·프로필 조회에 요청당 15초 |
 
 ## 2. 권한(RBAC)
 
@@ -80,9 +87,10 @@
 | 4.6 | 설정 파일 0600·원자적 쓰기, `site_url` 은 설치 요청에서, `secure_cookies` 설치 시 감지 | `internal/config/config.go`·`install.go` | `TestSaveUsesOwnerOnlyPermissions`·`TestRequestOriginFollowsTheInstallRequest` | ✓ `site_url` 은 2026-09-13 추가 |
 | 4.7 | 설치 창: 설정이 써진 순간 닫힘, 채워진 DB 거부 | `install.go` | `TestInstallStaysClosedWhenSwitchFails` | ✓ 2026-09-13 에 고침 |
 | 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·테마 24 MiB·웹훅 1 MiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
-| 4.9 | 정적 파일: `static/` 아래만, 심볼릭 링크 탈출·디렉터리 목록 404 | `theme/static.go` | 단위 테스트 | ✓ |
+| 4.9 | 테마 파일: 템플릿·다운로드·해시가 같은 파일 경계를 사용, 자산은 `static/` 아래만 | `theme/loader.go` `openThemeFile`·`static.go`·`funcs.go` | 경로·심볼릭 링크·해시 단위 테스트 | ✓ 2026-09-30: `os.OpenInRoot`가 파일을 여는 순간의 탈출을 막는다. 해시의 바깥 파일 읽기를 재현하고 수정 |
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
 | 4.12 | 저장된 자격증명(PG 시크릿·SMTP 비밀번호·소셜 client_secret)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |
+| 4.13 | 운영자가 넣은 PG 키가 맞는지 **관리자 화면에서** 확인된다 (A-209 「연결 확인」) — 값·응답 본문 비노출, 작업 로그에 결과만 | `admin/handlers_terms.go` `verifyPaymentCredentials`·`commerce/toss.go` `VerifyCredentials` | `TestPaymentVerifyReportsWithoutRevealingTheKey`·`TestVerifyCredentialsReadsAuthFromTheErrorCode` | ✓ 2026-10-01 |
 | 4.11 | 글 삭제가 첨부 **파일**까지 지운다(디스크 고아 없음) | `content/attachment.go` `DeletePost` — P-207·A-307 둘 다 이 경로 | 코드 읽기 | ✓ 행은 CASCADE, 파일은 `os.Root.Remove` |
 
 ## 5. 결제·커머스
@@ -101,7 +109,7 @@
 | 5.10 | 시크릿·카드 정보가 로그·화면·원문 보관에 없다 | `Toss.String`(가림)·`MaskCardFields`·`oplog.go`(비밀 필드 없음)·A-602 | `grep` + `make verify-upgrade` ⑤ 실기동 로그 | ✓ |
 | 5.11 | 작업 로그 append-only(D15 7절): DELETE 거부, UPDATE 는 `SET NULL` 한 경우만 | `00010`·`00021` | `TestOperationLogCannotBeRewrittenUnderCoverOfActorNull` | ✓ 2026-09-13 에 구멍을 막음 |
 | 5.12 | 취소 API 호출: 접수(A-507)·취소(P-506)·반품 정산(A-511)이 `ExecuteRefund` 로 PG 를 부르고 `완료` 로 확정 | `commerce/refund.go` `ExecuteRefund` | `TestExecuteRefundCallsThePGOnceAndCompletes`·`…KeepsUnknownResultsAndRetriesDeclines` | ✓ 2026-09-14 에 넣음(이전엔 호출처 0 — 돈이 나가지 않았다). 실제 토스 왕복은 [GAP-03](85-gaps.md) |
-| 5.13 | `결제대기` 만료: `AuthWindow` 를 넘긴 주문을 `결제실패` 로, 재고 복원. 결과 불명 결제가 있는 주문은 제외 | `commerce/order.go` `ExpirePendingOrders`, `app.go` 1분 고루틴 | `TestExpirePendingOrdersRestoresStock` | ✓ 2026-09-14 |
+| 5.13 | `결제대기` 만료: 재고 복원 전 진행 중인 결제를 주문 잠금 안에서 다시 확인. 결제 선점도 같은 주문을 잠그고 상태 검사 | `commerce/order.go`·`payment.go` | 기존 만료 테스트 + `TestConfirmRefusesOrderChangedAfterCheckout`·`TestExpiryRechecksPaymentReservedAfterSelection` | △ 2026-09-30: 경쟁 상황 수정 후 PostgreSQL 실행 검증이 남음 ([GAP-09](85-gaps.md)) |
 | 5.14 | `payments_pg_key_idx` 가 부분 인덱스가 아님 | `00013` | 코드 읽기 | — 그대로 둔다. 토스 `paymentKey` 는 결제 시도마다 새 값이라 실패 행이 키를 점유해도 정상 재결제는 막히지 않고, 다른 주문에서 같은 키가 오는 것(`ErrPaymentKeyReused`)을 잡는 쪽이 더 값지다 |
 | 5.15 | 웹훅 서명 실패 응답 400 | `handler_webhook.go`·[D19](19-screen-io.md) P-905 | 토스 웹훅 가이드(200 만 성공, 최대 7회 재전송) | ✓ 2026-09-14 확정 |
 | 5.16 | 구매자 부분 환불 요청(P-507)의 승인·거부 | A-507 | — | △ 화면이 없다 — [GAP-08](85-gaps.md) |
@@ -144,11 +152,11 @@
 | # | 점검 항목 | 어디 | 확인 방법 | 상태 |
 |---|---|---|---|---|
 | 8.1 | 서버 시한: 헤더 10초·읽기 30초·쓰기 60초·유휴 120초, 종료 15초 | `cmd/ondolith/main.go` | 코드 읽기 | ✓ `MaxHeaderBytes` 는 기본 1 MiB |
-| 8.2 | 템플릿은 한 번 파싱·캐시, 테마 교체는 포인터 교환 | `theme/loader.go`·`app.go` | 코드 읽기 | ✓ 개발 모드만 매 요청 재파싱(FR-306) |
-| 8.3 | 정적 자산 캐시: 해시 주소 `immutable` 1년, 그 외 1시간 | `theme/static.go` | 8.2 의 테스트 | ✓ 2026-09-13 |
-| 8.4 | 아웃바운드 시한: 토스 30초, SMTP 접속 10초·교환 30초 | `commerce/payment.go` `GatewayTimeout`·`app/mail.go` | 코드 읽기 | ✓ 2026-09-13 |
+| 8.2 | 템플릿은 한 번 파싱·캐시, `asset` 함수는 해당 로더에 귀속 | `theme/loader.go`·`app.go` | `TestAssetFunctionBelongsToItsLoader`·기존 캐시 테스트 | ✓ 2026-09-30: 개발 모드에서는 템플릿·자산 해시 모두 다시 읽음(FR-306). 자산 해시는 스트림으로 계산 |
+| 8.3 | 정적 자산 캐시: 현재 해시와 일치하면 `immutable` 1년, 버전 없는 주소 1시간. 개발 모드·다른 해시는 `no-store`, 404는 캐시 힌트 없음 | `theme/static.go` | `TestStaticCachePolicyMatchesContentAndMode` | ✓ 2026-09-30 |
+| 8.4 | 아웃바운드 시한: 토스 30초, SMTP 접속 10초·교환 최대 30초, OAuth 요청당 15초 | `commerce/payment.go`·`app/mail.go`·`auth/social_provider.go` | SMTP `net.Pipe` 테스트·프로바이더 클라이언트 검사 | ✓ 2026-09-30: SMTP TLS 모드 적용·인증서 검증·STARTTLS 지원 필수·접속 후 취소도 확인 |
 | 8.5 | 고루틴 기한: 웹훅 처리 1분, 메일 전송은 8.4 로 상한 | `handler_webhook.go`·`auth/mail.go` | 코드 읽기 | ✓ 전역 동시 수 제한은 없음(IP 별 제한이 앞에 있다) |
-| 8.6 | 레이트리미터 지도가 자란다 | `auth/ratelimit.go` | `TestAllowSweepsIdleBucketsOnceLarge` | ✓ 2026-09-13 |
+| 8.6 | 속도 제한기 지도 정리 비용 | `auth/ratelimit.go` | `TestAllowSweepsIdleBucketsOnceLarge`·`BenchmarkLimiterNewKeyWithActiveBuckets` | ✓ 2026-09-30: 4,096개부터 최대 1분에 한 번 정리. M4 Pro에서 활성 버킷 4,096개 + 새 키 허용·삭제 벤치마크 27.4μs → 66.5ns. 전체 사이트 성능 수치는 아님 |
 | 8.7 | 사이트맵: 질의 하나 + `Cache-Control` 1시간 | `handler_seo.go`·`content.SitemapPosts` | 코드 읽기 | ✓ 2026-09-13 |
 | 8.8 | bcrypt 비용 10 = 1 vCPU 에서 시도당 수십~백 ms | `auth/login.go` | — | — 의도적. IP·계정 제한이 앞에 있다 |
 | 8.9 | A-508 대사: 조회 하나 5초, 요청 전체 40초 예산, 넘긴 행은 「조회하지 않았다」 | `commerce/webhook.go` `Reconcile` | 코드 읽기 | ✓ 2026-09-14 |

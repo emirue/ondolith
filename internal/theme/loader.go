@@ -16,6 +16,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -56,23 +57,26 @@ func New(builtin fs.FS, dir string, dev bool, funcs template.FuncMap) *Loader {
 		builtin: builtin,
 		dir:     filepath.Clean(dir),
 		dev:     dev,
-		funcs:   funcs,
 		cache:   make(map[string]*template.Template),
 	}
 	if dir == "" {
 		l.dir = ""
 	}
 	l.assets = newAssetHasher(builtin, l.dir)
+	l.funcs = maps.Clone(funcs)
+	if l.funcs == nil {
+		l.funcs = make(template.FuncMap)
+	}
+	// Cached templates must use the same loader for markup and asset hashes,
+	// even if a theme switch replaces the active loader during a render.
+	l.funcs["asset"] = l.AssetURL
 	return l
 }
 
 // validName rejects anything that is not a plain relative template path.
 //
-// For the disk path this is the earlier and cheaper of two checks — withinDir
-// below is what actually holds, and removing this one alone does not open a
-// hole. It is kept because it is the ONLY check on the paths that never reach
-// withinDir: HasBuiltin and the asset hasher. Layering at a trust boundary is
-// not redundancy worth deleting.
+// Disk reads additionally go through OpenInRoot. Built-in reads also need this
+// check, since they do not pass through the operating system's path boundary.
 func validName(name string) error {
 	if name == "" || strings.ContainsAny(name, "\\\x00") {
 		return ErrBadName
@@ -94,48 +98,36 @@ func validName(name string) error {
 
 // resolve reads a template's source, disk first.
 func (l *Loader) resolve(name string) (string, bool, error) {
-	if err := validName(name); err != nil {
+	f, disk, err := openThemeFile(l.builtin, l.dir, name)
+	if err != nil {
 		return "", false, err
 	}
-	if l.dir != "" {
-		p := filepath.Join(l.dir, filepath.FromSlash(name))
-		// Join already cleans, but the result is re-checked against the root:
-		// a symlink inside the theme could still point outside it.
-		if !withinDir(l.dir, p) {
-			return "", false, ErrOutside
-		}
-		// Compare canonical paths on both sides. The theme root itself may sit
-		// behind a symlink — on macOS /var is one — and comparing a resolved
-		// file against an unresolved root rejects every legitimate read.
-		if real, err := filepath.EvalSymlinks(p); err == nil && !withinDir(l.root(), real) {
-			return "", false, ErrOutside
-		}
-		if b, err := os.ReadFile(p); err == nil {
-			return string(b), true, nil
-		}
-	}
-	b, err := fs.ReadFile(l.builtin, name)
-	if err != nil {
-		return "", false, ErrNotFound
-	}
-	return string(b), false, nil
+	defer f.Close()
+	b, err := io.ReadAll(f)
+	return string(b), disk, err
 }
 
-// root returns the theme directory with symlinks resolved, falling back to the
-// raw path when it cannot be resolved (the directory may not exist yet).
-func (l *Loader) root() string {
-	if r, err := filepath.EvalSymlinks(l.dir); err == nil {
-		return r
+// openThemeFile applies the same disk boundary and fallback to templates,
+// downloads and hashes. OpenInRoot protects the open itself against symlink
+// replacement; checking a path and opening it later leaves a race.
+func openThemeFile(builtin fs.FS, dir, name string) (fs.File, bool, error) {
+	if err := validName(name); err != nil {
+		return nil, false, err
 	}
-	return l.dir
-}
-
-func withinDir(root, p string) bool {
-	rel, err := filepath.Rel(root, p)
+	if dir != "" {
+		f, err := os.OpenInRoot(dir, filepath.FromSlash(name))
+		if err == nil {
+			return f, true, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, false, fmt.Errorf("%w: %v", ErrOutside, err)
+		}
+	}
+	f, err := builtin.Open(name)
 	if err != nil {
-		return false
+		return nil, false, ErrNotFound
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return f, false, nil
 }
 
 // Template returns name parsed together with base.html, so that a page template

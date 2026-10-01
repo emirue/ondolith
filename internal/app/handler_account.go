@@ -383,10 +383,6 @@ func (d *accountDeps) passwordForm(w http.ResponseWriter, r *http.Request) {
 	d.render(w, r, "account/password.html", http.StatusOK, nil)
 }
 
-// profileForm is P-108's whole surface. `role`, `is_active` and `is_admin` are
-// absent by construction — the escalation they would allow cannot be typed.
-type profileForm struct{ DisplayName string }
-
 // P-108 POST — edit own profile.
 func (d *accountDeps) updateProfile(w http.ResponseWriter, r *http.Request) {
 	a := ActorFrom(r.Context())

@@ -58,6 +58,25 @@ func TestBuiltinOnlyWhenNoDir(t *testing.T) {
 	}
 }
 
+// A render already using the old loader must keep that loader's asset URLs
+// when the active theme changes during the render.
+func TestAssetFunctionBelongsToItsLoader(t *testing.T) {
+	fsys := fakeBuiltin()
+	fsys["page.html"].Data = []byte(`{{define "body"}}{{asset "css/style.css"}}{{end}}`)
+	dir := t.TempDir()
+	write(t, dir, "static/css/style.css", "new-theme{}")
+	var active *Loader
+	funcs := FuncMap(Deps{AssetURL: func(name string) string { return active.AssetURL(name) }})
+	old := New(fsys, "", false, funcs)
+	active = New(fsys, dir, false, funcs)
+	if got := render(t, old, "page.html"); !strings.Contains(got, old.AssetURL("css/style.css")) {
+		t.Errorf("옛 로더가 새 테마의 자산 URL 을 썼다: %q", got)
+	}
+	if got := render(t, active, "page.html"); !strings.Contains(got, active.AssetURL("css/style.css")) {
+		t.Errorf("새 로더의 자산 URL 이 틀렸다: %q", got)
+	}
+}
+
 // A name the built-in theme lacks is a core bug, not a theme error — there is
 // no floor to fall back to.
 func TestMissingEverywhereIsAnError(t *testing.T) {
@@ -111,6 +130,23 @@ func TestSymlinkOutOfThemeIsRefused(t *testing.T) {
 	l := New(fakeBuiltin(), dir, false, nil)
 	if _, err := l.Template("link.html"); !errors.Is(err, ErrOutside) {
 		t.Errorf("심볼릭 링크로 테마 밖을 읽었다: %v", err)
+	}
+}
+
+func TestThemeRootSymlinkAndRelativeInternalLink(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "base.html", `<html>{{block "body" .}}{{end}}</html>`)
+	write(t, dir, "pages/source.html", `{{define "body"}}테마 안{{end}}`)
+	if err := os.Symlink("pages/source.html", filepath.Join(dir, "page.html")); err != nil {
+		t.Fatal(err)
+	}
+	rootLink := filepath.Join(t.TempDir(), "theme")
+	if err := os.Symlink(dir, rootLink); err != nil {
+		t.Fatal(err)
+	}
+	l := New(fakeBuiltin(), rootLink, false, nil)
+	if got := render(t, l, "page.html"); !strings.Contains(got, "테마 안") {
+		t.Errorf("정상 심볼릭 링크를 읽지 못했다: %s", got)
 	}
 }
 

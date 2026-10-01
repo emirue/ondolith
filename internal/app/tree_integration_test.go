@@ -587,10 +587,8 @@ func TestPublicScreensCarryTheBuiltInDesign(t *testing.T) {
 
 	// The stylesheet URL carries a content hash; follow whatever the page asked
 	// for rather than guessing the path.
-	href := home[strings.Index(home, "css/style.css")-1:]
-	href = href[:strings.IndexAny(href, `"`)+0]
 	start := strings.LastIndex(home[:strings.Index(home, "css/style.css")], `href="`)
-	href = home[start+len(`href="`):]
+	href := home[start+len(`href="`):]
 	href = href[:strings.Index(href, `"`)]
 
 	code, css := mustGet(t, c, srv.URL+href)

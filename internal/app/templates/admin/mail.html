@@ -34,7 +34,7 @@
         {{$m := index .Settings "mail.tls_mode"}}
         <select name="mail.tls_mode">
           <option value="none"{{if eq $m "none"}} selected{{end}}>없음</option>
-          <option value="starttls"{{if eq $m "starttls"}} selected{{end}}>STARTTLS</option>
+          <option value="starttls"{{if or (eq $m "") (eq $m "starttls")}} selected{{end}}>STARTTLS</option>
           <option value="tls"{{if eq $m "tls"}} selected{{end}}>TLS</option>
         </select>
       </label>
