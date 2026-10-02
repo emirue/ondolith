@@ -424,7 +424,9 @@ input[type="radio"] {
   accent-color: var(--accent);
 }
 
-input[type="file"] { padding: var(--s10) var(--s12); }
+/* 파일 입력은 고유 폭(「파일 선택」 버튼 + 파일 이름)을 갖는다. 줄이지 못하게 두면
+   375px 에서 화면을 가로로 민다 — A-502 의 이미지 올리기에서 34~45px 넘쳤다. */
+input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width: 0; }
 
 /* 표 안의 입력칸은 칸을 채운다. 기본 폭(대략 20자)이 열을 밀어낸다. */
 .adm-table input,
@@ -601,6 +603,8 @@ fieldset {
   border: 1px solid var(--line);
   border-radius: var(--chip-radius);
   background: var(--panel);
+  /* 기본값 min-content 는 안의 넓은 입력만큼 fieldset 을 넓힌다. */
+  min-width: 0;
 }
 
 legend {
