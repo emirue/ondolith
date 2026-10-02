@@ -43,5 +43,7 @@
   <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/shipping">송장 입력</a>
   <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/refund">환불 처리</a>
   <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/returns">반품·교환 처리</a>
+  {{/* A-516 으로 들어가는 유일한 길이다 (FR-623). */}}
+  <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/pick">피킹 대조</a>
 </div>
 {{end}}

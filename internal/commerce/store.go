@@ -71,21 +71,35 @@ var productSortColumns = map[string]bool{
 // D30 이 정한 것과 같다 — 미노출 상품은 데이터베이스 밖으로 나오지 않아야 하고,
 // 없는 술어는 잊힐 수 없다.
 func (s *Store) ListProducts(ctx context.Context, opt ProductQuery) ([]Product, error) {
+	out, _, err := s.ListProductsMore(ctx, opt)
+	return out, err
+}
+
+// ListProductsMore is ListProducts plus 「다음 쪽이 있는가」 (A-501, FR-706).
+//
+// **한 행 더 읽어 판정한다** (A-401 과 같은 방식). 전체 개수를 세지 않는 이유는
+// 그 값이 화면에 필요하지 않기 때문이고, 「다음」을 조건 없이 그리면 마지막 쪽
+// 뒤에 빈 쪽이 끝없이 이어진다.
+func (s *Store) ListProductsMore(ctx context.Context, opt ProductQuery) ([]Product, bool, error) {
 	if !productSortColumns[opt.Sort] {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownSort, opt.Sort)
+		return nil, false, fmt.Errorf("%w: %q", ErrUnknownSort, opt.Sort)
 	}
 	limit, offset := opt.clamp()
 	rows, err := s.q.ListProducts(ctx, commerceq.ListProductsParams{
 		VisibleOnly: opt.VisibleOnly, CategoryID: nullable(opt.CategoryID), Sort: opt.Sort,
-		Limit: int32(limit), Offset: int32(offset)})
+		Limit: int32(limit + 1), Offset: int32(offset)})
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
 	}
 	var out []Product
 	for _, r := range rows {
 		out = append(out, productFromList(r))
 	}
-	return out, nil
+	return out, more, nil
 }
 
 // productFromList converts a list row. SearchProducts 의 행은 필드가 같아

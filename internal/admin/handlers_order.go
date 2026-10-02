@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,15 +18,17 @@ func (d *Deps) OrderList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	orders, err := d.Commerce.AdminOrders(r.Context(), r.URL.Query().Get("status"), pageOf(r))
+	status, page := r.URL.Query().Get("status"), pageOf(r)
+	orders, more, err := d.Commerce.AdminOrders(r.Context(), status, page)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/orders.html", http.StatusOK, map[string]any{
-		"Orders": orders, "Status": r.URL.Query().Get("status"),
-		"Statuses": commerce.AllStatuses(),
-	})
+	data := map[string]any{
+		"Orders": orders, "Status": status, "Statuses": commerce.AllStatuses(),
+	}
+	pager(data, "/admin/orders", url.Values{"status": {status}}, page, more)
+	d.Render(w, r, "admin/orders.html", http.StatusOK, data)
 }
 
 // OrderDetail is A-505.
@@ -167,8 +170,9 @@ func (d *Deps) ProductList(w http.ResponseWriter, r *http.Request) {
 	}
 	// VisibleOnly 가 false 다 — 관리자는 숨긴 상품도 본다. 공개 화면과 같은
 	// 함수를 쓰되 인자가 다르다.
-	products, err := d.Commerce.ListProducts(r.Context(),
-		commerce.ProductQuery{Page: pageOf(r), Sort: r.URL.Query().Get("sort")})
+	sort, page := r.URL.Query().Get("sort"), pageOf(r)
+	products, more, err := d.Commerce.ListProductsMore(r.Context(),
+		commerce.ProductQuery{Page: page, Sort: sort})
 	if errors.Is(err, commerce.ErrUnknownSort) {
 		http.Error(w, "알 수 없는 정렬입니다.", http.StatusBadRequest)
 		return
@@ -177,7 +181,9 @@ func (d *Deps) ProductList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/products.html", http.StatusOK, map[string]any{"Products": products})
+	data := map[string]any{"Products": products}
+	pager(data, "/admin/products", url.Values{"sort": {sort}}, page, more)
+	d.Render(w, r, "admin/products.html", http.StatusOK, data)
 }
 
 // CategoryList is A-509 GET.
@@ -315,6 +321,38 @@ func pageOf(r *http.Request) int {
 		return 1
 	}
 	return n
+}
+
+// pager fills the previous/next links of a 1-based list (A-501, A-504, FR-706).
+//
+// **주소를 통째로 만들어 넘긴다.** 템플릿에서 `?a={{.A}}&page={{.N}}` 로 이으면
+// 조건이 하나 늘 때마다 화면마다 고쳐야 하고, 한 화면이 빠뜨리면 다음 쪽에서
+// 필터가 풀린다. 빈 값은 싣지 않는다.
+func pager(data map[string]any, path string, q url.Values, page int, more bool) {
+	data["PageNo"] = page
+	if page > 1 {
+		data["PrevURL"] = listURL(path, q, page-1)
+	}
+	if more {
+		data["NextURL"] = listURL(path, q, page+1)
+	}
+}
+
+// listURL is one list address: 빈 조건과 1쪽은 싣지 않는다.
+func listURL(path string, q url.Values, page int) string {
+	v := url.Values{}
+	for k, vals := range q {
+		if len(vals) > 0 && vals[0] != "" {
+			v.Set(k, vals[0])
+		}
+	}
+	if page > 1 {
+		v.Set("page", strconv.Itoa(page))
+	}
+	if len(v) == 0 {
+		return path
+	}
+	return path + "?" + v.Encode()
 }
 
 // RefundForm is A-507 GET — cancel / partial refund.

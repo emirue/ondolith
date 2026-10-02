@@ -473,22 +473,28 @@ func AllStatuses() []Status {
 }
 
 // AdminOrders is A-504's read. status "" means every order.
-func (s *Store) AdminOrders(ctx context.Context, status string, page int) ([]OrderDetail, error) {
+//
+// 두 번째 값은 「다음 쪽이 있는가」다 — 한 행 더 읽어 판정한다 (ListProductsMore).
+func (s *Store) AdminOrders(ctx context.Context, status string, page int) ([]OrderDetail, bool, error) {
 	if status != "" && !Known(Status(status)) {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownStatus, status)
+		return nil, false, fmt.Errorf("%w: %q", ErrUnknownStatus, status)
 	}
 	limit, offset := ProductQuery{Page: page}.clamp()
 	rows, err := s.q.AdminOrders(ctx, commerceq.AdminOrdersParams{
-		Status: nullable(status), Limit: int32(limit), Offset: int32(offset)})
+		Status: nullable(status), Limit: int32(limit + 1), Offset: int32(offset)})
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
 	}
 	var out []OrderDetail
 	for _, r := range rows {
 		out = append(out, OrderDetail{OrderNo: r.OrderNo, Status: Status(r.Status),
 			Total: int(r.TotalAmount), OrdererEmail: r.OrdererEmail, CreatedAt: r.CreatedAt})
 	}
-	return out, nil
+	return out, more, nil
 }
 
 // TransitionOrder is A-506's write: the state machine decides, then the row moves.

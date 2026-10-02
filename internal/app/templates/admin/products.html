@@ -7,7 +7,9 @@
     <thead><tr><th>이름</th><th>주소</th><th>가격</th><th>노출</th><th>재고</th></tr></thead>
     <tbody>
       {{range .Products}}
-      <tr><td>{{.Name}}</td><td>{{.Slug}}</td><td>{{money .BasePrice}}</td>
+      {{/* 행이 A-502 로 가는 길이다 (FR-706). 이 링크가 없는 동안 이미 만든
+           상품의 편집·옵션·라벨 화면은 주소를 직접 쳐야만 열렸다. */}}
+      <tr><td><a href="/admin/products/{{.ID}}">{{.Name}}</a></td><td>{{.Slug}}</td><td>{{money .BasePrice}}</td>
           <td>{{if .Visible}}노출{{else}}숨김{{end}}</td>
           <td>{{if .InStock}}있음{{else}}품절{{end}}</td></tr>
       {{else}}
@@ -15,5 +17,11 @@
       {{end}}
     </tbody>
   </table>
+</div>
+<div class="adm-pagination">
+  <span class="adm-count">{{.PageNo}}쪽</span>
+  {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
+  <span class="adm-page adm-page--current">{{.PageNo}}</span>
+  {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
 </div>
 {{end}}

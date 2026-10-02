@@ -444,7 +444,7 @@ func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// 주문 위젯은 커머스가 켜져 있고 order.view 가 있을 때만이다. Commerce 가
 	// nil 인 것은 조립 시점에 커머스를 끈 사이트다 (FR-710).
 	if d.Commerce != nil && c.Can("order.view") {
-		if orders, err := d.Commerce.AdminOrders(r.Context(), "", 1); err == nil {
+		if orders, _, err := d.Commerce.AdminOrders(r.Context(), "", 1); err == nil {
 			if len(orders) > dashboardItems {
 				orders = orders[:dashboardItems]
 			}
