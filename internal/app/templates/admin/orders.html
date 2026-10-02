@@ -5,6 +5,8 @@
     <option value="">전체</option>
     {{range .Statuses}}<option value="{{.}}"{{if eq . $.Status}} selected{{end}}>{{.}}</option>{{end}}
   </select>
+  {{/* 상태와 기간이 한 폼이다 — 상태를 바꿔도 기간이 함께 실린다 (D19 0.6). */}}
+  {{template "period-fields" .}}
 </form>
 <div class="adm-table-wrap">
   <table class="adm-table">

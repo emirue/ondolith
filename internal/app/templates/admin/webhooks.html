@@ -3,6 +3,9 @@
   {{/* **`수신` 이 목록 상단에 온다** — 처리되지 않은 채 남은 행이 이 화면의
        목적이다. 자동 재처리 루프를 두지 않기로 했으므로 (D50) 사람이 이것을
        봐야 한다. 원문은 카드 필드가 마스킹된 뒤 저장된 값이다. */}}
+  <form method="get" class="adm-filterbar">
+    {{template "period-fields" .}}
+  </form>
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr>
@@ -23,6 +26,12 @@
       {{end}}
       </tbody>
     </table>
+  </div>
+  <div class="adm-pagination">
+    <span class="adm-count">{{.PageNo}}쪽</span>
+    {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
   </div>
 </div>
 {{end}}

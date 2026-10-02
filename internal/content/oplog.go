@@ -135,8 +135,16 @@ type LogEntry struct {
 // the screen that needs it can add one, and an unused parameter is a shape
 // nobody checked.
 func (l *OpLog) Recent(ctx context.Context, limit, offset int) ([]LogEntry, error) {
+	return l.RecentBetween(ctx, nil, nil, limit, offset)
+}
+
+// RecentBetween is Recent within a period: `since ≤ 기록 시각 < until` (D19 0.6).
+// nil 이면 그쪽 끝이 열려 있다.
+func (l *OpLog) RecentBetween(ctx context.Context, since, until *time.Time,
+	limit, offset int) ([]LogEntry, error) {
+
 	rows, err := l.store.q.RecentOpLog(ctx, contentq.RecentOpLogParams{
-		Limit: int32(limit), Offset: int32(offset)})
+		Since: since, Until: until, Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +157,7 @@ func (l *OpLog) Recent(ctx context.Context, limit, offset int) ([]LogEntry, erro
 	return out, nil
 }
 
-func (l *OpLog) Count(ctx context.Context) (int64, error) {
-	return l.store.q.CountOpLog(ctx)
+// Count counts the entries of the same period RecentBetween reads.
+func (l *OpLog) Count(ctx context.Context, since, until *time.Time) (int64, error) {
+	return l.store.q.CountOpLog(ctx, contentq.CountOpLogParams{Since: since, Until: until})
 }

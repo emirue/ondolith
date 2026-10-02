@@ -18,16 +18,29 @@ func (d *Deps) OrderList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	status, page := r.URL.Query().Get("status"), pageOf(r)
-	orders, more, err := d.Commerce.AdminOrders(r.Context(), status, page)
+	// 기간 조회 (D19 0.6): 주문일 기준. 기본은 기간 조건 없음.
+	q := r.URL.Query()
+	status, page := q.Get("status"), pageOf(r)
+	keep := url.Values{"status": {status}}
+	p, perr := parsePeriod(q.Get("from"), q.Get("to"), time.Local)
+	data := map[string]any{
+		"Status": status, "Statuses": commerce.AllStatuses(), "From": p.From, "To": p.To,
+		// 빠른 버튼은 상태 필터를 유지한다.
+		"Quick": quickLinks("/admin/orders", keep, time.Now(), true),
+	}
+	if perr != nil {
+		// 목록 대신 폼과 오류 문구를 다시 보인다.
+		data["Error"] = perr.Error()
+		d.Render(w, r, "admin/orders.html", http.StatusUnprocessableEntity, data)
+		return
+	}
+	orders, more, err := d.Commerce.AdminOrders(r.Context(), status, p.Since, p.Until, page)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	data := map[string]any{
-		"Orders": orders, "Status": status, "Statuses": commerce.AllStatuses(),
-	}
-	pager(data, "/admin/orders", url.Values{"status": {status}}, page, more)
+	data["Orders"] = orders
+	pager(data, "/admin/orders", withPeriod(keep, p), page, more)
 	d.Render(w, r, "admin/orders.html", http.StatusOK, data)
 }
 

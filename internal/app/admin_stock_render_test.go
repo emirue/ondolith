@@ -10,18 +10,17 @@ import (
 	"github.com/emirue/ondolith/internal/commerce"
 )
 
-// renderStock 은 A-517 템플릿을 실제 렌더러로 그린다. DB 가 필요 없다.
-func renderStock(t *testing.T, data map[string]any) string {
+// renderAdmin 은 관리자 템플릿 하나를 실제 렌더러로 그린다. DB 가 필요 없다.
+func renderAdmin(t *testing.T, name string, data map[string]any) string {
 	t.Helper()
 	r, err := newAdminRenderer(func() string { return "s" }, "", true, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	r.Render(rec, httptest.NewRequest(http.MethodGet, "/admin/stock", nil),
-		"admin/stock.html", http.StatusOK, data)
+	r.Render(rec, httptest.NewRequest(http.MethodGet, "/admin/x", nil), name, http.StatusOK, data)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("A-517 렌더 = HTTP %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("%s 렌더 = HTTP %d: %s", name, rec.Code, rec.Body.String())
 	}
 	return rec.Body.String()
 }
@@ -38,7 +37,7 @@ func TestStockRowFormsAreDrawnOnlyForManagers(t *testing.T) {
 			"CanManage": manage, "CarryPage": 1, "PageNo": 1}
 	}
 
-	view := renderStock(t, data(false))
+	view := renderAdmin(t, "admin/stock.html", data(false))
 	for _, want := range []string{"티셔츠", "크기: L", "SKU-TEE", "8801234567890", "7개"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("조회 권한만 있는 화면에 %q 가 없다", want)
@@ -50,7 +49,7 @@ func TestStockRowFormsAreDrawnOnlyForManagers(t *testing.T) {
 		}
 	}
 
-	manage := renderStock(t, data(true))
+	manage := renderAdmin(t, "admin/stock.html", data(true))
 	for _, want := range []string{`action="/admin/stock/receive"`, `action="/admin/stock/stocktake"`,
 		`<input type="hidden" name="ledger" value="7">`} {
 		if !strings.Contains(manage, want) {

@@ -475,13 +475,19 @@ func AllStatuses() []Status {
 // AdminOrders is A-504's read. status "" means every order.
 //
 // 두 번째 값은 「다음 쪽이 있는가」다 — 한 행 더 읽어 판정한다 (ListProductsMore).
-func (s *Store) AdminOrders(ctx context.Context, status string, page int) ([]OrderDetail, bool, error) {
+//
+// since·until 은 주문일의 범위다 (`since ≤ 주문일 < until`, D19 0.6). nil 이면
+// 그쪽 끝이 열려 있다.
+func (s *Store) AdminOrders(ctx context.Context, status string, since, until *time.Time,
+	page int) ([]OrderDetail, bool, error) {
+
 	if status != "" && !Known(Status(status)) {
 		return nil, false, fmt.Errorf("%w: %q", ErrUnknownStatus, status)
 	}
 	limit, offset := ProductQuery{Page: page}.clamp()
 	rows, err := s.q.AdminOrders(ctx, commerceq.AdminOrdersParams{
-		Status: nullable(status), Limit: int32(limit + 1), Offset: int32(offset)})
+		Status: nullable(status), Since: since, Until: until,
+		Limit: int32(limit + 1), Offset: int32(offset)})
 	if err != nil {
 		return nil, false, err
 	}

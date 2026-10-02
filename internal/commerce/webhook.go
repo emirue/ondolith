@@ -159,11 +159,17 @@ type WebhookRow struct {
 // WebhookHistory is A-603's list. **`수신` 이 먼저 온다** — 처리되지 않은 채
 // 남은 행이 이 화면의 목적이고, D50 이 자동 재처리를 두지 않기로 했으므로
 // 사람이 그것을 봐야 한다.
-func (s *Store) WebhookHistory(ctx context.Context, limit int) ([]WebhookRow, error) {
+//
+// since·until 은 수신 시각의 범위다 (`since ≤ 수신 < until`, D19 0.6). nil 이면
+// 그쪽 끝이 열려 있다.
+func (s *Store) WebhookHistory(ctx context.Context, since, until *time.Time,
+	limit, offset int) ([]WebhookRow, error) {
+
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	rows, err := s.q.WebhookHistory(ctx, int32(limit))
+	rows, err := s.q.WebhookHistory(ctx, commerceq.WebhookHistoryParams{
+		Since: since, Until: until, Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}

@@ -25,8 +25,11 @@ WHERE id = sqlc.arg('id') AND status = '대기';
 SELECT w.id, w.pg, w.event_id, COALESCE(o.order_no, '')::text AS order_no, w.status,
        w.payload::text AS payload, COALESCE(w.error, '')::text AS error, w.created_at
 FROM webhook_events w LEFT JOIN orders o ON o.id = w.order_id
+-- 기간 조회 (D19 0.6): 수신 시각 기준.
+WHERE (sqlc.narg('since')::timestamptz IS NULL OR w.created_at >= sqlc.narg('since'))
+  AND (sqlc.narg('until')::timestamptz IS NULL OR w.created_at < sqlc.narg('until'))
 ORDER BY (w.status = '수신') DESC, w.created_at DESC, w.id
-LIMIT sqlc.arg('limit')::int;
+LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
 
 -- name: PaymentsToReconcile :many
 SELECT p.id, p.payment_key, o.order_no, p.pg, p.kind, p.status,

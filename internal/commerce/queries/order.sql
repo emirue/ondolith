@@ -92,6 +92,9 @@ WHERE order_id = $1 ORDER BY shipped_at DESC, id;
 SELECT order_no, status, total_amount, orderer_email, created_at
 FROM orders
 WHERE (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  -- 기간 조회 (D19 0.6): 주문일 기준, `since ≤ 시각 < until`. NULL 이면 그쪽 끝이 열려 있다.
+  AND (sqlc.narg('since')::timestamptz IS NULL OR created_at >= sqlc.narg('since'))
+  AND (sqlc.narg('until')::timestamptz IS NULL OR created_at < sqlc.narg('until'))
 ORDER BY created_at DESC, id LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
 
 -- name: LockOrderByNo :one

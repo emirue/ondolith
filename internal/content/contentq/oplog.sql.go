@@ -13,10 +13,17 @@ import (
 
 const countOpLog = `-- name: CountOpLog :one
 SELECT count(*) FROM operation_logs
+WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+  AND ($2::timestamptz IS NULL OR created_at < $2)
 `
 
-func (q *Queries) CountOpLog(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countOpLog)
+type CountOpLogParams struct {
+	Since *time.Time
+	Until *time.Time
+}
+
+func (q *Queries) CountOpLog(ctx context.Context, arg CountOpLogParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpLog, arg.Since, arg.Until)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -25,10 +32,15 @@ func (q *Queries) CountOpLog(ctx context.Context) (int64, error) {
 const recentOpLog = `-- name: RecentOpLog :many
 SELECT id, actor_email, action, target_type, coalesce(target_id, '') AS target_id,
        summary, coalesce(host(ip), '')::text AS ip, created_at
-FROM operation_logs ORDER BY created_at DESC, id DESC LIMIT $2::int OFFSET $1::int
+FROM operation_logs
+WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+  AND ($2::timestamptz IS NULL OR created_at < $2)
+ORDER BY created_at DESC, id DESC LIMIT $4::int OFFSET $3::int
 `
 
 type RecentOpLogParams struct {
+	Since  *time.Time
+	Until  *time.Time
 	Offset int32
 	Limit  int32
 }
@@ -44,8 +56,14 @@ type RecentOpLogRow struct {
 	CreatedAt  time.Time
 }
 
+// 기간 조회 (D19 0.6): 기록 시각 기준, `since ≤ 시각 < until`. NULL 이면 열린 끝이다.
 func (q *Queries) RecentOpLog(ctx context.Context, arg RecentOpLogParams) ([]RecentOpLogRow, error) {
-	rows, err := q.db.Query(ctx, recentOpLog, arg.Offset, arg.Limit)
+	rows, err := q.db.Query(ctx, recentOpLog,
+		arg.Since,
+		arg.Until,
+		arg.Offset,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}

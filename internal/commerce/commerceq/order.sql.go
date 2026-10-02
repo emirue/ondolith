@@ -14,11 +14,16 @@ const adminOrders = `-- name: AdminOrders :many
 SELECT order_no, status, total_amount, orderer_email, created_at
 FROM orders
 WHERE ($1::text IS NULL OR status = $1)
-ORDER BY created_at DESC, id LIMIT $3::int OFFSET $2::int
+  -- 기간 조회 (D19 0.6): 주문일 기준, ` + "`" + `since ≤ 시각 < until` + "`" + `. NULL 이면 그쪽 끝이 열려 있다.
+  AND ($2::timestamptz IS NULL OR created_at >= $2)
+  AND ($3::timestamptz IS NULL OR created_at < $3)
+ORDER BY created_at DESC, id LIMIT $5::int OFFSET $4::int
 `
 
 type AdminOrdersParams struct {
 	Status *string
+	Since  *time.Time
+	Until  *time.Time
 	Offset int32
 	Limit  int32
 }
@@ -32,7 +37,13 @@ type AdminOrdersRow struct {
 }
 
 func (q *Queries) AdminOrders(ctx context.Context, arg AdminOrdersParams) ([]AdminOrdersRow, error) {
-	rows, err := q.db.Query(ctx, adminOrders, arg.Status, arg.Offset, arg.Limit)
+	rows, err := q.db.Query(ctx, adminOrders,
+		arg.Status,
+		arg.Since,
+		arg.Until,
+		arg.Offset,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}

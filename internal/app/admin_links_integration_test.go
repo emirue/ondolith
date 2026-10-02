@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -156,6 +158,69 @@ func TestStockScreenRendersRowForms(t *testing.T) {
 	code, body = mustGet(t, c, srv.URL+"/admin/stock?q=not-a-uuid")
 	if code != http.StatusOK || !strings.Contains(body, "일치하는 조합이 없습니다") {
 		t.Errorf("없는 검색어 = HTTP %d, 빈 결과 문구가 없다", code)
+	}
+}
+
+// **기간 조회가 실제 화면에서 돈다** (D19 0.6, FR-712, W3-45).
+//
+// 거부(422)는 목록 없이 그리는 길이라, 목록 화면이 늘 받던 값이 빠진다. 템플릿이
+// 그 값을 요구하면 422 가 500 이 되는데 핸들러 테스트는 렌더를 하지 않아 못 본다 —
+// 실제로 A-601 이 그랬다(건수가 nil).
+func TestPeriodQueryOnTheRealScreens(t *testing.T) {
+	srv, pool, c := shopAdminSite(t)
+	seedOrders(t, pool, 1)
+
+	for _, path := range []string{"/admin/orders", "/admin/reconcile", "/admin/oplog", "/admin/webhooks"} {
+		code, body := mustGet(t, c, srv.URL+path+"?from=2025-03-11&to=2025-03-10")
+		if code != http.StatusUnprocessableEntity || !strings.Contains(body, "시작일이 종료일보다 늦습니다") {
+			t.Errorf("%s 시작일 > 종료일 = HTTP %d — want 422 와 오류 문구", path, code)
+		}
+		// 받은 날짜가 칸에 남아 있어 고쳐서 다시 조회할 수 있다.
+		if !strings.Contains(body, `name="from" value="2025-03-11"`) {
+			t.Errorf("%s: 거부 화면의 날짜 칸이 비었다", path)
+		}
+
+		code, body = mustGet(t, c, srv.URL+path)
+		if code != http.StatusOK {
+			t.Errorf("%s = HTTP %d", path, code)
+		}
+		for _, want := range []string{`type="date"`, ">1주일</a>", ">1개월</a>"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s 에 %s 가 없다", path, want)
+			}
+		}
+		// 3개월 버튼은 A-508 에만 없다 — 상한이 31일이다.
+		if got, want := strings.Contains(body, ">3개월</a>"), path != "/admin/reconcile"; got != want {
+			t.Errorf("%s: 3개월 버튼 있음=%v, want %v", path, got, want)
+		}
+	}
+
+	// 빠른 버튼을 누르면 그 범위로 조회되고 날짜 칸에 그 범위가 채워진다.
+	_, body := mustGet(t, c, srv.URL+"/admin/orders?status="+url.QueryEscape("결제대기"))
+	i := strings.Index(body, `">1주일</a>`)
+	if i < 0 {
+		t.Fatal("1주일 버튼이 없다")
+	}
+	href := body[strings.LastIndex(body[:i], `href="`)+len(`href="`) : i]
+	link, err := url.Parse(html.UnescapeString(href))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link.Query().Get("status") != "결제대기" {
+		t.Errorf("1주일 버튼 %s 이 상태 필터를 잃었다", href)
+	}
+	code, body := mustGet(t, c, srv.URL+link.String())
+	if code != http.StatusOK {
+		t.Fatalf("1주일 버튼 = HTTP %d", code)
+	}
+	for _, k := range []string{"from", "to"} {
+		if want := `name="` + k + `" value="` + link.Query().Get(k) + `"`; !strings.Contains(body, want) {
+			t.Errorf("버튼으로 조회한 화면의 날짜 칸에 %s 가 없다", want)
+		}
+	}
+	// 방금 넣은 주문은 최근 1주일 안이다.
+	if !strings.Contains(body, "AD0000") {
+		t.Error("1주일 범위에 방금 넣은 주문이 없다")
 	}
 }
 

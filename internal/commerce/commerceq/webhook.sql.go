@@ -173,9 +173,18 @@ const webhookHistory = `-- name: WebhookHistory :many
 SELECT w.id, w.pg, w.event_id, COALESCE(o.order_no, '')::text AS order_no, w.status,
        w.payload::text AS payload, COALESCE(w.error, '')::text AS error, w.created_at
 FROM webhook_events w LEFT JOIN orders o ON o.id = w.order_id
+WHERE ($1::timestamptz IS NULL OR w.created_at >= $1)
+  AND ($2::timestamptz IS NULL OR w.created_at < $2)
 ORDER BY (w.status = '수신') DESC, w.created_at DESC, w.id
-LIMIT $1::int
+LIMIT $4::int OFFSET $3::int
 `
+
+type WebhookHistoryParams struct {
+	Since  *time.Time
+	Until  *time.Time
+	Offset int32
+	Limit  int32
+}
 
 type WebhookHistoryRow struct {
 	ID        string
@@ -188,8 +197,14 @@ type WebhookHistoryRow struct {
 	CreatedAt time.Time
 }
 
-func (q *Queries) WebhookHistory(ctx context.Context, limit int32) ([]WebhookHistoryRow, error) {
-	rows, err := q.db.Query(ctx, webhookHistory, limit)
+// 기간 조회 (D19 0.6): 수신 시각 기준.
+func (q *Queries) WebhookHistory(ctx context.Context, arg WebhookHistoryParams) ([]WebhookHistoryRow, error) {
+	rows, err := q.db.Query(ctx, webhookHistory,
+		arg.Since,
+		arg.Until,
+		arg.Offset,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}

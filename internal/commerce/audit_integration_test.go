@@ -527,7 +527,7 @@ func TestWebhookHistoryPutsUnhandledFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := s.WebhookHistory(ctx, 3)
+	got, err := s.WebhookHistory(ctx, nil, nil, 3, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

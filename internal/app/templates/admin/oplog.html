@@ -1,5 +1,8 @@
 {{define "content"}}
 <div class="adm-card" style="padding:0">
+  <form method="get" class="adm-filterbar">
+    {{template "period-fields" .}}
+  </form>
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr><th>시각</th><th>주체</th><th>동작</th><th>대상</th><th>요약</th><th>IP</th></tr></thead>
@@ -21,9 +24,9 @@
   </div>
   <div class="adm-pagination">
     <span class="adm-count">{{number .Count}}건 · {{.PageNo}}쪽</span>
-    {{if .HasPrev}}<a href="/admin/oplog?page={{.PrevPage}}">‹</a>{{end}}
+    {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
     <span class="adm-page adm-page--current">{{.PageNo}}</span>
-    {{if .HasNext}}<a href="/admin/oplog?page={{.NextPage}}">›</a>{{end}}
+    {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
   </div>
 </div>
 <p class="adm-hint">

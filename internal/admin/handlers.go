@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
@@ -444,7 +445,7 @@ func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// 주문 위젯은 커머스가 켜져 있고 order.view 가 있을 때만이다. Commerce 가
 	// nil 인 것은 조립 시점에 커머스를 끈 사이트다 (FR-710).
 	if d.Commerce != nil && c.Can("order.view") {
-		if orders, _, err := d.Commerce.AdminOrders(r.Context(), "", 1); err == nil {
+		if orders, _, err := d.Commerce.AdminOrders(r.Context(), "", nil, nil, 1); err == nil {
 			if len(orders) > dashboardItems {
 				orders = orders[:dashboardItems]
 			}
@@ -853,30 +854,51 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
 		page = n
 	}
+	// 기간 조회 (D19 0.6): 기록 시각 기준. 기본은 기간 조건 없음.
+	q := r.URL.Query()
+	p, perr := parsePeriod(q.Get("from"), q.Get("to"), time.Local)
+	// Count 는 거부 화면에도 있어야 한다 — 템플릿의 `number` 가 nil 을 받으면
+	// 422 가 500 이 된다.
+	data := map[string]any{"From": p.From, "To": p.To, "PageNo": page + 1, "Count": int64(0),
+		"Quick": quickLinks("/admin/oplog", nil, time.Now(), true)}
+	if perr != nil {
+		data["Error"] = perr.Error()
+		d.Render(w, r, "admin/oplog.html", http.StatusUnprocessableEntity, data)
+		return
+	}
 	ctx := r.Context()
-	entries, err := d.OpLog.Recent(ctx, oplogPageSize, page*oplogPageSize)
+	entries, err := d.OpLog.RecentBetween(ctx, p.Since, p.Until, oplogPageSize, page*oplogPageSize)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	total, err := d.OpLog.Count(ctx)
+	total, err := d.OpLog.Count(ctx, p.Since, p.Until)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	prev := page - 1
-	if prev < 0 {
-		prev = 0
+	// `Total` 이 아니라 `Count` 다 — 이 화면의 숫자는 금액이 아니라 건수이고,
+	// 「…Total」 이라는 이름은 금액 표시 검사가 찾는 이름이다. 이름 하나로
+	// 금액과 건수가 섞이면 그 검사는 예외를 달기 시작하고, 예외가 붙은
+	// 검사는 다음 화면에서 진짜 금액을 놓친다.
+	data["Entries"] = entries
+	data["Count"] = total
+	// **쪽 이동 링크가 기간을 싣는다.** 이 화면의 쪽 번호는 0 부터라 pager 를 쓰지
+	// 않고 직접 만든다 (`?page=1` 이 둘째 쪽이다).
+	link := func(n int) string {
+		v := withPeriod(nil, p)
+		if n > 0 {
+			v.Set("page", strconv.Itoa(n))
+		}
+		return listURL("/admin/oplog", v, 0)
 	}
-	d.Render(w, r, "admin/oplog.html", http.StatusOK, map[string]any{
-		// `Total` 이 아니라 `Count` 다 — 이 화면의 숫자는 금액이 아니라 건수이고,
-		// 「…Total」 이라는 이름은 금액 표시 검사가 찾는 이름이다. 이름 하나로
-		// 금액과 건수가 섞이면 그 검사는 예외를 달기 시작하고, 예외가 붙은
-		// 검사는 다음 화면에서 진짜 금액을 놓친다.
-		"Entries": entries, "Count": total,
-		"PageNo": page + 1, "PrevPage": prev, "NextPage": page + 1,
-		"HasPrev": page > 0, "HasNext": int64((page+1)*oplogPageSize) < total,
-	})
+	if page > 0 {
+		data["PrevURL"] = link(page - 1)
+	}
+	if int64((page+1)*oplogPageSize) < total {
+		data["NextURL"] = link(page + 1)
+	}
+	d.Render(w, r, "admin/oplog.html", http.StatusOK, data)
 }
 
 // ---- A-406 회원 프로필 항목 (FR-215) ---------------------------------------

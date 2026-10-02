@@ -60,3 +60,16 @@
          placeholder="마지막 확인 후 15분이 지났다면 입력하세요">
 </label>
 {{end}}
+
+{{/* period-fields 는 기간 조회 칸이다 (D19 0.6, FR-712): 시작일·종료일과 빠른 버튼.
+     **빠른 버튼은 서버가 날짜를 계산해 둔 GET 링크다** — 누르면 바로 조회되고 JS 가
+     필요 없다. 날짜 선택은 브라우저 기본 선택기를 쓴다. 감싸는 form 은 화면이 둔다 —
+     상태 필터 같은 다른 조건이 같은 폼에 있어야 함께 실린다. */}}
+{{define "period-fields"}}
+<label for="from">기간</label>
+<input type="date" id="from" name="from" value="{{.From}}" aria-label="시작일">
+<span>~</span>
+<input type="date" name="to" value="{{.To}}" aria-label="종료일">
+{{range .Quick}}<a class="adm-btn" href="{{.URL}}">{{.Label}}</a>{{end}}
+<button class="adm-btn">조회</button>
+{{end}}
