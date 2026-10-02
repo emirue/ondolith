@@ -68,6 +68,23 @@ jobs:
       - run: sh scripts/testdb.sh up
       - run: make ui
 
+  # **화면을 실제로 여는 세 검사.** `make screens`(D11 의 모든 GET 화면)·`make crawl`
+  # (홈에서 링크 따라가기)·`make e2e`(빈 DB 에 설치부터 한 바퀴)는 CI 에 없었고,
+  # 그래서 낡았다: 2026-10-02 에 손으로 돌려 보니 셋 다 실패했는데 원인은 앱이
+  # 아니라 **바뀐 동작을 따라가지 못한 기대값**이었다(P-408 의 400, 재시작 없는
+  # 유형 전환, 접수 즉시 실행되는 환불). 아무도 안 돌리는 검사는 틀려도 초록이다.
+  flows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sh scripts/testdb.sh up
+      - run: make screens
+      - run: make crawl
+      - run: make e2e
+
   # 취약점 조회는 네트워크가 필요해 `make check` 에 없다 (D21 1절). 여기서 돈다.
   vuln:
     runs-on: ubuntu-latest

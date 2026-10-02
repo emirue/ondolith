@@ -250,6 +250,13 @@ while IFS="$(printf '\t')" read -r id name path methods; do
 
 	case "$code" in
 	200) ;;
+	400)
+		# **P-408 은 결제창이 돌려준 값 없이 열면 400 이 정상이다** (D19 P-408 1행:
+		# 세션의 주문과 `orderId` 불일치). 진짜 paymentKey 는 이 스윕이 만들 수
+		# 없다 — 그래서 「거부 화면이 그려지는가」를 본다. 200 만 받던 판은
+		# 370e9d9 가 이 화면을 400 으로 고친 뒤로 계속 실패하고 있었다.
+		[ "$id" = P-408 ] || { bad "$id $name — HTTP $code ($p)"; continue; }
+		;;
 	*) bad "$id $name — HTTP $code ($p)"; continue ;;
 	esac
 

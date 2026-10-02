@@ -235,9 +235,13 @@ want "T5.1 사이트 유형을 커머스로" 303 "$(code POST /admin/settings \
 	--data-urlencode "site.meta_description=" --data-urlencode "site.og_image=" \
 	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
 want "T5.1 설정이 저장됐다" shop "$(sql "select value from settings where key='site.type'")"
-want "T5.1 재시작 전에는 아직 없다 (FR-710 조립 시점 결정)" 404 "$(code GET /shop)"
+# **저장이 곧 반영이다** (D20 모듈 게이팅 — 운영 트리를 다시 조립해 원자 교체).
+# 예전 판은 「재시작 전에는 404」를 기대했다. 그 기대가 남아 있는 동안 이
+# 시나리오는 계속 실패하고 있었다 — CI 가 e2e 를 돌리지 않아 아무도 못 봤다.
+want "T5.1 저장 직후 /shop 이 열린다 (재시작 없음, D20)" 200 "$(code GET /shop)"
 
-# 재시작. 커머스 라우트는 조립 시점에 정해지므로 이것이 절차의 일부다.
+# 재시작. 더는 절차의 일부가 아니지만, **재시작 뒤에도 남는지**는 따로 본다 —
+# 메모리에서만 바뀌고 설정에 안 남았다면 여기서 드러난다.
 #
 # **포트가 풀릴 때까지 기다린다.** 종료를 보내자마자 새로 띄우면 `address
 # already in use` 로 죽고, 그러면 이후 케이스가 전부 「연결 실패」로 실패해
@@ -379,9 +383,16 @@ body GET "/orders/$NO/shipping" | grep -q "1234567890" &&
 
 ITEM=$(sql "select oi.id from order_items oi join orders o on o.id=oi.order_id
             where o.order_no='$NO' limit 1")
-want "T7.4 부분 환불 접수" 303 "$(code POST "/admin/orders/$NO/refund" \
+# 환불은 접수와 함께 PG 에 실행된다 (D19 A-507: DB 한도 선점 → PG 호출 → 확정).
+# 이 시나리오의 PG 키는 가짜이고 결제도 SQL 로 넣은 것이라 **PG 가 거부한다** —
+# 그때의 정답은 502 이고 선점은 남는다(「미환불이 이중환불보다 낫다」, D13).
+# 실제 환불 한 바퀴는 D73 의 실측이 본다.
+want "T7.4 PG 가 거부한 환불은 502" 502 "$(code POST "/admin/orders/$NO/refund" \
 	--data-urlencode "item_id=$ITEM" --data-urlencode "qty_$ITEM=1" \
 	--data-urlencode "reason=단순 변심" --data-urlencode "password=$ADMIN_PW")"
+want "T7.4 선점은 남는다 — 완료로 넘어가지 않았다" 0 \
+	"$(sql "select count(*) from refunds r join orders o on o.id=r.order_id
+	        where o.order_no='$NO' and r.status='완료'")"
 # **금액을 폼에서 받지 않는다** — 서버가 주문 시점 스냅샷에서 계산한다 (FR-625).
 want "T7.4 금액은 스냅샷에서 계산된다" 189000 \
 	"$(sql "select r.amount from refunds r join orders o on o.id=r.order_id
