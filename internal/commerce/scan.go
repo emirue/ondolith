@@ -114,11 +114,11 @@ func (m *VariantMatches) One() (*ScannedVariant, error) {
 	return &m.Rows[0], nil
 }
 
-// ScanVariant resolves a scanned value.
+// ScanVariant reads one combination by its id — A-514·A-515 가 행이 실어 온
+// `variant_id` 로 상품·조합 이름을 읽는 데 쓴다.
 //
-// **QR 이 담는 것은 `product_variants.id` 다** (FR-620). SKU 로 찾지 않는다 —
-// SKU 는 외부 시스템이 정하고 바뀔 수 있어서, 바뀌는 순간 이미 붙은 스티커가
-// 다른 조합을 가리키거나 아무것도 가리키지 않게 된다.
+// **값을 해석하지 않는다.** SKU·바코드·이름으로 조합을 찾는 것은 FindVariants
+// 하나의 일이다. uuid 형식이 아니면 ErrScanFormat(422), 없으면 ErrNotFound(404).
 func (s *Store) ScanVariant(ctx context.Context, scanned string) (*ScannedVariant, error) {
 	if !looksLikeUUID(scanned) {
 		return nil, fmt.Errorf("%w: %q", ErrScanFormat, scanned)

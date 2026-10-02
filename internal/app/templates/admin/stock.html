@@ -1,0 +1,86 @@
+{{define "content"}}
+<div class="adm-card" style="padding:0">
+  {{/* **검색창 하나가 QR·SKU·바코드·상품명을 다 받는다** (D13 「식별 값」).
+       스캐너는 키보드처럼 값을 치고 Enter 를 누르므로 포커스만 있으면 되고 JS 가
+       필요 없다. 스캐너가 없으면 상품명·SKU 를 손으로 친다.
+       이 화면 자체는 어떤 상태도 바꾸지 않는다 — 그래서 GET 이고 product.view 다. */}}
+  <form method="get" action="/admin/stock" class="adm-filterbar">
+    {{with .Product}}<input type="hidden" name="product" value="{{.}}">{{end}}
+    <label for="q">검색·스캔</label>
+    <input type="text" id="q" name="q" value="{{.Q}}" autocomplete="off"
+           placeholder="상품명 · SKU · 바코드 · QR"{{if not .Focus}} autofocus{{end}}>
+    <button class="adm-btn">조회</button>
+    {{if or .Q .Product}}<a class="adm-btn" href="/admin/stock">전체 보기</a>{{end}}
+  </form>
+
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr>
+        <th>상품</th><th>조합</th><th>SKU</th><th>바코드</th><th>현재 재고</th>
+        {{if .CanManage}}<th>입고</th><th>재고 조사</th>{{end}}
+      </tr></thead>
+      <tbody>
+      {{range .Rows}}
+        <tr>
+          <td>{{.ProductName}}</td>
+          <td>{{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}</td>
+          <td>{{if .SKU}}{{.SKU}}{{else}}—{{end}}</td>
+          <td>{{if .Barcode}}{{.Barcode}}{{else}}—{{end}}</td>
+          <td>{{.Stock}}개</td>
+          {{if $.CanManage}}
+          {{/* **입고와 조사는 따로 제출되는 별개의 폼이다.** 한 번에 같이 보내면
+               어느 쪽을 먼저 적용하는지가 정의되지 않는다. 폼은 고른 조합의
+               variant_id 만 싣는다 — 식별은 이 화면의 검색이 끝냈다. */}}
+          <td>
+            <form method="post" action="/admin/stock/receive" style="display:flex;gap:6px">
+              <input type="hidden" name="variant_id" value="{{.ID}}">
+              {{template "stock-carry" $}}
+              <input type="number" name="quantity" min="1" max="10000" step="1" required
+                     aria-label="입고 수량" placeholder="수량" style="width:6em"{{if eq .ID $.Focus}} autofocus{{end}}>
+              <button class="adm-btn adm-btn--primary">입고</button>
+            </form>
+          </td>
+          <td>
+            {{/* **장부 수량 칸이 없다.** 이 행을 그릴 때 읽은 재고가 숨은 값으로
+                 실리고, 그 값이 A-515 의 낙관적 잠금이 된다 — 사람이 옮겨 적은
+                 값은 잠금이 아니다. 조정값 칸도 없다: 서버가 `실측 − 장부` 로
+                 계산한다. */}}
+            <form method="post" action="/admin/stock/stocktake" style="display:flex;gap:6px">
+              <input type="hidden" name="variant_id" value="{{.ID}}">
+              <input type="hidden" name="ledger" value="{{.Stock}}">
+              {{template "stock-carry" $}}
+              <input type="number" name="counted" min="0" max="1000000" step="1" required
+                     aria-label="실측 수량" placeholder="실측" style="width:6em">
+              <input type="text" name="memo" maxlength="200"
+                     aria-label="메모" placeholder="메모(선택)" style="width:10em">
+              <button class="adm-btn">조사 반영</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+      {{else}}
+        <tr><td colspan="7" class="adm-empty">일치하는 조합이 없습니다.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  <div class="adm-pagination">
+    <span class="adm-count">{{.PageNo}}쪽</span>
+    {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
+  </div>
+</div>
+<p class="adm-hint">
+  입고는 증감으로 반영됩니다 — 두 사람이 같은 조합을 동시에 입고해도 합산됩니다.
+  재고 조사는 세는 도중 주문이 들어오면 거부됩니다. 판매분을 지우지 않기 위해서입니다.
+</p>
+{{end}}
+
+{{/* 행의 폼이 싣는 목록 상태다. 값이 정확히 한 조합에 맞은 스캔 흐름에서는
+     비어 있다 — 입고하고 돌아오면 검색창이 비어 다음 스캔을 바로 받는다. */}}
+{{define "stock-carry"}}
+{{with .CarryQ}}<input type="hidden" name="q" value="{{.}}">{{end}}
+{{with .CarryProduct}}<input type="hidden" name="product" value="{{.}}">{{end}}
+{{with .CarryPage}}<input type="hidden" name="page" value="{{.}}">{{end}}
+{{end}}

@@ -238,14 +238,14 @@
 | A-511 | 반품·교환 처리 | `/admin/orders/{no}/returns` | GET, POST | 권한:order.return | 있음 | SC-6 | FR-617, FR-618 |
 | A-512 | 커머스 정책 설정 | `/admin/commerce/policy` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-617, FR-618, FR-604 |
 | A-513 | QR 라벨 발행 | `/admin/products/{id}/labels` | GET | 권한:product.view | 없음 | SC-4 | FR-620 |
-| A-514 | 스캔 입고 | `/admin/scan/receive` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-621 |
-| A-515 | 재고 조사 | `/admin/scan/stocktake` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-622 |
+| A-514 | 재고 입고 | `/admin/stock/receive` | POST | 권한:product.manage | 있음 | SC-5 | FR-621 |
+| A-515 | 재고 조사 | `/admin/stock/stocktake` | POST | 권한:product.manage | 있음 | SC-5 | FR-622 |
 | A-516 | 출고 피킹 대조 | `/admin/orders/{no}/pick` | GET, POST | 권한:order.update | 있음 | SC-5 | FR-623 |
-| A-517 | 스캔 재고 조회 | `/admin/scan/lookup` | GET | 권한:product.view | 없음 | SC-4 | FR-624 |
+| A-517 | 재고 | `/admin/stock` | GET | 권한:product.view | 없음 | SC-4 | FR-624 |
 
-> **A-514·A-515·A-517은 통합 재고 화면으로 개편이 정해졌다** (2026-10-02, [D13](13-screens-admin.md)
-> 「A-513~A-517 재고 관리」, W3-44). 이 표의 경로·이름은 **구현 커밋에서 함께 바꾼다** — 이 표의
-> 경로는 `tree.go`와 대조되므로([D90](90-conventions.md) 28b) 문서만 먼저 바꾸면 `make check`가 깨진다.
+> **A-514·A-515는 독립 화면이 아니다.** A-517 재고 목록의 행이 보내는 폼이라 POST만 있고 메뉴도
+> 없다 ([D13](13-screens-admin.md) 「A-513~A-517 재고 관리」). 2026-10-02 개편(W3-44) 전에는 셋이
+> `/admin/scan/*` 아래의 스캔 전용 화면이었다.
 
 ### A-6xx 운영
 

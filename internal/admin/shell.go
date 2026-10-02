@@ -68,9 +68,10 @@ var nav = []NavItem{
 	{Screen: "A-209", Title: "결제 설정", Path: "/admin/settings/payment", Group: "커머스", Permission: "settings.update", Order: 33, Shop: true},
 	{Screen: "A-508", Title: "결제 목록", Path: "/admin/reconcile", Group: "커머스", Permission: "payment.view", Order: 34, Shop: true},
 	{Screen: "A-603", Title: "웹훅 이력", Path: "/admin/webhooks", Group: "커머스", Permission: "payment.view", Order: 36, Shop: true},
-	{Screen: "A-514", Title: "스캔 입고", Path: "/admin/scan/receive", Group: "커머스", Permission: "product.manage", Order: 38, Shop: true},
-	{Screen: "A-515", Title: "재고 조사", Path: "/admin/scan/stocktake", Group: "커머스", Permission: "product.manage", Order: 40, Shop: true},
-	{Screen: "A-517", Title: "스캔 조회", Path: "/admin/scan/lookup", Group: "커머스", Permission: "product.view", Order: 42, Shop: true},
+	// 재고 항목은 「재고」 하나다 (A-517). 입고(A-514)·조사(A-515)는 그 목록의
+	// 행이 보내는 폼이라 메뉴가 없다 — 같은 조합을 다루는 일을 세 메뉴에 나누면
+	// 사용자가 「어디서 해야 하지」부터 고민한다 (D13).
+	{Screen: "A-517", Title: "재고", Path: "/admin/stock", Group: "커머스", Permission: "product.view", Order: 23, Shop: true},
 	{Screen: "A-602", Title: "시스템 정보", Path: "/admin/system", Group: "설정", Permission: "settings.view", Order: 90},
 }
 

@@ -79,6 +79,86 @@ func TestAdminListsLinkToTheirDetailScreens(t *testing.T) {
 	}
 }
 
+// **재고 화면(A-517)이 실제로 그려지고, 행의 폼으로 입고·조사가 끝난다** (W3-44).
+//
+// 핸들러 테스트는 화면이 받은 값만 본다. 여기서는 렌더된 HTML 을 본다: 정확히
+// 한 조합에 맞으면 그 행의 입고 칸에 `autofocus` 가 있고, 실사 폼에는 장부 입력
+// 칸이 없이 행이 읽은 재고가 숨은 값으로 실린다. A-501·A-502 의 「재고」 링크가
+// 그 상품으로 좁혀 연다.
+func TestStockScreenRendersRowForms(t *testing.T) {
+	srv, pool, c := shopAdminSite(t)
+	ctx := context.Background()
+	productID := seedProducts(t, pool, 1)
+	var variantID string
+	if err := pool.QueryRow(ctx, `
+		UPDATE product_variants SET sku = 'SKU-00' WHERE product_id = $1 RETURNING id`,
+		productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+	stockLink := `href="/admin/stock?product=` + productID + `"`
+
+	// 메뉴에 「재고」가 있고, A-501·A-502 가 그 상품의 재고로 간다.
+	_, body := mustGet(t, c, srv.URL+"/admin/products")
+	if !strings.Contains(body, `href="/admin/stock"`) {
+		t.Error("메뉴에 「재고」(/admin/stock) 가 없다")
+	}
+	if strings.Contains(body, "/admin/scan/") {
+		t.Error("옛 /admin/scan/ 경로가 화면에 남아 있다")
+	}
+	if !strings.Contains(body, stockLink) {
+		t.Errorf("A-501 행에 재고 링크 %s 가 없다", stockLink)
+	}
+	if _, body := mustGet(t, c, srv.URL+"/admin/products/"+productID); !strings.Contains(body, stockLink) {
+		t.Errorf("A-502 에 재고 링크 %s 가 없다", stockLink)
+	}
+
+	// 상품으로 좁힌 목록: 행의 폼이 목록 상태를 싣고, 포커스는 검색창에 있다.
+	code, body := mustGet(t, c, srv.URL+"/admin/stock?product="+productID)
+	if code != http.StatusOK {
+		t.Fatalf("A-517 = HTTP %d", code)
+	}
+	for _, want := range []string{
+		`action="/admin/stock/receive"`, `action="/admin/stock/stocktake"`,
+		`<input type="hidden" name="variant_id" value="` + variantID + `">`,
+		`<input type="hidden" name="ledger" value="5">`,
+		`<input type="hidden" name="product" value="` + productID + `">`,
+		`name="memo" maxlength="200"`, "상품00", "SKU-00",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("A-517 에 %s 가 없다", want)
+		}
+	}
+	// **장부 입력 칸이 없다** — ledger 는 숨은 값 하나뿐이다.
+	if n := strings.Count(body, `name="ledger"`); n != 1 {
+		t.Errorf(`name="ledger" 가 %d 번 나온다, want 숨은 값 1번`, n)
+	}
+	if !strings.Contains(body, `placeholder="상품명 · SKU · 바코드 · QR" autofocus>`) {
+		t.Error("목록 화면에서 검색창에 포커스가 없다")
+	}
+	if strings.Count(body, "autofocus") != 1 {
+		t.Errorf("autofocus 가 %d 개다, want 1", strings.Count(body, "autofocus"))
+	}
+
+	// 스캔 흐름: SKU 가 정확히 한 조합에 맞으면 그 행의 입고 칸에 포커스가 가고,
+	// 행의 폼은 검색어를 싣지 않는다.
+	_, body = mustGet(t, c, srv.URL+"/admin/stock?q=SKU-00")
+	if !strings.Contains(body, `placeholder="수량" style="width:6em" autofocus>`) {
+		t.Error("정확히 한 조합인데 입고 수량 칸에 autofocus 가 없다")
+	}
+	if strings.Count(body, "autofocus") != 1 {
+		t.Errorf("autofocus 가 %d 개다, want 1 (입고 칸)", strings.Count(body, "autofocus"))
+	}
+	if strings.Contains(body, `<input type="hidden" name="q"`) {
+		t.Error("스캔 흐름의 행 폼이 검색어를 실었다 — 돌아오면 검색창이 비어 있어야 한다")
+	}
+
+	// 맞는 것이 없으면 오류가 아니라 빈 결과다.
+	code, body = mustGet(t, c, srv.URL+"/admin/stock?q=not-a-uuid")
+	if code != http.StatusOK || !strings.Contains(body, "일치하는 조합이 없습니다") {
+		t.Errorf("없는 검색어 = HTTP %d, 빈 결과 문구가 없다", code)
+	}
+}
+
 // **A-503 에 바코드 칸이, A-516 에 기본값 1 인 수량 칸이 그려진다** (FR-627, W3-43).
 //
 // 핸들러 테스트는 폼 값을 직접 보내므로 화면에 그 칸이 없어도 통과한다.

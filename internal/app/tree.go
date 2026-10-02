@@ -443,23 +443,20 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		r.Add(Route{Screen: "A-511", Method: "POST", Pattern: "/admin/orders/{no}/returns", Class: SC6,
 			Permission: "order.return", Handler: ad.ReturnAction})
 
-		// A-514·A-515·A-516·A-517 QR 재고. **QR 은 재고 모델이 아니라 재고
-		// 조작의 입력 수단이다** (D13) — 재고는 여전히 정수 하나이고 delta 로만
-		// 움직인다. A-517 만 조회라 product.view 다.
-		r.Add(Route{Screen: "A-514", Method: "GET", Pattern: "/admin/scan/receive", Class: SC4,
-			Permission: "product.manage", Handler: ad.ScanReceive})
-		r.Add(Route{Screen: "A-514", Method: "POST", Pattern: "/admin/scan/receive", Class: SC5,
-			Permission: "product.manage", Handler: ad.ScanReceive})
-		r.Add(Route{Screen: "A-515", Method: "GET", Pattern: "/admin/scan/stocktake", Class: SC4,
-			Permission: "product.manage", Handler: ad.Stocktake})
-		r.Add(Route{Screen: "A-515", Method: "POST", Pattern: "/admin/scan/stocktake", Class: SC5,
+		// A-517 재고 목록과 그 행의 폼이 보내는 A-514 입고·A-515 조사, 그리고
+		// A-516 피킹. **스캔은 재고 모델이 아니라 조합을 고르는 입력 수단이다**
+		// (D13) — 재고는 여전히 정수 하나이고 delta 로만 움직인다. A-514·A-515 는
+		// 독립 GET 화면이 없다. A-517 만 조회라 product.view 다.
+		r.Add(Route{Screen: "A-517", Method: "GET", Pattern: "/admin/stock", Class: SC4,
+			Permission: "product.view", Handler: ad.Stock})
+		r.Add(Route{Screen: "A-514", Method: "POST", Pattern: "/admin/stock/receive", Class: SC5,
+			Permission: "product.manage", Handler: ad.StockReceive})
+		r.Add(Route{Screen: "A-515", Method: "POST", Pattern: "/admin/stock/stocktake", Class: SC5,
 			Permission: "product.manage", Handler: ad.Stocktake})
 		r.Add(Route{Screen: "A-516", Method: "GET", Pattern: "/admin/orders/{no}/pick", Class: SC4,
 			Permission: "order.update", Handler: ad.PickCheck})
 		r.Add(Route{Screen: "A-516", Method: "POST", Pattern: "/admin/orders/{no}/pick", Class: SC5,
 			Permission: "order.update", Handler: ad.PickCheck})
-		r.Add(Route{Screen: "A-517", Method: "GET", Pattern: "/admin/scan/lookup", Class: SC4,
-			Permission: "product.view", Handler: ad.ScanLookup})
 		// A-513 QR 라벨. **상태를 바꾸지 않으므로 GET 만 있다** (FR-620).
 		r.Add(Route{Screen: "A-513", Method: "GET", Pattern: "/admin/products/{id}/labels", Class: SC4,
 			Permission: "product.view", Handler: ad.QRLabel})

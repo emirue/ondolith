@@ -1393,8 +1393,8 @@ func TestStocktakeRefusesAClientSuppliedDelta(t *testing.T) {
 	}
 
 	for _, field := range []string{"delta", "adjustment"} {
-		rec := postAdmin(t, d.Stocktake, "/admin/scan/stocktake", nil, url.Values{
-			"scanned": {variantID}, "ledger": {"10"}, "counted": {"10"}, field: {"999"}})
+		rec := postAdmin(t, d.Stocktake, "/admin/stock/stocktake", nil, url.Values{
+			"variant_id": {variantID}, "ledger": {"10"}, "counted": {"10"}, field: {"999"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s 필드 = HTTP %d, want 422", field, rec.Code)
 		}
@@ -1409,9 +1409,9 @@ func TestStocktakeRefusesAClientSuppliedDelta(t *testing.T) {
 	}
 
 	// 실측만 보내면 서버가 조정값을 계산한다.
-	rec := postAdmin(t, d.Stocktake, "/admin/scan/stocktake", nil, url.Values{
-		"scanned": {variantID}, "ledger": {"10"}, "counted": {"7"}})
-	if rec.Code != http.StatusOK {
+	rec := postAdmin(t, d.Stocktake, "/admin/stock/stocktake", nil, url.Values{
+		"variant_id": {variantID}, "ledger": {"10"}, "counted": {"7"}})
+	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("정상 실사 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
 	if err := pool.QueryRow(ctx,
@@ -1443,8 +1443,8 @@ func TestStocktakeLogsAllThreeNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	postAdmin(t, d.Stocktake, "/admin/scan/stocktake", nil, url.Values{
-		"scanned": {variantID}, "ledger": {"10"}, "counted": {"7"}})
+	postAdmin(t, d.Stocktake, "/admin/stock/stocktake", nil, url.Values{
+		"variant_id": {variantID}, "ledger": {"10"}, "counted": {"7"}})
 
 	var summary string
 	if err := pool.QueryRow(ctx,

@@ -223,7 +223,7 @@ cat "$PUBLIC_URLS" >>"$ANON_URLS"
 		/admin/themes /admin/themes/upload /admin/oplog /admin/system \
 		/admin/webhooks /admin/products /admin/products/new /admin/categories \
 		/admin/orders /admin/terms /admin/commerce/policy /admin/reconcile \
-		/admin/scan/lookup /admin/scan/receive /admin/scan/stocktake
+		/admin/stock
 	# **A-307·A-308·A-309 는 게시판을 골라야 목록이 나온다.** 고르지 않은
 	# 화면은 「게시판 주소를 입력하세요」 한 줄이라 잴 것이 없다 — 두 상태를
 	# 모두 본다.
