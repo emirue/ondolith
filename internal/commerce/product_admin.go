@@ -78,7 +78,16 @@ func (s *Store) UpdateProduct(ctx context.Context, p Product) error {
 	if err := checkBasePrice(p.BasePrice); err != nil {
 		return err
 	}
-	n, err := s.q.UpdateProduct(ctx, commerceq.UpdateProductParams{
+	// 상품과 카테고리 지정이 한 트랜잭션이다 (FR-615). 나누면 없는 카테고리로
+	// 거부된 저장이 이름·가격은 이미 바꿔 놓는다.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // 커밋됐으면 무의미하다
+	q := s.q.WithTx(tx)
+
+	n, err := q.UpdateProduct(ctx, commerceq.UpdateProductParams{
 		ID: p.ID, Slug: p.Slug, Name: p.Name, Description: p.Description,
 		BasePrice: int32(p.BasePrice), IsVisible: p.Visible})
 	var pgErr *pgconn.PgError
@@ -91,7 +100,10 @@ func (s *Store) UpdateProduct(ctx context.Context, p Product) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if err := setProductCategories(ctx, q, p.ID, p.CategoryIDs); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // DeleteProduct removes a product that was never ordered.

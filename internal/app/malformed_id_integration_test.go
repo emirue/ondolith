@@ -155,7 +155,7 @@ func TestNoRouteAnswers500ToAMalformedPathValue(t *testing.T) {
 // `new_variant_id` 를 빠뜨리고 아무도 읽지 않는 `category_id`·`role_id` 를
 // 적어 두었다 — 즉 그 세 필드는 이 스윕이 한 번도 건드리지 않았다.
 var formIDFields = []string{
-	"attachment_id", "board_id", "comment_id", "id", "item_id",
+	"attachment_id", "board_id", "category_id", "comment_id", "id", "item_id",
 	"new_variant_id", "parent_id", "post_id", "user_id", "variant_id",
 }
 

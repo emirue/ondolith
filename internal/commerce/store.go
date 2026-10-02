@@ -44,6 +44,10 @@ type Product struct {
 	// InStock 은 판매 가능한 조합이 하나라도 있는지다. 목록에서 품절 배지를
 	// 그리는 데 쓰고, 이것이 없으면 화면이 상품마다 조합을 조회한다 (N+1).
 	InStock bool
+	// CategoryIDs 는 A-502 가 **쓰는** 값이다 (FR-615). 저장은 이 집합으로 통째로
+	// 갈아 끼운다 — 비어 있으면 미분류다. 읽기 경로는 채우지 않는다
+	// (ProductCategoryIDs 가 따로 읽는다).
+	CategoryIDs []string
 }
 
 // Variant is one option combination.
@@ -229,19 +233,59 @@ func (s *Store) AdjustStock(ctx context.Context, tx pgx.Tx, deltas []StockDelta)
 	return nil
 }
 
-// CreateProduct is A-502's write.
+// CreateProduct is A-502's write. 상품과 카테고리 지정이 한 트랜잭션이다 —
+// 없는 카테고리로 거부되면 상품도 생기지 않는다.
 func (s *Store) CreateProduct(ctx context.Context, p Product) (string, error) {
 	if err := checkBasePrice(p.BasePrice); err != nil {
 		return "", err
 	}
-	id, err := s.q.CreateProduct(ctx, commerceq.CreateProductParams{
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // 커밋됐으면 무의미하다
+	q := s.q.WithTx(tx)
+
+	id, err := q.CreateProduct(ctx, commerceq.CreateProductParams{
 		Slug: p.Slug, Name: p.Name, Description: p.Description,
 		BasePrice: int32(p.BasePrice), IsVisible: p.Visible})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrSlugTaken
 	}
-	return id, err
+	if err != nil {
+		return "", err
+	}
+	if err := setProductCategories(ctx, q, id, p.CategoryIDs); err != nil {
+		return "", err
+	}
+	return id, tx.Commit(ctx)
+}
+
+// setProductCategories replaces a product's category set (A-502, FR-615).
+//
+// **존재 확인은 FK 가 한다.** 먼저 세어 보면 세는 것과 넣는 것 사이에 A-509 가
+// 그 카테고리를 지울 수 있다. 23503(없는 ID)과 22P02(uuid 가 아닌 값)를 같은
+// 오류로 옮긴다 — 둘 다 「그런 카테고리는 없다」이고 500 이 아니다.
+func setProductCategories(ctx context.Context, q *commerceq.Queries, productID string, ids []string) error {
+	if err := q.ClearProductCategories(ctx, productID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	err := q.AddProductCategories(ctx, commerceq.AddProductCategoriesParams{
+		ProductID: productID, CategoryIds: ids})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "22P02") {
+		return ErrCategoryMissing
+	}
+	return err
+}
+
+// ProductCategoryIDs is what A-502 ticks when it opens.
+func (s *Store) ProductCategoryIDs(ctx context.Context, productID string) ([]string, error) {
+	return s.q.ProductCategoryIDs(ctx, productID)
 }
 
 // CategoryParents reads the whole hierarchy for CheckReparent.

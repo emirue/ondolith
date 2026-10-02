@@ -9,6 +9,25 @@ import (
 	"context"
 )
 
+const addProductCategories = `-- name: AddProductCategories :exec
+INSERT INTO product_categories (product_id, category_id)
+SELECT $1::uuid, c::uuid
+FROM unnest($2::text[]) AS c
+ON CONFLICT DO NOTHING
+`
+
+type AddProductCategoriesParams struct {
+	ProductID   string
+	CategoryIds []string
+}
+
+// text[] 로 받아 안에서 uuid 로 바꾼다 — 드라이버가 문자열 배열을 uuid[] 로 싣는
+// 방식에 기대지 않는다. ON CONFLICT 는 같은 ID 가 두 번 실려 온 폼을 받아 준다.
+func (q *Queries) AddProductCategories(ctx context.Context, arg AddProductCategoriesParams) error {
+	_, err := q.db.Exec(ctx, addProductCategories, arg.ProductID, arg.CategoryIds)
+	return err
+}
+
 const addVariant = `-- name: AddVariant :one
 INSERT INTO product_variants (product_id, option_values, price_delta, stock, sku)
 VALUES ($1, $2, $3, 0, NULLIF($4::text, '')) RETURNING id
@@ -31,6 +50,15 @@ func (q *Queries) AddVariant(ctx context.Context, arg AddVariantParams) (string,
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const clearProductCategories = `-- name: ClearProductCategories :exec
+DELETE FROM product_categories WHERE product_id = $1
+`
+
+func (q *Queries) ClearProductCategories(ctx context.Context, productID string) error {
+	_, err := q.db.Exec(ctx, clearProductCategories, productID)
+	return err
 }
 
 const deleteProduct = `-- name: DeleteProduct :execrows
@@ -197,6 +225,32 @@ func (q *Queries) ProductByID(ctx context.Context, id string) (ProductByIDRow, e
 		&i.IsVisible,
 	)
 	return i, err
+}
+
+const productCategoryIDs = `-- name: ProductCategoryIDs :many
+SELECT category_id FROM product_categories WHERE product_id = $1 ORDER BY category_id
+`
+
+// 상품의 카테고리 (A-502, FR-615). **집합을 통째로 갈아 끼운다** — 지우고 넣는다.
+// product_categories 는 갱신하지 않는 연결 표다 (D30 3절 예외).
+func (q *Queries) ProductCategoryIDs(ctx context.Context, productID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, productCategoryIDs, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var category_id string
+		if err := rows.Scan(&category_id); err != nil {
+			return nil, err
+		}
+		items = append(items, category_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const productExists = `-- name: ProductExists :one

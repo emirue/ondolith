@@ -10,7 +10,8 @@ var (
 	ErrCategoryCycle = errors.New("commerce: 카테고리 계층에 순환이 생깁니다")
 	// ErrCategoryDepth is the runaway guard, not a design limit.
 	ErrCategoryDepth = errors.New("commerce: 카테고리 깊이 상한을 넘었습니다")
-	// ErrCategoryMissing is a parent that does not exist.
+	// ErrCategoryMissing is a parent that does not exist — 또는 상품이 가리킨
+	// 카테고리가 없는 경우다 (A-502). 문구는 화면이 정한다.
 	ErrCategoryMissing = errors.New("commerce: 존재하지 않는 상위 카테고리입니다")
 	// ErrCategoryInUse is 소속 상품이나 하위 카테고리가 있어서 지울 수 없는
 	// 경우다. DB 의 RESTRICT 가 판정하고 이 값은 그것을 옮긴다 (D19 A-509).

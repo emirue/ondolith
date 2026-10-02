@@ -16,15 +16,24 @@ func (d *Deps) ProductForm(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if isCreate(id) {
-		d.Render(w, r, "admin/product-edit.html", http.StatusOK,
-			map[string]any{"Product": &commerce.Product{Visible: true}, "New": true})
+		d.renderProduct(w, r, &commerce.Product{Visible: true}, http.StatusOK, "")
 		return
 	}
 	p, err := d.Commerce.ProductByID(r.Context(), id)
 	if d.fail(w, r, err) {
 		return
 	}
-	d.Render(w, r, "admin/product-edit.html", http.StatusOK, map[string]any{"Product": p})
+	if p.CategoryIDs, err = d.Commerce.ProductCategoryIDs(r.Context(), id); d.fail(w, r, err) {
+		return
+	}
+	d.renderProduct(w, r, p, http.StatusOK, "")
+}
+
+// categoryChoice 는 A-502 의 카테고리 체크박스 하나다. 관리자 템플릿에는
+// 함수맵이 없으므로 「골랐는가」를 여기서 계산해 넘긴다.
+type categoryChoice struct {
+	ID, Name string
+	Checked  bool
 }
 
 // ProductSave is A-502 POST.
@@ -57,6 +66,9 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		Name:        strings.TrimSpace(r.PostFormValue("name")),
 		Description: r.PostFormValue("description"),
 		Visible:     r.PostFormValue("is_visible") != "",
+		// **보낸 집합이 곧 저장되는 집합이다** (FR-615). 하나도 안 고르면
+		// 미분류가 된다 — 카테고리는 선택 입력이다 (D19 A-502).
+		CategoryIDs: r.PostForm["category_id"],
 	}
 	if p.Name == "" || p.Slug == "" {
 		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, "이름과 주소를 입력하세요.")
@@ -80,6 +92,9 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, commerce.ErrPriceNegative), errors.Is(err, commerce.ErrAmountTooBig):
 			d.renderProduct(w, r, p, http.StatusUnprocessableEntity, priceRangeMessage)
 			return
+		case errors.Is(err, commerce.ErrCategoryMissing):
+			d.renderProduct(w, r, p, http.StatusUnprocessableEntity, categoryMissingMessage)
+			return
 		case err != nil:
 			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 			return
@@ -97,6 +112,8 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		d.renderProduct(w, r, p, http.StatusConflict, "이미 쓰이는 주소입니다.")
 	case errors.Is(err, commerce.ErrPriceNegative), errors.Is(err, commerce.ErrAmountTooBig):
 		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, priceRangeMessage)
+	case errors.Is(err, commerce.ErrCategoryMissing):
+		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, categoryMissingMessage)
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 	default:
@@ -108,6 +125,10 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 
 // priceRangeMessage 는 A-502 의 가격 범위 오류다 (0 ~ commerce.MaxAmount).
 const priceRangeMessage = "가격은 0 이상 20억 이하의 정수여야 합니다."
+
+// categoryMissingMessage 는 A-502 가 없는 카테고리를 받았을 때의 문구다 (422).
+// 그 사이 A-509 에서 지워진 카테고리도 여기로 온다.
+const categoryMissingMessage = "존재하지 않는 카테고리입니다. 화면을 새로 고친 뒤 다시 고르세요."
 
 // ProductDelete is A-502 DELETE (POST + action).
 //
@@ -135,18 +156,41 @@ func (d *Deps) ProductDelete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// renderProduct draws A-502. p 가 nil 이면 저장된 상품을 다시 읽는다 — 폼 값
+// 없이 거부된 요청(삭제 409 등)이 그 경우다.
 func (d *Deps) renderProduct(w http.ResponseWriter, r *http.Request,
 	p *commerce.Product, code int, msg string) {
 
+	ctx := r.Context()
+	id := r.PathValue("id")
 	if p == nil {
-		if got, err := d.Commerce.ProductByID(r.Context(), r.PathValue("id")); err == nil {
+		if got, err := d.Commerce.ProductByID(ctx, id); err == nil {
 			p = got
+			p.CategoryIDs, _ = d.Commerce.ProductCategoryIDs(ctx, id)
 		} else {
 			p = &commerce.Product{}
 		}
 	}
-	d.Render(w, r, "admin/product-edit.html", code,
-		map[string]any{"Product": p, "Error": msg})
+	// 선택지는 A-509 가 만든 전부다. 거부된 폼은 **보낸 선택**을 그대로 다시
+	// 그린다 — 저장된 값으로 되돌리면 고른 것이 사라진다.
+	cats, err := d.Commerce.Categories(ctx)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	picked := map[string]bool{}
+	for _, c := range p.CategoryIDs {
+		picked[c] = true
+	}
+	choices := make([]categoryChoice, 0, len(cats))
+	for _, c := range cats {
+		choices = append(choices, categoryChoice{ID: c.ID, Name: c.Name, Checked: picked[c.ID]})
+	}
+	data := map[string]any{"Product": p, "Categories": choices, "New": isCreate(id)}
+	if msg != "" {
+		data["Error"] = msg
+	}
+	d.Render(w, r, "admin/product-edit.html", code, data)
 }
 
 // VariantForm is A-503 GET.

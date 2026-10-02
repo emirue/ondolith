@@ -43,3 +43,19 @@ VALUES ($1, $2, $3, $4);
 INSERT INTO product_variants (product_id, option_values, price_delta, stock)
 VALUES ($1, $2, 0, 0)
 ON CONFLICT (product_id, option_values) DO NOTHING;
+
+-- 상품의 카테고리 (A-502, FR-615). **집합을 통째로 갈아 끼운다** — 지우고 넣는다.
+-- product_categories 는 갱신하지 않는 연결 표다 (D30 3절 예외).
+-- name: ProductCategoryIDs :many
+SELECT category_id FROM product_categories WHERE product_id = $1 ORDER BY category_id;
+
+-- name: ClearProductCategories :exec
+DELETE FROM product_categories WHERE product_id = $1;
+
+-- text[] 로 받아 안에서 uuid 로 바꾼다 — 드라이버가 문자열 배열을 uuid[] 로 싣는
+-- 방식에 기대지 않는다. ON CONFLICT 는 같은 ID 가 두 번 실려 온 폼을 받아 준다.
+-- name: AddProductCategories :exec
+INSERT INTO product_categories (product_id, category_id)
+SELECT sqlc.arg('product_id')::uuid, c::uuid
+FROM unnest(sqlc.arg('category_ids')::text[]) AS c
+ON CONFLICT DO NOTHING;
