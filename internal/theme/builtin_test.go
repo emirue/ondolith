@@ -706,3 +706,49 @@ func TestBuiltinPayPageOpensTheTossWidget(t *testing.T) {
 		}
 	}
 }
+
+// **머리글의 관리자 링크는 권한이 있는 사람에게만 있고, 있으면 눌린다.**
+// 표시 이름을 흐린 글자(`<span class="who">`)로만 두었더니 이름이 「관리자」인
+// 계정에서 「눌리지 않는 관리자 버튼」으로 읽혔다 — 이름은 내 정보 링크이고,
+// 관리자 화면 링크는 admin.access 가 있을 때만 그려진다.
+func TestHeaderAdminLinkIsForAdminsAndClickable(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(admin bool) string {
+		v := fullView()
+		v.User.DisplayName = "관리자"
+		v.Can = map[string]bool{"admin.access": admin}
+		var b bytes.Buffer
+		if err := l.Render(&b, "page.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	const adminLink = `<a href="/admin/">관리자 화면</a>`
+
+	admin := render(true)
+	if !strings.Contains(admin, adminLink) {
+		t.Error("admin.access 가 있는데 관리자 화면 링크가 없다")
+	}
+	member := render(false)
+	if strings.Contains(member, `href="/admin/"`) {
+		t.Error("admin.access 가 없는데 관리자 화면 링크가 그려졌다")
+	}
+	for name, html := range map[string]string{"관리자": admin, "회원": member} {
+		if strings.Contains(html, `<span class="who"`) {
+			t.Errorf("%s: 표시 이름이 눌리지 않는 글자다", name)
+		}
+		if !strings.Contains(html, `<a class="who" href="/me"`) {
+			t.Errorf("%s: 표시 이름이 내 정보 링크가 아니다", name)
+		}
+	}
+	// 로그인하지 않으면 둘 다 없다.
+	v := fullView()
+	v.User = nil
+	var b bytes.Buffer
+	if err := l.Render(&b, "page.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), `href="/admin/"`) || strings.Contains(b.String(), `class="who"`) {
+		t.Error("비로그인 화면에 계정 영역이 그려졌다")
+	}
+}

@@ -812,7 +812,7 @@ a:focus-visible {
 }
 
 /* ═══ 기타 ═════════════════════════════════════════════════════════════════ */
-.who { opacity: .6; }
+.who { font-weight: 600; }
 .form--wide { max-width: 46rem; }
 
 .error-page { text-align: center; padding: clamp(40px, 8vw, 90px) 0; }

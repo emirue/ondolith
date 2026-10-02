@@ -15,12 +15,14 @@
   <nav class="account-nav">
     {{if eq .Site.Type "shop"}}<a href="/cart">장바구니</a>{{end}}
     {{if .User}}
-      <span class="who">{{.User.DisplayName}}</span>
+      {{/* 이름은 **누를 수 있는 것**이어야 한다. 흐린 글자로만 두었더니 표시 이름이
+           「관리자」인 계정에서 그것이 「눌리지 않는 관리자 버튼」으로 읽혔다. */}}
+      <a class="who" href="/me" title="내 정보">{{.User.DisplayName}}</a>
       {{if eq .Site.Type "shop"}}<a href="/orders">주문 내역</a>{{end}}
       <a href="/me">내 정보</a>
       {{/* 관리자에게만 보인다. **판정은 서버가 하고 여기서는 그 결과만 읽는다** —
            트리 관문(admin.access)이 실제 방어이고 이 링크는 안내다. */}}
-      {{if index .Can "admin.access"}}<a href="/admin/">관리</a>{{end}}
+      {{if index .Can "admin.access"}}<a href="/admin/">관리자 화면</a>{{end}}
       <form method="post" action="/logout" class="inline"><button type="submit">로그아웃</button></form>
     {{else}}
       <a href="/login">로그인</a>
