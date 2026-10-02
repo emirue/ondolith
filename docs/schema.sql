@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict q00NGj4TeYB2vp85BfB2iYg0viiuD8flxkgpSKty7x95XB1StMFnxoZgT3iklRL
+\restrict Uu3gImDRR5UVTSdX530DoZ9XaXZkncQcOW5bINAZVrl5L5nqM4DQ3VPETNOm6xv
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -464,6 +464,25 @@ CREATE TABLE public.product_categories (
 
 
 --
+-- Name: product_images; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_images (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    product_id uuid NOT NULL,
+    stored_path text NOT NULL,
+    original_name text NOT NULL,
+    mime_type text NOT NULL,
+    byte_size bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT product_images_byte_size_check CHECK ((byte_size > 0)),
+    CONSTRAINT product_images_mime_type_check CHECK ((mime_type = ANY (ARRAY['image/jpeg'::text, 'image/png'::text, 'image/gif'::text, 'image/webp'::text]))),
+    CONSTRAINT product_images_original_name_check CHECK (((length(original_name) >= 1) AND (length(original_name) <= 255))),
+    CONSTRAINT product_images_stored_path_check CHECK (((stored_path ~ '^[0-9]{4}/[0-9]{2}/[0-9a-f-]{36}$'::text) AND (length(stored_path) <= 128)))
+);
+
+
+--
 -- Name: product_options; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -494,6 +513,8 @@ CREATE TABLE public.product_variants (
     is_visible boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    barcode text,
+    CONSTRAINT product_variants_barcode_check CHECK (((barcode IS NULL) OR ((length(barcode) >= 1) AND (length(barcode) <= 64)))),
     CONSTRAINT product_variants_option_values_shape CHECK (((jsonb_typeof(option_values) = 'object'::text) AND (octet_length((option_values)::text) <= 4096))),
     CONSTRAINT product_variants_sku_check CHECK (((sku IS NULL) OR ((length(sku) >= 1) AND (length(sku) <= 64)))),
     CONSTRAINT product_variants_stock_check CHECK ((stock >= 0))
@@ -1034,6 +1055,22 @@ ALTER TABLE ONLY public.product_categories
 
 
 --
+-- Name: product_images product_images_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_images
+    ADD CONSTRAINT product_images_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: product_images product_images_stored_path_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_images
+    ADD CONSTRAINT product_images_stored_path_key UNIQUE (stored_path);
+
+
+--
 -- Name: product_options product_options_name_uniq; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1566,6 +1603,20 @@ CREATE INDEX product_categories_category_idx ON public.product_categories USING 
 
 
 --
+-- Name: product_images_product_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX product_images_product_idx ON public.product_images USING btree (product_id, created_at, id);
+
+
+--
+-- Name: product_variants_barcode_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX product_variants_barcode_idx ON public.product_variants USING btree (barcode) WHERE (barcode IS NOT NULL);
+
+
+--
 -- Name: product_variants_sellable_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2004,6 +2055,14 @@ ALTER TABLE ONLY public.product_categories
 
 
 --
+-- Name: product_images product_images_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_images
+    ADD CONSTRAINT product_images_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+
+
+--
 -- Name: product_options product_options_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2167,5 +2226,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict q00NGj4TeYB2vp85BfB2iYg0viiuD8flxkgpSKty7x95XB1StMFnxoZgT3iklRL
+\unrestrict Uu3gImDRR5UVTSdX530DoZ9XaXZkncQcOW5bINAZVrl5L5nqM4DQ3VPETNOm6xv
 

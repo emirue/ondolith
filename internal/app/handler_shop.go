@@ -20,7 +20,9 @@ type shopDeps struct {
 	*publicDeps
 	sm    *scs.SessionManager
 	store *commerce.Store
-	log   *slog.Logger
+	// images 는 상품 이미지 저장소다 (P-306). 업로드 루트는 설정이다 (NFR-304).
+	images *commerce.Images
+	log    *slog.Logger
 	// shipping is read per request, not captured: A-512 changes it and the
 	// checkout screen must show what is true now, not what was true at boot.
 	shipping func() commerce.Shipping
@@ -142,9 +144,61 @@ func (d *shopDeps) productDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	images, err := d.images.List(ctx, p.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 	d.renderPage(w, r, "shop/product.html", http.StatusOK, d.shopView(r, p.Name, map[string]any{
 		"Product": p, "Variants": variants, "Options": commerce.OptionGroups(variants),
+		"Images": images,
 	}))
+}
+
+// P-306 GET /shop/images/{id} — one product image.
+//
+// **상품의 노출 여부를 여기서 다시 본다** (D15 SC-7 2항). 이미지 id 는 누구나
+// 쥘 수 있는 URL 이고, 파일은 웹루트 밖에 있어 반드시 이 핸들러를 지난다.
+// 숨긴 상품의 이미지는 P-303 과 같이 404 다 — 숨김이 아니라 없음이어야 한다.
+//
+// 예외는 하나, `product.manage` 다: A-502 가 이 주소로 미리보기를 그리고,
+// 운영자는 공개하기 전에 올린 이미지를 봐야 한다. 그 응답은 캐시에 남기지 않는다.
+func (d *shopDeps) productImage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	img, visible, err := d.images.ByID(ctx, r.PathValue("id"))
+	if errors.Is(err, commerce.ErrNotFound) {
+		d.notFound(w, r)
+		return
+	}
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	if !visible {
+		if !ActorFrom(ctx).Can("product.manage") {
+			d.notFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
+	f, err := d.images.Open(img)
+	if err != nil {
+		// 행은 있고 파일이 없다. 고장이 아니라 없는 것이다 (P-211 과 같다).
+		d.notFound(w, r)
+		return
+	}
+	defer f.Close()
+
+	// Content-Type 은 업로드 때 서버가 잰 값이다 — 요청도 파일명도 아니다
+	// (D60 2항). ServeContent 는 이 헤더가 있으면 내용을 다시 추측하지 않는다.
+	w.Header().Set("Content-Type", img.MIMEType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// **inline 이다** — <img> 가 그려야 한다. 첨부(P-211)가 언제나 attachment
+	// 인 것과 다른 이유는 타입이다: 이 표에는 래스터 이미지 넷만 들어올 수
+	// 있고 (검증기 + product_images 의 CHECK), 그것들은 문서로 해석되지 않는다.
+	w.Header().Set("Content-Disposition", "inline")
+	// 조건부 요청(If-Modified-Since)과 Range 는 표준 라이브러리가 한다.
+	http.ServeContent(w, r, "", img.CreatedAt, f)
 }
 
 // P-304 GET /shop/p/{slug}/variant — htmx: which combination did they pick?

@@ -119,6 +119,7 @@
 | P-303 | 상품 상세 | `/shop/p/{slug}` | GET | 공개 | 없음 | SC-1 | FR-601, FR-602 |
 | P-304 | 옵션 조합 조회 (htmx) | `/shop/p/{slug}/variant` | GET | 공개 | 없음 | SC-1 | FR-602 |
 | P-305 | 상품 검색 | `/shop/search` | GET | 공개 | 없음 | SC-1 | FR-614 |
+| P-306 | 상품 이미지 | `/shop/images/{id}` | GET | 공개 | 없음 | SC-7 | FR-601, NFR-206 |
 
 ### P-4xx 장바구니·주문·결제
 

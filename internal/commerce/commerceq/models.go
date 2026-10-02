@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+type ProductImage struct {
+	ID           string
+	ProductID    string
+	StoredPath   string
+	OriginalName string
+	MimeType     string
+	ByteSize     int64
+	CreatedAt    time.Time
+}
+
 type Term struct {
 	ID          string
 	Kind        string

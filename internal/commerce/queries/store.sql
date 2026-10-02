@@ -5,7 +5,8 @@
 -- 나서 정렬한다. 바깥 ORDER BY 는 안쪽과 같다 — 조인이 순서를 지켜 준다는 보장은 없다.
 -- name: ListProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
-       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
+       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
+       COALESCE(i.id::text, '')::text AS image_id
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible, p.created_at
     FROM products p
@@ -26,6 +27,10 @@ LEFT JOIN LATERAL (
     FROM product_variants
     WHERE product_id = p.id AND is_visible
 ) v ON true
+-- 대표 이미지 하나 (올린 순서의 첫 행). 조합 요약과 같은 이유로 고른 쪽에만 붙인다.
+LEFT JOIN LATERAL (
+    SELECT id FROM product_images WHERE product_id = p.id ORDER BY created_at, id LIMIT 1
+) i ON true
 ORDER BY
     CASE WHEN sqlc.arg('sort')::text = 'price'      THEN p.base_price END,
     CASE WHEN sqlc.arg('sort')::text = 'price_desc' THEN p.base_price END DESC,
@@ -89,7 +94,8 @@ DELETE FROM categories WHERE id = $1;
 
 -- name: SearchProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
-       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
+       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
+       COALESCE(i.id::text, '')::text AS image_id
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
            ts_rank(p.search_tsv, to_tsquery('simple', sqlc.arg('query'))) AS rank
@@ -102,4 +108,7 @@ LEFT JOIN LATERAL (
     SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
     FROM product_variants WHERE product_id = p.id AND is_visible
 ) v ON true
+LEFT JOIN LATERAL (
+    SELECT id FROM product_images WHERE product_id = p.id ORDER BY created_at, id LIMIT 1
+) i ON true
 ORDER BY p.rank DESC, p.id;

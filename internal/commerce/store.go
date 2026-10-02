@@ -44,6 +44,10 @@ type Product struct {
 	// InStock 은 판매 가능한 조합이 하나라도 있는지다. 목록에서 품절 배지를
 	// 그리는 데 쓰고, 이것이 없으면 화면이 상품마다 조합을 조회한다 (N+1).
 	InStock bool
+	// ImageID 는 대표 이미지(올린 순서의 첫 장)의 id 다. 없으면 빈 문자열.
+	// 목록 질의가 함께 낸다 — 상품마다 이미지를 다시 읽지 않는다 (NFR-105).
+	// 주소는 `/shop/images/{ImageID}` (P-306).
+	ImageID string
 	// CategoryIDs 는 A-502 가 **쓰는** 값이다 (FR-615). 저장은 이 집합으로 통째로
 	// 갈아 끼운다 — 비어 있으면 미분류다. 읽기 경로는 채우지 않는다
 	// (ProductCategoryIDs 가 따로 읽는다).
@@ -112,7 +116,8 @@ func (s *Store) ListProductsMore(ctx context.Context, opt ProductQuery) ([]Produ
 // 구조체 변환으로 여기 온다.
 func productFromList(r commerceq.ListProductsRow) Product {
 	return Product{ID: r.ID, Slug: r.Slug, Name: r.Name, Description: r.Description,
-		BasePrice: int(r.BasePrice), Visible: r.IsVisible, MinDelta: int(r.MinDelta), InStock: r.InStock}
+		BasePrice: int(r.BasePrice), Visible: r.IsVisible, MinDelta: int(r.MinDelta), InStock: r.InStock,
+		ImageID: r.ImageID}
 }
 
 func productFromRow(r commerceq.ProductByIDRow) *Product {

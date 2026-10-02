@@ -267,3 +267,29 @@ func (zeros) Read(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// 상품 이미지의 허용목록은 **좁히기만 한다** (D60 「이미지 허용 확장자」).
+// 운영자가 뺀 확장자는 빠진 채로 남고, 원래 한도는 바뀌지 않는다 — 같은 값을
+// 첨부가 계속 쓴다.
+func TestImageOnlyNarrowsAndNeverWidens(t *testing.T) {
+	base := DefaultUploadLimits()
+	base.Denied = map[string]bool{".gif": true}
+	img := base.ImageOnly()
+
+	for ext, want := range map[string]bool{
+		".jpg": true, ".jpeg": true, ".png": true, ".webp": true,
+		".gif": false, // 운영자가 뺐다
+		".pdf": false, ".zip": false, ".txt": false, ".csv": false,
+		".svg": false, ".html": false, "": false,
+	} {
+		if got := img.Allows(ext); got != want {
+			t.Errorf("ImageOnly().Allows(%q) = %v, want %v", ext, got, want)
+		}
+	}
+	if !base.Allows(".pdf") {
+		t.Error("ImageOnly 가 원래 한도를 바꿨다 — 첨부가 pdf 를 못 받게 된다")
+	}
+	if img.MaxBytes != base.MaxBytes {
+		t.Errorf("크기 상한이 달라졌다: %d → %d", base.MaxBytes, img.MaxBytes)
+	}
+}

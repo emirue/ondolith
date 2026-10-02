@@ -30,6 +30,7 @@
     <ul>
       {{range .}}
       <li>
+        {{if .ImageID}}<img class="product-thumb product-thumb--small" src="/shop/images/{{.ImageID}}" alt="{{.Name}}" width="40" height="40" loading="lazy">{{end}}
         <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
         <span class="meta">{{money .BasePrice}}</span>
       </li>

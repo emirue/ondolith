@@ -137,7 +137,7 @@ func payloadFor(name string) any {
 	case "shop/list.html":
 		return map[string]any{
 			"Products": []productLike{
-				{ID: "p1", Slug: "tee", Name: "티셔츠", BasePrice: 12000, MinDelta: 1000, InStock: true},
+				{ID: "p1", Slug: "tee", Name: "티셔츠", BasePrice: 12000, MinDelta: 1000, InStock: true, ImageID: "i1"},
 				{ID: "p2", Slug: "cap", Name: "모자", BasePrice: 9000, InStock: false},
 			},
 			"Categories": []categoryLike{{ID: "c1", Slug: "top", Name: "상의"}},
@@ -158,6 +158,7 @@ func payloadFor(name string) any {
 				{ID: "v2", OptionValues: map[string]string{"크기": "M"}, Stock: 0},
 			},
 			"Options": []optionGroupLike{{Name: "크기", Values: []string{"L", "M"}}},
+			"Images":  []imageLike{{ID: "i1"}, {ID: "i2"}},
 			"Error":   "담을 수 없습니다",
 		}
 	case "shop/variant.html":
@@ -470,7 +471,11 @@ type productLike struct {
 	ID, Slug, Name, Description string
 	BasePrice, MinDelta         int
 	InStock                     bool
+	// ImageID 가 빈 것과 있는 것을 둘 다 그려 본다 (P-306).
+	ImageID string
 }
+
+type imageLike struct{ ID string }
 
 type categoryLike struct{ ID, Slug, Name string }
 

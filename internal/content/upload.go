@@ -87,6 +87,24 @@ func (l UploadLimits) Allows(ext string) bool {
 	return ok
 }
 
+// ImageOnly narrows the limits to raster images — 상품 이미지가 쓴다 (D60
+// 「이미지 허용 확장자」). **빼는 쪽으로만 좁힌다**: 내장 허용목록에서 이미지가
+// 아닌 것을 Denied 에 더할 뿐이라, 운영자가 A-309 에서 뺀 확장자는 그대로 빠져
+// 있고 이 함수가 무엇을 새로 허용하는 일은 없다.
+func (l UploadLimits) ImageOnly() UploadLimits {
+	denied := map[string]bool{}
+	for ext := range l.Denied {
+		denied[ext] = true
+	}
+	for ext, types := range allowedUploads {
+		if !strings.HasPrefix(types[0], "image/") {
+			denied[ext] = true
+		}
+	}
+	l.Denied = denied
+	return l
+}
+
 // allowedUploads maps an allowed extension to the content types
 // http.DetectContentType reports for that format.
 //
@@ -237,4 +255,34 @@ func newUUID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	h := hex.EncodeToString(b[:])
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+}
+
+// OpenUpload opens a stored file for serving. rel is a StoredPath.
+//
+// The path comes from the database, where a CHECK constrains it to
+// `YYYY/MM/<uuid>` — but it is still opened through os.Root, because "the
+// database validated it" is one migration away from being false and the escape
+// check costs nothing (NFR-201: do not write the check by hand).
+func OpenUpload(root, rel string) (*os.File, error) {
+	rt, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer rt.Close()
+	return rt.Open(filepath.FromSlash(rel))
+}
+
+// RemoveUpload deletes a stored file. 이미 없으면 성공이다 — 지우려던 상태가
+// 이미 참이다.
+func RemoveUpload(root, rel string) error {
+	rt, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer rt.Close()
+	err = rt.Remove(filepath.FromSlash(rel))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }

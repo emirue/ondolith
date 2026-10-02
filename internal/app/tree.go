@@ -309,6 +309,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.productDetail})
 		r.Add(Route{Screen: "P-304", Method: "GET", Pattern: "/shop/p/{slug}/variant", Class: SC1,
 			Handler: sh.variantPick})
+		// P-306 은 SC-7 이다. 경로에 상품이 없으므로 핸들러가 이미지 → 상품을
+		// 따라가 노출 여부를 다시 본다 (D15 SC-7 2항).
+		r.Add(Route{Screen: "P-306", Method: "GET", Pattern: "/shop/images/{id}", Class: SC7,
+			Handler: sh.productImage})
 
 		r.Add(Route{Screen: "P-402", Method: "GET", Pattern: "/cart", Class: SC1,
 			Handler: sh.cartView})
@@ -407,6 +411,12 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "product.manage", Handler: ad.ProductSave})
 		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/products/{id}/delete", Class: SC7,
 			Permission: "product.manage", Handler: ad.ProductDelete})
+		// A-502 의 이미지. 상품 폼과 다른 폼이다 — 올리기는 상품 id, 지우기는
+		// 이미지 id 를 경로에 받는다 (guardID 가 둘 다 uuid 로 거른다).
+		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/products/{id}/images", Class: SC7,
+			Permission: "product.manage", Handler: ad.ProductImageUpload})
+		r.Add(Route{Screen: "A-502", Method: "POST", Pattern: "/admin/product-images/{id}/delete", Class: SC7,
+			Permission: "product.manage", Handler: ad.ProductImageDelete})
 		r.Add(Route{Screen: "A-503", Method: "GET", Pattern: "/admin/products/{id}/variants", Class: SC4,
 			Permission: "product.manage", Handler: ad.VariantForm})
 		// A-503 의 옵션 저장. 같은 화면의 두 번째 폼이다 — 조합을 만드는 것과

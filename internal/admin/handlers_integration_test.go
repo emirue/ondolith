@@ -94,13 +94,17 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 	if f, ok := c.(*fakeCaller); ok && f.id != "" && !looksLikeUUIDForTest(f.id) {
 		f.id = ""
 	}
+	// 업로드 루트는 운영처럼 첨부와 상품 이미지가 함께 쓴다.
+	uploads := t.TempDir()
+	shop := commerce.NewStore(pool)
 	d := &Deps{
 		Content:  store,
 		Auth:     auth.NewStore(pool),
-		Commerce: commerce.NewStore(pool),
+		Commerce: shop,
 		// 운영과 같이 채운다. 비워 두면 첨부를 지우는 경로가 nil 로 터지는데,
 		// 그 사실이 테스트에서는 보이지 않는다.
-		Attachments: store.AttachmentsIn(t.TempDir()),
+		Attachments: store.AttachmentsIn(uploads),
+		Images:      shop.ImagesIn(uploads),
 		// **작업 로그도 운영과 같이 붙인다.** 비워 두면 d.log 가 조용히
 		// 아무것도 안 하고, "로그에 남는다" 를 확인하는 검사가 전부 무의미해진다
 		// (D15 7절이 요구하는 것이 바로 그 기록이다).

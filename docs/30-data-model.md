@@ -84,6 +84,7 @@ MySQL 동시 지원은 배제됐다 ([DEC-0](../.ai/DECISIONS.md)). JSONB 없이
 | `carts.user_id` → `users` | CASCADE | 비회원 장바구니는 `user_id`가 NULL |
 | `cart_items.cart_id` → `carts` · `cart_items.variant_id` → `product_variants` | CASCADE | **장바구니는 이력이 아니다.** 금액도 동의도 담지 않으므로 조합이 사라지면 항목도 사라진다. RESTRICT로 두면 익명 방문자가 담기만 해도 관리자의 조합 삭제를 막는다 |
 | `product_categories.product_id` → `products` | CASCADE | 분류는 이력이 아니다 |
+| `product_images.product_id` → `products` | CASCADE | 고아 행을 만들지 않는다. **파일은 따라가지 않으므로** 상품 삭제 경로가 같은 요청에서 지운다 (첨부와 같은 규칙) |
 | `product_categories.category_id` → `categories` | RESTRICT | 소속 상품이 있는 카테고리는 삭제 거부 |
 | `categories.parent_id` → `categories` | RESTRICT | 하위가 있는 카테고리도 삭제 거부 |
 | `payments.return_id` → `returns` | RESTRICT | 돈 기록. 차액 결제가 가리키는 교환 건 |
@@ -166,6 +167,8 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `attachments.stored_path` | 128 | `YYYY/MM/` + uuid 36자 + 여유 |
 | `attachments.original_name` | 255 | 대부분 파일시스템의 파일명 상한 |
 | `attachments.mime_type` | 128 | 허용목록 밖 값이 들어올 수 없다 |
+| `product_images.stored_path` · `product_images.original_name` | 128 / 255 | `attachments`와 같다 |
+| `product_images.mime_type` | 열거 4종 | 길이가 아니라 값 집합으로 막는다 — `CHECK (mime_type IN (…))` |
 | `operation_logs.actor_email` | 254 | `users.email`과 같은 상한 |
 | `operation_logs.action` · `target_type` · `target_id` | 64 / 32 / 255 | 앞의 둘은 정규식과 함께 핸들러가 지키는 값이고, `target_id`만 DB CHECK 가 있다 (255). uuid 36자 + 슬러그·설정 키를 함께 담는다 |
 | `operation_logs.summary` | 2,000 | 한 줄 요약. 원문은 로그 파일이 갖는다. DB CHECK 가 2,000 이다 — 이 표가 500 이라고 적고 있었다 |
@@ -208,9 +211,9 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | Phase 0 | `users` · `sessions` |
 | Phase 1 | `roles` · `permissions` · `role_permissions` · `user_roles` · `pages` · `settings` · `menus` · `password_reset_tokens` · `email_verification_tokens` · `social_accounts` · `user_fields` |
 | Phase 2 | `boards` · `board_fields` · `posts` · `comments` · `attachments` · `operation_logs` |
-| Phase 3 | `products` · `product_options` · `product_variants` · `categories` · `product_categories` · `carts` · `cart_items` · `orders` · `order_items` · `payments` · `refunds` · `refund_items` · `shipments` · `returns` · `return_items` · `webhook_events` · `terms` · `order_agreements` |
+| Phase 3 | `products` · `product_options` · `product_variants` · `categories` · `product_categories` · `product_images` · `carts` · `cart_items` · `orders` · `order_items` · `payments` · `refunds` · `refund_items` · `shipments` · `returns` · `return_items` · `webhook_events` · `terms` · `order_agreements` |
 
-전 37개. 테이블을 더하면 **같은 커밋에서** 이 표와 D16에 함께 추가한다.
+전 38개. 테이블을 더하면 **같은 커밋에서** 이 표와 D16에 함께 추가한다.
 
 ## 마이그레이션 규칙
 
@@ -876,6 +879,32 @@ delta 두 건은 순서와 무관하게 둘 다 맞다.
 `pg_advisory_xact_lock` 직렬화로 간다.
 
 `product_categories`는 갱신하지 않는 순수 연결 표라 `updated_at`을 두지 않는다(3절 예외).
+
+**`product_images`** — 상품 이미지 (FR-601, `00025_product_images.sql`)
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `product_id` | uuid | NOT NULL REFERENCES `products(id)` |
+| `stored_path` | text | NOT NULL **UNIQUE**, `CHECK (stored_path ~ '^[0-9]{4}/[0-9]{2}/[0-9a-f-]{36}$')` |
+| `original_name` | text | NOT NULL — **표시 전용** |
+| `mime_type` | text | NOT NULL, `CHECK (mime_type IN ('image/jpeg','image/png','image/gif','image/webp'))` |
+| `byte_size` | bigint | NOT NULL, `CHECK (byte_size > 0)` |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() |
+
+인덱스 `(product_id, created_at, id)` — 올린 순서로 읽고, 첫 행이 대표 이미지다.
+
+**`attachments`와 같은 모양이고 별도 표다.** 저장 경로·파일명 재생성·`UNIQUE`의 이유는 그쪽과 같다.
+`attachments.post_id`를 NULL 허용으로 풀어 같이 쓰지 않는 이유는 서빙 규칙이 부모에 달려 있기
+때문이다 — 첨부는 부모 글의 `post.read`를, 이미지는 부모 상품의 노출 여부를 다시 본다
+([D15](15-access-control.md) SC-7 2항). 부모가 행마다 다르면 그 검사가 분기가 된다.
+
+**`mime_type`을 값 집합으로 막는다.** 이 표의 파일은 `Content-Disposition: inline`으로 나간다
+(`<img>`가 그린다, P-306). 브라우저가 문서로 해석할 타입이 들어올 수 없다는 것을 업로드 검증기와
+**따로** DB가 보장한다 — 검증기의 허용목록이 넓어져도 이 표는 래스터 이미지 넷뿐이다.
+
+**폭·높이·`sort_order`를 두지 않는다.** 썸네일을 만들지 않고 원본을 CSS로 맞추므로 크기를 알
+필요가 없고, 순서를 바꾸는 화면이 없다. `updated_at`도 없다(3절 예외) — 생성과 삭제만 있다.
 
 **`carts` · `cart_items`**
 

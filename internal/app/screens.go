@@ -44,6 +44,7 @@ var screenInventory = map[string]SecurityClass{
 	"P-303": SC1, // 상품 상세
 	"P-304": SC1, // 옵션 조합 조회 (htmx)
 	"P-305": SC1, // 상품 검색
+	"P-306": SC7, // 상품 이미지
 	"P-401": SC2, // 장바구니 담기
 	"P-402": SC1, // 장바구니 보기
 	"P-403": SC3, // 장바구니 수량 변경

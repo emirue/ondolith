@@ -1,6 +1,16 @@
 {{define "body"}}
 {{with .Data}}
 <article class="page">
+  {{/* 상품 이미지 (FR-601). 올린 순서대로이고 첫 장이 대표다. 첫 장은 화면
+       위쪽에 있으므로 lazy 를 걸지 않는다 — 걸면 가장 큰 그림이 늦게 온다. */}}
+  {{$name := .Product.Name}}
+  {{with .Images}}
+  <div class="product-gallery">
+    {{range $i, $img := .}}
+    <img src="/shop/images/{{$img.ID}}" alt="{{$name}}" width="800" height="800"{{if $i}} loading="lazy"{{end}}>
+    {{end}}
+  </div>
+  {{end}}
   {{with .Product}}
   <h1>{{.Name}}</h1>
   <p class="price">{{money .BasePrice}}</p>

@@ -2,11 +2,13 @@ package admin
 
 import (
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/emirue/ondolith/internal/commerce"
+	"github.com/emirue/ondolith/internal/content"
 )
 
 // ProductForm is A-502 GET. id 가 비면 새 상품이다.
@@ -141,7 +143,8 @@ func (d *Deps) ProductDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	err := d.Commerce.DeleteProduct(r.Context(), id)
+	// 이미지 파일까지 지운다. 행은 CASCADE 로 가지만 파일은 따라가지 않는다.
+	err := d.Images.DeleteProduct(r.Context(), id)
 	switch {
 	case errors.Is(err, commerce.ErrNotFound):
 		http.NotFound(w, r)
@@ -171,6 +174,17 @@ func (d *Deps) renderProduct(w http.ResponseWriter, r *http.Request,
 			p = &commerce.Product{}
 		}
 	}
+	// 이미지는 폼 값이 아니라 저장된 것을 그린다 — 별도 폼으로 올리고 지운다.
+	// 새 상품은 아직 id 가 없어 이미지를 가질 수 없다.
+	images := []commerce.ProductImage{}
+	if !isCreate(id) {
+		got, err := d.Images.List(ctx, id)
+		if err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		images = got
+	}
 	// 선택지는 A-509 가 만든 전부다. 거부된 폼은 **보낸 선택**을 그대로 다시
 	// 그린다 — 저장된 값으로 되돌리면 고른 것이 사라진다.
 	cats, err := d.Commerce.Categories(ctx)
@@ -186,11 +200,109 @@ func (d *Deps) renderProduct(w http.ResponseWriter, r *http.Request,
 	for _, c := range cats {
 		choices = append(choices, categoryChoice{ID: c.ID, Name: c.Name, Checked: picked[c.ID]})
 	}
-	data := map[string]any{"Product": p, "Categories": choices, "New": isCreate(id)}
+	data := map[string]any{"Product": p, "Categories": choices, "New": isCreate(id),
+		"Images": images}
 	if msg != "" {
 		data["Error"] = msg
 	}
 	d.Render(w, r, "admin/product-edit.html", code, data)
+}
+
+// maxImageUploadBytes 는 이미지 업로드 요청 하나의 상한이다. 여러 장이 함께
+// 오므로 파일 하나의 상한(A-309 `upload.max_bytes`)보다 넉넉하되 무한은
+// 아니다 — 파일별 판정은 검증기가 하고, 이것은 소켓을 멈출 뿐이다.
+const maxImageUploadBytes = 64 << 20
+
+// ProductImageUpload is A-502 POST /admin/products/{id}/images (FR-601, NFR-206).
+//
+// **검증을 여기 쓰지 않는다.** 확장자 허용목록·매직바이트·웹루트 밖 저장과
+// 파일명 재생성·0644 는 전부 content.StoreUpload 안에 있고 (D60), 상품 이미지는
+// 그 허용목록을 이미지로 좁혀서 지난다 (commerce.Images.Save).
+func (d *Deps) ProductImageUpload(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "product.manage")
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	// 본문 크기를 파싱보다 먼저 막는다 (테마 업로드와 같은 규칙).
+	r.Body = http.MaxBytesReader(w, r.Body, maxImageUploadBytes)
+	if err := r.ParseMultipartForm(maxThemeMemoryBytes); err != nil {
+		d.renderProduct(w, r, nil, http.StatusRequestEntityTooLarge,
+			"파일이 너무 크거나 형식이 올바르지 않습니다.")
+		return
+	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
+
+	// 크기 상한과 운영자가 뺀 확장자는 첨부와 같은 설정을 쓴다 (A-309).
+	limits, err := d.Attachments.Limits(r.Context())
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	saved := 0
+	for _, fh := range r.MultipartForm.File["image"] {
+		if fh.Size == 0 {
+			continue // 파일 칸을 비워 두면 브라우저가 빈 항목을 보낸다
+		}
+		var f multipart.File
+		if f, err = fh.Open(); err != nil {
+			break
+		}
+		_, err = d.Images.Save(r.Context(), id, fh.Filename, f, limits)
+		f.Close()
+		if err != nil {
+			break
+		}
+		saved++
+	}
+	switch {
+	case errors.Is(err, commerce.ErrNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, content.ErrUploadExt), errors.Is(err, content.ErrUploadContent),
+		errors.Is(err, content.ErrUploadEmpty), errors.Is(err, content.ErrUploadTooLarge):
+		// 거부된 업로드를 남긴다 (D19 A-502). 사유에는 서버가 본 확장자·타입만
+		// 있다 — 저장 경로는 들어 있지 않다.
+		d.log(r, c, "product.manage", "product", id, "상품 이미지 업로드 거부: "+err.Error())
+		d.renderProduct(w, r, nil, http.StatusUnprocessableEntity,
+			"허용되지 않는 파일입니다. jpg·png·gif·webp 이미지만 올릴 수 있습니다.")
+	case errors.Is(err, content.ErrUploadTooMany):
+		d.renderProduct(w, r, nil, http.StatusUnprocessableEntity,
+			"이미지는 상품당 "+strconv.Itoa(commerce.MaxProductImages)+"장까지입니다.")
+	case err != nil:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	case saved == 0:
+		d.renderProduct(w, r, nil, http.StatusUnprocessableEntity, "파일을 고르세요.")
+	default:
+		d.log(r, c, "product.manage", "product", id, "상품 이미지 "+strconv.Itoa(saved)+"장 추가")
+		http.Redirect(w, r, "/admin/products/"+id, http.StatusSeeOther)
+	}
+}
+
+// ProductImageDelete is A-502 POST /admin/product-images/{id}/delete.
+//
+// 경로의 id 는 **이미지**의 것이다. 상품 id 를 함께 받지 않는다 — 받으면 「이
+// 이미지가 그 상품의 것인가」를 따로 확인해야 하고, 권한(product.manage)은
+// 상품마다 다르지 않다.
+func (d *Deps) ProductImageDelete(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "product.manage")
+	if !ok {
+		return
+	}
+	productID, err := d.Images.Delete(r.Context(), r.PathValue("id"))
+	if errors.Is(err, commerce.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil && productID == "" {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	if err != nil && d.Logger != nil {
+		// 행은 갔고 파일만 남았다. 되돌릴 수 없으므로 알리기만 한다 (A-309 와 같다).
+		d.Logger.Warn("상품 이미지 파일 삭제 실패", "product", productID, "err", err)
+	}
+	d.log(r, c, "product.manage", "product", productID, "상품 이미지 삭제")
+	http.Redirect(w, r, "/admin/products/"+productID, http.StatusSeeOther)
 }
 
 // VariantForm is A-503 GET.

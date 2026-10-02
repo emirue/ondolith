@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -115,19 +114,9 @@ func (a *Attachments) ByID(ctx context.Context, id string) (*Attachment, error) 
 	return &at, nil
 }
 
-// Open returns the file for download.
-//
-// The path comes from the database, where a CHECK constrains it to
-// `YYYY/MM/<uuid>` — but it is still opened through os.Root, because "the
-// database validated it" is one migration away from being false and the escape
-// check costs nothing (NFR-201: do not write the check by hand).
+// Open returns the file for download. 경로 탈출 검사는 OpenUpload 가 한다.
 func (a *Attachments) Open(at *Attachment) (*os.File, error) {
-	rt, err := os.OpenRoot(a.root)
-	if err != nil {
-		return nil, err
-	}
-	defer rt.Close()
-	return rt.Open(filepath.FromSlash(at.StoredPath))
+	return OpenUpload(a.root, at.StoredPath)
 }
 
 // Delete removes the row and then the file.
@@ -219,18 +208,7 @@ func (a *Attachments) Limits(ctx context.Context) (UploadLimits, error) {
 	return l, nil
 }
 
-func (a *Attachments) removeFile(rel string) error {
-	rt, err := os.OpenRoot(a.root)
-	if err != nil {
-		return err
-	}
-	defer rt.Close()
-	err = rt.Remove(filepath.FromSlash(rel))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
-}
+func (a *Attachments) removeFile(rel string) error { return RemoveUpload(a.root, rel) }
 
 // BoardAttachments is A-309's list: every attachment on one board, newest
 // first. The board scopes it because post.moderate does (D15 2.4) — "every

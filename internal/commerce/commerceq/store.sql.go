@@ -191,7 +191,8 @@ func (q *Queries) DeleteCategory(ctx context.Context, id string) (int64, error) 
 const listProducts = `-- name: ListProducts :many
 
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
-       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
+       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
+       COALESCE(i.id::text, '')::text AS image_id
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible, p.created_at
     FROM products p
@@ -212,6 +213,9 @@ LEFT JOIN LATERAL (
     FROM product_variants
     WHERE product_id = p.id AND is_visible
 ) v ON true
+LEFT JOIN LATERAL (
+    SELECT id FROM product_images WHERE product_id = p.id ORDER BY created_at, id LIMIT 1
+) i ON true
 ORDER BY
     CASE WHEN $3::text = 'price'      THEN p.base_price END,
     CASE WHEN $3::text = 'price_desc' THEN p.base_price END DESC,
@@ -237,12 +241,14 @@ type ListProductsRow struct {
 	IsVisible   bool
 	MinDelta    int32
 	InStock     bool
+	ImageID     string
 }
 
 // 상품·조합·카테고리·검색 (store.go). 정렬 키는 CASE 로 한 질의에 담는다 (D22 6절).
 // **쪽을 먼저 고르고, 조합 요약은 그 행에만 붙인다** (ListProducts·SearchProducts).
 // 한 층으로 쓰면 정렬이 인덱스를 못 타는 순간 걸러진 상품 **전부**의 조합을 집계하고
 // 나서 정렬한다. 바깥 ORDER BY 는 안쪽과 같다 — 조인이 순서를 지켜 준다는 보장은 없다.
+// 대표 이미지 하나 (올린 순서의 첫 행). 조합 요약과 같은 이유로 고른 쪽에만 붙인다.
 func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]ListProductsRow, error) {
 	rows, err := q.db.Query(ctx, listProducts,
 		arg.VisibleOnly,
@@ -267,6 +273,7 @@ func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]L
 			&i.IsVisible,
 			&i.MinDelta,
 			&i.InStock,
+			&i.ImageID,
 		); err != nil {
 			return nil, err
 		}
@@ -327,7 +334,8 @@ func (q *Queries) ProductBySlug(ctx context.Context, arg ProductBySlugParams) (P
 
 const searchProducts = `-- name: SearchProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
-       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock
+       COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
+       COALESCE(i.id::text, '')::text AS image_id
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
            ts_rank(p.search_tsv, to_tsquery('simple', $1)) AS rank
@@ -340,6 +348,9 @@ LEFT JOIN LATERAL (
     SELECT min(price_delta) AS min_delta, bool_or(stock > 0) AS in_stock
     FROM product_variants WHERE product_id = p.id AND is_visible
 ) v ON true
+LEFT JOIN LATERAL (
+    SELECT id FROM product_images WHERE product_id = p.id ORDER BY created_at, id LIMIT 1
+) i ON true
 ORDER BY p.rank DESC, p.id
 `
 
@@ -358,6 +369,7 @@ type SearchProductsRow struct {
 	IsVisible   bool
 	MinDelta    int32
 	InStock     bool
+	ImageID     string
 }
 
 func (q *Queries) SearchProducts(ctx context.Context, arg SearchProductsParams) ([]SearchProductsRow, error) {
@@ -378,6 +390,7 @@ func (q *Queries) SearchProducts(ctx context.Context, arg SearchProductsParams) 
 			&i.IsVisible,
 			&i.MinDelta,
 			&i.InStock,
+			&i.ImageID,
 		); err != nil {
 			return nil, err
 		}

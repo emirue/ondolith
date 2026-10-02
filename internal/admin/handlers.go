@@ -74,6 +74,9 @@ type Deps struct {
 	// 것이고 (FR-710), 그 라우트는 애초에 트리에 없다.
 	Commerce    *commerce.Store
 	Attachments *content.Attachments
+	// Images 는 A-502 의 상품 이미지 저장소다. Attachments 와 같은 이유로
+	// 주입한다 — 업로드 디렉터리는 설정이다 (NFR-304).
+	Images *commerce.Images
 	// OpLog records D15 7절's audit entries. Injected so admin does not decide
 	// where the trail lives.
 	OpLog *content.OpLog

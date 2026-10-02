@@ -632,6 +632,37 @@ a:focus-visible {
 .product-list a { color: inherit; text-decoration: none; font-weight: 600; font-size: 14.5px; }
 .product-list .empty { grid-column: 1 / -1; }
 
+/* 상품 이미지. **원본을 그대로 받는다** (썸네일을 만들지 않는다) — 그래서 크기와
+   비율은 여기서 정한다. aspect-ratio 가 그림이 오기 전에 자리를 잡아 레이아웃이
+   밀리지 않고, object-fit 이 비율이 다른 원본을 찌그러뜨리지 않는다. */
+.product-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--thead-bg);
+}
+.product-thumb--small { width: 40px; flex: none; border-radius: 6px; }
+
+.product-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--gap);
+  margin: 0 0 18px;
+}
+.product-gallery img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
 .price { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
 .stock { font-size: 12.5px; opacity: .55; }
 .option { display: grid; gap: 6px; margin: 0 0 14px; }

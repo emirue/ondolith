@@ -626,6 +626,25 @@ label:has(> input[type="radio"]),
   margin-bottom: 0;
 }
 
+/* 상품 이미지 (A-502). **원본을 그대로 쓴다** — 썸네일을 만들지 않으므로 크기는
+   여기서 정한다. width/height 속성이 자리를 먼저 잡아 그림이 늦게 와도 밀리지 않는다. */
+.adm-thumbs {
+  list-style: none;
+  margin: 0 0 var(--s16);
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s16);
+}
+.adm-thumbs li { display: grid; gap: var(--s8); justify-items: start; }
+.adm-thumbs img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--chip-radius);
+}
+
 dl { margin: 0 0 var(--s20); }
 
 /* 이름-값 쌍. 값이 이름 아래로 떨어지면 한 화면에 담기지 않는다. */

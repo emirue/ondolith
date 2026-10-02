@@ -26,6 +26,9 @@
   <ul class="product-list">
     {{range .Products}}
     <li>
+      {{/* 대표 이미지 (P-306). 원본을 그대로 받으므로 크기는 CSS 가 정한다 —
+           .product-thumb 의 aspect-ratio 가 자리를 먼저 잡아 늦게 와도 밀리지 않는다. */}}
+      {{if .ImageID}}<img class="product-thumb" src="/shop/images/{{.ImageID}}" alt="{{.Name}}" width="400" height="400" loading="lazy">{{end}}
       <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
       <span class="price">{{money .BasePrice}}{{if .MinDelta}}~{{end}}</span>
       {{if not .InStock}}<span class="badge">품절</span>{{end}}

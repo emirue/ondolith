@@ -1402,6 +1402,7 @@ route_unlinked_reason() {
 	"GET /healthz") echo "운영 감시가 부른다" ;;
 	"GET /robots.txt" | "GET /sitemap.xml") echo "크롤러가 읽는다" ;;
 	"GET /static/{path...}") echo "문서가 자산을 건다" ;;
+	"GET /shop/images/{id}") echo "문서가 <img src> 로 건다" ;;
 	"GET /shop/p/{slug}/variant") echo "htmx 가 부른다" ;;
 	"GET /verify/{token}" | "GET /password/reset/{token}") echo "메일의 링크로 들어온다" ;;
 	"POST /board/{slug}/{id}/comments") echo "폼 action 을 핸들러가 넘긴다 (CommentForm.Action)" ;;

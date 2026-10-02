@@ -9,7 +9,10 @@
   {{with .Data}}{{if .Query}}
   <ul class="product-list">
     {{range .Products}}
-    <li><a href="/shop/p/{{.Slug}}">{{.Name}}</a> <span class="price">{{money .BasePrice}}</span></li>
+    <li>
+      {{if .ImageID}}<img class="product-thumb" src="/shop/images/{{.ImageID}}" alt="{{.Name}}" width="400" height="400" loading="lazy">{{end}}
+      <a href="/shop/p/{{.Slug}}">{{.Name}}</a> <span class="price">{{money .BasePrice}}</span>
+    </li>
     {{else}}
     <li class="empty">검색 결과가 없습니다.</li>
     {{end}}
