@@ -18,7 +18,7 @@
 
 <div class="adm-card">
   <h2>동작</h2>
-  <div class="adm-actions">
+  <div class="adm-actions" style="flex-direction:column;align-items:flex-start">
     <form method="post" action="/admin/users/{{.ID}}/deactivate">
       {{template "reauth-field" .}}
       <button class="adm-btn">비활성화</button>

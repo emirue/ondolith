@@ -8,7 +8,7 @@
        (D19 A-503 「variant_id 직접 지정」을 받지 않는 이유). 이 폼이 없을 때
        새 상품은 조합이 0개인 채로 남았고, 조합이 없으면 장바구니에 담을 것이
        없어서 아무것도 팔 수 없었다. */}}
-  <form method="post" action="/admin/products/{{.Product.ID}}/options" class="adm-form">
+  <form method="post" action="/admin/products/{{.Product.ID}}/options">
     <h3>옵션</h3>
     <div class="adm-table-wrap">
       <table class="adm-table">
@@ -32,7 +32,7 @@
         </tbody>
       </table>
     </div>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">옵션 저장 · 조합 생성</button>
     </div>
     <p class="adm-hint">
@@ -47,13 +47,13 @@
     <div class="adm-table-wrap">
       <table class="adm-table">
         <thead>
-          <tr><th>조합</th><th>SKU</th><th>바코드</th><th>가격 차액</th><th>현재 재고</th><th>증감</th></tr>
+          <tr><th>조합</th><th>SKU</th><th>바코드</th><th>가격 차액 (원)</th><th>현재 재고</th><th>증감</th></tr>
         </thead>
         <tbody>
         {{if not .Variants}}<tr><td colspan="6">옵션을 저장하면 조합이 만들어집니다.</td></tr>{{end}}
         {{range .Variants}}
           <tr>
-            <td>
+            <td class="adm-nw">
               <input type="hidden" name="variant_id" value="{{.ID}}">
               <input type="hidden" name="version_{{.ID}}" value="{{.Stock}}">
               {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
@@ -72,7 +72,7 @@
         </tbody>
       </table>
     </div>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>
   </form>

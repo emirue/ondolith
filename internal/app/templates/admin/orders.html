@@ -1,4 +1,5 @@
 {{define "content"}}
+<div class="adm-card adm-card--flush">
 <form method="get" class="adm-filterbar">
   <label for="status">상태</label>
   <select id="status" name="status" onchange="this.form.submit()">
@@ -13,7 +14,7 @@
     <thead><tr><th>주문번호</th><th>상태</th><th>금액</th><th>주문자</th><th>주문일</th></tr></thead>
     <tbody>
       {{range .Orders}}
-      <tr><td><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
+      <tr><td class="adm-nw"><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
           <td>{{.Status}}</td><td>{{money .Total}}</td><td>{{.OrdererEmail}}</td><td>{{date .CreatedAt "2006-01-02 15:04"}}</td></tr>
       {{else}}
       <tr><td colspan="5" class="adm-empty">주문이 없습니다.</td></tr>
@@ -22,9 +23,10 @@
   </table>
 </div>
 <div class="adm-pagination">
-  <span class="adm-count">{{.PageNo}}쪽</span>
-  {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
-  <span class="adm-page adm-page--current">{{.PageNo}}</span>
-  {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
+    <span class="adm-count">{{.PageNo}}쪽</span>
+    {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
+  </div>
 </div>
 {{end}}

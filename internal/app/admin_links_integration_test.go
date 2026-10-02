@@ -144,7 +144,7 @@ func TestStockScreenRendersRowForms(t *testing.T) {
 	// 스캔 흐름: SKU 가 정확히 한 조합에 맞으면 그 행의 입고 칸에 포커스가 가고,
 	// 행의 폼은 검색어를 싣지 않는다.
 	_, body = mustGet(t, c, srv.URL+"/admin/stock?q=SKU-00")
-	if !strings.Contains(body, `placeholder="수량" style="width:6em" autofocus>`) {
+	if !strings.Contains(body, `placeholder="수량" style="width:5em" autofocus>`) {
 		t.Error("정확히 한 조합인데 입고 수량 칸에 autofocus 가 없다")
 	}
 	if strings.Count(body, "autofocus") != 1 {

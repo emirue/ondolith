@@ -33,7 +33,7 @@
           {{if .Discount}}<span class="discount">할인 {{money .Discount}} 적용</span>{{end}}
         </label>
         <input name="qty_{{.ID}}" type="number" min="1" max="{{.RemainingQty}}" value="1"
-               {{if not .RemainingQty}}disabled{{end}}>
+               aria-label="{{.ProductName}} 수량"{{if not .RemainingQty}} disabled{{end}}>
       </div>
       {{end}}
     </fieldset>

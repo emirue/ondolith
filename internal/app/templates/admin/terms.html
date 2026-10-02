@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="adm-card">
+<div class="adm-card adm-card--flush">
   {{/* **배포된 버전을 고치는 폼이 없다.** order_agreements 가 가리키는 본문이
        바뀌면 동의 이력이 거짓이 되고, FR-619 가 약속한 "나중에 재현된다" 가
        깨진다. 개정은 새 행이다. */}}
@@ -20,7 +20,9 @@
       </tbody>
     </table>
   </div>
+</div>
 
+<div class="adm-card">
   <h2>새 버전 추가</h2>
   <form method="post" action="/admin/terms">
     <label class="adm-field"><span>종류 (예: service, privacy)</span>
@@ -33,7 +35,7 @@
       <textarea name="body" rows="12" maxlength="20000" required></textarea></label>
     <label class="adm-field adm-field--check">
       <input type="checkbox" name="is_required" checked><span>필수 동의</span></label>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">버전 추가</button>
     </div>
   </form>

@@ -4,11 +4,12 @@
   {{with .Data}}
   {{with .Categories}}
   <nav class="categories"><a href="/shop">전체</a>
-    {{range .}} · <a href="/shop/c/{{.Slug}}">{{.Name}}</a>{{end}}
+    {{range .}}<a href="/shop/c/{{.Slug}}">{{.Name}}</a>{{end}}
   </nav>
   {{end}}
   {{/* 상품 검색(P-305)의 진입점. 쇼핑몰이면 머리글 검색이 여기로 오지만,
        cms 사이트에 켜 둔 상점에서는 머리글이 글을 찾으므로 여기가 유일하다. */}}
+  <div class="listing-tools">
   <form method="get" action="/shop/search" class="shop-search">
     <label for="shop-q">상품 검색</label>
     <input id="shop-q" name="q" type="search" placeholder="상품 이름">
@@ -23,6 +24,7 @@
       <option value="name"{{if eq .Sort "name"}} selected{{end}}>이름순</option>
     </select>
   </form>
+  </div>
   <ul class="product-list">
     {{range .Products}}
     <li>

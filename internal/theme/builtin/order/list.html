@@ -2,6 +2,7 @@
 <section class="page">
   <h1>주문 내역</h1>
   {{with .Data}}
+  <div class="table-wrap">
   <table class="order-list">
     <thead><tr><th>주문번호</th><th>상태</th><th>금액</th><th>주문일</th></tr></thead>
     <tbody>
@@ -13,6 +14,7 @@
       {{end}}
     </tbody>
   </table>
+  </div>
   {{end}}
 </section>
 {{end}}

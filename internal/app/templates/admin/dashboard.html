@@ -6,45 +6,43 @@
 {{if or .Posts .Orders}}
 <div class="adm-grid-2">
   {{if .Posts}}
-  <div class="adm-card">
-    <h2>최근 글</h2>
+  <div class="adm-card adm-card--flush">
+    <div class="adm-filterbar"><h2>최근 글</h2><a href="/admin/boards">게시판 관리 →</a></div>
     <div class="adm-table-wrap">
-    <table class="adm-table">
+    <table class="adm-table adm-table--fit">
       <thead><tr><th>제목</th><th>작성자</th><th>작성일</th></tr></thead>
       <tbody>
         {{range .Posts}}
         <tr>
           <td>{{.Title}}</td>
           <td>{{if .AuthorName}}{{.AuthorName}}{{else}}—{{end}}</td>
-          <td>{{date .CreatedAt "2006-01-02"}}</td>
+          <td class="adm-nw">{{date .CreatedAt "2006-01-02"}}</td>
         </tr>
         {{end}}
       </tbody>
     </table>
     </div>
-    <p class="adm-hint"><a href="/admin/boards">게시판 관리 →</a></p>
   </div>
   {{end}}
 
   {{if .Orders}}
-  <div class="adm-card">
-    <h2>최근 주문</h2>
+  <div class="adm-card adm-card--flush">
+    <div class="adm-filterbar"><h2>최근 주문</h2><a href="/admin/orders">주문 관리 →</a></div>
     <div class="adm-table-wrap">
-    <table class="adm-table">
+    <table class="adm-table adm-table--fit">
       <thead><tr><th>주문번호</th><th>상태</th><th>금액</th><th>주문일</th></tr></thead>
       <tbody>
         {{range .Orders}}
         <tr>
-          <td><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
+          <td class="adm-nw"><a href="/admin/orders/{{.OrderNo}}">{{.OrderNo}}</a></td>
           <td>{{.Status}}</td>
           <td>{{money .Total}}</td>
-          <td>{{date .CreatedAt "2006-01-02"}}</td>
+          <td class="adm-nw">{{date .CreatedAt "2006-01-02"}}</td>
         </tr>
         {{end}}
       </tbody>
     </table>
     </div>
-    <p class="adm-hint"><a href="/admin/orders">주문 관리 →</a></p>
   </div>
   {{end}}
 </div>

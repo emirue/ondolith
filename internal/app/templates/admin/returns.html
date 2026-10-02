@@ -1,6 +1,6 @@
 {{define "content"}}
 {{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
-{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+{{with .Order}}<div class="adm-card"><p>주문 {{.OrderNo}} · 상태 {{.Status}}</p></div>{{end}}
 {{range .Returns}}
 <section class="adm-panel">
   <h2>{{.ReturnNo}} · {{.Kind}} · {{.Status}}</h2>
@@ -58,6 +58,6 @@
   </form>
 </section>
 {{else}}
-<p>접수된 반품·교환이 없습니다.</p>
+<div class="adm-card"><p>접수된 반품·교환이 없습니다.</p></div>
 {{end}}
 {{end}}

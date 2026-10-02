@@ -1,6 +1,6 @@
 {{define "body"}}
 {{with .Data}}
-<article class="page">
+<article class="page product-detail">
   {{/* 상품 이미지 (FR-601). 올린 순서대로이고 첫 장이 대표다. 첫 장은 화면
        위쪽에 있으므로 lazy 를 걸지 않는다 — 걸면 가장 큰 그림이 늦게 온다. */}}
   {{$name := .Product.Name}}
@@ -11,6 +11,7 @@
     {{end}}
   </div>
   {{end}}
+  <div class="product-info">
   {{with .Product}}
   <h1>{{.Name}}</h1>
   <p class="price">{{money .BasePrice}}</p>
@@ -49,6 +50,7 @@
     <button type="submit">장바구니에 담기</button>
   </form>
   {{end}}
+  </div>
 </article>
 {{end}}
 {{end}}

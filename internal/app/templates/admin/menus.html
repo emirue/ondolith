@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="adm-card" style="padding:0">
+<div class="adm-card adm-card--flush">
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr><th>제목</th><th>URL</th><th>부모</th><th>동작</th></tr></thead>
@@ -7,6 +7,11 @@
       {{range .Items}}
         <tr>
           <td colspan="4" style="padding:0">
+            {{/* 삭제 버튼이 없어서 `MenuDelete` 는 라우트도 핸들러도 있는데
+                 누를 자리가 없었다 — 메뉴를 한번 만들면 지울 수 없었다.
+                 「수정」 폼과 다른 폼이어야 하므로 `form` 속성으로 잇고, 버튼은
+                 수정 옆에 나란히 둔다 — 아래 줄에 따로 떨어지면 행이 두 줄이 된다. */}}
+            <form id="menu-del-{{.ID}}" method="post" action="/admin/menus/{{.ID}}/delete"></form>
             <form method="post" action="/admin/menus/{{.ID}}"
                   style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;padding:12px 22px;align-items:center">
               <input type="text" name="title" value="{{.Title}}" aria-label="제목">
@@ -14,14 +19,8 @@
               <input type="text" name="parent_id" value="{{.ParentID}}" placeholder="(최상위)" aria-label="부모">
               <span class="adm-actions">
                 <button class="adm-btn adm-btn--sm">수정</button>
+                <button class="adm-btn adm-btn--sm adm-btn--danger" form="menu-del-{{.ID}}">삭제</button>
               </span>
-            </form>
-            {{/* 삭제 버튼이 없어서 `MenuDelete` 는 라우트도 핸들러도 있는데
-                 누를 자리가 없었다 — 메뉴를 한번 만들면 지울 수 없었다.
-                 폼 밖에 두는 이유는 위 폼이 「수정」이기 때문이다. */}}
-            <form method="post" action="/admin/menus/{{.ID}}/delete"
-                  style="padding:0 22px 12px;text-align:right">
-              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
             </form>
           </td>
         </tr>
@@ -41,7 +40,7 @@
       <label class="adm-field"><span>URL</span><input type="text" name="url"></label>
       <label class="adm-field"><span>부모 ID</span><input type="text" name="parent_id" placeholder="(최상위)"></label>
     </div>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">추가</button>
     </div>
   </form>

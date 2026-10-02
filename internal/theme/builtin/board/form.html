@@ -29,8 +29,10 @@
     {{end}}
 
     {{if .CanSecret}}
-      <label for="is_secret">비밀글</label>
-      <input type="checkbox" id="is_secret" name="is_secret" value="1"{{if .Post.IsSecret}} checked{{end}}>
+      <label class="checkbox">
+        <input type="checkbox" id="is_secret" name="is_secret" value="1"{{if .Post.IsSecret}} checked{{end}}>
+        비밀글
+      </label>
     {{end}}
 
     <button>{{if .Post.ID}}수정{{else}}등록{{end}}</button>

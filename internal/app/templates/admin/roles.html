@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="adm-card" style="padding:0">
+<div class="adm-card adm-card--flush">
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr><th>역할 키</th><th>권한</th><th>비고</th></tr></thead>
@@ -26,7 +26,7 @@
       <label class="adm-field"><span>권한 키</span><input type="text" name="permission" required></label>
       <label class="adm-field"><span>게시판 (스코프 권한만)</span><input type="text" name="board_id"></label>
     </div>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">부여</button>
     </div>
   </form>
@@ -39,7 +39,7 @@
       <label class="adm-field"><span>사용자 ID</span><input type="text" name="user_id" required></label>
       <label class="adm-field"><span>역할 키</span><input type="text" name="role" required></label>
     </div>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">부여</button>
     </div>
   </form>

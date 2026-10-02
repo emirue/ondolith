@@ -1,11 +1,15 @@
 {{define "content"}}
 {{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
+<div class="adm-card">
 {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}{{if .Discount}} · 할인 {{money .Discount}}{{end}}</p>{{end}}
-<dl class="adm-dl">
+<dl class="adm-detail">
   <dt>결제 금액</dt><dd>{{money .Approved}}</dd>
   <dt>환불 접수·완료</dt><dd>{{money .Refunded}}</dd>
   <dt>남은 금액</dt><dd><strong>{{money .Remaining}}</strong></dd>
 </dl>
+</div>
+<div class="adm-card adm-card--flush">
+<div class="adm-filterbar"><h2>환불 요청 내역</h2></div>
 <div class="adm-table-wrap">
   <table class="adm-table">
     <thead><tr><th>시각</th><th>요청자</th><th>금액</th><th>상태</th><th>사유</th></tr></thead>
@@ -19,7 +23,10 @@
     </tbody>
   </table>
 </div>
+</div>
 
+<div class="adm-card">
+<h2>환불 접수</h2>
 {{/* **금액 입력란이 없다.** 관리자 화면이라고 예외를 두면 그 경로만 위변조
      가능해진다 (FR-625). 품목·수량만 받고 서버가 스냅샷에서 계산한다. */}}
 <form method="post" class="adm-form">
@@ -51,4 +58,5 @@
   {{end}}
   <button type="submit">환불 접수</button>
 </form>
+</div>
 {{end}}

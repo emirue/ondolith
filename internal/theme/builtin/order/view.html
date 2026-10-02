@@ -5,7 +5,8 @@
   <p>상태 {{.Status}} · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
   {{/* 스냅샷만 그린다 (FR-612). 상품 표를 조인해 현재 이름·가격을 보여주면
        상품이 바뀐 뒤 주문서가 달라진다. */}}
-  <table class="order-items">
+  <div class="table-wrap">
+  <table class="order-list">
     <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
     <tbody>
       {{range .Items}}
@@ -14,6 +15,7 @@
       {{end}}
     </tbody>
   </table>
+  </div>
   <dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
   <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
 

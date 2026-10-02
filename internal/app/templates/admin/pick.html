@@ -1,6 +1,6 @@
 {{define "content"}}
-<div class="adm-card">
-  <h2>주문 {{.OrderNo}} 피킹 대조</h2>
+<div class="adm-card adm-card--flush">
+  <div class="adm-filterbar"><h2>주문 {{.OrderNo}} 피킹 대조</h2></div>
   {{/* **이 화면은 재고도 주문 상태도 바꾸지 않는다** (FR-623). 재고는 주문
        시점에 이미 차감됐고, 상태는 A-506 이 옮긴다. 여기서 건드리면 이중
        차감과 유령 전이가 생긴다. */}}
@@ -18,7 +18,9 @@
       </tbody>
     </table>
   </div>
+</div>
 
+<div class="adm-card">
   <form method="post" action="/admin/orders/{{.OrderNo}}/pick">
     {{range .Lines}}
     <input type="hidden" name="count_{{.VariantID}}" value="{{index $s .VariantID}}">
@@ -30,7 +32,7 @@
          수량을 고쳐 한 번에 센다. */}}
     <label class="adm-field"><span>수량</span>
       <input type="number" name="quantity" min="1" step="1" value="1" required></label>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">대조</button>
     </div>
   </form>

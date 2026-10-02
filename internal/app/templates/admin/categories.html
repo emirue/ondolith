@@ -2,7 +2,7 @@
 {{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
 
 {{$cats := .Categories}}
-<div class="adm-card" style="padding:0">
+<div class="adm-card adm-card--flush">
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr><th>이름</th><th>주소</th><th>상위</th><th>순서</th><th>동작</th></tr></thead>
@@ -48,7 +48,7 @@
         <input type="number" name="sort_order" value="0"></label>
     </div>
     <p class="adm-hint">주소가 공개 URL 이 됩니다 — <code>/shop/c/&lt;주소&gt;</code></p>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">추가</button>
     </div>
   </form>
@@ -70,7 +70,7 @@
           {{range .Categories}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
         </select></label>
     </div>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
       <button class="adm-btn">이동</button>
     </div>
   </form>

@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="adm-card" style="padding:0">
+<div class="adm-card adm-card--flush">
   <form method="get" class="adm-filterbar">
     {{template "period-fields" .}}
   </form>
@@ -9,7 +9,7 @@
       <tbody>
       {{range .Entries}}
         <tr>
-          <td class="muted">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+          <td class="muted adm-nw">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
           <td>{{if .ActorEmail}}{{.ActorEmail}}{{else}}<span class="muted">시스템</span>{{end}}</td>
           <td><span class="adm-badge">{{.Action}}</span></td>
           <td class="muted">{{.TargetType}}{{if .TargetID}} · {{.TargetID}}{{end}}</td>

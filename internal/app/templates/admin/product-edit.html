@@ -42,52 +42,55 @@
       <p>카테고리가 없습니다. <a href="/admin/categories">카테고리 관리</a>에서 먼저 만드세요.</p>
       {{end}}
     </fieldset>
-    <div class="adm-actions" style="justify-content:flex-end">
+    <div class="adm-actions adm-actions--end">
+      {{if not .New}}
+      {{/* QR 라벨(A-513)은 이 링크가 없는 동안 닿을 수 없는 화면이었다. */}}
+      <a class="adm-btn" href="/admin/products/{{.Product.ID}}/variants">옵션·재고 편집</a>
+      <a class="adm-btn" href="/admin/products/{{.Product.ID}}/labels">QR 라벨 인쇄</a>
+      <a class="adm-btn" href="/admin/stock?product={{.Product.ID}}">재고</a>
+      {{end}}
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>
   </form>
+</div>
 
-  {{if not .New}}
+{{if not .New}}
+<div class="adm-card">
+  <h2>이미지</h2>
   {{/* 이미지 (FR-601). 상품 폼과 **다른 폼**이다 — 상품이 있어야 붙일 수 있고,
        파일 하나가 거부됐다고 이름·가격 저장까지 되돌리지 않는다. 검증은 서버가
        한다 (D60 4중 검증); `accept` 는 파일 고르기 창을 좁혀 줄 뿐이다.
        원본을 그대로 보여 주고 크기는 CSS 가 정한다 (.adm-thumbs). 비공개
        상품의 이미지는 product.manage 가 있는 사람에게만 열린다 (P-306). */}}
-  <fieldset>
-    <legend>이미지</legend>
     <ul class="adm-thumbs">
       {{range .Images}}
       <li>
         <img src="/shop/images/{{.ID}}" alt="{{$.Product.Name}}" width="96" height="96" loading="lazy">
         <form method="post" action="/admin/product-images/{{.ID}}/delete">
-          <button class="adm-btn adm-btn--danger">삭제</button>
+          <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
         </form>
       </li>
       {{else}}
       <li>등록된 이미지가 없습니다. 첫 번째로 올린 이미지가 목록의 대표 이미지입니다.</li>
       {{end}}
     </ul>
-    <form method="post" action="/admin/products/{{.Product.ID}}/images" enctype="multipart/form-data">
+    <form method="post" action="/admin/products/{{.Product.ID}}/images" enctype="multipart/form-data" class="adm-inline">
       <label for="product-image">이미지 추가 (jpg·png·gif·webp)</label>
       <input id="product-image" type="file" name="image" multiple required
              accept="image/jpeg,image/png,image/gif,image/webp">
       <button class="adm-btn">올리기</button>
     </form>
-  </fieldset>
+</div>
 
-  {{/* QR 라벨(A-513)은 이 링크가 없는 동안 닿을 수 없는 화면이었다. */}}
-  <div class="adm-actions">
-    <a class="adm-btn" href="/admin/products/{{.Product.ID}}/variants">옵션·재고 편집</a>
-    <a class="adm-btn" href="/admin/products/{{.Product.ID}}/labels">QR 라벨 인쇄</a>
-    <a class="adm-btn" href="/admin/stock?product={{.Product.ID}}">재고</a>
-  </div>
+<div class="adm-card">
+  <h2>상품 삭제</h2>
   {{/* 주문된 상품은 FK 가 막는다 (409). 판매 중단은 위의 공개 체크를 끄는
        것이고, 소프트 삭제 컬럼을 따로 두지 않는다 — "안 보이는 상태" 가
        둘이 되면 조회에서 한쪽을 빠뜨리는 순간 지운 상품이 되살아난다. */}}
-  <form method="post" action="/admin/products/{{.Product.ID}}/delete">
+  <form method="post" action="/admin/products/{{.Product.ID}}/delete" class="adm-actions">
     {{template "reauth-field" .}}
     <button class="adm-btn adm-btn--danger">삭제</button>
   </form>
-  {{end}}
 </div>
+{{end}}
 {{end}}

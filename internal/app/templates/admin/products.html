@@ -1,7 +1,10 @@
-{{define "content"}}
 {{/* 「새 상품」이 없어서 A-502 의 만들기 화면에 갈 방법이 주소를 직접 치는
-     것뿐이었다 — 게시판·페이지에는 있는 버튼이다. */}}
+     것뿐이었다 — 게시판·페이지에는 있는 버튼이고, 같은 자리(제목 줄 오른쪽)에 선다. */}}
+{{define "pageactions"}}
 <div class="adm-actions"><a class="adm-btn adm-btn--primary" href="/admin/products/new">새 상품</a></div>
+{{end}}
+{{define "content"}}
+<div class="adm-card adm-card--flush">
 <div class="adm-table-wrap">
   <table class="adm-table">
     <thead><tr><th>이름</th><th>주소</th><th>가격</th><th>노출</th><th>재고</th><th></th></tr></thead>
@@ -21,9 +24,10 @@
   </table>
 </div>
 <div class="adm-pagination">
-  <span class="adm-count">{{.PageNo}}쪽</span>
-  {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
-  <span class="adm-page adm-page--current">{{.PageNo}}</span>
-  {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
+    <span class="adm-count">{{.PageNo}}쪽</span>
+    {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
+  </div>
 </div>
 {{end}}

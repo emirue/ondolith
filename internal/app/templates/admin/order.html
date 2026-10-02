@@ -1,42 +1,57 @@
 {{define "content"}}
 {{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}
-<p>상태 <strong>{{.Status}}</strong> · 주문일 {{date .CreatedAt "2006-01-02 15:04"}}</p>
-<div class="adm-table-wrap">
-  <table class="adm-table">
-    <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
-    <tbody>
-      {{range .Items}}
-      <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-          <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
-      {{end}}
-    </tbody>
-  </table>
+<div class="adm-card">
+  <dl class="adm-detail">
+    <dt>상태</dt><dd><strong>{{.Status}}</strong></dd>
+    <dt>주문일</dt><dd>{{date .CreatedAt "2006-01-02 15:04"}}</dd>
+    <dt>결제 금액</dt><dd><strong>{{money .Total}}</strong></dd>
+    <dt>받는 사람</dt><dd>{{.ReceiverName}} · {{.ReceiverPhone}}</dd>
+    <dt>배송지</dt><dd><address>({{.Postcode}}) {{.Address1}} {{.Address2}}</address></dd>
+  </dl>
 </div>
-<p>결제 금액 <strong>{{money .Total}}</strong></p>
-<address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
+<div class="adm-card adm-card--flush">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>상품</th><th>옵션</th><th>단가</th><th>수량</th><th>금액</th></tr></thead>
+      <tbody>
+        {{range .Items}}
+        <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
+            <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
 {{end}}
 
 {{/* 선택지는 상태머신이 낸 목록이다. 전체 상태를 나열하고 서버에서 검증하지
      않는 것이 D14 5절이 지목한 가장 흔한 구현 실수다 — 좁히는 것은 편의이고,
      거부하는 것은 서버다. */}}
-{{if .Next}}
-<form method="post" action="/admin/orders/{{.Order.OrderNo}}/transition" class="adm-form">
-  <label for="to">다음 상태</label>
-  <select id="to" name="to" required>
-    {{range .Next}}<option value="{{.}}">{{.}}</option>{{end}}
-  </select>
-  <button type="submit">변경</button>
-</form>
-{{else}}
-<p>더 이상 옮길 수 있는 상태가 없습니다.</p>
-{{end}}
+<div class="adm-card">
+  <h2>상태 변경</h2>
+  {{if .Next}}
+  <form method="post" action="/admin/orders/{{.Order.OrderNo}}/transition" class="adm-inline">
+    <label for="to">다음 상태</label>
+    <select id="to" name="to" required>
+      {{range .Next}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    <button type="submit" class="adm-btn adm-btn--primary">변경</button>
+  </form>
+  {{else}}
+  <p>더 이상 옮길 수 있는 상태가 없습니다.</p>
+  {{end}}
+</div>
 
+<div class="adm-card">
 <h2>배송</h2>
+{{if .Shipments}}
 <ul>
-  {{range .Shipments}}<li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{date .ShippedAt "2006-01-02 15:04"}})</li>
-  {{else}}<li>발송 정보가 없습니다.</li>{{end}}
+  {{range .Shipments}}<li>{{.Kind}} · {{.Carrier}} {{.TrackingNo}} ({{date .ShippedAt "2006-01-02 15:04"}})</li>{{end}}
 </ul>
+{{else}}
+<p>발송 정보가 없습니다.</p>
+{{end}}
 {{/* 환불(A-507)·반품 처리(A-511) 화면은 만들어져 있었지만 관리자 주문 상세가
      송장만 가리켜, 나머지 둘은 주소를 직접 쳐야 닿았다. */}}
 <div class="adm-actions">
@@ -45,5 +60,6 @@
   <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/returns">반품·교환 처리</a>
   {{/* A-516 으로 들어가는 유일한 길이다 (FR-623). */}}
   <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/pick">피킹 대조</a>
+</div>
 </div>
 {{end}}

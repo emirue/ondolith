@@ -296,6 +296,15 @@ a:hover { color: var(--link-hover); }
   margin-bottom: var(--gap);
 }
 
+/* 표를 품는 카드. 표의 칸 여백이 곧 카드의 안쪽 여백이다 — 카드 여백을 또 주면
+   표가 이중으로 들여쓰이고(20+22px) 머리줄 배경이 카드 가장자리에 닿지 않는다.
+   인라인 `style="padding:0"` 로 흩어져 있던 것을 한 이름으로 모았다. */
+.adm-card--flush { padding: 0; overflow: hidden; }
+
+/* 카드 안의 마지막 것은 아래 여백을 내지 않는다. 카드 여백과 더해져 아래만 두꺼워진다. */
+.adm-card > :last-child,
+.adm-card > form:last-child > :last-child { margin-bottom: 0; }
+
 .adm-card > h2 {
   margin: 0 0 var(--s16);
   font-size: 15px;
@@ -342,6 +351,32 @@ a:hover { color: var(--link-hover); }
    아래에는 가를 것이 없다. */
 .adm-table tbody tr:last-child td { border-bottom: 0; }
 
+/* **칸이 좁아져도 낱말은 쪼개지 않는다.** 한글은 기본값에서 글자마다 줄바꿈이
+   허용되어, 입력칸이 많은 표(A-517)에서 「테스트 티셔츠」가 한 글자씩 세로로
+   섰다. 낱말 단위로만 꺾고, 모자란 폭은 래퍼의 가로 스크롤이 받는다.
+   머리칸은 아예 꺾지 않는다 — 「현재 재고」가 두 줄이면 행 높이가 따라 늘어난다. */
+.adm-table th { white-space: nowrap; }
+.adm-table td { word-break: keep-all; overflow-wrap: break-word; }
+
+/* 좁은 자리(대시보드 위젯)에 놓이는 표. 660px 최소 폭이 카드를 가로로 민다. */
+.adm-table--fit { min-width: 0; }
+
+/* 칸이 많은 표. 좌우 22px 씩이면 여백만 300px 를 넘어 1280px 화면에서도 가로로
+   넘친다 — 바깥쪽 두 칸만 카드 가장자리와 맞추고(22px) 안쪽은 좁힌다. */
+.adm-table--fit th, .adm-table--fit td,
+.adm-table--dense th, .adm-table--dense td { padding-left: var(--s10); padding-right: var(--s10); }
+.adm-table--fit :is(th, td):first-child,
+.adm-table--dense :is(th, td):first-child { padding-left: var(--s22); }
+.adm-table--fit :is(th, td):last-child,
+.adm-table--dense :is(th, td):last-child { padding-right: var(--s22); }
+
+/* 번호·날짜·코드는 꺾이면 다른 값처럼 읽힌다 (주문번호가 하이픈에서 두 줄이 됐다). */
+.adm-nw { white-space: nowrap; }
+
+/* 표 칸 안의 폼은 한 줄이다. */
+.adm-table .adm-field { margin: 0; }
+.adm-rowform { display: flex; gap: var(--s6); align-items: center; }
+
 .adm-table thead th {
   background: var(--thead-bg);
   border-top: 1px solid var(--line);
@@ -384,6 +419,12 @@ a:hover { color: var(--link-hover); }
 }
 
 .adm-filterbar > h2 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
+
+/* 필터바는 한 줄이다. 라벨의 아래 여백(위에 서는 라벨용)이 남으면 「기간」만
+   입력칸보다 3px 위로 뜨고, 버튼(40px)이 입력칸(34px)보다 커서 줄이 들쭉날쭉하다. */
+.adm-filterbar label { margin: 0; }
+.adm-filterbar button,
+.adm-filterbar .adm-btn { height: var(--h-aux); padding: 0 var(--s12); font-size: 13px; }
 
 /* ---- 폼 ----------------------------------------------------------------- */
 .adm-field { display: block; margin-bottom: var(--s16); }
@@ -429,10 +470,12 @@ input[type="radio"] {
 input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width: 0; }
 
 /* 표 안의 입력칸은 칸을 채운다. 기본 폭(대략 20자)이 열을 밀어낸다. */
-.adm-table input,
+/* **체크박스·라디오는 뺀다.** 폭 100% 를 받으면 18px 상자가 줄 가운데로 가고
+   글자는 오른쪽 끝에서 세로로 꺾인다 — 「공개」「필수 동의」가 그랬다. */
+.adm-table input:not([type="checkbox"], [type="radio"]),
 .adm-table select { width: 100%; }
 
-.adm-field input,
+.adm-field input:not([type="checkbox"], [type="radio"]),
 .adm-field select,
 .adm-field textarea { width: 100%; }
 
@@ -454,7 +497,13 @@ input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width:
   gap: var(--s16);
 }
 
-.adm-hint { font-size: 11.5px; opacity: .45; margin: var(--s4) 0 0; }
+/* 안내문은 **자기가 설명하는 칸에 붙는다.** 칸(.adm-field)의 아래 여백 16px 뒤에
+   놓이면 위 칸에서는 떨어지고 다음 라벨에는 달라붙어, 아래 칸의 설명처럼 읽힌다
+   (A-305 「주소는 … 바꾸지 않습니다」가 「스킨」 위에 붙어 있었다). */
+.adm-hint { font-size: 12px; opacity: .55; margin: var(--s12) 0 0; }
+.adm-field + .adm-hint,
+.adm-field-row + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--s16); }
+.adm-card + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--gap); }
 
 /* 대시보드 위젯. `.adm-field-row` 와 같은 규칙이되 최소 폭만 다르다 —
    표가 들어가므로 130px 에서는 열이 겹친다. 좁은 화면에서는 한 줄로 떨어진다. */
@@ -506,7 +555,15 @@ button,
 .adm-btn[disabled] { opacity: var(--disabled); cursor: default; }
 
 .adm-actions { display: flex; gap: var(--s8); flex-wrap: wrap; align-items: center; }
-.adm-actions form { display: inline; }
+.adm-actions form { display: inline-flex; gap: var(--s8); align-items: center; flex-wrap: wrap; }
+/* 폼을 닫는 버튼 줄은 오른쪽 끝에 선다. 인라인 style 로 흩어져 있던 것이다. */
+.adm-actions--end { justify-content: flex-end; }
+/* 버튼 줄 안의 재확인 칸은 버튼 옆에 한 줄로 선다 — 보이는 라벨은 placeholder 가,
+   읽어 주는 이름은 입력칸의 aria-label 이 맡는다 (reauth-field). */
+.adm-actions .adm-field { margin: 0; }
+.adm-actions .adm-field > span { display: none; }
+.adm-actions .adm-field input { width: 17rem; max-width: 100%; }
+.adm-btn--sm ~ .adm-field input, .adm-table .adm-actions .adm-field input { min-height: var(--h-aux); font-size: 13px; }
 
 /* ---- 알림 --------------------------------------------------------------- */
 .adm-toast {
@@ -630,6 +687,30 @@ label:has(> input[type="radio"]),
   margin-bottom: 0;
 }
 
+/* 체크 한 줄도 칸이다 — 아래 칸과 16px 떨어진다. 안의 글자는 라벨 모양(작고 흐린)
+   이 아니라 본문 모양이다. */
+.adm-field.adm-field--check { margin-bottom: var(--s16); }
+.adm-field--check > span { margin: 0; font-size: inherit; opacity: 1; }
+fieldset > label:has(> input[type="checkbox"]) { padding: var(--s4) 0; }
+fieldset > label > span { margin: 0; }
+
+/* ═══ 본문 요소 ════════════════════════════════════════════════════════════
+   클래스 없이 놓이는 제목·문단·목록. 브라우저 기본 여백(위아래 1em·왼쪽 40px)이
+   카드마다 다른 간격을 만든다. `:where()` 로 특이성을 0 으로 둔다 — 아니면
+   `.adm-toast`·`.adm-hint`·`.adm-filterbar > h2` 의 여백을 이 규칙이 이긴다. */
+:where(.adm-main) h2 { margin: 0 0 var(--s16); font-size: 15px; font-weight: 600; }
+:where(.adm-main) h3 { margin: var(--s20) 0 var(--s12); font-size: 14px; font-weight: 600; }
+:where(.adm-main) p { margin: 0 0 var(--s12); }
+:where(.adm-main) ul { margin: 0 0 var(--s16); padding-left: var(--s20); }
+address { font-style: normal; }
+
+/* 카드 안에서 구역을 가르는 선. 저장 폼과 삭제 폼처럼 서로 다른 동작 사이에 둔다. */
+.adm-section { margin-top: var(--s20); padding-top: var(--s20); border-top: 1px solid var(--line); }
+
+/* 한 줄 입력 폼 (파일 올리기 등): 입력과 버튼이 나란히 서고 좁으면 줄바꿈한다. */
+.adm-inline { display: flex; gap: var(--s8); align-items: center; flex-wrap: wrap; }
+.adm-inline > label { flex: 1 0 100%; margin: 0; }
+
 /* 상품 이미지 (A-502). **원본을 그대로 쓴다** — 썸네일을 만들지 않으므로 크기는
    여기서 정한다. width/height 속성이 자리를 먼저 잡아 그림이 늦게 와도 밀리지 않는다. */
 .adm-thumbs {
@@ -687,7 +768,12 @@ dl { margin: 0 0 var(--s20); }
 .adm-alert--error { background: var(--danger-bg); color: var(--danger); }
 
 /* ═══ 폼 · 패널 ════════════════════════════════════════════════════════════ */
-.adm-form { display: grid; gap: var(--s14); margin: 0 0 var(--s20); }
+/* 칸이 화면 폭을 다 쓰면 「택배사」 한 단어를 치는 칸이 980px 가 된다. */
+.adm-form { display: grid; gap: var(--s14); margin: 0 0 var(--s20); max-width: 40rem; }
+/* 라벨은 자기 칸에 붙는다. 격자 간격(14px)이 라벨과 칸 사이에도 들어가 라벨이
+   위 칸과 아래 칸의 한가운데에 떠 있었다. */
+.adm-form > label[for] { margin-bottom: calc(-1 * var(--s8)); }
+.adm-form > p.adm-hint { display: block; }
 
 /* 폼 안의 가로줄(사유 · 비밀번호 · 버튼)은 줄바꿈되게 둔다 — 좁아지면 버튼이
    화면 밖으로 나가는 것보다 아래로 내려오는 편이 낫다. */
@@ -817,4 +903,5 @@ dl { margin: 0 0 var(--s20); }
   /* 터치 타겟 최소 44px */
   .adm-btn { min-height: 44px; }
   .adm-sidebar a { min-height: 44px; display: flex; align-items: center; }
+  .adm-filterbar a:not(.adm-btn) { min-height: 44px; display: inline-flex; align-items: center; }
 }
