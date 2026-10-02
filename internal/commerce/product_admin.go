@@ -27,6 +27,11 @@ var (
 	// ErrSkuLength 는 SKU 가 64자를 넘은 경우다 (D30). 막는 것은 DB 의 CHECK
 	// (product_variants_sku_check) 이고, 이 이름은 그것을 옮긴 것이다.
 	ErrSkuLength = errors.New("commerce: SKU 가 너무 깁니다")
+	// ErrBarcodeTaken 은 다른 조합이 이미 쓰는 바코드다 (FR-627, 409). 같은
+	// 바코드가 두 조합을 가리키면 스캔이 어느 재고를 움직일지 정할 수 없다.
+	ErrBarcodeTaken = errors.New("commerce: 이미 쓰이는 바코드입니다")
+	// ErrBarcodeLength 는 바코드가 64자를 넘는 경우다 (DB CHECK).
+	ErrBarcodeLength = errors.New("commerce: 바코드가 너무 깁니다")
 )
 
 // checkBasePrice 는 기본가가 저장할 수 있는 범위인지 본다. 저장이 int32 변환을
@@ -113,8 +118,10 @@ func (s *Store) DeleteProduct(ctx context.Context, id string) error {
 
 // VariantEdit is one row of A-503's editor.
 type VariantEdit struct {
-	ID         string
-	SKU        string
+	ID  string
+	SKU string
+	// Barcode 는 빈 값이면 NULL 로 저장된다 (FR-627).
+	Barcode    string
 	PriceDelta int
 	// StockDelta 는 **조정값이다. 절대값이 아니다** (D13, D19 A-503).
 	// 주문이 동시에 들어오면 절대값 덮어쓰기는 판매분을 지운다.
@@ -172,10 +179,15 @@ func (s *Store) EditVariants(ctx context.Context, productID string, edits []Vari
 		// 질의가 자리 인자($3·$4)라 생성 이름이 Stock·Column4 다 — 조정값과 SKU.
 		n, err := q.EditVariant(ctx, commerceq.EditVariantParams{
 			ID: e.ID, ProductID: productID, Stock: int32(e.StockDelta),
-			Column4: e.SKU, PriceDelta: int32(e.PriceDelta)})
+			Column4: e.SKU, PriceDelta: int32(e.PriceDelta), Barcode: e.Barcode})
 		var pgErr *pgconn.PgError
 		switch {
 		case errors.As(err, &pgErr) && pgErr.Code == "23505":
+			// 무엇이 겹쳤는지 가른다. 한 오류로 접으면 바코드가 겹쳤는데
+			// 「이미 쓰이는 SKU」 라고 답한다.
+			if pgErr.ConstraintName == "product_variants_barcode_idx" {
+				return ErrBarcodeTaken
+			}
 			return ErrSkuTaken
 		case errors.As(err, &pgErr) && pgErr.Code == "23514":
 			// **어느 CHECK 인지 본다.** 전부 「재고 부족」으로 접으면 SKU 가
@@ -185,6 +197,8 @@ func (s *Store) EditVariants(ctx context.Context, productID string, edits []Vari
 				return ErrOutOfStock
 			case "product_variants_sku_check":
 				return ErrSkuLength
+			case "product_variants_barcode_check":
+				return ErrBarcodeLength
 			}
 			return err
 		case err != nil:

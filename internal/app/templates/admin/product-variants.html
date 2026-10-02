@@ -47,10 +47,10 @@
     <div class="adm-table-wrap">
       <table class="adm-table">
         <thead>
-          <tr><th>조합</th><th>SKU</th><th>가격 차액</th><th>현재 재고</th><th>증감</th></tr>
+          <tr><th>조합</th><th>SKU</th><th>바코드</th><th>가격 차액</th><th>현재 재고</th><th>증감</th></tr>
         </thead>
         <tbody>
-        {{if not .Variants}}<tr><td colspan="5">옵션을 저장하면 조합이 만들어집니다.</td></tr>{{end}}
+        {{if not .Variants}}<tr><td colspan="6">옵션을 저장하면 조합이 만들어집니다.</td></tr>{{end}}
         {{range .Variants}}
           <tr>
             <td>
@@ -59,12 +59,15 @@
               {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
             </td>
             <td><input type="text" name="sku_{{.ID}}" maxlength="64" value="{{.SKU}}"></td>
+            {{/* 상품 포장에 이미 인쇄된 바코드다 (FR-627). 칸에 포커스를 두고
+                 스캔하면 채워진다. 비워 두어도 된다. */}}
+            <td><input type="text" name="barcode_{{.ID}}" maxlength="64" value="{{.Barcode}}" autocomplete="off"></td>
             <td><input type="number" name="price_delta_{{.ID}}" step="1" value="{{.PriceDelta}}" required></td>
             <td>{{.Stock}}</td>
             <td><input type="number" name="delta_{{.ID}}" step="1" value="0" required></td>
           </tr>
         {{else}}
-          <tr><td colspan="5" class="adm-empty">조합이 없습니다.</td></tr>
+          <tr><td colspan="6" class="adm-empty">조합이 없습니다.</td></tr>
         {{end}}
         </tbody>
       </table>

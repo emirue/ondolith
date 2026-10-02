@@ -9,6 +9,91 @@ import (
 	"context"
 )
 
+const findVariants = `-- name: FindVariants :many
+WITH exact AS (
+    SELECT v.id FROM product_variants v
+    WHERE v.id = $5::uuid
+       OR v.sku = $2::text OR v.barcode = $2::text
+)
+SELECT v.id, v.product_id, p.name AS product_name, v.option_values,
+       COALESCE(v.sku, '')::text AS sku, COALESCE(v.barcode, '')::text AS barcode, v.stock,
+       EXISTS (SELECT 1 FROM exact)::boolean AS exact
+FROM product_variants v JOIN products p ON p.id = v.product_id
+WHERE ($1::uuid IS NULL OR v.product_id = $1)
+  AND ($2::text = ''
+       OR v.id IN (SELECT id FROM exact)
+       OR (NOT EXISTS (SELECT 1 FROM exact)
+           AND strpos(lower(p.name), lower($2::text)) > 0))
+ORDER BY p.name, p.id, v.price_delta, v.id
+LIMIT $4::int OFFSET $3::int
+`
+
+type FindVariantsParams struct {
+	ProductID *string
+	Q         string
+	Offset    int32
+	Limit     int32
+	ID        *string
+}
+
+type FindVariantsRow struct {
+	ID           string
+	ProductID    string
+	ProductName  string
+	OptionValues []byte
+	Sku          string
+	Barcode      string
+	Stock        int32
+	Exact        bool
+}
+
+// **조합을 특정하는 질의는 이것 하나다** (FR-627, D13 「식별 값」). A-516·A-517 이
+// 같은 규칙을 봐야 하므로 화면마다 따로 쓰지 않는다.
+//
+// 정확 일치(QR = id · SKU · 바코드)가 먼저다. 하나라도 있으면 그것만 돌려주고,
+// 없을 때만 상품명 부분 일치로 찾는다 — 스캔한 값이 우연히 어느 상품명의 일부여도
+// 그 조합이 다른 상품들 사이에 묻히지 않는다. `exact` 는 어느 쪽으로 찾았는지다.
+// 한 조합의 SKU 가 다른 조합의 바코드와 같을 수 있어 정확 일치도 여러 행일 수 있다.
+//
+// id 는 uuid 인자로 따로 받는다. `v.id::text = q` 로 쓰면 기본키 인덱스를 못 탄다.
+// 이름 일치는 strpos 다 — LIKE 는 `%`·`_` 를 이스케이프해야 한다.
+// ponytail: 이름 일치는 products 순차 탐색이다. 상품이 수만 개가 되어 느려지면
+// pg_trgm 인덱스를 건다.
+func (q *Queries) FindVariants(ctx context.Context, arg FindVariantsParams) ([]FindVariantsRow, error) {
+	rows, err := q.db.Query(ctx, findVariants,
+		arg.ProductID,
+		arg.Q,
+		arg.Offset,
+		arg.Limit,
+		arg.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FindVariantsRow{}
+	for rows.Next() {
+		var i FindVariantsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.ProductName,
+			&i.OptionValues,
+			&i.Sku,
+			&i.Barcode,
+			&i.Stock,
+			&i.Exact,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pickList = `-- name: PickList :many
 SELECT oi.variant_id, oi.product_name, oi.option_label, oi.quantity
 FROM order_items oi JOIN orders o ON o.id = oi.order_id

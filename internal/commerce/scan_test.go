@@ -39,17 +39,17 @@ func TestCheckPickRefusesWrongItemAndOverCount(t *testing.T) {
 	}
 	scanned := map[string]int{}
 
-	if err := CheckPick(lines, scanned, "v9"); !errors.Is(err, ErrPickNotInOrder) {
+	if err := CheckPick(lines, scanned, "v9", 1); !errors.Is(err, ErrPickNotInOrder) {
 		t.Errorf("주문에 없는 조합 = %v, want ErrPickNotInOrder", err)
 	}
 
 	for i := range 2 {
-		if err := CheckPick(lines, scanned, "v1"); err != nil {
+		if err := CheckPick(lines, scanned, "v1", 1); err != nil {
 			t.Fatalf("%d번째 정상 스캔이 막혔다: %v", i+1, err)
 		}
 		scanned["v1"]++
 	}
-	err := CheckPick(lines, scanned, "v1")
+	err := CheckPick(lines, scanned, "v1", 1)
 	if !errors.Is(err, ErrPickOverCount) {
 		t.Fatalf("수량 초과 = %v, want ErrPickOverCount", err)
 	}
@@ -78,5 +78,51 @@ func TestPickCompleteNeedsEveryLine(t *testing.T) {
 	// 없는 주문에 대해서도 완료가 찍힌다.
 	if PickComplete(nil, map[string]int{}) {
 		t.Error("빈 목록을 완료로 봤다")
+	}
+}
+
+// **수량을 한 번에 세도 누적이 주문 수량을 넘지 못한다** (FR-623, W3-43).
+//
+// 스캔 1번이 1개이던 때는 `이미 센 수 >= 주문 수량` 만 보면 됐다. 수량 칸이
+// 생기면 그 비교는 3개 주문에 2개를 센 뒤 2개를 더 세는 것을 통과시킨다.
+func TestCheckPickCountsAQuantityAtOnce(t *testing.T) {
+	lines := []PickLine{{VariantID: "v1", ProductName: "티셔츠", Ordered: 3}}
+
+	if err := CheckPick(lines, map[string]int{}, "v1", 3); err != nil {
+		t.Errorf("주문 수량만큼 한 번에 세는 것이 막혔다: %v", err)
+	}
+	if err := CheckPick(lines, map[string]int{}, "v1", 4); !errors.Is(err, ErrPickOverCount) {
+		t.Errorf("한 번에 4개 = %v, want ErrPickOverCount", err)
+	}
+	if err := CheckPick(lines, map[string]int{"v1": 2}, "v1", 2); !errors.Is(err, ErrPickOverCount) {
+		t.Errorf("2개 센 뒤 2개 = %v, want ErrPickOverCount", err)
+	}
+	if err := CheckPick(lines, map[string]int{"v1": 2}, "v1", 1); err != nil {
+		t.Errorf("2개 센 뒤 1개가 막혔다: %v", err)
+	}
+	for _, bad := range []int{0, -1} {
+		if err := CheckPick(lines, map[string]int{}, "v1", bad); !errors.Is(err, ErrQuantityRange) {
+			t.Errorf("수량 %d = %v, want ErrQuantityRange", bad, err)
+		}
+	}
+}
+
+// One 은 정확 일치 하나만 고른다. 이름으로 찾은 것과 둘 이상은 고르지 않는다.
+func TestVariantMatchesOnePicksOnlyASingleExactMatch(t *testing.T) {
+	a, b := ScannedVariant{ID: "a"}, ScannedVariant{ID: "b"}
+
+	got, err := (&VariantMatches{Rows: []ScannedVariant{a}, Exact: true}).One()
+	if err != nil || got.ID != "a" {
+		t.Errorf("정확 일치 하나 = %v, %v", got, err)
+	}
+	if _, err := (&VariantMatches{Rows: []ScannedVariant{a, b}, Exact: true}).One(); !errors.Is(err, ErrPickAmbiguous) {
+		t.Errorf("정확 일치 둘 = %v, want ErrPickAmbiguous", err)
+	}
+	// 이름 부분 일치는 하나여도 고르지 않는다 — 확인이 아니라 선택이 된다.
+	if _, err := (&VariantMatches{Rows: []ScannedVariant{a}}).One(); !errors.Is(err, ErrPickNotInOrder) {
+		t.Errorf("이름 일치 하나 = %v, want ErrPickNotInOrder", err)
+	}
+	if _, err := (&VariantMatches{}).One(); !errors.Is(err, ErrPickNotInOrder) {
+		t.Errorf("일치 없음 = %v, want ErrPickNotInOrder", err)
 	}
 }

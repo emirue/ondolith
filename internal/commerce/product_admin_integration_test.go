@@ -340,7 +340,7 @@ func TestPickListTouchesNothing(t *testing.T) {
 	// 전 품목 대조를 마쳐도 아무것도 변하지 않는다.
 	scanned := map[string]int{}
 	for range lines[0].Ordered {
-		if err := CheckPick(lines, scanned, lines[0].VariantID); err != nil {
+		if err := CheckPick(lines, scanned, lines[0].VariantID, 1); err != nil {
 			t.Fatal(err)
 		}
 		scanned[lines[0].VariantID]++

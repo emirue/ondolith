@@ -56,7 +56,8 @@ func (q *Queries) DeleteProductOptions(ctx context.Context, productID string) er
 
 const editVariant = `-- name: EditVariant :execrows
 UPDATE product_variants
-SET stock = stock + $3, sku = NULLIF($4::text, ''), price_delta = $5, updated_at = now()
+SET stock = stock + $3, sku = NULLIF($4::text, ''), price_delta = $5,
+    barcode = NULLIF($6::text, ''), updated_at = now()
 WHERE id = $1 AND product_id = $2
 `
 
@@ -66,6 +67,7 @@ type EditVariantParams struct {
 	Stock      int32
 	Column4    string
 	PriceDelta int32
+	Barcode    string
 }
 
 func (q *Queries) EditVariant(ctx context.Context, arg EditVariantParams) (int64, error) {
@@ -75,6 +77,7 @@ func (q *Queries) EditVariant(ctx context.Context, arg EditVariantParams) (int64
 		arg.Stock,
 		arg.Column4,
 		arg.PriceDelta,
+		arg.Barcode,
 	)
 	if err != nil {
 		return 0, err

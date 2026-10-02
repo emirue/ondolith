@@ -79,6 +79,38 @@ func TestAdminListsLinkToTheirDetailScreens(t *testing.T) {
 	}
 }
 
+// **A-503 에 바코드 칸이, A-516 에 기본값 1 인 수량 칸이 그려진다** (FR-627, W3-43).
+//
+// 핸들러 테스트는 폼 값을 직접 보내므로 화면에 그 칸이 없어도 통과한다.
+func TestBarcodeAndPickQuantityFieldsRender(t *testing.T) {
+	srv, pool, c := shopAdminSite(t)
+	ctx := context.Background()
+	productID := seedProducts(t, pool, 1)
+	seedOrders(t, pool, 1)
+	var variantID string
+	if err := pool.QueryRow(ctx, `
+		UPDATE product_variants SET barcode = '8801234567890' WHERE product_id = $1 RETURNING id`,
+		productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO order_items (order_id, product_id, variant_id, product_name, unit_price, quantity)
+		SELECT id, $1, $2, '상품00', 1000, 2 FROM orders WHERE order_no = 'AD0000'`,
+		productID, variantID); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := mustGet(t, c, srv.URL+"/admin/products/"+productID+"/variants")
+	if want := `name="barcode_` + variantID + `" maxlength="64" value="8801234567890"`; code != http.StatusOK || !strings.Contains(body, want) {
+		t.Errorf("A-503 = HTTP %d, 바코드 칸 %s 가 없다", code, want)
+	}
+
+	code, body = mustGet(t, c, srv.URL+"/admin/orders/AD0000/pick")
+	if want := `<input type="number" name="quantity" min="1" step="1" value="1" required>`; code != http.StatusOK || !strings.Contains(body, want) {
+		t.Errorf("A-516 = HTTP %d, 수량 칸 %s 가 없다", code, want)
+	}
+}
+
 // **21번째 상품·주문에 이전·다음 링크로 닿는다** (FR-706, W3-42).
 //
 // 서버는 20건씩 나누는데 화면에 링크가 없어 21번째부터는 `?page=2` 를 직접

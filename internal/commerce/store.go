@@ -52,9 +52,11 @@ type Variant struct {
 	ProductID    string
 	OptionValues map[string]string
 	SKU          string
-	PriceDelta   int
-	Stock        int
-	Visible      bool
+	// Barcode 는 상품 포장의 제조사 바코드다 (FR-627). 비어 있을 수 있다.
+	Barcode    string
+	PriceDelta int
+	Stock      int
+	Visible    bool
 }
 
 // productSortColumns is the allow-list. 요청에서 온 문자열을 SQL 에 잇지 않는다
@@ -160,7 +162,7 @@ func (s *Store) Variants(ctx context.Context, productID string, sellableOnly boo
 	}
 	var out []Variant
 	for _, r := range rows {
-		v := Variant{ID: r.ID, ProductID: r.ProductID, SKU: r.Sku,
+		v := Variant{ID: r.ID, ProductID: r.ProductID, SKU: r.Sku, Barcode: r.Barcode,
 			PriceDelta: int(r.PriceDelta), Stock: int(r.Stock), Visible: r.IsVisible}
 		if err := json.Unmarshal(r.OptionValues, &v.OptionValues); err != nil {
 			return nil, err

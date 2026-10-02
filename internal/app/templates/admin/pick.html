@@ -23,14 +23,20 @@
     {{range .Lines}}
     <input type="hidden" name="count_{{.VariantID}}" value="{{index $s .VariantID}}">
     {{end}}
-    <label class="adm-field"><span>스캔 값</span>
+    {{/* QR·SKU·바코드 중 하나다 (FR-627). 스캐너가 없으면 SKU 를 친다. */}}
+    <label class="adm-field"><span>스캔 값 (QR·SKU·바코드)</span>
       <input type="text" name="scanned" autofocus autocomplete="off" required></label>
+    {{/* 기본값 1 — 스캔하고 Enter 만 치면 1개로 센다. 같은 물건 여러 개는
+         수량을 고쳐 한 번에 센다. */}}
+    <label class="adm-field"><span>수량</span>
+      <input type="number" name="quantity" min="1" step="1" value="1" required></label>
     <div class="adm-actions" style="justify-content:flex-end">
       <button class="adm-btn adm-btn--primary">대조</button>
     </div>
   </form>
   <p class="adm-hint">
-    주문에 없는 조합이나 수량을 넘긴 스캔은 거부되고 작업 로그에 남습니다.
+    주문에 없는 조합, 주문 수량을 넘기는 수량, 여러 상품에 해당하는 코드는 거부되고
+    작업 로그에 남습니다.
   </p>
 </div>
 {{end}}

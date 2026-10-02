@@ -440,7 +440,8 @@ func (q *Queries) VariantForPurchase(ctx context.Context, id string) (VariantFor
 }
 
 const variants = `-- name: Variants :many
-SELECT id, product_id, option_values, COALESCE(sku, '')::text AS sku, price_delta, stock, is_visible
+SELECT id, product_id, option_values, COALESCE(sku, '')::text AS sku,
+       COALESCE(barcode, '')::text AS barcode, price_delta, stock, is_visible
 FROM product_variants
 WHERE product_id = $1 AND ($2::boolean IS NOT TRUE OR (is_visible AND stock > 0))
 ORDER BY price_delta, id
@@ -456,6 +457,7 @@ type VariantsRow struct {
 	ProductID    string
 	OptionValues []byte
 	Sku          string
+	Barcode      string
 	PriceDelta   int32
 	Stock        int32
 	IsVisible    bool
@@ -475,6 +477,7 @@ func (q *Queries) Variants(ctx context.Context, arg VariantsParams) ([]VariantsR
 			&i.ProductID,
 			&i.OptionValues,
 			&i.Sku,
+			&i.Barcode,
 			&i.PriceDelta,
 			&i.Stock,
 			&i.IsVisible,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,9 @@ var (
 	ErrPickNotInOrder = errors.New("commerce: 이 주문에 없는 조합입니다")
 	// ErrPickOverCount 는 주문 수량을 넘겨 스캔한 경우다.
 	ErrPickOverCount = errors.New("commerce: 주문 수량을 넘었습니다")
+	// ErrPickAmbiguous 는 스캔 값이 둘 이상의 조합에 맞는 경우다 (FR-627).
+	// 피킹에서 하나를 추측해 고르면 오출고가 대조 완료로 기록된다.
+	ErrPickAmbiguous = errors.New("commerce: 여러 조합에 해당하는 코드입니다")
 )
 
 // ScannedVariant is what A-514/A-515/A-517 show after a scan.
@@ -30,7 +34,84 @@ type ScannedVariant struct {
 	ProductName  string
 	OptionValues map[string]string
 	SKU          string
+	Barcode      string
 	Stock        int
+}
+
+// VariantQuery is what A-516·A-517 ask FindVariants.
+type VariantQuery struct {
+	// Q 는 스캔 값이거나 손으로 친 검색어다. 서버는 둘을 구분하지 않는다 —
+	// 장치별 분기를 만들면 한쪽만 테스트된 경로가 생긴다 (D13).
+	Q string
+	// ProductID 는 한 상품으로 좁힌다 (A-501·A-502 의 「재고」 링크).
+	ProductID string
+	Page      int
+}
+
+// VariantMatches is FindVariants' answer.
+type VariantMatches struct {
+	Rows []ScannedVariant
+	// Exact 는 Rows 가 QR·SKU·바코드 **정확 일치**로 찾은 것인지다. false 면
+	// 상품명 부분 일치이거나 검색어가 없는 전체 목록이다.
+	Exact bool
+	More  bool
+}
+
+// FindVariants is **the one identification function** (FR-627, D13 「식별 값」).
+//
+// QR(`product_variants.id`)·SKU·바코드 정확 일치를 먼저 보고, 하나도 없을 때만
+// 상품명 부분 일치를 돌려준다. 규칙은 queries/scan.sql FindVariants 한 문장에
+// 있고 A-516·A-517 이 이 함수만 쓴다 — 화면마다 따로 찾으면 규칙이 갈라진다.
+//
+// **맞는 것이 없는 것은 오류가 아니다.** 형식이 uuid 가 아닌 ProductID 도 빈
+// 결과다: 검색은 사람이 치는 값이고, 못 찾은 것은 검색 결과다.
+func (s *Store) FindVariants(ctx context.Context, q VariantQuery) (*VariantMatches, error) {
+	arg := commerceq.FindVariantsParams{Q: strings.TrimSpace(q.Q)}
+	if looksLikeUUID(arg.Q) {
+		arg.ID = &arg.Q
+	}
+	if q.ProductID != "" {
+		if !looksLikeUUID(q.ProductID) {
+			return &VariantMatches{}, nil
+		}
+		arg.ProductID = &q.ProductID
+	}
+	limit, offset := ProductQuery{Page: q.Page}.clamp()
+	arg.Limit, arg.Offset = int32(limit+1), int32(offset)
+
+	rows, err := s.q.FindVariants(ctx, arg)
+	if err != nil {
+		return nil, err
+	}
+	out := &VariantMatches{More: len(rows) > limit}
+	if out.More {
+		rows = rows[:limit]
+	}
+	for _, r := range rows {
+		v := ScannedVariant{ID: r.ID, ProductID: r.ProductID, ProductName: r.ProductName,
+			SKU: r.Sku, Barcode: r.Barcode, Stock: int(r.Stock)}
+		if err := unmarshalOptions(r.OptionValues, &v.OptionValues); err != nil {
+			return nil, err
+		}
+		out.Rows = append(out.Rows, v)
+		out.Exact = r.Exact
+	}
+	return out, nil
+}
+
+// One picks the single combination a scanned value names (A-516).
+//
+// **상품명 부분 일치는 쓰지 않는다** — 피킹은 손에 든 물건이 맞는지 확인하는
+// 일인데, 이름으로 고르면 확인이 아니라 선택이 된다. 둘 이상에 맞으면 고르지
+// 않고 거부한다.
+func (m *VariantMatches) One() (*ScannedVariant, error) {
+	switch {
+	case !m.Exact || len(m.Rows) == 0:
+		return nil, ErrPickNotInOrder
+	case len(m.Rows) > 1:
+		return nil, ErrPickAmbiguous
+	}
+	return &m.Rows[0], nil
 }
 
 // ScanVariant resolves a scanned value.
@@ -182,16 +263,22 @@ func (s *Store) PickList(ctx context.Context, orderNo string) ([]PickLine, error
 
 // CheckPick validates one scan against the pick list and the tally so far.
 //
+// qty 는 한 번에 세는 개수다 (기본 1). **누적이 주문 수량을 넘으면 거부한다** —
+// 3개 주문에 2개를 센 뒤 2개를 더 세는 것은 4번째 물건이 상자에 들어간다는 뜻이다.
+//
 // 순수 함수다 — 대조는 상태를 바꾸지 않으므로 DB 가 필요 없고, 그래서 이
 // 규칙의 테스트도 DB 를 요구하지 않는다.
-func CheckPick(lines []PickLine, scanned map[string]int, variantID string) error {
+func CheckPick(lines []PickLine, scanned map[string]int, variantID string, qty int) error {
+	if qty < 1 {
+		return fmt.Errorf("%w: 수량 %d", ErrQuantityRange, qty)
+	}
 	for _, l := range lines {
 		if l.VariantID != variantID {
 			continue
 		}
-		if scanned[variantID] >= l.Ordered {
-			return fmt.Errorf("%w: %s 는 %d개 주문인데 %d번째다",
-				ErrPickOverCount, l.ProductName, l.Ordered, scanned[variantID]+1)
+		if scanned[variantID]+qty > l.Ordered {
+			return fmt.Errorf("%w: %s 는 %d개 주문인데 %d개째다",
+				ErrPickOverCount, l.ProductName, l.Ordered, scanned[variantID]+qty)
 		}
 		return nil
 	}

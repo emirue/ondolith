@@ -38,7 +38,8 @@ SELECT id, slug, name, description, base_price, is_visible
 FROM products WHERE slug = $1 AND (sqlc.arg('visible_only')::boolean IS NOT TRUE OR is_visible);
 
 -- name: Variants :many
-SELECT id, product_id, option_values, COALESCE(sku, '')::text AS sku, price_delta, stock, is_visible
+SELECT id, product_id, option_values, COALESCE(sku, '')::text AS sku,
+       COALESCE(barcode, '')::text AS barcode, price_delta, stock, is_visible
 FROM product_variants
 WHERE product_id = $1 AND (sqlc.arg('sellable_only')::boolean IS NOT TRUE OR (is_visible AND stock > 0))
 ORDER BY price_delta, id;

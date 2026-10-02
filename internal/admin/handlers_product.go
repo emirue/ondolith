@@ -204,6 +204,9 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 		}
 		edits = append(edits, commerce.VariantEdit{ID: id, StockDelta: delta,
 			PriceDelta: priceDelta, SKU: strings.TrimSpace(r.PostFormValue("sku_" + id)),
+			// 앞뒤 공백을 자른다 (D19 A-503). 스캐너가 붙인 공백 하나로 같은
+			// 바코드가 다른 값이 되면 유일 제약을 지나간다.
+			Barcode: strings.TrimSpace(r.PostFormValue("barcode_" + id)),
 			Version: version})
 	}
 	if len(edits) == 0 {
@@ -220,6 +223,8 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 			"다른 사람이 먼저 바꿨습니다. 새로고침 후 다시 시도하세요.")
 	case errors.Is(err, commerce.ErrSkuTaken):
 		d.renderVariants(w, r, http.StatusConflict, "이미 쓰이는 SKU 입니다.")
+	case errors.Is(err, commerce.ErrBarcodeTaken):
+		d.renderVariants(w, r, http.StatusConflict, "이미 쓰이는 바코드입니다.")
 	case errors.Is(err, commerce.ErrOutOfStock):
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"재고가 0 보다 작아집니다. 백오더는 없습니다.")
@@ -227,6 +232,8 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 	// 예전에는 SKU 가 긴 것도 위의 「재고 부족」으로 나갔다.
 	case errors.Is(err, commerce.ErrSkuLength):
 		d.renderVariants(w, r, http.StatusUnprocessableEntity, "SKU 는 64자 이하여야 합니다.")
+	case errors.Is(err, commerce.ErrBarcodeLength):
+		d.renderVariants(w, r, http.StatusUnprocessableEntity, "바코드는 64자 이하여야 합니다.")
 	case errors.Is(err, commerce.ErrAmountTooBig), errors.Is(err, commerce.ErrQuantityRange):
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"재고 증감과 가격 차액은 ±20억 이내여야 합니다.")

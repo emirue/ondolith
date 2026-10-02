@@ -170,17 +170,38 @@ func (d *Deps) PickCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{"OrderNo": orderNo, "Lines": lines, "Scanned": scanned}
 
-	if v := strings.TrimSpace(r.PostFormValue("scanned")); v != "" {
-		if err := commerce.CheckPick(lines, scanned, v); err != nil {
+	if value := strings.TrimSpace(r.PostFormValue("scanned")); value != "" {
+		// **수량은 기본값 1 이다** — 스캔하고 Enter 만 치면 1개로 센다.
+		qty := 1
+		if s := strings.TrimSpace(r.PostFormValue("quantity")); s != "" {
+			n, err := strconv.Atoi(s)
+			if err != nil || n < 1 {
+				data["Error"] = "수량은 1 이상의 정수입니다."
+				d.Render(w, r, "admin/pick.html", http.StatusUnprocessableEntity, data)
+				return
+			}
+			qty = n
+		}
+		// 식별은 A-517 과 같은 함수가 한다 (FR-627): QR·SKU·바코드.
+		found, err := d.Commerce.FindVariants(r.Context(), commerce.VariantQuery{Q: value})
+		if err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		v, err := found.One()
+		if err == nil {
+			err = commerce.CheckPick(lines, scanned, v.ID, qty)
+		}
+		if err != nil {
+			msg := pickMessage(err, lines, v)
 			// **거부도 작업 로그에 남는다** (FR-623) — 잘못된 스캔이 반복되면
 			// 그것 자체가 라벨이나 피킹 절차의 문제 신호다.
-			d.log(r, c, "order.update", "order", orderNo, "피킹 대조 거부: "+err.Error())
-			data["Error"] = err.Error()
+			d.log(r, c, "order.update", "order", orderNo, "피킹 대조 거부: "+msg)
+			data["Error"] = msg
 			d.Render(w, r, "admin/pick.html", http.StatusUnprocessableEntity, data)
 			return
 		}
-		scanned[v]++
-		data["Scanned"] = scanned
+		scanned[v.ID] += qty
 	}
 
 	if commerce.PickComplete(lines, scanned) {
@@ -190,6 +211,29 @@ func (d *Deps) PickCheck(w http.ResponseWriter, r *http.Request) {
 	d.Render(w, r, "admin/pick.html", http.StatusOK, data)
 }
 
+// pickMessage 는 A-516 의 거부 문구다 (D19 A-516 거부 조건).
+//
+// v 는 스캔 값이 가리킨 조합이다 — 식별되지 않았으면 nil 이다. 주문에 없는
+// 상품이면 그 이름을 함께 보여야 사람이 무엇을 집었는지 안다.
+func pickMessage(err error, lines []commerce.PickLine, v *commerce.ScannedVariant) string {
+	switch {
+	case errors.Is(err, commerce.ErrPickAmbiguous):
+		return "여러 상품에 해당하는 코드입니다. QR로 다시 스캔하세요."
+	case errors.Is(err, commerce.ErrPickOverCount):
+		for _, l := range lines {
+			if v != nil && l.VariantID == v.ID {
+				return "주문 수량(" + strconv.Itoa(l.Ordered) + "개)을 넘었습니다: " + l.ProductName
+			}
+		}
+		return "주문 수량을 넘었습니다."
+	default:
+		if v != nil {
+			return "이 주문에 없는 상품입니다: " + v.ProductName
+		}
+		return "이 주문에 없는 상품입니다."
+	}
+}
+
 // ScanLookup is A-517 — 조회만 한다. 권한이 `product.view` 인 이유가 그것이다.
 func (d *Deps) ScanLookup(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "product.view"); !ok {
@@ -197,13 +241,15 @@ func (d *Deps) ScanLookup(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{}
 	if v := strings.TrimSpace(r.URL.Query().Get("scanned")); v != "" {
-		got, err := d.Commerce.ScanVariant(r.Context(), v)
+		// 식별은 A-516 과 같은 함수가 한다 (FR-627). 맞는 것이 없으면 오류가
+		// 아니라 빈 결과다.
+		found, err := d.Commerce.FindVariants(r.Context(), commerce.VariantQuery{Q: v})
 		if err != nil {
-			code, msg := scanError(err)
-			d.Render(w, r, "admin/scan-lookup.html", code, map[string]any{"Error": msg})
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 			return
 		}
-		data["Variant"] = got
+		data["Q"] = v
+		data["Variants"] = found.Rows
 	}
 	d.Render(w, r, "admin/scan-lookup.html", http.StatusOK, data)
 }

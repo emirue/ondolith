@@ -813,7 +813,7 @@ CREATE TRIGGER operation_logs_no_truncate BEFORE TRUNCATE ON operation_logs
 | `product_id` | uuid | NOT NULL REFERENCES `products(id)` ON DELETE CASCADE |
 | `option_values` | jsonb | NOT NULL, `CHECK (jsonb_typeof='object' AND ≤4096바이트)` |
 | `sku` | text | NULL. 있을 때만 UNIQUE |
-| `barcode` | text | NULL. 있을 때만 UNIQUE. 상품 포장의 제조사 바코드 (FR-627) — **Phase 3에서 추가** (W3-43, 마이그레이션 전) |
+| `barcode` | text | NULL. 있을 때만 UNIQUE. 상품 포장의 제조사 바코드 (FR-627). `CHECK (length BETWEEN 1 AND 64)` |
 | `price_delta` | integer | NOT NULL DEFAULT 0 — **음수 허용** |
 | `stock` | integer | NOT NULL DEFAULT 0 `CHECK (>= 0)` |
 | `is_visible` | boolean | NOT NULL DEFAULT true |
@@ -828,7 +828,7 @@ CREATE INDEX ON products USING GIN (search_tsv);
 CREATE UNIQUE INDEX ON product_options (product_id, name);
 CREATE UNIQUE INDEX ON product_variants (product_id, option_values);
 CREATE UNIQUE INDEX ON product_variants (sku) WHERE sku IS NOT NULL;
-CREATE UNIQUE INDEX ON product_variants (barcode) WHERE barcode IS NOT NULL;  -- W3-43, 마이그레이션 전
+CREATE UNIQUE INDEX ON product_variants (barcode) WHERE barcode IS NOT NULL;
 CREATE INDEX ON product_variants (product_id) WHERE is_visible AND stock > 0;
 ```
 

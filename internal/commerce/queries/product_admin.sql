@@ -17,7 +17,8 @@ SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR NO KEY 
 
 -- name: EditVariant :execrows
 UPDATE product_variants
-SET stock = stock + $3, sku = NULLIF($4::text, ''), price_delta = $5, updated_at = now()
+SET stock = stock + $3, sku = NULLIF($4::text, ''), price_delta = $5,
+    barcode = NULLIF(sqlc.arg('barcode')::text, ''), updated_at = now()
 WHERE id = $1 AND product_id = $2;
 
 -- name: AddVariant :one
