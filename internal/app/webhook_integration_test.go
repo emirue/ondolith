@@ -234,6 +234,44 @@ func TestWebhookSecretMustMatchTheApproval(t *testing.T) {
 	}
 }
 
+// **토스가 실제로 보내는 입금 알림이 문을 통과한다.** DEPOSIT_CALLBACK 은
+// `eventType`·`data` 없이 필드가 최상위다 (토스 웹훅 이벤트 문서, 2026-10-03).
+// 앞 판의 수신부는 그 형태를 400 으로 돌려보냈다 — 토스는 7회 재전송 뒤 포기하고,
+// 기록도 남지 않아 A-603 에도 보이지 않았다.
+func TestDepositCallbackInTheDocumentedShapeIsRecordedAndChecked(t *testing.T) {
+	srvT, pool, _ := shopSite(t)
+	srv := srvT.URL
+	orderNo, _ := seedPaidOrderForWebhook(t, pool)
+
+	post := func(secret, tk string) {
+		t.Helper()
+		resp := postWebhook(t, srv, "toss", `{"createdAt":"2026-10-03T21:00:00.000000",`+
+			`"secret":"`+secret+`","status":"DONE","transactionKey":"`+tk+`","orderId":"`+orderNo+`"}`)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("문서 형태의 입금 알림 = HTTP %d, want 200", resp.StatusCode)
+		}
+	}
+
+	post("wh-secret", "tk-ok")
+	if got := waitForWebhookStatus(t, pool, "DEPOSIT_CALLBACK:"+orderNo+":tk-ok"); got != "처리완료" {
+		t.Errorf("secret 이 맞는 입금 알림의 처리 상태 %q, want 처리완료", got)
+	}
+	var linked string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT COALESCE(o.order_no,'') FROM webhook_events w
+		LEFT JOIN orders o ON o.id = w.order_id WHERE w.event_id = $1`,
+		"DEPOSIT_CALLBACK:"+orderNo+":tk-ok").Scan(&linked); err != nil || linked != orderNo {
+		t.Errorf("주문 연결 = %q (%v), want %q", linked, err, orderNo)
+	}
+
+	// secret 대조는 이 형태에서도 그대로다 — 흉내 낸 알림은 처리되지 않는다.
+	post("남의-secret", "tk-forged")
+	if got := waitForWebhookStatus(t, pool, "DEPOSIT_CALLBACK:"+orderNo+":tk-forged"); got != "실패" {
+		t.Errorf("secret 불일치인데 상태가 %q", got)
+	}
+}
+
 // seedPaidOrderForWebhook 은 승인된 결제가 붙은 주문을 만든다. secret 은
 // 승인 응답이 준 값으로 저장돼 있어야 웹훅이 대조할 상대가 생긴다.
 func seedPaidOrderForWebhook(t *testing.T, pool *pgxpool.Pool) (string, int) {

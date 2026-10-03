@@ -161,6 +161,8 @@ Go에서 SDK 없이 REST로 구현한다. 공식 샘플 저장소는 참고하�
 | 재전송 | 최대 7회, 지수 백오프 (1·4·16·64·256·1024·4096분 ≈ 3일 19시간) |
 | 검증 | 본문 `secret` ↔ 승인 응답 `secret` 대조 (가상계좌) |
 | 주요 이벤트 | `PAYMENT_STATUS_CHANGED`, `DEPOSIT_CALLBACK`, `CANCEL_STATUS_CHANGED`, `METHOD_UPDATED` |
+| 본문 형태 | **두 가지다** (2026-10-03 확인). `PAYMENT_STATUS_CHANGED` 등은 `{eventType, createdAt, data:{Payment}}`. `DEPOSIT_CALLBACK` 은 봉투 없이 `createdAt`·`secret`·`status`·`transactionKey`·`orderId` 가 최상위이고 금액·`paymentKey` 가 없다 |
+| 멱등 키 | 토스가 이벤트 ID 를 주지 않아 우리가 만든다. 봉투형은 `eventType:orderId:paymentKey`, 입금 알림은 `DEPOSIT_CALLBACK:orderId:transactionKey` |
 
 지키는 것:
 

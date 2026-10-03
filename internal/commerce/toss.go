@@ -106,6 +106,11 @@ func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, err
 	if len(body) == 0 || len(body) > tossMaxBody {
 		return nil, ErrWebhookUnverified
 	}
+	// **봉투가 두 가지다** (토스 웹훅 이벤트 문서, 2026-10-03 확인).
+	// PAYMENT_STATUS_CHANGED 등은 `{"eventType", "data":{Payment}}` 이고,
+	// DEPOSIT_CALLBACK 은 `eventType`·`data` 없이 createdAt·secret·status·
+	// transactionKey·orderId 가 최상위다. 앞 판은 앞의 것만 읽어서 실제 입금
+	// 알림을 전부 검증 실패로 돌려보냈다.
 	var raw struct {
 		EventType string `json:"eventType"`
 		Data      struct {
@@ -114,11 +119,29 @@ func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, err
 			Secret      string `json:"secret"`
 			TotalAmount int    `json:"totalAmount"`
 		} `json:"data"`
+		OrderID        string `json:"orderId"`
+		Secret         string `json:"secret"`
+		TransactionKey string `json:"transactionKey"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, ErrWebhookUnverified
 	}
-	if raw.EventType == "" || raw.Data.OrderID == "" {
+	if raw.EventType == "" {
+		// 입금 알림. 금액·paymentKey 가 없다 — 비워 두면 호출자가 금액 대조를
+		// 건너뛰고 저장된 paymentKey 로 조회한다. 멱등 키는 거래 단위인
+		// transactionKey 다: 입금과 그 뒤의 취소가 같은 주문에 따로 온다.
+		if raw.OrderID == "" || raw.TransactionKey == "" {
+			return nil, ErrWebhookUnverified
+		}
+		return &WebhookEvent{
+			EventID: "DEPOSIT_CALLBACK:" + raw.OrderID + ":" + raw.TransactionKey,
+			Type:    "DEPOSIT_CALLBACK",
+			OrderNo: raw.OrderID,
+			Secret:  raw.Secret,
+			Raw:     body,
+		}, nil
+	}
+	if raw.Data.OrderID == "" {
 		return nil, ErrWebhookUnverified
 	}
 	// 이벤트 ID 는 (eventType, orderId, paymentKey) 로 만든다. 토스는 별도
