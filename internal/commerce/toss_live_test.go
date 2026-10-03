@@ -118,3 +118,49 @@ func TestLiveTossErrorsCarryNoSecret(t *testing.T) {
 		}
 	}
 }
+
+// **가상계좌는 발급만으로는 결제완료가 아니다 — 실제 조회 API 로 확인한다.**
+//
+// P-905 는 입금 알림을 받으면 저장된 paymentKey 로 Get 을 부르고, 그 답이
+// 승인(DONE)일 때만 결제완료로 옮긴다. 단위 테스트는 가짜 게이트웨이를 쓰므로
+// 「토스가 발급 직후의 가상계좌를 조회에 실제로 어떻게 답하는가」는 여기서만
+// 확인된다: 대기로 읽혀야 하고(승인으로 읽으면 입금 없이 물건이 나간다), 웹훅
+// 대조 상대인 secret 이 실려 와야 하며 발급 응답의 것과 같아야 한다.
+//
+// 발급은 API 개별 연동 키가 필요하다 — 결제위젯 문서용 키는 이 경로에서
+// NOT_FOUND_MERCHANT 다 (2026-10-02 실측). 입금(DONE)은 개발자센터
+// 「테스트 결제내역」의 입금처리로만 만들 수 있어 자동 검사가 닿지 않는다.
+func TestLiveTossVirtualAccountReadsAsPendingWithItsSecret(t *testing.T) {
+	tp := liveToss(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	orderNo := "LIVEVA-" + time.Now().UTC().Format("20060102150405")
+	issued, err := tp.post(ctx, "/v1/virtual-accounts", map[string]any{
+		"amount": 1000, "orderId": orderNo, "orderName": "가상계좌 실측",
+		"customerName": "실측", "bank": "88", "validHours": 1,
+	}, "live-va-"+orderNo)
+	if err != nil {
+		t.Fatalf("가상계좌 발급 = %v (API 개별 연동 테스트 키인지 확인)", err)
+	}
+	if issued.PaymentKey == "" || issued.Secret == "" {
+		t.Fatalf("발급 응답에 paymentKey·secret 이 없다: key=%t secret=%t",
+			issued.PaymentKey != "", issued.Secret != "")
+	}
+
+	got, err := tp.Get(ctx, issued.PaymentKey)
+	if err != nil {
+		t.Fatalf("발급한 가상계좌 조회 = %v", err)
+	}
+	if got.Status != PaymentPending {
+		t.Errorf("입금 전 가상계좌가 %s 로 읽혔다, want %s", got.Status, PaymentPending)
+	}
+	if got.OrderNo != orderNo || got.Amount != 1000 {
+		t.Errorf("조회 = (%q, %d), want (%q, 1000)", got.OrderNo, got.Amount, orderNo)
+	}
+	// 입금 알림의 secret 은 이것과 같아야 정상 요청이다 (토스 웹훅 문서).
+	if got.Secret != issued.Secret {
+		t.Error("조회 응답의 secret 이 발급 응답의 것과 다르다 — 웹훅 대조 상대가 흔들린다")
+	}
+	t.Logf("발급 %s → 조회 %s (secret 일치)", orderNo, got.Status)
+}

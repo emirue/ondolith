@@ -21,7 +21,12 @@
        {{with $.Data.Order}}data-order-no="{{.OrderNo}}" data-amount="{{.Total}}"{{end}}>
     <div id="payment-method"></div>
     <div id="agreement"></div>
-    <button type="button" id="payment-button" disabled>결제하기</button>
+    {{/* 이 화면의 주 동작이다. 위젯이 다 그려지기 전에는 눌러도 열 것이 없으므로
+         비활성으로 시작하고, 아래 JS 가 준비되면 푼다. */}}
+    <p class="actions">
+      <button type="button" id="payment-button" class="btn btn--primary" disabled>결제하기</button>
+      <a class="btn" href="/cart">장바구니로 돌아가기</a>
+    </p>
     <p class="error" role="alert" id="payment-error" hidden></p>
   </div>
   <script src="https://js.tosspayments.com/v2/standard"></script>
@@ -62,12 +67,12 @@
   <p class="error" role="alert">
     결제 수단이 설정되지 않았습니다. 관리자에게 문의하세요.
   </p>
+  <p class="actions"><a class="btn" href="/cart">장바구니로 돌아가기</a></p>
   {{end}}
-  <p class="hint">결제창이 열리지 않으면 아래 버튼을 눌러 주세요.</p>
-  <form method="get" action="/checkout/success" class="form">
-    <button type="submit">결제 진행</button>
-  </form>
-  <p><a href="/cart">장바구니로 돌아가기</a></p>
+  {{/* 「결제창이 열리지 않으면」 폼을 두지 않는다. 그 폼은 파라미터 없이 P-408 을
+       GET 해서 누를 때마다 실패했다 — 결제 승인은 PG 가 successUrl 로 돌려보낼
+       때만 일어나고, 사람이 그 주소를 직접 열 방법은 없다. 위젯이 실패하면
+       위의 #payment-error 가 이유를 말한다. */}}
   {{end}}
 </section>
 {{end}}

@@ -1398,7 +1398,10 @@ route_unlinked_reason() {
 	case "$1 $2" in
 	"GET /admin") echo "308 리다이렉트 — 화면이 아니다" ;;
 	"GET /auth/{provider}/callback") echo "소셜 제공자가 되돌려 보낸다" ;;
-	"GET /checkout/complete" | "GET /checkout/fail") echo "결제창이 되돌려 보낸다" ;;
+	# /checkout/success 는 PG 의 successUrl 이다. 결제 화면의 「결제창이 열리지
+	# 않으면」 폼이 이 주소를 가리켜 이 검사를 통과시키고 있었는데, 그 폼은
+	# 파라미터 없이 와서 누를 때마다 실패했다 — 링크가 있다고 닿는 것이 아니다.
+	"GET /checkout/success" | "GET /checkout/complete" | "GET /checkout/fail") echo "결제창이 되돌려 보낸다" ;;
 	"GET /healthz") echo "운영 감시가 부른다" ;;
 	"GET /robots.txt" | "GET /sitemap.xml") echo "크롤러가 읽는다" ;;
 	"GET /static/{path...}") echo "문서가 자산을 건다" ;;

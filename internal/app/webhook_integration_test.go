@@ -425,6 +425,17 @@ func TestConfiguredClientKeyReachesTheCheckoutScreen(t *testing.T) {
 	if strings.Contains(body, "test_sk_NEVER_SHOWN") {
 		t.Error("시크릿 키가 결제 화면에 실렸다")
 	}
+
+	// **결제를 여는 버튼이 이 화면의 주 동작이다.** 앞 판은 그 아래에 「결제창이
+	// 열리지 않으면」 버튼을 두었는데, 그것은 파라미터 없이 P-408 을 GET 해서
+	// 누를 때마다 「결제 정보가 주문과 맞지 않습니다」로 끝났다 — 그런데 그쪽이
+	// 강조색이고 진짜 버튼은 테두리만 있어서, 눈은 고장 난 쪽으로 갔다.
+	if strings.Contains(body, `action="/checkout/success"`) {
+		t.Error("결제 화면에 파라미터 없이 P-408 로 가는 폼이 남아 있다 — 누르면 항상 실패한다")
+	}
+	if !strings.Contains(body, `id="payment-button" class="btn btn--primary"`) {
+		t.Error("결제하기 버튼이 주 동작(btn--primary)으로 그려지지 않았다")
+	}
 }
 
 // **「사용 안 함」은 실제 결제를 막는다** (A-209, D19).
