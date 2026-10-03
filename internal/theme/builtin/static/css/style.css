@@ -1036,6 +1036,10 @@ legend { padding: 0 6px; font-size: 12.5px; opacity: .6; }
    `overflow-wrap: anywhere` 가 375px 에서 「1,00/0원」「장바구/니」를 만들었다 —
    모자란 폭은 표는 `.table-wrap` 의 가로 스크롤이, 머리글은 줄바꿈(.account-nav)이 받는다. */
 .order-list td { white-space: nowrap; }
+/* 글 제목은 낱말 사이에서만 꺾인다 — 375px 에서 「sqlc 점/검 글 (수/정)」이 됐다. */
+.board-list td { word-break: keep-all; overflow-wrap: normal; }
+/* 영수증의 주문자 줄은 그 위 배송지와 같은 글자 크기다. */
+address + p { font-size: 14px; margin-top: 6px; }
 
 /* 댓글 목록과 입력 폼 사이. 맞닿아 있었다. */
 .comments h2 { margin: 0 0 14px; font-size: 18px; }
