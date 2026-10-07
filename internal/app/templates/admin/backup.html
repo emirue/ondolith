@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="adm-card">
+  {{/* A-604 (FR-713). 받는 것은 zip 하나 — DB 덤프(pg_dump custom 형식)와 업로드 폴더. 정기 백업은
+       Lightsail 스냅샷이 맡는다 (D72 5절). */}}
+  <p class="adm-hint">DB 덤프(<code>ondolith.dump</code>)와 업로드 파일(<code>uploads/</code>)을 zip 하나로 내려받습니다.
+    회원 정보와 비밀번호 해시가 들어 있으니 안전한 곳에 보관하세요. 로그인 세션은 들어 있지 않습니다.</p>
+  <p class="adm-hint"><strong>설정 파일(ondolith.json)과 사용자 테마는 들어 있지 않습니다.</strong> 결제·메일 키는 설정 파일의
+    <code>secret_key</code> 로 봉인돼 있어, 설정 파일 없이 복원하면 관리자 화면에서 키를 다시 넣어야 합니다.</p>
+  <p class="adm-hint">복원: 빈 DB 를 새로 만들고 <code>pg_restore --no-owner --exit-on-error -d &lt;DB&gt; ondolith.dump</code>,
+    <code>uploads/</code> 는 업로드 폴더에 그대로 풉니다. 정기 백업은 서버 스냅샷을 쓰세요.</p>
+  <form method="post" action="/admin/backup">
+    {{/* 최고 관리자만, 비밀번호를 다시 넣고 받는다. 받은 사실은 작업 로그에 남는다. */}}
+    {{template "reauth-field" .}}
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn adm-btn--primary">백업 내려받기</button>
+    </div>
+  </form>
+</div>
+{{end}}

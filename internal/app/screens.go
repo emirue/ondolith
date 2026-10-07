@@ -124,6 +124,7 @@ var screenInventory = map[string]SecurityClass{
 	"A-517": SC4, // 재고
 	"A-601": SC4, // 작업 로그
 	"A-602": SC4, // 시스템 정보
+	"A-604": SC5, // 백업 내려받기 (FR-713)
 	"A-603": SC4, // 웹훅 수신 이력
 }
 

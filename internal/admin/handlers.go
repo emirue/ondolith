@@ -103,6 +103,10 @@ type Deps struct {
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.
 	SendReset func(email, token string)
+	// DumpDB writes `pg_dump --format=custom` of the site database, and UploadDir is
+	// the upload folder — together they are A-604's backup (FR-713).
+	DumpDB    func(ctx context.Context, w io.Writer) error
+	UploadDir string
 }
 
 // require is the per-handler permission check.

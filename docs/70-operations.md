@@ -246,7 +246,25 @@ exit 0으로 내놓는다 — 메모리 한도를 넘겨 커널에 죽은 경우
 
 바이너리는 백업 대상이 아니다. 릴리즈에서 다시 받으면 된다.
 
-**복원 테스트를 하지 않은 백업은 백업이 아니다.**
+**관리자 화면에서 받기 (A-604, FR-713).** 최고 관리자가 비밀번호를 다시 넣으면 `ondolith.dump`(`pg_dump -Fc`)와
+`uploads/` 가 든 zip 이 내려온다. 서버에 **DB 서버와 같거나 높은 버전의 `pg_dump`** 가 있어야 한다 — 낮으면
+pg_dump 가 거부하고 화면이 그렇게 말한다. 로그인 세션은 빠지고, 설정 파일·사용자 테마는 들어 있지 않다.
+
+**복원.** 덤프는 기본 `public` 스키마를 새로 만들지 않으므로 **새로 만든 빈 DB** 에 복원한다 — 표를 지운 기존 DB
+에 부으면 `schema "public" does not exist` 로 멈춘다(2026-10-08, PostgreSQL 18.4 로 확인).
+
+```bash
+createdb ondolith_restored
+pg_restore --no-owner --exit-on-error -d ondolith_restored ondolith.dump
+unzip -o ondolith-backup-*.zip 'uploads/*' -d /opt/ondolith   # 업로드 폴더
+```
+
+그다음 `ondolith.json` 의 `database_url` 을 새 DB 로 바꾸고 재시작한다. 복원한 사이트에서는 모두 다시 로그인한다.
+
+**복원 테스트를 하지 않은 백업은 백업이 아니다.** 덤프 → 빈 DB 복원 → 같은 글이 보이는지를
+`ONDOLITH_TEST_PGDUMP=1 go test ./internal/app -run TestBackupRestoresIntoAnEmptyDatabase` 가 본다(`ONDOLITH_TEST_DSN`
+과 PATH 의 `pg_dump`·`pg_restore` 필요). 기본으로 돌지 않는 이유는 CI 러너의 `pg_dump` 버전이 DB 서버보다
+낮을 수 있어서다.
 
 ## 헬스체크 (P-907)
 

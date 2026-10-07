@@ -169,6 +169,13 @@ var endsTheSession = map[string]string{
 	"/me/delete": "계정을 비활성화한다 — 같은 이유",
 }
 
+// hostDependent 는 응답이 폼 값이 아니라 **이 서버에 깔린 프로그램**에 달린 라우트다.
+// 읽는 폼 값에 id 가 없으므로 이 스윕이 볼 것이 없고, 남겨 두면 결과가 그 기계의
+// pg_dump 유무·버전을 따라 바뀐다 (A-604 의 500 「pg_dump 없음」 은 설계다, D19).
+var hostDependent = map[string]string{
+	"/admin/backup": "pg_dump 를 실행한다 — 폼 값은 비밀번호뿐이다",
+}
+
 // **폼으로 온 깨진 uuid 도 500 이 되지 않는다.**
 //
 // 모든 POST 라우트에 모든 후보 필드를 한꺼번에 실어 보낸다 — 그 화면이 읽지
@@ -183,6 +190,9 @@ func TestNoRouteAnswers500ToAMalformedFormID(t *testing.T) {
 			continue
 		}
 		if _, ends := endsTheSession[rt.Pattern]; ends {
+			continue
+		}
+		if _, host := hostDependent[rt.Pattern]; host {
 			continue
 		}
 		// 경로 조각은 **멀쩡한** 값으로 채운다 — 여기서 보는 것은 폼 값이다.

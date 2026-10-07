@@ -296,6 +296,12 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 
 	r.Add(Route{Screen: "A-602", Method: "GET", Pattern: "/admin/system", Class: SC4,
 		Permission: "settings.view", Handler: ad.System})
+	// A-604 백업 (FR-713). 선언은 settings.update 이고 **최고 관리자·재확인은 핸들러가 건다**
+	// (A-205 R7 과 같은 방식) — 덤프에는 모든 회원의 비밀번호 해시가 있다.
+	r.Add(Route{Screen: "A-604", Method: "GET", Pattern: "/admin/backup", Class: SC4,
+		Permission: "settings.update", Handler: ad.BackupForm})
+	r.Add(Route{Screen: "A-604", Method: "POST", Pattern: "/admin/backup", Class: SC5,
+		Permission: "settings.update", Handler: ad.BackupDownload})
 
 	// P-202 is last on purpose: `/{slug}` matches anything one segment long, and
 	// ServeMux prefers the more specific pattern regardless of registration

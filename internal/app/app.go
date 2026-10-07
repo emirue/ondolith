@@ -366,6 +366,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Attachments: contentStore.AttachmentsIn(cfg.Uploads()),
 		Media:       contentStore.MediaIn(cfg.Uploads()),
 		Images:      commerceStore.ImagesIn(cfg.Uploads()),
+		DumpDB:      pgDump(cfg.DatabaseURL),
+		UploadDir:   cfg.Uploads(),
 		OpLog:       contentStore.OpLog(),
 		Logger:      log,
 		BaseURL:     baseURL,
