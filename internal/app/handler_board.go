@@ -23,33 +23,42 @@ type boardDeps struct {
 	siteURL string
 }
 
-// countView bumps the counter once per session per post.
+// countView bumps the counter once per browser session per post.
 //
 // SC-1 3항 allows a write on a GET here because it decides nothing — but a
-// refresh must not inflate it, so the session remembers. The list is capped:
-// an unbounded set in the session grows with every post a crawler opens, and
-// the session row is written back on every request.
-const viewedKey = "viewed_posts"
+// refresh must not inflate it, so the browser remembers what it has seen.
+//
+// **세션이 아니라 쿠키 하나에 적는다.** 앞 판은 세션에 적어서, 쿠키 없는
+// 크롤러가 글 하나를 열 때마다 sessions 에 행이 하나씩 쌓였고 로그인한 사람은
+// 글을 열 때마다 세션 행을 다시 썼다. 이 값은 조회수 중복을 거르는 데만 쓰이고
+// 아무것도 허락하지 않으므로, 고쳐 보내도 자기 조회수가 한 번 더 셀 뿐이다.
+// 브라우저를 닫으면 사라지는 쿠키라 「세션당 한 번」은 그대로다.
+const viewedCookie = "ondolith_viewed"
 
-const maxViewedRemembered = 200
+// maxViewedRemembered 는 쿠키에 남기는 글 수다. 50개 × 37자 ≈ 1.9KB 로 쿠키 한
+// 개의 상한(4KB) 안이다. 넘치면 오래된 것부터 잊는다.
+const maxViewedRemembered = 50
 
-func (d *boardDeps) countView(r *http.Request, postID string) {
-	ctx := r.Context()
-	seen, _ := d.sm.Get(ctx, viewedKey).(string)
-	for _, id := range strings.Split(seen, ",") {
+func (d *boardDeps) countView(w http.ResponseWriter, r *http.Request, postID string) {
+	var seen string
+	if c, err := r.Cookie(viewedCookie); err == nil {
+		seen = c.Value
+	}
+	for _, id := range strings.Split(seen, ".") {
 		if id == postID {
 			return
 		}
 	}
-	if err := d.content.BumpViewCount(ctx, postID); err != nil {
+	if err := d.content.BumpViewCount(r.Context(), postID); err != nil {
 		d.log.Warn("조회수 증가", "post", postID, "err", err)
 		return
 	}
-	ids := strings.Split(strings.TrimPrefix(seen+","+postID, ","), ",")
+	ids := strings.Split(strings.TrimPrefix(seen+"."+postID, "."), ".")
 	if len(ids) > maxViewedRemembered {
 		ids = ids[len(ids)-maxViewedRemembered:]
 	}
-	d.sm.Put(ctx, viewedKey, strings.Join(ids, ","))
+	http.SetCookie(w, &http.Cookie{Name: viewedCookie, Value: strings.Join(ids, "."),
+		Path: "/board/", HttpOnly: true, Secure: d.sm.Cookie.Secure, SameSite: http.SameSiteLaxMode})
 }
 
 // board loads the board named in the path and checks the caller may read it.
@@ -162,7 +171,7 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	// SC-1 3항 allows this write on a GET because it carries no permission
 	// decision. The session remembers what it has counted so a refresh does not
 	// inflate the number.
-	d.countView(r, p.ID)
+	d.countView(w, r, p.ID)
 
 	v := d.view(r, p.Title, firstLine(p.Body))
 	v.Data = map[string]any{

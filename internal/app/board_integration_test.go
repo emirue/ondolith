@@ -304,6 +304,15 @@ func TestViewCountCountsOncePerSession(t *testing.T) {
 	if n != 1 {
 		t.Errorf("조회수 = %d, want 1 (같은 세션의 새로고침)", n)
 	}
+	// **익명 열람이 세션 행을 만들지 않는다.** 앞 판은 본 글 목록을 세션에 적어,
+	// 쿠키 없는 크롤러가 글 하나를 열 때마다 sessions 에 행이 하나씩 쌓였다.
+	var sessions int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM sessions`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 0 {
+		t.Errorf("익명 열람 뒤 세션 %d행, want 0", sessions)
+	}
 
 	// 다른 세션은 따로 센다.
 	if code, _ := mustGet(t, client(), srv.URL+"/board/free/"+id); code != http.StatusOK {
