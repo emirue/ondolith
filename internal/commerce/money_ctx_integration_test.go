@@ -249,3 +249,24 @@ func TestResolvePendingPaymentRechecksAfterTheLookup(t *testing.T) {
 		t.Errorf("결제 행 = %q (%v), want 승인 — 늦은 조회가 덮어썼다", st, err)
 	}
 }
+
+// **교환 차액도 결과를 모르면 '실패' 로 내리지 않는다** (D50, ConfirmPayment 와 같다).
+// 앞 판은 시간 초과도 '실패' 로 적어, 부분 유니크(`status <> '실패'`)가 같은 교환의
+// 두 번째 차액 결제를 열었다 — 첫 결제가 실제로 승인됐다면 이중 청구다.
+func TestUnknownExchangeDiffStaysPending(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, returnNo, amount := exchangeAwaitingDiff(t, s, pool, "tee-unk")
+
+	gw := &fakeGateway{err: ErrPaymentUnknown}
+	if err := s.ConfirmExchangeDiff(ctx, gw, "toss", orderNo, returnNo, "", "pk-diff-unk", amount, time.Now()); !errors.Is(err, ErrPaymentUnknown) {
+		t.Fatalf("= %v, want ErrPaymentUnknown", err)
+	}
+	var st string
+	if err := pool.QueryRow(ctx, `SELECT status FROM payments WHERE payment_key = 'pk-diff-unk'`).Scan(&st); err != nil || st != "대기" {
+		t.Errorf("차액 결제 행 = %q (%v), want 대기", st, err)
+	}
+	if err := s.ConfirmExchangeDiff(ctx, okGateway(), "toss", orderNo, returnNo, "", "pk-diff-2", amount, time.Now()); !errors.Is(err, ErrAlreadyPaid) {
+		t.Errorf("결과 불명 뒤 두 번째 차액 결제 = %v, want ErrAlreadyPaid — 이중 청구 길", err)
+	}
+}

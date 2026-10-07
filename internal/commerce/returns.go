@@ -848,6 +848,11 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 	res, err := gw.Confirm(ctx, ConfirmRequest{
 		OrderNo: orderNo, PaymentKey: paymentKey, Amount: d.Amount, IdempotencyKey: paymentKey})
 	if err != nil {
+		// 결과 불명은 '대기' 로 남긴다 (ConfirmPayment 와 같다). '실패' 로 내리면
+		// 부분 유니크가 두 번째 차액 결제를 열어, 첫 결제가 승인됐을 때 이중 청구다.
+		if errors.Is(err, ErrPaymentUnknown) {
+			return err
+		}
 		if uerr := s.q.FailPaymentByID(ctx, paymentID); uerr != nil {
 			return errors.Join(err, uerr)
 		}
