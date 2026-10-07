@@ -19,8 +19,14 @@
 
     <label class="adm-field">
       <span>본문</span>
-      <textarea name="body">{{with .Page}}{{.Body}}{{end}}</textarea>
+      {{/* 에디터 (FR-513). 글쓰기와 같은 editor.js — 사진은 A-310 으로 올린다. */}}
+      <textarea name="body" data-editor data-upload="/admin/pages/media">{{with .Page}}{{.Body}}{{end}}</textarea>
     </label>
+    <input type="hidden" name="body_html" value="{{with .Page}}{{.BodyHTML}}{{end}}">
+    <link rel="stylesheet" href="/static/vendor/suneditor/suneditor.min.css">
+    <script src="/static/vendor/suneditor/suneditor.min.js" defer></script>
+    <script src="/static/vendor/suneditor/ko.js" defer></script>
+    <script src="/static/js/editor.js" defer></script>
 
     <div class="adm-actions adm-actions--end">
       <a class="adm-btn" href="/admin/pages">취소</a>

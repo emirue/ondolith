@@ -2,6 +2,8 @@ package theme
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"os"
@@ -776,5 +778,32 @@ func TestHeaderAdminLinkIsForAdminsAndClickable(t *testing.T) {
 	}
 	if strings.Contains(b.String(), `href="/admin/"`) || strings.Contains(b.String(), `class="who"`) {
 		t.Error("비로그인 화면에 계정 영역이 그려졌다")
+	}
+}
+
+// **내장한 에디터 파일이 기록한 해시와 같다** (DEC-2.2, FR-513). 버전 파일만 고치고 파일을
+// 안 바꾸거나 그 반대면 무엇이 들어 있는지 아무도 모른다 — 해시로 대조한다.
+func TestSunEditorVersionFileMatchesTheVendoredFiles(t *testing.T) {
+	ver, err := fs.ReadFile(Builtin(), "static/vendor/suneditor/SUNEDITOR.VERSION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, line := range strings.Split(string(ver), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 || f[0] != "sha256" {
+			continue
+		}
+		b, err := fs.ReadFile(Builtin(), "static/vendor/suneditor/"+f[2])
+		if err != nil {
+			t.Fatalf("%s: %v", f[2], err)
+		}
+		if got := fmt.Sprintf("%x", sha256.Sum256(b)); got != f[1] {
+			t.Errorf("%s 의 sha256 = %s, 기록은 %s", f[2], got, f[1])
+		}
+		checked++
+	}
+	if checked != 3 {
+		t.Errorf("해시를 대조한 파일 %d 개, want 3 (js·css·ko)", checked)
 	}
 }

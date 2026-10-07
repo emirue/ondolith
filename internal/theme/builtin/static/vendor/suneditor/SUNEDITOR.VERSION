@@ -1,0 +1,7 @@
+SunEditor 3.3.3 (MIT, LICENSE.txt)
+https://www.npmjs.com/package/suneditor/v/3.3.3 — npm 배포본의 dist/ 와 src/langs/ko.js
+npm tarball sha512 sha512-p/e8ymutQOVDVfGnVo3kVAltkshQdfIDWoR/akMRGg4s1OUuz3eYQGMwd4HbER/oojXLV6YbRrRSQC6hHKSFvA==
+sha256  79320e3c797d27fbaabb023dbc170964b2f91047c1abc35722297d65285a9ec5  suneditor.min.js
+sha256  0cffdc05252996ee97609317850f7ae3c84ef8cefab0f11ee477b0a6595116e8  suneditor.min.css
+sha256  dba7a1ded919287f103f4cd41ca3cd33c1483653cb2c67179183979d5ecfb1da  ko.js
+조회 2026-10-08. 갱신 시 이 파일·D21 표·DECISIONS 를 같은 커밋에서 고친다.

@@ -33,6 +33,13 @@ DELETE 를 보낼 수 없어서 장바구니(`/cart/items/…`)의 수량 변경
 `_method=DELETE` 를 실어 보낸다.** 서버는 그 경로의 POST 에서만 이 값을 읽는다 — 다른 경로에 실으면
 무시된다. 내장 테마의 `shop/cart.html` 이 본보기다.
 
+**글쓰기 에디터(FR-513).** 글쓰기·글수정 폼(`board/form.html`)이 에디터를 쓰려면 본문 칸을
+`<textarea name="body" data-editor data-upload="/board/{{.Board.Slug}}/media">` 로 두고, 같은 폼에
+`<input type="hidden" name="body_html" value="{{.Post.BodyHTML}}">` 을 두고, 내장 자산
+`vendor/suneditor/suneditor.min.css`·`suneditor.min.js`·`ko.js` 와 `js/editor.js` 를 `{{asset …}}` 으로 건다
+(내장 테마가 본보기다 — 사용자 테마에 그 파일이 없으면 내장 것이 나간다). 셋 중 하나라도 빠지면 그 테마는
+**평문 칸으로 동작한다** — 깨지지 않는다.
+
 ## 디렉터리 구조
 
 ```

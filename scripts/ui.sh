@@ -306,6 +306,7 @@ ui_skip_reason() {
 	P-211) echo "첨부 다운로드 — 파일을 내려보낸다, 화면이 아니다" ;;
 	P-304) echo "조합 조회 — 상품 화면의 조각이라 홀로 그리지 않는다" ;;
 	P-306) echo "상품 이미지 — 파일을 내려보낸다, 화면이 아니다" ;;
+	P-213) echo "본문 사진 — 파일을 내려보낸다, 화면이 아니다 (editor-ime 가 받아 본다)" ;;
 	P-407 | P-408 | P-409 | P-410) echo "결제창이 되돌려 보낸다" ;;
 	P-502 | P-503) echo "비회원 조회 — 회원 세션으로 이미 잰다" ;;
 	P-514) echo "교환 차액 — 차액이 양수인 교환에만 있다" ;;
@@ -360,6 +361,7 @@ sleep 61
 # 그 실패는 브라우저를 띄운 뒤에야 나온다.
 node --check scripts/ui-audit.mjs || { echo "  ✗ 감사 스크립트 문법 오류"; exit 1; }
 node --check scripts/shots.mjs || { echo "  ✗ 촬영 스크립트 문법 오류"; exit 1; }
+node --check scripts/editor-ime.mjs || { echo "  ✗ 에디터 시험 스크립트 문법 오류"; exit 1; }
 tojson() { python3 -c 'import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' <"$1"; }
 audit=0
 
@@ -395,6 +397,18 @@ fi
 run_role admin admin@example.com "$ADMIN_PW" "$WORK/live-admin"
 run_role member member@example.com "$MEMBER_PW" "$WORK/live-member"
 run_role anon "" "" "$WORK/live-anon"
+
+# **에디터는 그려 보는 것으로 끝나지 않는다** (FR-513·FR-514). 한글을 IME 조합으로 넣고
+# 사진을 올려 저장한 글에 같은 글자와 줄인 사진이 보이는지 본다. 감사 뒤에 둔다 —
+# 글이 하나 늘어 목록 화면이 달라진다.
+if [ -z "${UI_SHOTS:-}" ]; then
+	if UI_BASE="$BASE" UI_EMAIL=admin@example.com UI_PASSWORD="$ADMIN_PW" UI_BOARD=notice \
+		node scripts/editor-ime.mjs; then
+		ok "에디터: 한글 조합·사진 올리기·저장"
+	else
+		bad "에디터 브라우저 시험"
+	fi
+fi
 
 echo
 if [ -n "${UI_SHOTS:-}" ]; then

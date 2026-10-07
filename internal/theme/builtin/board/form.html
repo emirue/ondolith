@@ -21,7 +21,14 @@
     {{end}}
 
     <label for="body">본문</label>
-    <textarea id="body" name="body">{{.Post.Body}}</textarea>
+    {{/* 에디터 (FR-513, D17 「폼」). editor.js 가 이 칸을 에디터로 바꾸고 HTML 은 body_html 로
+         보낸다. JS 가 없으면 이 칸이 그대로 남아 평문으로 저장된다. 사진은 data-upload 로 올린다. */}}
+    <textarea id="body" name="body" data-editor data-upload="/board/{{.Board.Slug}}/media">{{.Post.Body}}</textarea>
+    <input type="hidden" name="body_html" value="{{.Post.BodyHTML}}">
+    <link rel="stylesheet" href="{{asset "vendor/suneditor/suneditor.min.css"}}">
+    <script src="{{asset "vendor/suneditor/suneditor.min.js"}}" defer></script>
+    <script src="{{asset "vendor/suneditor/ko.js"}}" defer></script>
+    <script src="{{asset "js/editor.js"}}" defer></script>
 
     {{if .Board.AllowAttachments}}
       <label for="attachments">첨부파일</label>
