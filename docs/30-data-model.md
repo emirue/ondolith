@@ -560,6 +560,7 @@ ALTER TABLE social_accounts ADD CONSTRAINT social_accounts_user_provider_uniq UN
 | `allow_comments` | boolean | NOT NULL DEFAULT true |
 | `allow_secret` | boolean | NOT NULL DEFAULT false |
 | `per_page` | integer | NOT NULL DEFAULT 20, `CHECK (per_page BETWEEN 1 AND 100)` |
+| `list_style` | text | NOT NULL DEFAULT 'list', `CHECK (list_style IN ('list','gallery'))` — 목록 모양 (FR-515, `00028`). 모르는 폼 값은 저장소가 `list` 로 바꾼다 |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 권한 컬럼을 두지 않는다 — 스코프는 `role_permissions.board_id`가 표현한다(D15 2.4).
@@ -604,6 +605,7 @@ ALTER TABLE board_fields ADD CONSTRAINT board_fields_options_when
 | `author_id` | uuid | **NULL 허용** REFERENCES `users(id)` — 3-1이 SET NULL이다 |
 | `title` · `body` | text | NOT NULL. 에디터로 쓴 글이면 `body` 는 `body_html` 의 평문이다 — 검색·요약·OG 가 이것을 쓴다 |
 | `body_html` | text | NOT NULL DEFAULT '', `CHECK (length(body_html) <= 200000)` — **정화를 지난** 본문 HTML(FR-513, `00026`). 빈 값이 평문 글이다 |
+| `cover_media_id` | uuid | **NULL 허용** REFERENCES `media(id)` ON DELETE SET NULL — 갤러리 카드 사진 (FR-515, `00028`). 저장할 때 `body_html` 의 첫 `/media/{id}` 이고, 그 `media` 행이 없으면 NULL 이다(본문은 브라우저가 보낸 것이라 없는 id 를 실을 수 있다) |
 | `custom_fields` | jsonb | NOT NULL DEFAULT '{}' |
 | `status` | text | NOT NULL DEFAULT 'published', `CHECK (status IN ('published','hidden'))` |
 | `is_pinned` · `is_secret` | boolean | NOT NULL DEFAULT false |

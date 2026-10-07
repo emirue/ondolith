@@ -119,3 +119,67 @@ func TestEditorUploadRefusals(t *testing.T) {
 		t.Errorf("거부된 업로드가 media 행 %d 을 남겼다 (%v)", n, err)
 	}
 }
+
+// **갤러리 게시판의 목록은 글마다 본문 첫 사진의 썸네일을 카드로 보인다** (FR-515).
+// 본문 HTML 은 브라우저가 보낸 것이라 없는 사진 id 를 실을 수 있다 — 그 글도 저장되고
+// (외래 키 위반 500 이 아니라) 카드에 사진이 없을 뿐이다.
+func TestGalleryBoardShowsCoverThumbnails(t *testing.T) {
+	srv, pool := liveSite(t)
+	mkBoard(t, pool, "works", content.PresetPublic)
+	if _, err := pool.Exec(context.Background(), `UPDATE boards SET list_style = 'gallery' WHERE slug = 'works'`); err != nil {
+		t.Fatal(err)
+	}
+	mkUser(t, pool, "m@example.com")
+	c := client()
+	login(t, srv.URL, "m@example.com", c)
+
+	_, out := editorUpload(t, c, srv.URL+"/board/works/media", map[string][]byte{"마루.jpg": photo(t, 800, 600)})
+	list, _ := out["result"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("업로드 = %v", out)
+	}
+	url := list[0].(map[string]any)["url"].(string)
+	resp := httpPost(t, c, srv.URL+"/board/works/write", map[string][]string{
+		"title": {"거실 마루"}, "body": {"마루"}, "body_html": {`<p>마루</p><img src="` + url + `">`}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("글쓰기 HTTP %d", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	resp = httpPost(t, c, srv.URL+"/board/works/write", map[string][]string{
+		"title": {"없는 사진"}, "body": {"x"}, "body_html": {`<p>x</p><img src="/media/0b6f3c3e-0000-4000-8000-0000000000ff">`}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("없는 사진 id 를 실은 글 = HTTP %d, want 303 (카드 사진 없이 저장)", resp.StatusCode)
+	}
+
+	_, page := mustGet(t, c, srv.URL+"/board/works")
+	if !bytes.Contains([]byte(page), []byte(`src="`+url+`/thumb"`)) {
+		t.Errorf("갤러리 목록에 썸네일이 없다:\n%s", page)
+	}
+	var cover *string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT cover_media_id::text FROM posts WHERE title = '없는 사진'`).Scan(&cover); err != nil || cover != nil {
+		t.Errorf("없는 사진의 cover_media_id = %v (%v), want NULL", cover, err)
+	}
+
+	// 고칠 때도 같다 — 본문의 사진이 바뀌면 카드 사진도 바뀌고, 없는 id 는 비운다.
+	resp = httpPost(t, c, srv.URL+loc+"/edit", map[string][]string{
+		"title": {"거실 마루"}, "body": {"마루"}, "body_html": {`<img src="/media/0b6f3c3e-0000-4000-8000-0000000000ff">`}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("없는 사진 id 로 고치기 = HTTP %d, want 303", resp.StatusCode)
+	}
+	if err := pool.QueryRow(context.Background(),
+		`SELECT cover_media_id::text FROM posts WHERE title = '거실 마루'`).Scan(&cover); err != nil || cover != nil {
+		t.Errorf("고친 글의 cover_media_id = %v (%v), want NULL", cover, err)
+	}
+	resp = httpPost(t, c, srv.URL+loc+"/edit", map[string][]string{
+		"title": {"거실 마루"}, "body": {"마루"}, "body_html": {`<img src="` + url + `">`}})
+	resp.Body.Close()
+	if err := pool.QueryRow(context.Background(),
+		`SELECT cover_media_id::text FROM posts WHERE title = '거실 마루'`).Scan(&cover); err != nil ||
+		cover == nil || "/media/"+*cover != url {
+		t.Errorf("사진을 되돌린 글의 cover_media_id = %v (%v), want %s", cover, err, url)
+	}
+}

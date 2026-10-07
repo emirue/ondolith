@@ -27,13 +27,15 @@ type Board struct {
 	AllowComments    bool
 	AllowSecret      bool
 	PerPage          int
+	// ListStyle 는 목록 모양이다 — "list" 또는 "gallery" (FR-515). 그 밖의 값은 목록이다.
+	ListStyle string
 }
 
 // boardOf is the one place a boards row becomes a Board (pageOf 와 같은 이유).
 func boardOf(r contentq.Board) Board {
 	return Board{ID: r.ID, Slug: r.Slug, Name: r.Name, Skin: r.Skin,
 		AllowAttachments: r.AllowAttachments, AllowComments: r.AllowComments,
-		AllowSecret: r.AllowSecret, PerPage: int(r.PerPage)}
+		AllowSecret: r.AllowSecret, PerPage: int(r.PerPage), ListStyle: r.ListStyle}
 }
 
 func oneBoard(r contentq.Board, err error) (*Board, error) {
@@ -69,7 +71,7 @@ func (s *Store) CreateBoard(ctx context.Context, b Board, preset BoardPreset) (s
 	id, err := q.CreateBoard(ctx, contentq.CreateBoardParams{
 		Slug: b.Slug, Name: b.Name, Skin: b.Skin,
 		AllowAttachments: b.AllowAttachments, AllowComments: b.AllowComments,
-		AllowSecret: b.AllowSecret, PerPage: int32(b.PerPage)})
+		AllowSecret: b.AllowSecret, PerPage: int32(b.PerPage), ListStyle: listStyle(b.ListStyle)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrSlugTakenBoard
@@ -123,7 +125,16 @@ func (s *Store) UpdateBoard(ctx context.Context, id string, b Board) error {
 	return affected(s.q.UpdateBoard(ctx, contentq.UpdateBoardParams{
 		ID: id, Name: b.Name, Skin: b.Skin,
 		AllowAttachments: b.AllowAttachments, AllowComments: b.AllowComments,
-		AllowSecret: b.AllowSecret, PerPage: int32(b.PerPage)}))
+		AllowSecret: b.AllowSecret, PerPage: int32(b.PerPage), ListStyle: listStyle(b.ListStyle)}))
+}
+
+// listStyle 은 허용목록이다. 모르는 값은 기본(목록)이다 — 표시 설정이 틀렸다고 게시판이
+// 닫히면 안 된다(skin 과 같은 태도).
+func listStyle(s string) string {
+	if s == "gallery" {
+		return s
+	}
+	return "list"
 }
 
 // DeleteBoard removes a board, its posts and its scoped grants — all by

@@ -12,6 +12,24 @@
        쇼핑몰에서는 머리글 검색이 상품으로 가므로 여기가 글 검색의 진입점이다. */}}
   <p class="meta"><a href="/search">전체 게시판에서 검색</a></p>
 
+  {{if eq .Board.ListStyle "gallery"}}
+  {{/* 갤러리 (FR-515): 글마다 본문 첫 사진의 썸네일(P-213). **비밀글은 사진을 내지 않는다** —
+       목록은 비밀글 제목을 누구에게나 보이므로, 썸네일까지 그리면 본문 사진이 샌다. */}}
+  {{$gb := .Board}}
+  <ul class="gallery">
+    {{range .Posts}}
+    <li class="gallery-card">
+      <a href="/board/{{$gb.Slug}}/{{.ID}}">
+        {{if and .CoverMediaID (not .IsSecret)}}<img src="/media/{{.CoverMediaID}}/thumb" alt="" width="480" height="360" loading="lazy">{{else}}<span class="gallery-blank" aria-hidden="true"></span>{{end}}
+        <span class="gallery-title">{{if .IsSecret}}<span class="badge badge--outline">비밀</span> {{end}}{{.Title}}</span>
+      </a>
+      <span class="meta">{{date .CreatedAt "2006-01-02"}}</span>
+    </li>
+    {{else}}
+    <li class="empty">글이 없습니다.</li>
+    {{end}}
+  </ul>
+  {{else}}
   <div class="table-wrap">
   <table class="board-list">
     <thead>
@@ -45,6 +63,7 @@
     </tbody>
   </table>
   </div>
+  {{end}}
 
   {{template "partials/pagination.html" .Pager}}
 </section>

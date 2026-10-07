@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict dHXWepBlTGKRRCtbhSpMYOCzcijjY5503TOWPiqbE8qMQqK6McHhpjxAfxeaRu0
+\restrict g1cKL9AJeOi4yJQSdj77ZI2gNIdq8LIliGnxxMgRJd8zH3OcU7dIhhCmUxdc7kw
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -118,6 +118,8 @@ CREATE TABLE public.boards (
     per_page integer DEFAULT 20 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    list_style text DEFAULT 'list'::text NOT NULL,
+    CONSTRAINT boards_list_style_known CHECK ((list_style = ANY (ARRAY['list'::text, 'gallery'::text]))),
     CONSTRAINT boards_name_check CHECK (((length(name) >= 1) AND (length(name) <= 100))),
     CONSTRAINT boards_per_page_check CHECK (((per_page >= 1) AND (per_page <= 100))),
     CONSTRAINT boards_skin_check CHECK (((skin = ''::text) OR ((skin ~ '^[a-z0-9][a-z0-9-]*$'::text) AND (length(skin) <= 64)))),
@@ -470,6 +472,7 @@ CREATE TABLE public.posts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     body_html text DEFAULT ''::text NOT NULL,
+    cover_media_id uuid,
     CONSTRAINT posts_body_check CHECK ((length(body) <= 50000)),
     CONSTRAINT posts_body_html_len CHECK ((length(body_html) <= 200000)),
     CONSTRAINT posts_custom_fields_shape CHECK (((jsonb_typeof(custom_fields) = 'object'::text) AND (octet_length((custom_fields)::text) <= 16384))),
@@ -2090,6 +2093,14 @@ ALTER TABLE ONLY public.posts
 
 
 --
+-- Name: posts posts_cover_media_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.posts
+    ADD CONSTRAINT posts_cover_media_id_fkey FOREIGN KEY (cover_media_id) REFERENCES public.media(id) ON DELETE SET NULL;
+
+
+--
 -- Name: product_categories product_categories_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2277,5 +2288,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict dHXWepBlTGKRRCtbhSpMYOCzcijjY5503TOWPiqbE8qMQqK6McHhpjxAfxeaRu0
+\unrestrict g1cKL9AJeOi4yJQSdj77ZI2gNIdq8LIliGnxxMgRJd8zH3OcU7dIhhCmUxdc7kw
 

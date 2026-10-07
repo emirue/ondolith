@@ -444,6 +444,8 @@ func TestHtmxVersionFileMatchesTheVendoredFile(t *testing.T) {
 // 움직인다. 필드 이름이 어긋나면 이 테스트가 렌더링에서 실패한다.
 type boardLike struct {
 	ID, Slug, Name, Skin string
+	// ListStyle 은 목록 모양이다 — "list"·"gallery" (FR-515).
+	ListStyle string
 	// AllowAttachments 는 글쓰기 폼이 파일 칸과 enctype 을 낼지 정한다
 	// (FR-506). 픽스처에 없던 동안 그 조건은 렌더링 검사를 통과하지 못했다.
 	AllowAttachments bool
@@ -456,7 +458,7 @@ func (p postLike) Rendered() template.HTML { return template.HTML(p.BodyHTML) }
 
 type postLike struct {
 	ID, BoardID, Title, Body, AuthorName string
-	BodyHTML                             string
+	BodyHTML, CoverMediaID               string
 	CustomFields                         map[string]any
 	IsPinned, IsSecret                   bool
 	ViewCount, CommentCount              int64
@@ -805,5 +807,33 @@ func TestSunEditorVersionFileMatchesTheVendoredFiles(t *testing.T) {
 	}
 	if checked != 3 {
 		t.Errorf("해시를 대조한 파일 %d 개, want 3 (js·css·ko)", checked)
+	}
+}
+
+// **갤러리 목록은 카드마다 썸네일을 그리고, 비밀글은 사진을 내지 않는다** (FR-515).
+// 목록은 비밀글 제목을 누구에게나 보이므로 썸네일까지 그리면 본문 사진이 샌다.
+func TestGalleryListShowsCoversButNotSecretOnes(t *testing.T) {
+	l := newBuiltinLoader()
+	data := payloadFor("board/list.html").(map[string]any)
+	data["Board"] = boardLike{ID: "b1", Slug: "works", Name: "시공 사례", ListStyle: "gallery"}
+	data["Posts"] = []postLike{
+		{ID: "p1", Title: "거실 마루", CoverMediaID: "0b6f3c3e-0000-4000-8000-000000000001"},
+		{ID: "p2", Title: "비밀 현장", IsSecret: true, CoverMediaID: "0b6f3c3e-0000-4000-8000-000000000002"},
+	}
+	v := fullView()
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "board/list.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, `src="/media/0b6f3c3e-0000-4000-8000-000000000001/thumb"`) {
+		t.Error("갤러리 카드에 썸네일이 없다")
+	}
+	if strings.Contains(out, "0b6f3c3e-0000-4000-8000-000000000002") {
+		t.Error("비밀글의 사진이 갤러리에 나왔다")
+	}
+	if strings.Contains(out, `class="board-list"`) {
+		t.Error("갤러리 게시판이 표 목록까지 그렸다")
 	}
 }

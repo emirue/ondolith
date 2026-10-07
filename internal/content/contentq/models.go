@@ -29,6 +29,7 @@ type Board struct {
 	PerPage          int32
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	ListStyle        string
 }
 
 type Page struct {

@@ -292,6 +292,18 @@ themes/{이름}/
 `.Rendered` 를 쓰지 않는 테마도 깨지지 않는다 — 에디터로 쓴 글이 평문으로 보일 뿐이다.
 본문 사진은 원본 폭이 클 수 있으니 테마가 `img { max-width: 100% }` 를 준다(내장 테마의 `.rich`).
 
+## 갤러리 목록 (FR-515)
+
+`board/list.html` 은 게시판의 `.Board.ListStyle`(`list`·`gallery`)로 모양을 고른다. 글마다
+`.CoverMediaID` 가 본문 첫 사진의 id 이고(없으면 빈 값) 썸네일은 `/media/{id}/thumb` 다.
+
+```
+{{if and .CoverMediaID (not .IsSecret)}}<img src="/media/{{.CoverMediaID}}/thumb" alt="">{{end}}
+```
+
+**비밀글의 사진은 싣지 않는다.** 목록은 비밀글 제목을 누구에게나 보이지만 사진은 본문이다 —
+`(not .IsSecret)` 를 빠뜨리면 읽을 권한이 없는 사람에게 본문 사진이 나간다.
+
 ## 뷰 모델 규약
 
 모든 템플릿이 공통으로 받는 것.

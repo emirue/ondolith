@@ -10,7 +10,7 @@ import (
 )
 
 const boardByID = `-- name: BoardByID :one
-SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at
+SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at, list_style
 FROM boards WHERE id = $1
 `
 
@@ -28,12 +28,13 @@ func (q *Queries) BoardByID(ctx context.Context, id string) (Board, error) {
 		&i.PerPage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ListStyle,
 	)
 	return i, err
 }
 
 const boardByPost = `-- name: BoardByPost :one
-SELECT b.id, b.slug, b.name, b.skin, b.allow_attachments, b.allow_comments, b.allow_secret, b.per_page, b.created_at, b.updated_at
+SELECT b.id, b.slug, b.name, b.skin, b.allow_attachments, b.allow_comments, b.allow_secret, b.per_page, b.created_at, b.updated_at, b.list_style
 FROM boards b JOIN posts p ON p.board_id = b.id
 WHERE p.id = $1
 `
@@ -52,12 +53,13 @@ func (q *Queries) BoardByPost(ctx context.Context, id string) (Board, error) {
 		&i.PerPage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ListStyle,
 	)
 	return i, err
 }
 
 const boardBySlug = `-- name: BoardBySlug :one
-SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at
+SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at, list_style
 FROM boards WHERE slug = $1
 `
 
@@ -75,6 +77,7 @@ func (q *Queries) BoardBySlug(ctx context.Context, slug string) (Board, error) {
 		&i.PerPage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ListStyle,
 	)
 	return i, err
 }
@@ -123,7 +126,7 @@ func (q *Queries) BoardFields(ctx context.Context, boardID string) ([]BoardField
 }
 
 const boards = `-- name: Boards :many
-SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at
+SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at, list_style
 FROM boards ORDER BY name, id
 `
 
@@ -147,6 +150,7 @@ func (q *Queries) Boards(ctx context.Context) ([]Board, error) {
 			&i.PerPage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ListStyle,
 		); err != nil {
 			return nil, err
 		}
@@ -170,8 +174,8 @@ func (q *Queries) CountBoardPosts(ctx context.Context, boardID string) (int64, e
 }
 
 const createBoard = `-- name: CreateBoard :one
-INSERT INTO boards (slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+INSERT INTO boards (slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, list_style)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
 `
 
 type CreateBoardParams struct {
@@ -182,6 +186,7 @@ type CreateBoardParams struct {
 	AllowComments    bool
 	AllowSecret      bool
 	PerPage          int32
+	ListStyle        string
 }
 
 func (q *Queries) CreateBoard(ctx context.Context, arg CreateBoardParams) (string, error) {
@@ -193,6 +198,7 @@ func (q *Queries) CreateBoard(ctx context.Context, arg CreateBoardParams) (strin
 		arg.AllowComments,
 		arg.AllowSecret,
 		arg.PerPage,
+		arg.ListStyle,
 	)
 	var id string
 	err := row.Scan(&id)
@@ -284,7 +290,7 @@ func (q *Queries) SaveBoardField(ctx context.Context, arg SaveBoardFieldParams) 
 
 const updateBoard = `-- name: UpdateBoard :execrows
 UPDATE boards SET name = $2, skin = $3, allow_attachments = $4,
-       allow_comments = $5, allow_secret = $6, per_page = $7, updated_at = now()
+       allow_comments = $5, allow_secret = $6, per_page = $7, list_style = $8, updated_at = now()
 WHERE id = $1
 `
 
@@ -296,6 +302,7 @@ type UpdateBoardParams struct {
 	AllowComments    bool
 	AllowSecret      bool
 	PerPage          int32
+	ListStyle        string
 }
 
 func (q *Queries) UpdateBoard(ctx context.Context, arg UpdateBoardParams) (int64, error) {
@@ -307,6 +314,7 @@ func (q *Queries) UpdateBoard(ctx context.Context, arg UpdateBoardParams) (int64
 		arg.AllowComments,
 		arg.AllowSecret,
 		arg.PerPage,
+		arg.ListStyle,
 	)
 	if err != nil {
 		return 0, err

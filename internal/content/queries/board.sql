@@ -1,6 +1,6 @@
 -- name: CreateBoard :one
-INSERT INTO boards (slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id;
+INSERT INTO boards (slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, list_style)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id;
 
 -- name: GrantBoardPreset :execrows
 INSERT INTO role_permissions (role_id, permission_id, board_id)
@@ -8,25 +8,25 @@ SELECT r.id, p.id, sqlc.arg('board_id')::uuid FROM roles r, permissions p
 WHERE r.key = sqlc.arg('role') AND p.key = sqlc.arg('permission') AND p.is_scoped;
 
 -- name: Boards :many
-SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at
+SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at, list_style
 FROM boards ORDER BY name, id;
 
 -- name: BoardBySlug :one
-SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at
+SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at, list_style
 FROM boards WHERE slug = $1;
 
 -- name: BoardByID :one
-SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at
+SELECT id, slug, name, skin, allow_attachments, allow_comments, allow_secret, per_page, created_at, updated_at, list_style
 FROM boards WHERE id = $1;
 
 -- name: BoardByPost :one
-SELECT b.id, b.slug, b.name, b.skin, b.allow_attachments, b.allow_comments, b.allow_secret, b.per_page, b.created_at, b.updated_at
+SELECT b.id, b.slug, b.name, b.skin, b.allow_attachments, b.allow_comments, b.allow_secret, b.per_page, b.created_at, b.updated_at, b.list_style
 FROM boards b JOIN posts p ON p.board_id = b.id
 WHERE p.id = $1;
 
 -- name: UpdateBoard :execrows
 UPDATE boards SET name = $2, skin = $3, allow_attachments = $4,
-       allow_comments = $5, allow_secret = $6, per_page = $7, updated_at = now()
+       allow_comments = $5, allow_secret = $6, per_page = $7, list_style = $8, updated_at = now()
 WHERE id = $1;
 
 -- name: CountBoardPosts :one

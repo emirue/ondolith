@@ -196,8 +196,9 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (s
 }
 
 const createPost = `-- name: CreatePost :one
-INSERT INTO posts (board_id, author_id, title, body, body_html, custom_fields, is_secret)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+INSERT INTO posts (board_id, author_id, title, body, body_html, custom_fields, is_secret, cover_media_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT m.id FROM media m WHERE m.id = $8))
+RETURNING id
 `
 
 type CreatePostParams struct {
@@ -208,8 +209,11 @@ type CreatePostParams struct {
 	BodyHtml     string
 	CustomFields []byte
 	IsSecret     bool
+	CoverMediaID *string
 }
 
+// 카드 사진은 실제로 있는 사진일 때만 붙는다 — 본문 HTML 은 브라우저가 보낸 것이라 없는
+// id 를 실을 수 있고, 그대로 넣으면 외래 키 위반이 500 이 된다.
 func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (string, error) {
 	row := q.db.QueryRow(ctx, createPost,
 		arg.BoardID,
@@ -219,6 +223,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (string,
 		arg.BodyHtml,
 		arg.CustomFields,
 		arg.IsSecret,
+		arg.CoverMediaID,
 	)
 	var id string
 	err := row.Scan(&id)
@@ -251,12 +256,12 @@ func (q *Queries) DeletePost(ctx context.Context, id string) (int64, error) {
 
 const listPosts = `-- name: ListPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = $1
@@ -300,6 +305,7 @@ type ListPostsRow struct {
 	Title         string
 	Body          string
 	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -339,6 +345,7 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPos
 			&i.Title,
 			&i.Body,
 			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -361,12 +368,12 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPos
 
 const listPostsSearch = `-- name: ListPostsSearch :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = $1
@@ -416,6 +423,7 @@ type ListPostsSearchRow struct {
 	Title         string
 	Body          string
 	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -453,6 +461,7 @@ func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams
 			&i.Title,
 			&i.Body,
 			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -532,7 +541,7 @@ func (q *Queries) ModerateComments(ctx context.Context, arg ModerateCommentsPara
 
 const moderatePosts = `-- name: ModeratePosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -556,6 +565,7 @@ type ModeratePostsRow struct {
 	Title         string
 	Body          string
 	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -584,6 +594,7 @@ func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([
 			&i.Title,
 			&i.Body,
 			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -606,7 +617,7 @@ func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([
 
 const postByID = `-- name: PostByID :one
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, p.body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, p.body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -629,6 +640,7 @@ type PostByIDRow struct {
 	Title         string
 	Body          string
 	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -651,6 +663,7 @@ func (q *Queries) PostByID(ctx context.Context, arg PostByIDParams) (PostByIDRow
 		&i.Title,
 		&i.Body,
 		&i.BodyHtml,
+		&i.CoverMediaID,
 		&i.CustomFields,
 		&i.Status,
 		&i.IsPinned,
@@ -666,7 +679,7 @@ func (q *Queries) PostByID(ctx context.Context, arg PostByIDParams) (PostByIDRow
 
 const recentPosts = `-- name: RecentPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -694,6 +707,7 @@ type RecentPostsRow struct {
 	Title         string
 	Body          string
 	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -727,6 +741,7 @@ func (q *Queries) RecentPosts(ctx context.Context, arg RecentPostsParams) ([]Rec
 			&i.Title,
 			&i.Body,
 			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -749,12 +764,12 @@ func (q *Queries) RecentPosts(ctx context.Context, arg RecentPostsParams) ([]Rec
 
 const searchPosts = `-- name: SearchPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = ANY($1::uuid[])
@@ -803,6 +818,7 @@ type SearchPostsRow struct {
 	Title         string
 	Body          string
 	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -840,6 +856,7 @@ func (q *Queries) SearchPosts(ctx context.Context, arg SearchPostsParams) ([]Sea
 			&i.Title,
 			&i.Body,
 			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -957,8 +974,9 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (i
 
 const updatePost = `-- name: UpdatePost :execrows
 UPDATE posts SET title = $2, body = $3, body_html = $4, custom_fields = $5, is_secret = $6,
+       cover_media_id = (SELECT m.id FROM media m WHERE m.id = $7),
        updated_at = now()
-WHERE id = $1
+WHERE posts.id = $1
 `
 
 type UpdatePostParams struct {
@@ -968,6 +986,7 @@ type UpdatePostParams struct {
 	BodyHtml     string
 	CustomFields []byte
 	IsSecret     bool
+	CoverMediaID *string
 }
 
 func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (int64, error) {
@@ -978,6 +997,7 @@ func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (int64, 
 		arg.BodyHtml,
 		arg.CustomFields,
 		arg.IsSecret,
+		arg.CoverMediaID,
 	)
 	if err != nil {
 		return 0, err

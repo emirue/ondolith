@@ -134,3 +134,16 @@ func FormBody(plain, submittedHTML string) (body, bodyHTML string) {
 	}
 	return plain, ""
 }
+
+// coverSrc is an uploaded photo's address in body HTML (P-213).
+var coverSrc = regexp.MustCompile(`src="/media/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(/thumb)?"`)
+
+// CoverOf is the id of the first photo uploaded through the editor, or "" — 갤러리
+// 목록의 카드 사진이다 (FR-515). 정화를 지난 HTML 을 받는다(속성이 큰따옴표로 나온다).
+// 바깥 주소의 그림은 썸네일이 없어 건너뛴다.
+func CoverOf(html string) string {
+	if m := coverSrc.FindStringSubmatch(html); m != nil {
+		return m[1]
+	}
+	return ""
+}

@@ -72,3 +72,20 @@ func TestRichTextPlainText(t *testing.T) {
 		}
 	}
 }
+
+// **갤러리 카드의 사진은 본문의 첫 「우리」 사진이다** (FR-515). 바깥 주소의 그림은
+// 썸네일이 없으므로 건너뛰고, 모양이 uuid 가 아니면 사진으로 치지 않는다.
+func TestCoverOfPicksTheFirstUploadedPhoto(t *testing.T) {
+	const id = "0b6f3c3e-0000-4000-8000-000000000001"
+	for _, tc := range []struct{ name, html, want string }{
+		{"우리 사진", `<p>글</p><img src="/media/` + id + `">`, id},
+		{"바깥 그림 다음", `<img src="https://example.com/a.jpg"><img src="/media/` + id + `">`, id},
+		{"썸네일 주소", `<img src="/media/` + id + `/thumb">`, id},
+		{"사진 없음", `<p>글만</p>`, ""},
+		{"uuid 아님", `<img src="/media/../../etc">`, ""},
+	} {
+		if got := CoverOf(tc.html); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
