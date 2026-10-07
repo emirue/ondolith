@@ -199,8 +199,8 @@ themes/{이름}/
 | `url "page" .Slug` | 페이지 URL |
 | `url "board" .Slug` | 게시판 목록 URL |
 | `url "post" .BoardSlug .ID` | 글 URL |
-| `url "product" .Slug` | 상품 URL |
-| `url "order" .OrderNo` | 주문 URL |
+| `url "product" .Slug` | 상품 URL (`/shop/p/{slug}`, P-303) |
+| `url "order" .OrderNo` | 주문 URL (`/orders/{orderNo}`, P-502) |
 | `asset "css/style.css"` | 테마 정적 자산 URL. **파일 내용 해시**를 붙인다 → `/static/css/style.css?v=a1b2c3d4` |
 
 > **`isCurrent`·`can`을 함수로 두지 않는다.** 둘 다 요청마다 달라지는 값인데,
