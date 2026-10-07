@@ -179,10 +179,6 @@ var handlerJudged = map[string]bool{
 	"comment.write":    true,
 	"comment.moderate": true,
 
-	// 같은 경로가 두 동작을 받는다. A-302 의 POST 는 `id` 가 "new" 면 만들기,
-	// 아니면 고치기다 — 경로 패턴은 하나이므로 라우트가 가를 수 없다.
-	"page.create": true,
-
 	// A-506 의 POST 는 어느 상태로 보내는지가 폼 값에 있다. `취소` 로 가는
 	// 전이만 order.cancel 이고 나머지는 order.update 다 (D15 2.2).
 	"order.cancel": true,

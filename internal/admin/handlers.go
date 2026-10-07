@@ -413,10 +413,16 @@ func (d *Deps) PageList(w http.ResponseWriter, r *http.Request) {
 // screen: D11 gives A-302 one path, and a separate /new route would be a screen
 // with no id in the inventory.
 func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "page.update"); !ok {
+	// 만들기 폼은 page.create 다 — PageSave 와 같고, 라우트(`/admin/pages/new`)가
+	// 적은 것도 그것이다 (D15 2.2).
+	id := r.PathValue("id")
+	perm := "page.update"
+	if isCreate(id) {
+		perm = "page.create"
+	}
+	if _, ok := d.require(w, r, perm); !ok {
 		return
 	}
-	id := r.PathValue("id")
 	if isCreate(id) {
 		d.Render(w, r, "admin/page-edit.html", http.StatusOK, nil)
 		return

@@ -35,6 +35,20 @@ func TestPageCreateAndUpdateAreSeparatePermissions(t *testing.T) {
 	if rec2.Code == http.StatusForbidden {
 		t.Error("page.create 를 가졌는데 만들지 못했다")
 	}
+
+	// **만들기 폼(GET /admin/pages/new)도 같다.** 라우트는 page.create 를 적었는데
+	// 핸들러가 page.update 를 물어, 만들기만 가진 사람은 라우트를 지나 폼에서 403 이었다.
+	form := func(d *Deps) int {
+		rec := httptest.NewRecorder()
+		d.PageForm(rec, httptest.NewRequest(http.MethodGet, "/admin/pages/new", nil))
+		return rec.Code
+	}
+	if code := form(d2); code != http.StatusOK {
+		t.Errorf("page.create 로 만들기 폼 = HTTP %d, want 200", code)
+	}
+	if code := form(d); code != http.StatusForbidden {
+		t.Errorf("page.update 만으로 만들기 폼 = HTTP %d, want 403", code)
+	}
 }
 
 // **취소는 order.cancel 이다** (D15 2.2). 상태 전이 권한 하나로 취소까지
