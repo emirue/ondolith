@@ -264,7 +264,7 @@ unzip -o ondolith-backup-*.zip 'uploads/*' -d /opt/ondolith   # 업로드 폴더
 **복원 테스트를 하지 않은 백업은 백업이 아니다.** 덤프 → 빈 DB 복원 → 같은 글이 보이는지를
 `ONDOLITH_TEST_PGDUMP=1 go test ./internal/app -run TestBackupRestoresIntoAnEmptyDatabase` 가 본다(`ONDOLITH_TEST_DSN`
 과 PATH 의 `pg_dump`·`pg_restore` 필요). 기본으로 돌지 않는 이유는 CI 러너의 `pg_dump` 버전이 DB 서버보다
-낮을 수 있어서다.
+낮을 수 있어서다 ([D85](85-gaps.md) GAP-28).
 
 ## 헬스체크 (P-907)
 

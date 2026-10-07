@@ -22,7 +22,7 @@ import (
 // **백업 덤프로 빈 DB 에 복원한 사이트가 같은 글을 보인다** (FR-713, D80 Phase 6 완료 기준).
 //
 // 진짜 pg_dump·pg_restore 가 PATH 에 있어야 하고, 그 버전이 DB 서버보다 낮으면 실패한다 —
-// 그래서 기본으로 돌지 않고 ONDOLITH_TEST_PGDUMP=1 일 때만 돈다 (D70 「백업」).
+// 그래서 기본으로 돌지 않고 ONDOLITH_TEST_PGDUMP=1 일 때만 돈다 (D70 「백업」, D85 GAP-28).
 func TestBackupRestoresIntoAnEmptyDatabase(t *testing.T) {
 	if os.Getenv("ONDOLITH_TEST_PGDUMP") == "" {
 		t.Skip("ONDOLITH_TEST_PGDUMP 미설정 — 실제 pg_dump 로 복원까지 보려면 1 로 켠다 (D70 「백업」)")
