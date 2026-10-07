@@ -270,17 +270,12 @@ func (d *shopDeps) checkoutSuccess(w http.ResponseWriter, r *http.Request) {
 //
 // `message` 는 읽되 화면에 출력하지 않는다 (D19 P-409). PG 가 붙인 임의
 // 문자열이라 그대로 그리면 반사형 XSS·피싱 문구 주입 표면이 된다.
+//
+// **아무것도 쓰지 않는다.** 결제창이 실패로 돌려보낼 때는 P-408 이 결제 행을
+// 만들기 전이다. 그때 '대기' 행이 있다면 앞선 승인 시도의 결과를 모르는 것이고,
+// 그것을 '실패' 로 내리면 재결제 길이 열려 이중 청구가 되고 A-508 이 찾을 줄이
+// 사라진다 — 앞 판이 그랬고, GET 이라 남의 페이지의 <img> 로도 일어났다.
 func (d *shopDeps) checkoutFail(w http.ResponseWriter, r *http.Request) {
-	order, err := d.pendingOrder(r)
-	if err == nil {
-		if q := r.URL.Query().Get("orderId"); q == order.OrderNo {
-			// 시도 기록만 남긴다. 주문은 결제대기에 머문다 (D14 5-1).
-			if ferr := d.store.FailPayment(r.Context(), order.OrderNo, ""); ferr != nil &&
-				!errors.Is(ferr, commerce.ErrNotFound) {
-				d.log.Warn("결제 실패 기록", "order", order.OrderNo, "err", ferr)
-			}
-		}
-	}
 	d.renderFail(w, r, failMessage(r.URL.Query().Get("code")))
 }
 

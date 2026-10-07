@@ -133,49 +133,6 @@ func paymentStatus(t *testing.T, s *Store, orderNo string) string {
 	return status
 }
 
-// FailPayment 는 **그 주문의 '대기' 결제만** '실패' 로 내린다.
-func TestFailPaymentFlipsOnlyThisOrdersPendingPayment(t *testing.T) {
-	s, pool := testStore(t)
-	ctx := context.Background()
-	limbo := func(slug string) string {
-		t.Helper()
-		orderNo, total := seedOrder(t, s, pool, slug, 1)
-		unknown := &fakeGateway{err: ErrPaymentUnknown}
-		if _, err := s.ConfirmPayment(ctx, unknown, "toss", orderNo, "pk-"+slug, total, time.Now()); !errors.Is(err, ErrPaymentUnknown) {
-			t.Fatalf("= %v, want ErrPaymentUnknown", err)
-		}
-		if got := paymentStatus(t, s, orderNo); got != "대기" {
-			t.Fatalf("준비: 결제 상태 %q, want 대기", got)
-		}
-		return orderNo
-	}
-	target, bystander := limbo("tee"), limbo("cap")
-	paid, _, _ := paidOrder(t, s, pool, "mug", 1)
-	unpaid, _ := seedOrder(t, s, pool, "sock", 1)
-
-	if err := s.FailPayment(ctx, target, "사용자 취소"); err != nil {
-		t.Fatal(err)
-	}
-	if got := paymentStatus(t, s, target); got != "실패" {
-		t.Errorf("대상 결제 %q, want 실패", got)
-	}
-	if got := paymentStatus(t, s, bystander); got != "대기" {
-		t.Errorf("다른 주문의 결제 %q, want 대기 — 남의 결제를 내렸다", got)
-	}
-	if err := s.FailPayment(ctx, target, ""); !errors.Is(err, ErrNotFound) {
-		t.Errorf("이미 실패한 결제 = %v, want ErrNotFound", err)
-	}
-	if err := s.FailPayment(ctx, unpaid, ""); !errors.Is(err, ErrNotFound) {
-		t.Errorf("결제 시도가 없는 주문 = %v, want ErrNotFound", err)
-	}
-	if err := s.FailPayment(ctx, paid, ""); !errors.Is(err, ErrNotFound) {
-		t.Errorf("승인된 결제 = %v, want ErrNotFound", err)
-	}
-	if got := paymentStatus(t, s, paid); got != "승인" {
-		t.Errorf("승인된 결제가 %q 이 됐다 — 받은 돈을 실패로 적었다", got)
-	}
-}
-
 func TestUpdateProductChangesOneRow(t *testing.T) {
 	s, _ := testStore(t)
 	ctx := context.Background()

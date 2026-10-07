@@ -319,17 +319,3 @@ func lower(s string) string {
 	return string(b)
 }
 
-// FailPayment records a confirmed failure without transitioning the order.
-//
-// D14 5-1: P-409 는 결제 시도만 기록한다. 주문은 결제대기에 머문다 — 재시도
-// 경로를 남기기 위해서이고, 역전이 금지 규칙과도 맞는다.
-func (s *Store) FailPayment(ctx context.Context, orderNo, reason string) error {
-	n, err := s.q.FailPendingPayment(ctx, orderNo)
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrNotFound, orderNo)
-	}
-	return nil
-}

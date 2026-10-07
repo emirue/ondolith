@@ -252,6 +252,46 @@ func TestFailScreenDoesNotEchoTheGatewayMessage(t *testing.T) {
 	}
 }
 
+// **P-409 는 결제 행을 쓰지 않는다** (D19 P-409, D15 P5).
+//
+// 결제창이 실패로 돌려보낼 때는 P-408 이 결제 행을 만들기 전이라 내릴 행이 없다.
+// 그때 '대기' 행이 있다면 앞선 승인 시도의 결과를 모르는 것이고, 그것을 '실패' 로
+// 내리면 재결제 길이 열리고(이중 청구) A-508 이 「PG 는 승인, 우리는 대기」로 찾을
+// 줄이 사라진다. 그리고 GET 이라 남의 페이지의 <img> 하나로도 일어났다.
+func TestFailRedirectDoesNotTouchThePayment(t *testing.T) {
+	srv, pool, variant := shopSite(t)
+	c := client()
+	post(t, c, srv.URL+"/cart/items", url.Values{"variant_id": {variant}}).Body.Close()
+	post(t, c, srv.URL+"/checkout", url.Values{
+		"receiver_name": {"나"}, "receiver_phone": {"010-0000-0000"},
+		"postcode": {"12345"}, "address1": {"서울"},
+		"orderer_email": {"a@example.com"}, "orderer_phone": {"010-1111-1111"},
+	}).Body.Close()
+	ctx := context.Background()
+	var orderID, orderNo string
+	var total int
+	if err := pool.QueryRow(ctx, `SELECT id, order_no, total_amount FROM orders`).Scan(&orderID, &orderNo, &total); err != nil {
+		t.Fatal(err)
+	}
+	// 승인 결과를 모른 채 남은 앞선 시도.
+	if _, err := pool.Exec(ctx, `INSERT INTO payments (order_id, kind, status, pg, payment_key, approved_amount)
+		VALUES ($1,'주문결제','대기','toss','pk-limbo',$2)`, orderID, total); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := c.Get(srv.URL + "/checkout/fail?code=PAY_PROCESS_CANCELED&orderId=" + orderNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := readAll(t, resp); !strings.Contains(body, "취소하셨습니다") {
+		t.Errorf("실패 화면이 아니다: %.200s", body)
+	}
+	var st string
+	if err := pool.QueryRow(ctx, `SELECT status FROM payments WHERE payment_key = 'pk-limbo'`).Scan(&st); err != nil || st != "대기" {
+		t.Errorf("결제 행 = %q (%v), want 대기 — 실패 리다이렉트가 결과 불명 결제를 내렸다", st, err)
+	}
+}
+
 // 빈 장바구니로 주문서를 열면 장바구니로 돌려보낸다.
 func TestCheckoutWithEmptyCartRedirects(t *testing.T) {
 	srv, _, _ := shopSite(t)

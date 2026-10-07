@@ -114,35 +114,6 @@ func TestTermsWithTheSameEffectiveTimeAreRefused(t *testing.T) {
 	}
 }
 
-// 가상계좌를 발급받은 주문(입금대기)에서 /checkout/fail 을 열면 살아 있는 결제가
-// '실패' 로 내려갔고, 뒤에 온 입금 웹훅은 대조할 결제를 찾지 못했다.
-func TestFailPaymentLeavesADepositPendingOrderAlone(t *testing.T) {
-	s, pool := testStore(t)
-	ctx := context.Background()
-
-	waiting, total := seedOrder(t, s, pool, "va", 1)
-	depositOrder(t, s, pool, waiting, total, "s3cret")
-	if err := s.FailPayment(ctx, waiting, ""); !errors.Is(err, ErrNotFound) {
-		t.Errorf("입금대기 주문 = %v, want ErrNotFound", err)
-	}
-	if got := paymentStatus(t, s, waiting); got != "대기" {
-		t.Errorf("입금대기 주문의 결제 %q, want 대기 — 입금을 기다리는 결제를 내렸다", got)
-	}
-
-	// 결제대기 주문의 결과 불명 결제는 내린다 (P-409).
-	pending, total := seedOrder(t, s, pool, "card", 1)
-	if _, err := s.ConfirmPayment(ctx, &fakeGateway{err: ErrPaymentUnknown}, "toss",
-		pending, "pk-card", total, time.Now()); !errors.Is(err, ErrPaymentUnknown) {
-		t.Fatal(err)
-	}
-	if err := s.FailPayment(ctx, pending, ""); err != nil {
-		t.Fatal(err)
-	}
-	if got := paymentStatus(t, s, pending); got != "실패" {
-		t.Errorf("결제대기 주문의 결제 %q, want 실패", got)
-	}
-}
-
 // whileWaitingOn holds a row lock on order_items.id = held, starts fn — which
 // must wait for that row — and, while it waits, checks that `probe` can still
 // be locked. 그것이 「held 를 probe 보다 먼저 잡는다」의 관측이다: 순서가 거꾸로면

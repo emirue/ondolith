@@ -34,23 +34,6 @@ func (q *Queries) FailPaymentByID(ctx context.Context, id string) error {
 	return err
 }
 
-const failPendingPayment = `-- name: FailPendingPayment :execrows
-UPDATE payments SET status = '실패', updated_at = now()
-WHERE order_id = (SELECT id FROM orders WHERE order_no = $1 AND status = '결제대기')
-  AND kind = '주문결제' AND status = '대기'
-`
-
-// **결제대기 주문의 것만이다.** 가상계좌를 발급받은 주문(입금대기)의 '대기' 결제는
-// 입금을 기다리는 살아 있는 결제다 — 그것을 실패로 내리면 뒤에 오는 입금 웹훅이
-// 대조할 결제를 찾지 못한다.
-func (q *Queries) FailPendingPayment(ctx context.Context, orderNo string) (int64, error) {
-	result, err := q.db.Exec(ctx, failPendingPayment, orderNo)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const lockOrderForPayment = `-- name: LockOrderForPayment :one
 
 SELECT id, status, total_amount, created_at FROM orders
@@ -94,6 +77,9 @@ type PaymentForResolveRow struct {
 	TotalAmount int32
 }
 
+// **결제대기 주문의 것만이다.** 가상계좌를 발급받은 주문(입금대기)의 '대기' 결제는
+// 입금을 기다리는 살아 있는 결제다 — 그것을 실패로 내리면 뒤에 오는 입금 웹훅이
+// 대조할 결제를 찾지 못한다.
 // A-508 「PG 결과로 반영」. 결제 행을 잠그고 다시 읽는다 — 조회하는 사이 웹훅이나
 // 다른 관리자가 같은 행을 닫았을 수 있다. 주문은 moveOrder 의 CAS 가 지킨다.
 func (q *Queries) PaymentForResolve(ctx context.Context, id string) (PaymentForResolveRow, error) {
