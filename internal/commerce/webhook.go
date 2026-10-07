@@ -290,3 +290,82 @@ func (s *Store) Reconcile(ctx context.Context, gw Gateway, rows []ReconcileRow) 
 	}
 	return out
 }
+
+// ErrNothingToResolve 는 A-508 이 PG 결과로 반영할 것이 없다는 뜻이다 — 결제가
+// 이미 닫혔거나, 주문결제가 아니거나, PG 도 아직 승인·실패를 말하지 않는다.
+var ErrNothingToResolve = errors.New("commerce: PG 결과로 반영할 것이 없습니다")
+
+// ResolvePendingPayment closes a '대기' order payment with what the gateway says
+// (D19 A-508 「대사 결과로 상태 변경」). 「PG 는 승인, 우리는 대기」를 앱 안에서
+// 닫는 유일한 길이다 — 결제대기 → 결제완료 는 그 밖에 P-408 만 할 수 있다.
+//
+// **근거는 조회 결과뿐이다** (D19 A-508 거부 조건 「PG 조회 실패 상태에서 추정
+// 반영」). 승인이면 주문을 결제완료로, 실패면 결제 행만 '실패' 로 — 그러면 10분
+// 만료가 주문과 재고를 놓는다. 그 밖(대기·취소)은 ErrNothingToResolve 다.
+// 조회의 '대기' 는 READY 와 가상계좌 발급을 가르지 못해 입금대기로도 옮기지 않는다.
+func (s *Store) ResolvePendingPayment(ctx context.Context, gw Gateway, paymentID string) (Status, error) {
+	ctx, cancel := moneyCtx(ctx) // 조회 뒤 기록까지 끝낸다 (payment.go)
+	defer cancel()
+	p, err := s.q.PaymentForResolve(ctx, paymentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if p.Status != string(PaymentPending) || p.Kind != "주문결제" {
+		return "", fmt.Errorf("%w: %s %s", ErrNothingToResolve, p.Kind, p.Status)
+	}
+	if gw == nil {
+		return "", errors.New("commerce: PG 가 설정되어 있지 않아 조회할 수 없습니다")
+	}
+	callCtx, callCancel := context.WithTimeout(ctx, reconcileCallTimeout)
+	got, err := gw.Get(callCtx, p.PaymentKey)
+	callCancel()
+	if err != nil {
+		return "", err
+	}
+	if got == nil {
+		return "", errors.New("commerce: PG 에 기록이 없습니다")
+	}
+	// 결제키만으로 묻는 조회다. 다른 주문의 답이면 그 결제로 이 주문을 닫는다.
+	if got.OrderNo != p.OrderNo {
+		return "", fmt.Errorf("commerce: 조회 응답이 다른 주문(%s)의 것입니다", got.OrderNo)
+	}
+	if got.Status != PaymentApproved && got.Status != PaymentFailed {
+		return "", fmt.Errorf("%w: PG 상태 %s", ErrNothingToResolve, got.Status)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	// 조회하는 사이 웹훅이나 다른 관리자가 닫았을 수 있다 — 잠그고 다시 본다.
+	p, err = q.PaymentForResolve(ctx, paymentID)
+	if err != nil {
+		return "", err
+	}
+	if p.Status != string(PaymentPending) {
+		return "", fmt.Errorf("%w: 조회하는 사이 %s", ErrNothingToResolve, p.Status)
+	}
+	if got.Status == PaymentFailed {
+		if err := q.DeclinePayment(ctx, commerceq.DeclinePaymentParams{
+			ID: paymentID, RawResponse: MaskCardFields(got.Raw)}); err != nil {
+			return "", err
+		}
+		return "", tx.Commit(ctx)
+	}
+	if err := VerifyAmount(int(p.TotalAmount), got.Amount); err != nil {
+		return "", err
+	}
+	if err := s.moveOrder(ctx, tx, p.OrderID, Status(p.OrderStatus), StatusPaid, "A-508"); err != nil {
+		return "", err
+	}
+	if _, err := q.ApprovePendingPayment(ctx, commerceq.ApprovePendingPaymentParams{
+		ID: paymentID, RawResponse: MaskCardFields(got.Raw)}); err != nil {
+		return "", err
+	}
+	return StatusPaid, tx.Commit(ctx)
+}

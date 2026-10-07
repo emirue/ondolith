@@ -472,7 +472,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 			d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 			return
 		}
-		err := d.Commerce.RetryRefund(r.Context(), d.refundGateway(), target.ID, time.Now())
+		err := d.Commerce.RetryRefund(r.Context(), d.pgGateway(), target.ID, time.Now())
 		if errors.Is(err, commerce.ErrRefundRetryExpired) {
 			d.log(r, c, "order.refund", "order", order.OrderNo,
 				"환불 "+itoa(target.Amount)+"원 재실행 거부 — 멱등키 기간 경과, 환불 건 "+target.ID)
@@ -537,7 +537,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 	// 순서는 DB 한도 선점 → PG 호출 → 확정이다 (D13, D19 A-507). 선점은 위에서
 	// 끝났고 여기서 돈이 나간다.
 	d.finishRefund(w, r, c, order, refundID, amount,
-		d.Commerce.ExecuteRefund(r.Context(), d.refundGateway(), refundID))
+		d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID))
 }
 
 // refundInOrder 는 폼의 refund_id 가 경로의 주문의 건일 때만 돌려준다. 번호만
@@ -560,7 +560,9 @@ func (d *Deps) refundInOrder(w http.ResponseWriter, r *http.Request,
 	return nil, false
 }
 
-func (d *Deps) refundGateway() commerce.Gateway {
+// pgGateway 는 지금 설정된 PG 다. 클로저가 nil 인 경우(배선 전)와 반환값이 nil 인
+// 경우(PG 「사용 안 함」)를 한 경로로 모은다 — 스토어가 nil 을 받아 답한다.
+func (d *Deps) pgGateway() commerce.Gateway {
 	if d.Gateway == nil {
 		return nil
 	}

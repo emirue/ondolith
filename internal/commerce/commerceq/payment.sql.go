@@ -77,6 +77,40 @@ func (q *Queries) LockOrderForPayment(ctx context.Context, orderNo string) (Lock
 	return i, err
 }
 
+const paymentForResolve = `-- name: PaymentForResolve :one
+SELECT p.status, p.kind, p.payment_key, o.id AS order_id, o.order_no,
+       o.status AS order_status, o.total_amount
+FROM payments p JOIN orders o ON o.id = p.order_id
+WHERE p.id = $1 FOR UPDATE OF p
+`
+
+type PaymentForResolveRow struct {
+	Status      string
+	Kind        string
+	PaymentKey  string
+	OrderID     string
+	OrderNo     string
+	OrderStatus string
+	TotalAmount int32
+}
+
+// A-508 「PG 결과로 반영」. 결제 행을 잠그고 다시 읽는다 — 조회하는 사이 웹훅이나
+// 다른 관리자가 같은 행을 닫았을 수 있다. 주문은 moveOrder 의 CAS 가 지킨다.
+func (q *Queries) PaymentForResolve(ctx context.Context, id string) (PaymentForResolveRow, error) {
+	row := q.db.QueryRow(ctx, paymentForResolve, id)
+	var i PaymentForResolveRow
+	err := row.Scan(
+		&i.Status,
+		&i.Kind,
+		&i.PaymentKey,
+		&i.OrderID,
+		&i.OrderNo,
+		&i.OrderStatus,
+		&i.TotalAmount,
+	)
+	return i, err
+}
+
 const recordPaymentResult = `-- name: RecordPaymentResult :exec
 UPDATE payments SET status = $1,
        approved_at = CASE WHEN $1 = '승인' THEN now() ELSE approved_at END,

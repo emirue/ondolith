@@ -475,6 +475,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		// 조회와의 대조이고, 수신 이력은 "웹훅이 오긴 왔는가" 다 (D13 A-603).
 		r.Add(Route{Screen: "A-508", Method: "GET", Pattern: "/admin/reconcile", Class: SC4,
 			Permission: "payment.view", Handler: ad.Reconcile})
+		// 「PG 결과로 반영」. 화면 권한은 payment.view 이고 핸들러가 order.update 를
+		// 함께 본다 (D13 — 조회 권한만으로 주문을 바꾸면 대사가 우회 경로가 된다).
+		r.Add(Route{Screen: "A-508", Method: "POST", Pattern: "/admin/reconcile", Class: SC6,
+			Permission: "payment.view", Handler: ad.ReconcileResolve})
 		r.Add(Route{Screen: "A-603", Method: "GET", Pattern: "/admin/webhooks", Class: SC4,
 			Permission: "payment.view", Handler: ad.WebhookLog})
 

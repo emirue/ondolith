@@ -1251,9 +1251,10 @@ func TestProductSaveRefusesNonIntegerPrice(t *testing.T) {
 
 // reconcileGateway 는 조회 API 가 무엇을 말하든 그대로 돌려준다.
 type reconcileGateway struct {
-	status commerce.PaymentStatus
-	amount int
-	err    error
+	status  commerce.PaymentStatus
+	amount  int
+	err     error
+	orderNo string // 조회 응답의 주문번호. 「PG 결과로 반영」이 대조한다
 }
 
 func (g reconcileGateway) Confirm(context.Context, commerce.ConfirmRequest) (*commerce.Payment, error) {
@@ -1272,7 +1273,7 @@ func (g reconcileGateway) Get(_ context.Context, key string) (*commerce.Payment,
 	if !strings.HasPrefix(key, "pk-") {
 		return nil, nil
 	}
-	return &commerce.Payment{PaymentKey: key, Status: g.status, Amount: g.amount}, nil
+	return &commerce.Payment{PaymentKey: key, OrderNo: g.orderNo, Status: g.status, Amount: g.amount}, nil
 }
 func (g reconcileGateway) VerifyWebhook(context.Context, []byte) (*commerce.WebhookEvent, error) {
 	return nil, nil
@@ -1868,5 +1869,95 @@ func TestAdminResendsAnUnknownRefundOnlyWhileTheKeyLives(t *testing.T) {
 	}
 	if gw.cancels != before || refundRowStatus(t, pool, old) != "승인" {
 		t.Errorf("14일 뒤 취소 %d번 더·상태 %s, want 0·승인", gw.cancels-before, refundRowStatus(t, pool, old))
+	}
+}
+
+// pendingAdminPayment 는 paidAdminOrder 를 「승인 결과를 모른 채 남은」 모습으로
+// 되돌린다 — 결제 '대기', 주문 결제대기.
+func pendingAdminPayment(t *testing.T, d *Deps, pool *pgxpool.Pool) (*commerce.OrderDetail, int, string) {
+	t.Helper()
+	order, total := paidAdminOrder(t, d, pool)
+	ctx := context.Background()
+	var paymentID string
+	if err := pool.QueryRow(ctx, `UPDATE payments SET status = '대기', approved_at = NULL
+		WHERE payment_key = 'pk-admin' RETURNING id`).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE orders SET status = '결제대기' WHERE order_no = $1`, order.OrderNo); err != nil {
+		t.Fatal(err)
+	}
+	return order, total, paymentID
+}
+
+func reconcileLogs(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM operation_logs WHERE action = 'payment.reconcile'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// **A-508 의 「PG 결과로 반영」이 「PG 는 승인, 우리는 대기」를 닫는다** (D19 A-508).
+//
+// 앞 판은 그 줄을 보여 주고 「A-506 에서 옮기라」고 했지만 결제대기 → 결제완료 는
+// P-408 만 할 수 있어 A-506 에 그 선택지가 없었다. 돈은 나갔는데 주문을 결제완료로
+// 만들 길이 앱 안에 없었다.
+func TestReconcileResolveReflectsThePGAnswer(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"payment.view": true, "order.update": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	order, total, paymentID := pendingAdminPayment(t, d, pool)
+	d.Gateway = func() commerce.Gateway {
+		return reconcileGateway{status: commerce.PaymentApproved, amount: total, orderNo: order.OrderNo}
+	}
+
+	rec := postAdmin(t, d.ReconcileResolve, "/admin/reconcile", nil,
+		url.Values{"payment_id": {paymentID}, "from": {"2026-10-01"}, "to": {"2026-10-07"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("반영 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/admin/reconcile?from=2026-10-01&to=2026-10-07" {
+		t.Errorf("돌아갈 곳 %q — 보던 기간으로 돌아가야 한다", loc)
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaid)
+	if n := reconcileLogs(t, pool); n != 1 {
+		t.Errorf("작업 로그 %d건, want 1 (D13: 반영은 남긴다)", n)
+	}
+}
+
+// 반영은 payment.view 에 order.update 를 함께 요구하고(D13), 조회가 답하지 않으면
+// 추정으로 반영하지 않는다 (D19 A-508 거부 조건). 둘 다 작업 로그에 남는다.
+func TestReconcileResolveNeedsOrderUpdateAndAnAnswer(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"payment.view": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	order, total, paymentID := pendingAdminPayment(t, d, pool)
+	d.Gateway = func() commerce.Gateway {
+		return reconcileGateway{status: commerce.PaymentApproved, amount: total, orderNo: order.OrderNo}
+	}
+	post := func(id string) *httptest.ResponseRecorder {
+		return postAdmin(t, d.ReconcileResolve, "/admin/reconcile", nil, url.Values{"payment_id": {id}})
+	}
+
+	if rec := post(paymentID); rec.Code != http.StatusForbidden {
+		t.Errorf("order.update 없이 = HTTP %d, want 403", rec.Code)
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaymentPending)
+
+	caller.perms["order.update"] = true
+	d.Gateway = func() commerce.Gateway { return reconcileGateway{err: commerce.ErrPaymentUnknown} }
+	if rec := post(paymentID); rec.Code != http.StatusBadGateway {
+		t.Errorf("조회 실패 = HTTP %d, want 502", rec.Code)
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaymentPending)
+	if n := reconcileLogs(t, pool); n != 2 {
+		t.Errorf("작업 로그 %d건, want 2 — 권한 거부·조회 실패 모두 남는다", n)
+	}
+
+	if rec := post("not-a-uuid"); rec.Code != http.StatusNotFound {
+		t.Errorf("깨진 결제 id = HTTP %d, want 404", rec.Code)
 	}
 }

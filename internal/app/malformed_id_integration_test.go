@@ -156,7 +156,7 @@ func TestNoRouteAnswers500ToAMalformedPathValue(t *testing.T) {
 // 적어 두었다 — 즉 그 세 필드는 이 스윕이 한 번도 건드리지 않았다.
 var formIDFields = []string{
 	"attachment_id", "board_id", "category_id", "comment_id", "id", "item_id",
-	"new_variant_id", "parent_id", "post_id", "refund_id", "user_id", "variant_id",
+	"new_variant_id", "parent_id", "payment_id", "post_id", "refund_id", "user_id", "variant_id",
 }
 
 // endsTheSession 은 **호출하면 이후 요청이 전부 로그인 화면으로 밀리는** 라우트다.

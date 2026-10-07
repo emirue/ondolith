@@ -101,3 +101,31 @@ func TestRefundRowsOfferOnlyTheActionsTheirStateAllows(t *testing.T) {
 		t.Errorf("행별 동작 = %v, want %v", got, want)
 	}
 }
+
+// A-508 의 「PG 결과로 반영」은 '대기' 주문결제를 PG 가 승인·실패로 답한 줄에만,
+// order.update 가 있을 때만 그린다 (D19 A-508, D13).
+func TestReconcileOffersResolveOnlyWhereThePGAnswered(t *testing.T) {
+	rows := []commerce.ReconcileRow{
+		{PaymentID: "p-approved", Kind: "주문결제", OurStatus: "대기", TheirStatus: "승인"},
+		{PaymentID: "p-failed", Kind: "주문결제", OurStatus: "대기", TheirStatus: "실패"},
+		{PaymentID: "p-still", Kind: "주문결제", OurStatus: "대기", TheirStatus: "대기"},
+		{PaymentID: "p-done", Kind: "주문결제", OurStatus: "승인", TheirStatus: "승인"},
+		{PaymentID: "p-diff", Kind: "교환차액", OurStatus: "대기", TheirStatus: "승인"},
+	}
+	ids := func(can bool) []string {
+		view := renderAdmin(t, "admin/reconcile.html", map[string]any{
+			"Rows": rows, "Mismatched": 0, "From": "2026-10-01", "To": "2026-10-07",
+			"Quick": nil, "CanResolve": can})
+		var out []string
+		for _, m := range regexp.MustCompile(`name="payment_id" value="([^"]+)"`).FindAllStringSubmatch(view, -1) {
+			out = append(out, m[1])
+		}
+		return out
+	}
+	if got := ids(true); !reflect.DeepEqual(got, []string{"p-approved", "p-failed"}) {
+		t.Errorf("반영 버튼 = %v, want [p-approved p-failed]", got)
+	}
+	if got := ids(false); got != nil {
+		t.Errorf("order.update 없이 반영 버튼 = %v, want 없음", got)
+	}
+}

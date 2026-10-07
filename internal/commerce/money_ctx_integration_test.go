@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // **결제사 호출 중에 브라우저가 떠나도 결과는 기록된다.**
@@ -131,5 +133,119 @@ func TestUnknownConfirmLookupOnlyAcceptsADefiniteAnswerForThisOrder(t *testing.T
 				t.Errorf("결제 행 = %q (%v), want %s", st, err, tc.wantPay)
 			}
 		})
+	}
+}
+
+// pendingPayment 는 승인 결과를 모른 채 '대기' 로 남은 주문결제다 — 승인도 조회도
+// 답하지 않은 경우. A-508 이 닫는 대상이다.
+func pendingPayment(t *testing.T, s *Store, pool *pgxpool.Pool, slug string) (orderNo string, total int, paymentID string) {
+	t.Helper()
+	orderNo, total = seedOrder(t, s, pool, slug, 1)
+	gw := &fakeGateway{err: ErrPaymentUnknown, getErr: ErrPaymentUnknown}
+	if _, err := s.ConfirmPayment(context.Background(), gw, "toss", orderNo, "pk-"+slug, total, time.Now()); !errors.Is(err, ErrPaymentUnknown) {
+		t.Fatalf("준비: %v", err)
+	}
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM payments WHERE payment_key = $1`, "pk-"+slug).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	return orderNo, total, paymentID
+}
+
+// **A-508 이 '대기' 결제를 PG 조회 결과로 닫는다** (D19 A-508 「대사 결과로 상태 변경」).
+//
+// 앞 판의 A-508 은 「PG 는 승인, 우리는 대기」를 보여 주고 「A-506 에서 옮기라」고
+// 했지만, 결제대기 → 결제완료 는 P-408 만 할 수 있어 A-506 에 그 선택지가 없었다.
+// 돈은 나갔는데 주문을 결제완료로 만들 길이 앱 안에 없었다.
+func TestResolvePendingPaymentFollowsTheLookup(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		got       func(orderNo string, total int) *Payment
+		getErr    error
+		wantErr   error
+		wantOrder Status
+		wantPay   string
+	}{
+		{"PG 승인", func(o string, n int) *Payment {
+			return &Payment{OrderNo: o, Status: PaymentApproved, Amount: n, Raw: []byte(`{"status":"DONE"}`)}
+		}, nil, nil, StatusPaid, "승인"},
+		{"PG 실패", func(o string, n int) *Payment {
+			return &Payment{OrderNo: o, Status: PaymentFailed, Amount: n, Raw: []byte(`{"status":"ABORTED"}`)}
+		}, nil, nil, StatusPaymentPending, "실패"},
+		{"PG 도 대기", func(o string, n int) *Payment {
+			return &Payment{OrderNo: o, Status: PaymentPending, Amount: n}
+		}, nil, ErrNothingToResolve, StatusPaymentPending, "대기"},
+		{"조회 실패", nil, ErrPaymentUnknown, ErrPaymentUnknown, StatusPaymentPending, "대기"},
+		{"금액이 다르다", func(o string, n int) *Payment {
+			return &Payment{OrderNo: o, Status: PaymentApproved, Amount: n + 1}
+		}, nil, ErrAmountMismatch, StatusPaymentPending, "대기"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, pool := testStore(t)
+			orderNo, total, paymentID := pendingPayment(t, s, pool, "tee-resolve")
+			gw := &fakeGateway{getErr: tc.getErr}
+			if tc.got != nil {
+				gw.getResponse = tc.got(orderNo, total)
+			}
+			_, err := s.ResolvePendingPayment(context.Background(), gw, paymentID)
+			if tc.wantErr == nil && err != nil || tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("= %v, want %v", err, tc.wantErr)
+			}
+			if got := statusOf(t, s, orderNo); got != tc.wantOrder {
+				t.Errorf("주문 상태 %s, want %s", got, tc.wantOrder)
+			}
+			var st string
+			if err := pool.QueryRow(context.Background(),
+				`SELECT status FROM payments WHERE id = $1`, paymentID).Scan(&st); err != nil || st != tc.wantPay {
+				t.Errorf("결제 행 = %q (%v), want %s", st, err, tc.wantPay)
+			}
+		})
+	}
+}
+
+// 조회 응답이 다른 주문의 결제면 반영하지 않는다 — 남의 결제로 내 주문을 닫는다.
+// 이미 닫힌 결제는 다시 반영하지 않는다.
+func TestResolvePendingPaymentRefusesOtherOrdersAndSettledPayments(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, total, paymentID := pendingPayment(t, s, pool, "tee-resolve2")
+	other := &fakeGateway{getResponse: &Payment{OrderNo: "OTHER-ORDER", Status: PaymentApproved, Amount: total}}
+	if _, err := s.ResolvePendingPayment(context.Background(), other, paymentID); err == nil {
+		t.Fatal("다른 주문의 승인으로 반영했다")
+	}
+	if got := statusOf(t, s, orderNo); got != StatusPaymentPending {
+		t.Errorf("주문 상태 %s, want %s", got, StatusPaymentPending)
+	}
+
+	ok := &fakeGateway{getResponse: &Payment{OrderNo: orderNo, Status: PaymentApproved, Amount: total}}
+	if _, err := s.ResolvePendingPayment(context.Background(), ok, paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolvePendingPayment(context.Background(), ok, paymentID); !errors.Is(err, ErrNothingToResolve) {
+		t.Errorf("이미 반영된 결제 = %v, want ErrNothingToResolve", err)
+	}
+	if _, err := s.ResolvePendingPayment(context.Background(), ok, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("없는 결제 = %v, want ErrNotFound", err)
+	}
+}
+
+// 조회하는 사이 웹훅이 결제를 닫았으면 그 위에 덮어쓰지 않는다. 잠근 뒤 다시 읽지
+// 않으면, 늦게 온 조회의 「실패」가 방금 승인된 결제를 '실패' 로 바꾼다.
+func TestResolvePendingPaymentRechecksAfterTheLookup(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, total, paymentID := pendingPayment(t, s, pool, "tee-resolve3")
+	gw := &fakeGateway{getResponse: &Payment{OrderNo: orderNo, Status: PaymentFailed, Amount: total}}
+	gw.onGet = func() { // 그 사이 P-905 가 승인으로 닫는다
+		if _, err := pool.Exec(context.Background(),
+			`UPDATE payments SET status = '승인' WHERE id = $1`, paymentID); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := s.ResolvePendingPayment(context.Background(), gw, paymentID); !errors.Is(err, ErrNothingToResolve) {
+		t.Errorf("= %v, want ErrNothingToResolve", err)
+	}
+	var st string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status FROM payments WHERE id = $1`, paymentID).Scan(&st); err != nil || st != "승인" {
+		t.Errorf("결제 행 = %q (%v), want 승인 — 늦은 조회가 덮어썼다", st, err)
 	}
 }

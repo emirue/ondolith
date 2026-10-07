@@ -25,6 +25,8 @@ type fakeGateway struct {
 	getResponse *Payment
 	getErr      error
 	getCalls    int
+	// onGet 은 조회 API 왕복 중에 일어나는 일을 흉내낸다.
+	onGet func()
 	// Cancel 이 돌려줄 것과 받은 것. 기본값 (nil, nil) 은 「취소가 됐다」다.
 	cancelResponse *Payment
 	cancelErr      error
@@ -66,6 +68,9 @@ func (g *fakeGateway) Get(context.Context, string) (*Payment, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.getCalls++
+	if g.onGet != nil {
+		g.onGet()
+	}
 	return g.getResponse, g.getErr
 }
 func (g *fakeGateway) VerifyWebhook(context.Context, []byte) (*WebhookEvent, error) {
