@@ -157,7 +157,7 @@ SVG는 스크립트를 담을 수 있다. 허용한다면 정화하거나 `Conte
 
 ### 웹훅 본문 (P-905, FR-610)
 
-본문 크기 상한 **1 MiB** (`internal/app/handler_webhook.go`의 `maxWebhookBody`).
+본문 크기 상한 **64 KiB** (`internal/app/handler_webhook.go`의 `maxWebhookBody`, 2026-10-07 에 1 MiB 에서 줄임). 이 주소는 인증이 없고 형태만 맞으면 원문이 `webhook_events` 에 남으므로 상한이 곧 요청 하나가 쌓는 양이다. A-603 은 원문을 앞 4,096자만 읽는다.
 `http.MaxBytesReader`로 강제하고 초과는 413.
 NFR-101의 티어에서 무제한 본문 버퍼링은 그 자체가 DoS 표면이다.
 

@@ -111,13 +111,19 @@ func TestWebhookVerificationFailureSaysNothing(t *testing.T) {
 
 // 본문 크기 상한을 넘으면 413 이다. 서명 검증 전에 파싱하지 않는다는 규칙은
 // 크기 상한이 있어야 의미가 있다 — 없으면 파싱 전에 메모리를 다 쓴다.
+//
+// **상한은 64KiB 다.** 이 주소는 인증이 없고(토스 웹훅에는 서명이 없다) 형태만
+// 맞으면 원문이 `webhook_events` 에 남는다. 1MiB 였던 앞 판은 요청 하나로 1MiB 를
+// 쌓을 수 있었고, A-603 한 쪽이 그런 행 100개를 메모리에 읽었다.
 func TestWebhookRejectsOversizedBody(t *testing.T) {
 	srvT, _, _ := shopSite(t)
 	srv := srvT.URL
-	resp := postWebhook(t, srv, "toss", strings.Repeat("a", maxWebhookBody+1))
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusRequestEntityTooLarge {
-		t.Errorf("과대 본문 = HTTP %d, want 413", resp.StatusCode)
+	for _, n := range []int{maxWebhookBody + 1, 64<<10 + 1} {
+		resp := postWebhook(t, srv, "toss", strings.Repeat("a", n))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("%d바이트 본문 = HTTP %d, want 413", n, resp.StatusCode)
+		}
 	}
 }
 

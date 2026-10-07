@@ -485,6 +485,36 @@ func TestProductListPagesInTheSameTotalOrder(t *testing.T) {
 	}
 }
 
+// **A-603 은 원문을 앞 4,096자까지만 읽는다.** 한 쪽이 100행이라, 원문을 통째로
+// 읽으면 큰 행 몇 개로 화면 하나가 수 MiB 를 메모리에 올린다. 잘렸으면 그렇다고 표시한다.
+func TestWebhookHistoryReadsOnlyThePayloadHead(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO webhook_events (pg, event_id, status, payload) VALUES
+		('toss', 'big', '수신', jsonb_build_object('pad', repeat('가', 10000))),
+		('toss', 'small', '처리완료', '{"a":1}')`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.WebhookHistory(ctx, nil, nil, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range got {
+		n := len([]rune(r.Payload))
+		switch r.EventID {
+		case "big":
+			if n != WebhookPayloadHead || !r.PayloadCut {
+				t.Errorf("큰 원문 = %d자·잘림 %v, want %d자·true", n, r.PayloadCut, WebhookPayloadHead)
+			}
+		case "small":
+			if r.Payload != `{"a": 1}` || r.PayloadCut {
+				t.Errorf("작은 원문 = %q·잘림 %v, want 그대로·false", r.Payload, r.PayloadCut)
+			}
+		}
+	}
+}
+
 // A-603 웹훅 이력은 미처리(수신)가 앞이고 그다음 최신순이다. 00023 의 인덱스는 이
 // 정렬식 그대로다 — 식이 어긋나면 인덱스는 남고 순서만 조용히 느려진다.
 func TestWebhookHistoryPutsUnhandledFirst(t *testing.T) {

@@ -144,16 +144,23 @@ const (
 	reconcileCallTimeout = 5 * time.Second
 )
 
+// WebhookPayloadHead 는 A-603 이 읽는 원문의 앞부분 길이(문자)다 — queries/webhook.sql
+// WebhookHistory 의 left(…, 4096) 과 같은 값이다. 한 쪽 100행을 통째로 읽으면 큰
+// 원문 몇 개로 화면 하나가 수 MiB 를 메모리에 올린다.
+const WebhookPayloadHead = 4096
+
 // WebhookRow is one row of A-603.
 type WebhookRow struct {
-	ID        string
-	PG        string
-	EventID   string
-	OrderNo   string
-	Status    string
-	Payload   string
-	Error     string
-	CreatedAt time.Time
+	ID      string
+	PG      string
+	EventID string
+	OrderNo string
+	Status  string
+	Payload string
+	// PayloadCut 은 Payload 가 앞 WebhookPayloadHead 자에서 잘렸다는 뜻이다.
+	PayloadCut bool
+	Error      string
+	CreatedAt  time.Time
 }
 
 // WebhookHistory is A-603's list. **`수신` 이 먼저 온다** — 처리되지 않은 채
@@ -176,7 +183,7 @@ func (s *Store) WebhookHistory(ctx context.Context, since, until *time.Time,
 	var out []WebhookRow
 	for _, r := range rows {
 		out = append(out, WebhookRow{ID: r.ID, PG: r.Pg, EventID: r.EventID, OrderNo: r.OrderNo,
-			Status: r.Status, Payload: r.Payload, Error: r.Error, CreatedAt: r.CreatedAt})
+			Status: r.Status, Payload: r.Payload, PayloadCut: r.PayloadCut, Error: r.Error, CreatedAt: r.CreatedAt})
 	}
 	return out, nil
 }

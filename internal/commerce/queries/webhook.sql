@@ -22,8 +22,11 @@ UPDATE payments SET status = '승인', approved_at = now(), raw_response = sqlc.
 WHERE id = sqlc.arg('id') AND status = '대기';
 
 -- name: WebhookHistory :many
+-- 원문은 앞 4,096자만 읽는다 (WebhookPayloadHead). 한 쪽이 100행이다.
 SELECT w.id, w.pg, w.event_id, COALESCE(o.order_no, '')::text AS order_no, w.status,
-       w.payload::text AS payload, COALESCE(w.error, '')::text AS error, w.created_at
+       left(w.payload::text, 4096)::text AS payload,
+       (char_length(w.payload::text) > 4096)::bool AS payload_cut,
+       COALESCE(w.error, '')::text AS error, w.created_at
 FROM webhook_events w LEFT JOIN orders o ON o.id = w.order_id
 -- 기간 조회 (D19 0.6): 수신 시각 기준.
 WHERE (sqlc.narg('since')::timestamptz IS NULL OR w.created_at >= sqlc.narg('since'))

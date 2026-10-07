@@ -86,7 +86,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 4.5 | 첨부: 확장자 허용목록(`.jpg .jpeg .png .gif .webp .pdf .zip .txt .csv`), **매직바이트 대조**, `YYYY/MM/<uuid>` 저장, `os.Root`, 내려줄 때 `Content-Disposition: attachment`·`nosniff`·부모 글 권한 재확인 | `content/upload.go`·`content/attachment.go`·`handler_attachment.go` | 코드 읽기 | ✓ `.svg`·`.html` 없음. 운영자는 목록을 **줄일 수만** 있다 |
 | 4.6 | 설정 파일 0600·원자적 쓰기, `site_url` 은 설치 요청에서, `secure_cookies` 설치 시 감지 | `internal/config/config.go`·`install.go` | `TestSaveUsesOwnerOnlyPermissions`·`TestRequestOriginFollowsTheInstallRequest` | ✓ `site_url` 은 2026-09-13 추가 |
 | 4.7 | 설치 창: 설정이 써진 순간 닫힘, 채워진 DB 거부 | `install.go` | `TestInstallStaysClosedWhenSwitchFails` | ✓ 2026-09-13 에 고침 |
-| 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·테마 24 MiB·웹훅 1 MiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
+| 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·테마 24 MiB·웹훅 64 KiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
 | 4.9 | 테마 파일: 템플릿·다운로드·해시가 같은 파일 경계를 사용, 자산은 `static/` 아래만 | `theme/loader.go` `openThemeFile`·`static.go`·`funcs.go` | 경로·심볼릭 링크·해시 단위 테스트 | ✓ 2026-09-30: `os.OpenInRoot`가 파일을 여는 순간의 탈출을 막는다. 해시의 바깥 파일 읽기를 재현하고 수정 |
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
 | 4.12 | 저장된 자격증명(PG 시크릿·SMTP 비밀번호·소셜 client_secret)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |
@@ -104,7 +104,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 5.5 | 주문 상태 전이는 표(`state.go`)를 거치고 **비교-교환** | `payment.go` `moveOrder`·`returns.go` | 통합 테스트 | ✓ 교환 차액도 2026-09-13 부터 |
 | 5.6 | 환불 누적 ≤ 승인액은 **DB CHECK** | `payments_refund_within_approved` | `TestConcurrentRefundsCannotOvershoot` | ✓ |
 | 5.7 | 재고: `FOR UPDATE` 정렬 잠금 + `CHECK (stock >= 0)` | `commerce/stock.go`·`00011` | `TestStockVersionMismatchIsRefused` 등 | ✓ 초과 판매 경로 없음 |
-| 5.8 | 웹훅: `(pg, event_id)` 유니크로 멱등, 본문 1 MiB, secret **상수 시간** 비교, 본문을 진실로 쓰지 않음 | `webhook.go`·`handler_webhook.go` | `TestWebhookSecretMismatchIsRefused` | ✓ |
+| 5.8 | 웹훅: `(pg, event_id)` 유니크로 멱등, 본문 64 KiB(A-603 은 원문 앞 4,096자만 읽는다), secret **상수 시간** 비교, 본문을 진실로 쓰지 않음 | `webhook.go`·`handler_webhook.go` | `TestWebhookSecretMismatchIsRefused` | ✓ |
 | 5.9 | 교환 대상 조합은 노출 중인 것만 | `returns.go` `OpenReturn` | `TestExchangeRefusesHiddenVariant` | ✓ 2026-09-13 |
 | 5.10 | 시크릿·카드 정보가 로그·화면·원문 보관에 없다 | `Toss.String`(가림)·`MaskCardFields`·`oplog.go`(비밀 필드 없음)·A-602 | `grep` + `make verify-upgrade` ⑤ 실기동 로그 | ✓ |
 | 5.11 | 작업 로그 append-only(D15 7절): DELETE 거부, UPDATE 는 `SET NULL` 한 경우만 | `00010`·`00021` | `TestOperationLogCannotBeRewrittenUnderCoverOfActorNull` | ✓ 2026-09-13 에 구멍을 막음 |
