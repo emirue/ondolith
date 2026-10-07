@@ -158,11 +158,12 @@ func TestAdminRefundIgnoresAnyAmountField(t *testing.T) {
 type cancelCounter struct {
 	adminFakeGateway
 	cancels int
+	err     error // 취소가 돌려줄 오류. nil 이면 「취소가 됐다」
 }
 
 func (g *cancelCounter) Cancel(context.Context, commerce.CancelRequest) (*commerce.Payment, error) {
 	g.cancels++
-	return nil, nil
+	return nil, g.err
 }
 
 // newRefundKey 는 A-507 화면이 발급했을 키와 같은 모양의 값이다. 이 시험들의
@@ -1719,5 +1720,153 @@ func TestAdminFullRefundClosesTheOrderAndRestocks(t *testing.T) {
 	}
 	if status, stock := state(); status != "취소" || stock != 10 {
 		t.Fatalf("전액 환불 뒤 상태 %s, 재고 %d (취소, 10 이어야)", status, stock)
+	}
+}
+
+// pendingRefund 는 구매자가 P-507 로 낸 부분 환불 요청이다 — 한도를 잡은 '요청' 행.
+func pendingRefund(t *testing.T, d *Deps, order *commerce.OrderDetail) string {
+	t.Helper()
+	id, _, err := d.Commerce.RequestRefund(context.Background(), order.OrderNo,
+		[]commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 1}}, "구매자", "단순 변심", newRefundKey(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func refundRowStatus(t *testing.T, pool *pgxpool.Pool, id string) string {
+	t.Helper()
+	var st string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM refunds WHERE id = $1`, id).Scan(&st); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+// **구매자의 환불 요청을 A-507 이 실행하거나 거부한다** (D19 A-507, D14 5-1).
+//
+// 앞 판의 A-507 은 새 환불을 접수하는 폼뿐이라, P-507 이 만든 '요청' 행은 한도를
+// 잡은 채 영원히 '요청' 이었다 — 그만큼은 관리자가 새로 접수해도 한도 초과로
+// 막혔다. 실패해 '요청' 으로 돌아온 취소·반품 환불도 다시 보낼 길이 없었다.
+func TestAdminExecutesOrRejectsAPendingRefund(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	gw := &cancelCounter{}
+	d.Gateway = func() commerce.Gateway { return gw }
+	order, total := paidAdminOrder(t, d, pool) // 수량 2
+	path, pv := "/admin/orders/"+order.OrderNo+"/refund", map[string]string{"no": order.OrderNo}
+
+	run := pendingRefund(t, d, order)
+	if rec := postAdmin(t, d.RefundSave, path, pv,
+		url.Values{"action": {"execute"}, "refund_id": {run}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("실행 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if got := refundRowStatus(t, pool, run); got != "완료" || gw.cancels != 1 {
+		t.Errorf("실행 뒤 상태 %s · PG 취소 %d회, want 완료·1", got, gw.cancels)
+	}
+
+	drop := pendingRefund(t, d, order)
+	if rec := postAdmin(t, d.RefundSave, path, pv,
+		url.Values{"action": {"reject"}, "refund_id": {drop}, "reason": {"사용 흔적"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("거부 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if got := refundRowStatus(t, pool, drop); got != "거부" || gw.cancels != 1 {
+		t.Errorf("거부 뒤 상태 %s · PG 취소 %d회, want 거부·1", got, gw.cancels)
+	}
+	// 거부가 한도를 돌려줬다 — 남은 것은 실행한 한 개 몫뿐이다.
+	if _, refunded, err := d.Commerce.RefundedTotal(context.Background(), order.OrderNo); err != nil || refunded != total/2 {
+		t.Errorf("환불 누적 %d (%v), want %d", refunded, err, total/2)
+	}
+
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM operation_logs
+		WHERE action = 'order.refund' AND target_id = $1`, order.OrderNo).Scan(&n); err != nil || n != 2 {
+		t.Errorf("작업 로그 %d건 (%v), want 2 — 실행·거부 모두 남는다", n, err)
+	}
+}
+
+// 실행은 돈이 나가므로 재인증을 거치고, 거부는 거치지 않는다 (D15 5.3-1 — A-511 과 같다).
+// 남의 주문의 환불 건은 경로의 주문으로 열리지 않는다.
+func TestAdminPendingRefundActionsAreReauthedAndScoped(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, reauth: true,
+		id: "u1", email: "op@example.com", password: "correct horse battery"}
+	d, pool := fixture(t, caller)
+	gw := &cancelCounter{}
+	d.Gateway = func() commerce.Gateway { return gw }
+	mine, _ := paidAdminOrder(t, d, pool)
+	path, pv := "/admin/orders/"+mine.OrderNo+"/refund", map[string]string{"no": mine.OrderNo}
+
+	id := pendingRefund(t, d, mine)
+	if rec := postAdmin(t, d.RefundSave, path, pv,
+		url.Values{"action": {"execute"}, "refund_id": {id}}); rec.Code != http.StatusForbidden {
+		t.Errorf("재인증 없이 실행 = HTTP %d, want 403", rec.Code)
+	}
+	if got := refundRowStatus(t, pool, id); got != "요청" || gw.cancels != 0 {
+		t.Errorf("재인증 없이 상태 %s · PG 취소 %d회, want 요청·0", got, gw.cancels)
+	}
+	// 거부 사유는 받는다 — 구매자가 P-508 에서 읽고, 요청 때의 사유를 덮어쓴다.
+	if rec := postAdmin(t, d.RefundSave, path, pv,
+		url.Values{"action": {"reject"}, "refund_id": {id}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("사유 없이 거부 = HTTP %d, want 422", rec.Code)
+	}
+	if rec := postAdmin(t, d.RefundSave, path, pv,
+		url.Values{"action": {"reject"}, "refund_id": {id}, "reason": {"사용 흔적"}}); rec.Code != http.StatusSeeOther {
+		t.Errorf("재인증 없이 거부 = HTTP %d, want 303 — 돈이 나가지 않는다", rec.Code)
+	}
+
+	// 다른 주문의 경로 + 이 주문의 환불 건.
+	other, _ := deliveredAdminOrderFor(t, d, pool, order2Slug)
+	theirs := pendingRefund(t, d, mine)
+	for _, action := range []string{"execute", "reject"} {
+		rec := postAdmin(t, d.RefundSave, "/admin/orders/"+other.OrderNo+"/refund",
+			map[string]string{"no": other.OrderNo}, url.Values{"action": {action},
+				"refund_id": {theirs}, "reason": {"x"}, "password": {"correct horse battery"}})
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("다른 주문의 환불 건 %s = HTTP %d, want 404", action, rec.Code)
+		}
+	}
+	if got := refundRowStatus(t, pool, theirs); got != "요청" || gw.cancels != 0 {
+		t.Errorf("다른 주문의 환불 건 상태 %s · PG 취소 %d회, want 요청·0", got, gw.cancels)
+	}
+}
+
+// **결과를 모르는 환불('승인')은 「실행」이 같은 키로 다시 보낸다 — 14일 안에서만.**
+// 그 뒤에는 보내지 않고 결제사 화면에서 확인하라고 말한다 (D50, 토스 멱등키 15일).
+func TestAdminResendsAnUnknownRefundOnlyWhileTheKeyLives(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	gw := &cancelCounter{err: commerce.ErrPaymentUnknown}
+	d.Gateway = func() commerce.Gateway { return gw }
+	order, _ := paidAdminOrder(t, d, pool)
+	path, pv := "/admin/orders/"+order.OrderNo+"/refund", map[string]string{"no": order.OrderNo}
+	execute := func(id string) *httptest.ResponseRecorder {
+		return postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"execute"}, "refund_id": {id}})
+	}
+
+	id := pendingRefund(t, d, order)
+	if rec := execute(id); rec.Code != http.StatusBadGateway || refundRowStatus(t, pool, id) != "승인" {
+		t.Fatalf("결과 불명 = HTTP %d · 상태 %s, want 502·승인", rec.Code, refundRowStatus(t, pool, id))
+	}
+	gw.err = nil
+	if rec := execute(id); rec.Code != http.StatusSeeOther || refundRowStatus(t, pool, id) != "완료" {
+		t.Errorf("다시 실행 = HTTP %d · 상태 %s, want 303·완료", rec.Code, refundRowStatus(t, pool, id))
+	}
+
+	old := pendingRefund(t, d, order)
+	gw.err = commerce.ErrPaymentUnknown
+	execute(old)
+	gw.err = nil
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE refunds SET created_at = now() - interval '15 days' WHERE id = $1`, old); err != nil {
+		t.Fatal(err)
+	}
+	before := gw.cancels
+	rec := execute(old)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "결제사 관리자 화면") {
+		t.Errorf("14일 뒤 = HTTP %d, want 422 와 확인 안내 (%q)", rec.Code, rec.Body.String())
+	}
+	if gw.cancels != before || refundRowStatus(t, pool, old) != "승인" {
+		t.Errorf("14일 뒤 취소 %d번 더·상태 %s, want 0·승인", gw.cancels-before, refundRowStatus(t, pool, old))
 	}
 }

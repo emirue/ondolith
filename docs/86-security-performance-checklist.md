@@ -112,7 +112,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 5.13 | `결제대기` 만료: 재고 복원 전 진행 중인 결제를 주문 잠금 안에서 다시 확인. 결제 선점도 같은 주문을 잠그고 상태 검사 | `commerce/order.go`·`payment.go` | 기존 만료 테스트 + `TestConfirmRefusesOrderChangedAfterCheckout`·`TestExpiryRechecksPaymentReservedAfterSelection` | △ 2026-09-30: 경쟁 상황 수정 후 PostgreSQL 실행 검증이 남음 ([GAP-09](85-gaps.md)) |
 | 5.14 | `payments_pg_key_idx` 가 부분 인덱스가 아님 | `00013` | 코드 읽기 | — 그대로 둔다. 토스 `paymentKey` 는 결제 시도마다 새 값이라 실패 행이 키를 점유해도 정상 재결제는 막히지 않고, 다른 주문에서 같은 키가 오는 것(`ErrPaymentKeyReused`)을 잡는 쪽이 더 값지다 |
 | 5.15 | 웹훅 서명 실패 응답 400 | `handler_webhook.go`·[D19](19-screen-io.md) P-905 | 토스 웹훅 가이드(200 만 성공, 최대 7회 재전송) | ✓ 2026-09-14 확정 |
-| 5.16 | 구매자 부분 환불 요청(P-507)의 승인·거부 | A-507 | — | △ 화면이 없다 — [GAP-08](85-gaps.md) |
+| 5.16 | 접수된 환불 건(P-507 구매자 요청·PG 거절로 돌아온 건·결과 불명 건)의 실행·거부 | A-507 `action=execute\|reject` · `commerce/refund.go` `RetryRefund` | `TestAdminExecutesOrRejectsAPendingRefund`·`TestAdminPendingRefundActionsAreReauthedAndScoped`·`TestAdminResendsAnUnknownRefundOnlyWhileTheKeyLives`·`TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives` | ✓ 2026-10-07. 결과 불명(`승인`)은 같은 멱등키로 접수 14일 안에서만 다시 보낸다(토스 키 15일) |
 
 ## 6. 운영 환경
 

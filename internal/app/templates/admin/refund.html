@@ -12,13 +12,37 @@
 <div class="adm-filterbar"><h2>환불 요청 내역</h2></div>
 <div class="adm-table-wrap">
   <table class="adm-table">
-    <thead><tr><th>시각</th><th>요청자</th><th>금액</th><th>상태</th><th>사유</th></tr></thead>
+    <thead><tr><th>시각</th><th>요청자</th><th>금액</th><th>상태</th><th>사유</th><th>처리</th></tr></thead>
     <tbody>
       {{range .Refunds}}
       <tr><td>{{date .CreatedAt "2006-01-02 15:04"}}</td><td>{{.Requester}}</td><td>{{money .Amount}}</td>
-          <td>{{.Status}}</td><td>{{.Reason}}</td></tr>
+          <td>{{.Status}}</td><td>{{.Reason}}</td>
+          <td>
+          {{/* 접수된 건의 실행·거부 (D19 A-507). '요청' 은 구매자 요청이거나 PG 가 거절해
+               돌아온 건이고, '승인' 은 결과를 모르는 건이라 같은 요청 키로 다시 보낸다
+               (접수 14일 안). 실행만 돈이 나가 재인증을 묻는다 (D15 5.3-1). */}}
+          {{if or (eq .Status "요청") (eq .Status "승인")}}
+          <form method="post" class="adm-form">
+            <input type="hidden" name="action" value="execute">
+            <input type="hidden" name="refund_id" value="{{.ID}}">
+            {{if $.NeedsReauth}}
+            <input name="password" type="password" required autocomplete="current-password"
+                   aria-label="비밀번호 확인" placeholder="비밀번호 확인">
+            {{end}}
+            <button type="submit">{{if eq .Status "승인"}}다시 보내기{{else}}실행{{end}}</button>
+          </form>
+          {{end}}
+          {{if eq .Status "요청"}}
+          <form method="post" class="adm-form">
+            <input type="hidden" name="action" value="reject">
+            <input type="hidden" name="refund_id" value="{{.ID}}">
+            <input name="reason" maxlength="500" required aria-label="거부 사유" placeholder="거부 사유">
+            <button type="submit">거부</button>
+          </form>
+          {{end}}
+          </td></tr>
       {{else}}
-      <tr><td colspan="5" class="adm-empty">접수된 요청이 없습니다.</td></tr>
+      <tr><td colspan="6" class="adm-empty">접수된 요청이 없습니다.</td></tr>
       {{end}}
     </tbody>
   </table>

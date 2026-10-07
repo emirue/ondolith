@@ -436,6 +436,15 @@ func restockDeltas(ctx context.Context, tx pgx.Tx, orderID string) ([]StockDelta
 // ErrRefundState 는 환불 건이 실행할 수 있는 상태가 아니라는 뜻이다.
 var ErrRefundState = errors.New("commerce: 실행할 수 있는 환불 건이 아닙니다")
 
+// ErrRefundRetryExpired 는 결과 불명 환불의 멱등키가 PG 쪽에서 이미 죽었을
+// 수 있다는 뜻이다. 그 뒤의 같은 키 호출은 첫 결과가 아니라 새 환불이 된다.
+var ErrRefundRetryExpired = errors.New("commerce: 다시 실행할 수 있는 기간이 지났습니다")
+
+// RefundRetryWindow 는 결과 불명 환불을 같은 키로 다시 부를 수 있는 기간이다.
+// 토스는 같은 멱등키의 재요청에 15일 동안 첫 응답을 돌려준다 (D50). 하루를
+// 남기고, 잴 때는 첫 호출보다 이르거나 같은 접수 시각을 쓴다 — 늘 짧게 잰다.
+const RefundRetryWindow = 14 * 24 * time.Hour
+
 // ExecuteRefund sends a reserved refund to the PG (A-507 의 순서: DB 한도 선점 →
 // PG 호출 → 확정, D13). RequestRefund·CancelOrder·SettleReturn 이 만든 '요청'
 // 행이 대상이다 — 그 행이 있다는 것은 한도가 이미 선점됐다는 뜻이고, 여기서
@@ -445,9 +454,9 @@ var ErrRefundState = errors.New("commerce: 실행할 수 있는 환불 건이 �
 // 상태의 뜻:
 //
 //	요청 → PG 를 부르기 전. 한도는 잡혀 있고 돈은 아직 안 나갔다
-//	승인 → PG 를 **부르는 중이거나 결과 불명**. 다시 부르지 않는다 — 두 번째
-//	       호출이 이중 환불이다. 멱등키(request_key)가 같은 요청은 PG 가
-//	       첫 결과를 돌려주므로 사람이 조회로 확인한 뒤 손으로 닫는다
+//	승인 → PG 를 **부르는 중이거나 결과 불명**. 여기서는 다시 부르지 않는다.
+//	       A-507 의 「다시 실행」(RetryRefund)만 같은 멱등키로 다시 부른다 —
+//	       키가 살아 있는 동안 PG 는 첫 결과를 돌려준다
 //	완료 → PG 가 취소를 확정했다
 //	거부 → RejectRefund 가 한도를 돌려줬다
 //
@@ -455,6 +464,18 @@ var ErrRefundState = errors.New("commerce: 실행할 수 있는 환불 건이 �
 // (타임아웃·5xx·IDEMPOTENT_REQUEST_PROCESSING)은 '승인' 에 둔다 —
 // **미환불이 이중환불보다 낫다** (D13).
 func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string) error {
+	return s.executeRefund(ctx, gw, refundID, time.Time{})
+}
+
+// RetryRefund is A-507's 「다시 실행」 for a stuck refund. '요청' 은 처음 실행과
+// 같고, '승인'(결과 불명)은 같은 멱등키로 다시 부른다 — 접수가 RefundRetryWindow
+// 안일 때만. 그 밖은 ErrRefundRetryExpired 이고 사람이 결제사 화면에서 확인한다.
+func (s *Store) RetryRefund(ctx context.Context, gw Gateway, refundID string, now time.Time) error {
+	return s.executeRefund(ctx, gw, refundID, now)
+}
+
+// executeRefund 의 now 가 영(zero)이면 '승인' 을 다시 부르지 않는다.
+func (s *Store) executeRefund(ctx context.Context, gw Gateway, refundID string, now time.Time) error {
 	ctx, cancel := moneyCtx(ctx) // PG 호출 뒤 기록까지 끝낸다 (payment.go)
 	defer cancel()
 	if gw == nil {
@@ -479,11 +500,18 @@ func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string) 
 	case "완료":
 		return nil // 이미 나갔다. 재전송은 같은 결과다
 	case "요청":
+		if err := q.MarkRefundExecuting(ctx, refundID); err != nil {
+			return err
+		}
+	case "승인":
+		if now.IsZero() {
+			return fmt.Errorf("%w: 상태 %s", ErrRefundState, status)
+		}
+		if now.Sub(r.CreatedAt) > RefundRetryWindow {
+			return ErrRefundRetryExpired
+		}
 	default:
 		return fmt.Errorf("%w: 상태 %s", ErrRefundState, status)
-	}
-	if err := q.MarkRefundExecuting(ctx, refundID); err != nil {
-		return err
 	}
 	// 호출 중 표시를 커밋한다. 트랜잭션을 연 채 PG 를 부르면 잠금이 그 시간만큼
 	// 유지되고, 프로세스가 도중에 죽으면 '요청' 으로 남아 두 번째 호출을 부른다.

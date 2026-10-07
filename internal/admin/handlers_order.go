@@ -428,6 +428,62 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 	if d.fail(w, r, err) {
 		return
 	}
+
+	// 접수된 건의 「실행」·「거부」 (D19 A-507). 대상은 구매자가 P-507 로 낸 요청,
+	// PG 가 거절해 '요청' 으로 돌아온 건, 결과를 모른 채 '승인' 에 멈춘 건이다 —
+	// 이것이 없으면 그 행들은 한도를 잡은 채 나갈 길이 없다. 동작이 없으면 새 접수다.
+	switch r.PostFormValue("action") {
+	case "reject":
+		target, ok := d.refundInOrder(w, r, order)
+		if !ok {
+			return
+		}
+		// 돈이 나가지 않으므로 재인증을 묻지 않는다 (A-511 의 거부와 같다). 사유는
+		// 받는다 — 구매자가 P-508 에서 읽고, 요청 때의 사유를 덮어쓴다.
+		reason := strings.TrimSpace(r.PostFormValue("reason"))
+		if reason == "" {
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "거부 사유를 적으세요.")
+			return
+		}
+		err := d.Commerce.RejectRefund(r.Context(), target.ID, reason)
+		if errors.Is(err, commerce.ErrNotFound) { // '요청' 이 아니다
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "거부할 수 있는 상태가 아닙니다.")
+			return
+		}
+		if err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		d.log(r, c, "order.refund", "order", order.OrderNo,
+			"환불 "+itoa(target.Amount)+"원 요청 거부 — 한도 해제, 환불 건 "+target.ID)
+		http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+		return
+	case "execute":
+		target, ok := d.refundInOrder(w, r, order)
+		if !ok {
+			return
+		}
+		if target.Status != "요청" && target.Status != "승인" {
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "실행할 수 있는 상태가 아닙니다.")
+			return
+		}
+		// **돈이 나간다** — 새 접수와 같은 재인증 (D15 5.3-1).
+		if !reauthOK(c, r) {
+			d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+			return
+		}
+		err := d.Commerce.RetryRefund(r.Context(), d.refundGateway(), target.ID, time.Now())
+		if errors.Is(err, commerce.ErrRefundRetryExpired) {
+			d.log(r, c, "order.refund", "order", order.OrderNo,
+				"환불 "+itoa(target.Amount)+"원 재실행 거부 — 멱등키 기간 경과, 환불 건 "+target.ID)
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity,
+				"결과를 모르는 채 14일이 지나 다시 보낼 수 없습니다. 결제사 관리자 화면에서 취소 여부를 확인하세요.")
+			return
+		}
+		d.finishRefund(w, r, c, order, target.ID, target.Amount, err)
+		return
+	}
+
 	if !reauthOK(c, r) {
 		d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
@@ -479,13 +535,45 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		"환불 "+itoa(amount)+"원 접수 ("+itoa(len(lines))+"개 품목)")
 
 	// 순서는 DB 한도 선점 → PG 호출 → 확정이다 (D13, D19 A-507). 선점은 위에서
-	// 끝났고 여기서 돈이 나간다. 실패는 502 — 선점은 유지되고, 작업 로그에
-	// 그 사실을 남긴다 (「선점 해제 여부까지 기록」).
-	var gw commerce.Gateway
-	if d.Gateway != nil {
-		gw = d.Gateway()
+	// 끝났고 여기서 돈이 나간다.
+	d.finishRefund(w, r, c, order, refundID, amount,
+		d.Commerce.ExecuteRefund(r.Context(), d.refundGateway(), refundID))
+}
+
+// refundInOrder 는 폼의 refund_id 가 경로의 주문의 건일 때만 돌려준다. 번호만
+// 믿으면 아무 주문 화면에서 남의 환불을 실행할 수 있다. 아니면 응답을 쓰고 false.
+func (d *Deps) refundInOrder(w http.ResponseWriter, r *http.Request,
+	order *commerce.OrderDetail) (*commerce.Refund, bool) {
+
+	refunds, err := d.Commerce.Refunds(r.Context(), order.ID)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return nil, false
 	}
-	if err := d.Commerce.ExecuteRefund(r.Context(), gw, refundID); err != nil {
+	id := r.PostFormValue("refund_id")
+	for i := range refunds {
+		if refunds[i].ID == id {
+			return &refunds[i], true
+		}
+	}
+	http.NotFound(w, r)
+	return nil, false
+}
+
+func (d *Deps) refundGateway() commerce.Gateway {
+	if d.Gateway == nil {
+		return nil
+	}
+	return d.Gateway()
+}
+
+// finishRefund 는 PG 로 보낸 결과를 기록하고 화면을 정한다. 새 접수와 「실행」이
+// 같은 길을 지난다. 실패는 502 — 선점은 유지되고, 작업 로그에 그 사실을
+// 남긴다 (D19 A-507 「선점 해제 여부까지 기록」).
+func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
+	order *commerce.OrderDetail, refundID string, amount int, err error) {
+
+	if err != nil {
 		d.Logger.Error("환불 실행", "order", order.OrderNo, "refund", refundID, "err", err)
 		d.log(r, c, "order.refund", "order", order.OrderNo,
 			"환불 "+itoa(amount)+"원 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)
