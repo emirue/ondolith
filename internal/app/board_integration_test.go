@@ -393,6 +393,51 @@ func TestSecretPostTitlesAreListedButBodiesAreNot(t *testing.T) {
 	}
 }
 
+// **게시판 안 검색은 비밀글 본문의 신탁(oracle)이 되지 않는다.**
+//
+// 목록은 비밀글 제목을 누구에게나 보이므로(FR-512), 검색이 본문을 보고 비밀글을
+// 남기면 「이 낱말을 넣었더니 그 글이 남았다」가 곧 본문 한 낱말이다 — 접두
+// 질의라 전화번호 같은 값을 한 글자씩 맞춰 볼 수 있었다. 통합 검색(P-212)은 이미
+// 같은 술어를 갖고 있었고 게시판 안 검색만 빠져 있었다.
+func TestBoardSearchDoesNotRevealSecretPostBodies(t *testing.T) {
+	srv, pool := liveSite(t)
+	boardID := mkBoard(t, pool, "free", content.PresetPublic)
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE boards SET allow_secret = true WHERE id = $1`, boardID); err != nil {
+		t.Fatal(err)
+	}
+	mkUser(t, pool, "a@example.com")
+	mkUser(t, pool, "b@example.com")
+
+	author := client()
+	login(t, srv.URL, "a@example.com", author)
+	resp := httpPost(t, author, srv.URL+"/board/free/write", url.Values{
+		"title": {"비밀 문의"}, "body": {"연락처는 고유낱말토큰 입니다"}, "is_secret": {"1"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("비밀글 작성 HTTP %d", resp.StatusCode)
+	}
+
+	other := client()
+	login(t, srv.URL, "b@example.com", other)
+	for name, c := range map[string]*http.Client{"익명": client(), "다른 회원": other} {
+		code, page := mustGet(t, c, srv.URL+"/board/free?q="+url.QueryEscape("고유낱말"))
+		if code != http.StatusOK {
+			t.Fatalf("%s 검색 HTTP %d", name, code)
+		}
+		if strings.Contains(page, "비밀 문의") {
+			t.Errorf("%s: 본문 낱말 검색에 남의 비밀글이 걸렸다 — 본문이 한 낱말씩 샌다", name)
+		}
+		if strings.Contains(page, "전체 1건") {
+			t.Errorf("%s: 검색 합계가 남의 비밀글을 셌다", name)
+		}
+	}
+	// 자기 글은 자기가 찾는다.
+	if _, page := mustGet(t, author, srv.URL+"/board/free?q="+url.QueryEscape("고유낱말")); !strings.Contains(page, "비밀 문의") {
+		t.Error("작성자가 자기 비밀글을 검색으로 찾지 못한다")
+	}
+}
+
 // 게시판이 비밀글을 끄면 폼에 체크박스가 없고, 보내도 비밀글이 되지 않는다.
 // 화면에서 숨기는 것은 UX 고, 서버가 거절하는 것이 규칙이다 (D15 4.3).
 func TestBoardWithoutSecretPostsRefusesTheFlag(t *testing.T) {

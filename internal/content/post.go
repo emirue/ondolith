@@ -60,9 +60,9 @@ func (c Comment) IsTombstone() bool { return !c.DeletedAt.IsZero() }
 // that hid them entirely would be unusable for the case they exist for, a Q&A
 // board where you need to see your question is in the queue.
 //
-// So there is no viewer here and no canSecret: this query has no permission
-// decision left to make. Search is the one that keeps the filter, because its
-// results carry an excerpt of the body.
+// So the plain list has no permission decision left to make. **A search does**:
+// which secret posts survive a body-text match is itself the body, one word at a
+// time. ListPostsSearch therefore filters by q.ViewerID·q.CanSecret, as P-212 does.
 func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]Post, error) {
 	// The sort key comes from the allow list (listquery.go) and reaches SQL as
 	// a bind parameter that an ORDER BY CASE chain compares (D22 6절).
@@ -80,7 +80,8 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 	// A prefix query is what actually matches Korean text: the stored token
 	// carries the particle, so the exact term misses (D30 measured this).
 	return postsOf(s.q.ListPostsSearch(ctx, contentq.ListPostsSearchParams{
-		BoardID: boardID, Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+		BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
+		Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
 		Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
 }
 
@@ -92,7 +93,8 @@ func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (in
 		return s.q.CountPosts(ctx, boardID)
 	}
 	return s.q.CountPostsSearch(ctx, contentq.CountPostsSearchParams{
-		BoardID: boardID, Search: toPrefixQuery(q.Search)})
+		BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
+		Search: toPrefixQuery(q.Search)})
 }
 
 // PostPage is P-203's read: one page and the pager total.

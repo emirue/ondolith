@@ -115,16 +115,27 @@ func (q *Queries) CountPosts(ctx context.Context, boardID string) (int64, error)
 const countPostsSearch = `-- name: CountPostsSearch :one
 SELECT count(*) FROM posts p
 WHERE p.board_id = $1 AND p.status = 'published'
-  AND p.search_vector @@ to_tsquery('simple', $2)
+  AND (NOT p.is_secret OR $2::bool OR p.author_id = $3)
+  AND p.search_vector @@ to_tsquery('simple', $4)
 `
 
 type CountPostsSearchParams struct {
-	BoardID string
-	Search  string
+	BoardID   string
+	CanSecret bool
+	ViewerID  *string
+	Search    string
 }
 
+// **읽을 수 없는 비밀글은 검색에서 빠진다.** 목록은 비밀글 제목을 누구에게나
+// 보이므로, 검색이 본문을 보고 비밀글을 남기면 「이 낱말로 그 글이 걸렸다」가
+// 곧 본문 한 낱말이다. ListPostsSearch 와 같은 술어여야 합계가 쪽과 맞는다.
 func (q *Queries) CountPostsSearch(ctx context.Context, arg CountPostsSearchParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPostsSearch, arg.BoardID, arg.Search)
+	row := q.db.QueryRow(ctx, countPostsSearch,
+		arg.BoardID,
+		arg.CanSecret,
+		arg.ViewerID,
+		arg.Search,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -352,37 +363,41 @@ FROM (
     FROM posts p
     WHERE p.board_id = $1
       AND p.status = 'published'
-      AND p.search_vector @@ to_tsquery('simple', $2)
+      -- CountPostsSearch 의 주석 참고. 검색에서만 거른다 — 검색어 없는 목록은 제목을 보인다.
+      AND (NOT p.is_secret OR $2::bool OR p.author_id = $3)
+      AND p.search_vector @@ to_tsquery('simple', $4)
     ORDER BY p.is_pinned DESC,
-             CASE WHEN $3::text = 'created' AND $4::bool THEN p.created_at END DESC,
-             CASE WHEN $3::text = 'created' AND NOT $4::bool THEN p.created_at END ASC,
-             CASE WHEN $3::text = 'views' AND $4::bool THEN p.view_count END DESC,
-             CASE WHEN $3::text = 'views' AND NOT $4::bool THEN p.view_count END ASC,
-             CASE WHEN $3::text = 'title' AND $4::bool THEN p.title END DESC,
-             CASE WHEN $3::text = 'title' AND NOT $4::bool THEN p.title END ASC,
-             CASE WHEN $4::bool THEN p.id END DESC,
-             CASE WHEN NOT $4::bool THEN p.id END ASC
-    LIMIT $6::int OFFSET $5::int
+             CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
+             CASE WHEN $5::text = 'created' AND NOT $6::bool THEN p.created_at END ASC,
+             CASE WHEN $5::text = 'views' AND $6::bool THEN p.view_count END DESC,
+             CASE WHEN $5::text = 'views' AND NOT $6::bool THEN p.view_count END ASC,
+             CASE WHEN $5::text = 'title' AND $6::bool THEN p.title END DESC,
+             CASE WHEN $5::text = 'title' AND NOT $6::bool THEN p.title END ASC,
+             CASE WHEN $6::bool THEN p.id END DESC,
+             CASE WHEN NOT $6::bool THEN p.id END ASC
+    LIMIT $8::int OFFSET $7::int
 ) p
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
-         CASE WHEN $3::text = 'created' AND $4::bool THEN p.created_at END DESC,
-         CASE WHEN $3::text = 'created' AND NOT $4::bool THEN p.created_at END ASC,
-         CASE WHEN $3::text = 'views' AND $4::bool THEN p.view_count END DESC,
-         CASE WHEN $3::text = 'views' AND NOT $4::bool THEN p.view_count END ASC,
-         CASE WHEN $3::text = 'title' AND $4::bool THEN p.title END DESC,
-         CASE WHEN $3::text = 'title' AND NOT $4::bool THEN p.title END ASC,
-         CASE WHEN $4::bool THEN p.id END DESC,
-         CASE WHEN NOT $4::bool THEN p.id END ASC
+         CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
+         CASE WHEN $5::text = 'created' AND NOT $6::bool THEN p.created_at END ASC,
+         CASE WHEN $5::text = 'views' AND $6::bool THEN p.view_count END DESC,
+         CASE WHEN $5::text = 'views' AND NOT $6::bool THEN p.view_count END ASC,
+         CASE WHEN $5::text = 'title' AND $6::bool THEN p.title END DESC,
+         CASE WHEN $5::text = 'title' AND NOT $6::bool THEN p.title END ASC,
+         CASE WHEN $6::bool THEN p.id END DESC,
+         CASE WHEN NOT $6::bool THEN p.id END ASC
 `
 
 type ListPostsSearchParams struct {
-	BoardID string
-	Search  string
-	Sort    string
-	Desc    bool
-	Offset  int32
-	Limit   int32
+	BoardID   string
+	CanSecret bool
+	ViewerID  *string
+	Search    string
+	Sort      string
+	Desc      bool
+	Offset    int32
+	Limit     int32
 }
 
 type ListPostsSearchRow struct {
@@ -406,6 +421,8 @@ type ListPostsSearchRow struct {
 func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams) ([]ListPostsSearchRow, error) {
 	rows, err := q.db.Query(ctx, listPostsSearch,
 		arg.BoardID,
+		arg.CanSecret,
+		arg.ViewerID,
 		arg.Search,
 		arg.Sort,
 		arg.Desc,

@@ -3,8 +3,12 @@ SELECT count(*) FROM posts p
 WHERE p.board_id = $1 AND p.status = 'published';
 
 -- name: CountPostsSearch :one
+-- **읽을 수 없는 비밀글은 검색에서 빠진다.** 목록은 비밀글 제목을 누구에게나
+-- 보이므로, 검색이 본문을 보고 비밀글을 남기면 「이 낱말로 그 글이 걸렸다」가
+-- 곧 본문 한 낱말이다. ListPostsSearch 와 같은 술어여야 합계가 쪽과 맞는다.
 SELECT count(*) FROM posts p
-WHERE p.board_id = $1 AND p.status = 'published'
+WHERE p.board_id = sqlc.arg('board_id') AND p.status = 'published'
+  AND (NOT p.is_secret OR sqlc.arg('can_secret')::bool OR p.author_id = sqlc.narg('viewer_id'))
   AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'));
 
 -- name: CountSearchPosts :one
@@ -134,8 +138,10 @@ FROM (
     SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
-    WHERE p.board_id = $1
+    WHERE p.board_id = sqlc.arg('board_id')
       AND p.status = 'published'
+      -- CountPostsSearch 의 주석 참고. 검색에서만 거른다 — 검색어 없는 목록은 제목을 보인다.
+      AND (NOT p.is_secret OR sqlc.arg('can_secret')::bool OR p.author_id = sqlc.narg('viewer_id'))
       AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
     ORDER BY p.is_pinned DESC,
              CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,

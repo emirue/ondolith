@@ -81,6 +81,8 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	q := content.ParseListQuery(r.URL.Query(), b.PerPage)
+	// 검색이 비밀글 본문의 신탁이 되지 않도록 (post.sql CountPostsSearch).
+	q.ViewerID, q.CanSecret = actorID(a), a.CanOn("post.read_secret", auth.BoardID(b.ID))
 
 	// 비밀글도 목록에는 나온다 (FR-512). 본문은 P-204 가 지킨다.
 	// 총수는 화면 요소다 — 내장 테마의 페이저가 「전체 N건」을 그린다
