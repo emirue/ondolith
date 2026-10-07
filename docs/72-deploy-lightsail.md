@@ -89,7 +89,8 @@ server {
     ssl_certificate     /etc/letsencrypt/live/<도메인>/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/<도메인>/privkey.pem;
 
-    client_max_body_size 24m;   # 테마 zip 업로드 상한 + 멀티파트 여유
+    client_max_body_size 65m;   # 앱의 가장 큰 상한(글+첨부·상품 이미지 64MiB) + 멀티파트 여유.
+                                # 더 작으면 앱의 안내 대신 nginx 의 413 화면이 나온다. 테마 zip 은 앱이 24MiB 로 자른다
     # 한 번 HTTPS 로 온 브라우저는 이후 평문으로 오지 않는다. 앱은 TLS 를 모르므로
     # 이 헤더는 프록시가 낸다 — 세션 쿠키가 평문으로 다니는 창을 닫는 것이다.
     add_header Strict-Transport-Security "max-age=31536000" always;

@@ -87,7 +87,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 4.5 | 첨부: 확장자 허용목록(`.jpg .jpeg .png .gif .webp .pdf .zip .txt .csv`), **매직바이트 대조**, `YYYY/MM/<uuid>` 저장, `os.Root`, 내려줄 때 `Content-Disposition: attachment`·`nosniff`·부모 글 권한 재확인 | `content/upload.go`·`content/attachment.go`·`handler_attachment.go` | 코드 읽기 | ✓ `.svg`·`.html` 없음. 운영자는 목록을 **줄일 수만** 있다 |
 | 4.6 | 설정 파일 0600·원자적 쓰기, `site_url` 은 설치 요청에서, `secure_cookies` 설치 시 감지 | `internal/config/config.go`·`install.go` | `TestSaveUsesOwnerOnlyPermissions`·`TestRequestOriginFollowsTheInstallRequest` | ✓ `site_url` 은 2026-09-13 추가 |
 | 4.7 | 설치 창: 설정이 써진 순간 닫힘, 채워진 DB 거부 | `install.go` | `TestInstallStaysClosedWhenSwitchFails` | ✓ 2026-09-13 에 고침 |
-| 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·테마 24 MiB·웹훅 64 KiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
+| 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·상품 이미지 64 MiB·테마 24 MiB·nginx `client_max_body_size 65m`(D72, 2026-10-07 에 24m 에서 맞춤)·웹훅 64 KiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
 | 4.9 | 테마 파일: 템플릿·다운로드·해시가 같은 파일 경계를 사용, 자산은 `static/` 아래만 | `theme/loader.go` `openThemeFile`·`static.go`·`funcs.go` | 경로·심볼릭 링크·해시 단위 테스트 | ✓ 2026-09-30: `os.OpenInRoot`가 파일을 여는 순간의 탈출을 막는다. 해시의 바깥 파일 읽기를 재현하고 수정 |
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
 | 4.12 | 저장된 자격증명(PG 시크릿·SMTP 비밀번호·소셜 client_secret)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |

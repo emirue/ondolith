@@ -248,7 +248,7 @@ go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 - Lightsail에는 AWS WAF를 직접 붙일 수 없다. 결제를 다루므로 **CloudFront를 앞단에 두는
   구성**을 문서로 안내한다
-- TLS는 리버스 프록시(Caddy 권장, 자동 인증서) 또는 CloudFront에서 종단한다
+- TLS는 리버스 프록시(nginx + Let's Encrypt — 설정은 [D72](72-deploy-lightsail.md) 3절) 또는 CloudFront에서 종단한다
 - 설정 파일·업로드 디렉터리를 백업에 포함하되 백업 자체를 공개 저장소에 두지 않는다
 
 ## 체크리스트 — 코드를 올리기 전

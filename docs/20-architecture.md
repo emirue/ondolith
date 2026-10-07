@@ -95,14 +95,22 @@ Phase 1 이후 추가될 자리:
 
 ```
 요청
+ → withProxyClientIP            proxy_ip_header 가 있으면 루프백 프록시가 준 방문자 주소로 (D72 3절)
+ → 경로 분기                     /static/ → 보안 헤더만 · /webhooks/ → P-905 서브트리(세션·CSRF·액터 없음, D15 SC-8)
+ → httpsec.Headers              보안 헤더
  → CrossOriginProtection        상태 변경 요청의 교차 출처 차단 (NFR-205)
  → scs.LoadAndSave              세션 로드 / 응답 시 저장
- → ServeMux                     Go 1.22+ 패턴 라우팅
+ → methodOverride               /cart/items/ 의 POST 만 `_method` 로 PATCH·DELETE (D11, D17 「폼」)
+ → withActor                    세션의 사용자·권한 로드
+ → withAdminRateLimit           관리자 트리만 IP 당 제한 (D15 4.3-2)
+ → withTreeGate                 관리자 트리 입장 판정 (D15 4.1)
+ → ServeMux + guardID           Go 1.22+ 패턴 라우팅. `{id}` 는 uuid 만, 아니면 404
  → 핸들러                        데이터 조회
  → 테마 렌더링                   html/template — 준비된 데이터만 받는다
 ```
 
-미들웨어는 이 세 겹이 전부다. 더 늘리려면 [D10](10-requirements.md)의 요구사항 ID를 근거로 대야 한다.
+미들웨어는 이것이 전부다(`internal/app/app.go` 의 조립 순서). 더 늘리려면 [D10](10-requirements.md)의
+요구사항 ID를 근거로 대야 한다.
 
 ## 모듈 게이팅 (FR-710)
 
@@ -122,7 +130,7 @@ Phase 1 이후 추가될 자리:
 | 항목 | 처리 |
 |---|---|
 | 라우트 | `cms`면 등록하지 않는다 → 404 |
-| 관리자 메뉴 | 등록된 라우트만 메뉴에 나온다. 메뉴는 라우트에서 파생되지 별도 목록이 아니다 |
+| 관리자 메뉴 | 등록된 라우트만 메뉴에 나온다. **메뉴는 아직 별도 목록이다**(`internal/admin/shell.go` 의 `nav`) — 라우트에서 파생하지 않는 대신, 부팅이 메뉴의 모든 경로가 등록된 라우트인지 대조하고 아니면 기동을 멈춘다 |
 | 마이그레이션 | **커머스 테이블도 항상 만든다.** 조건부 스키마는 마이그레이션 관리를 망가뜨린다 ([DEC-3.9](../.ai/DECISIONS.md)와 같은 논리) — 설치처마다 스키마가 달라지면 검증이 불가능하다 |
 
 ### 조립 시점에 정하는데 A-201이 바꾼다면
@@ -204,10 +212,7 @@ FR-110에 걸려 기동하지 못한다.
 
 ## 아직 없는 것
 
-Phase 0 시점에서 의도적으로 비어 있다. 채우기 전에 [D10](10-requirements.md)에서 해당
-FR을 확인할 것.
+채우기 전에 [D10](10-requirements.md)에서 해당 요구사항을 확인할 것. (테마 로더·RBAC·관리자 트리는
+Phase 1~3 에서 만들어져 이 목록에서 뺐다 — 2026-10-07.)
 
-- 테마 로더 (FR-301~308) — 현재 운영 트리는 내장 템플릿 하나만 렌더링한다
-- 인증·RBAC (FR-2xx) — Phase 0 은 `users.is_admin` 불리언 하나뿐이었다. Phase 1 이 RBAC 으로 교체했고 `00020`이 그 컬럼을 지웠다 (W2-01)
-- 관리자 트리 (FR-7xx)
 - 훅 포인트 (NFR-401)
