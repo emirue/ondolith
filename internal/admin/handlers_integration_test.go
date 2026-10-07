@@ -257,6 +257,39 @@ func TestTurnstileKeysOnSiteSettings(t *testing.T) {
 	}
 }
 
+// **GA4 측정 ID 는 형식이 맞을 때만 저장한다** (FR-714). 이 값은 공개 화면의 `<script>` 에
+// 들어간다 — 「G- + 영숫자」(Google 문서) 밖의 값을 받으면 오타는 조용히 측정을 끄고, 이상한
+// 값은 스크립트 주소를 바꾼다. 붙여넣은 공백·소문자는 고쳐 저장하고, 빈 값은 끄기다.
+func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	ctx := context.Background()
+	saved := func() string {
+		kv, err := d.Content.Settings(ctx, "analytics.ga4_id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kv["analytics.ga4_id"]
+	}
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {" g-psw1my7hb4 "}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("맞는 ID = HTTP %d", rec.Code)
+	}
+	if got := saved(); got != "G-PSW1MY7HB4" {
+		t.Errorf("저장된 ID = %q, want G-PSW1MY7HB4", got)
+	}
+	for _, bad := range []string{"UA-12345-1", "G-", "G-PSW1\"><script>", "PSW1MY7HB4", "G-" + strings.Repeat("A", 40)} {
+		if rec := post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {bad}}); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%q = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	if got := saved(); got != "G-PSW1MY7HB4" {
+		t.Errorf("거부한 값이 저장됐다: %q", got)
+	}
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {""}})
+	if got := saved(); got != "" {
+		t.Errorf("빈 값으로 끌 수 없다: %q", got)
+	}
+}
+
 // An empty secret box means "leave it alone": the form cannot show the current
 // value, so empty is the normal state of a screen opened to change something
 // else. Treating it as "erase" silently breaks mail on the next save.

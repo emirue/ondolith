@@ -104,6 +104,8 @@ func TestSiteCarriesOnlyRenderableFields(t *testing.T) {
 		"Type": true, "Business": true,
 		// Turnstile 의 **사이트** 키 — 위젯이 페이지에 싣는 공개값이다 (FR-216). 비밀 키는 아니다.
 		"Turnstile": true,
+		// GA4 측정 ID — 페이지의 측정 스크립트에 들어가는 공개값이다 (FR-714).
+		"Analytics": true,
 	}
 	for i := 0; i < ty.NumField(); i++ {
 		if f := ty.Field(i); !allowed[f.Name] {

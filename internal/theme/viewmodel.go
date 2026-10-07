@@ -53,6 +53,8 @@ type Site struct {
 	// Turnstile is the Cloudflare Turnstile **site** key (공개값) when A-201 turned
 	// the check on, else empty (FR-216). 비밀키는 여기 오지 않는다.
 	Turnstile string
+	// Analytics is the GA4 measurement ID (`G-…`, A-201 이 형식을 본다) or empty (FR-714).
+	Analytics string
 }
 
 // ViewUser is the logged-in caller as a template sees them: enough to greet

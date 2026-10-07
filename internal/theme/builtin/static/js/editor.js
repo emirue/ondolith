@@ -48,6 +48,14 @@
       // 사진은 서버로 올린다. 주소가 없으면 에디터가 base64 로 본문에 박는다 —
       // 서버는 data: 주소를 받지 않는다(D60).
       image: { uploadUrl: ta.getAttribute('data-upload') },
+      // 지도: 「삽입」 에 구글 지도 「지도 퍼가기」 의 iframe 이나 그 src 를 넣는다. embed 플러그인의
+      // 기본 주소 목록(페이스북·인스타그램…)에 구글 지도가 없어 그대로는 거부된다. 서버 정화가
+      // 허용하는 것도 이 주소다(richtext.go embedSrc).
+      embed: {
+        embedQuery: {
+          googleMaps: { pattern: /^https:\/\/www\.google\.com\/maps\/embed\?/i, action: function (u) { return u; }, tag: 'iframe' },
+        },
+      },
     });
 
     // 브라우저 시험(scripts/editor-ime.mjs)이 인스턴스에 닿는 자리다. 쓰지 않으면 해가 없다.

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -176,7 +177,13 @@ var siteSettingKeys = []string{
 	"admin.theme",
 	// 공개 폼 스팸 방지 (FR-216). 둘 다 있어야 켜진다. 비밀키는 봉인되고 다시 보이지 않는다.
 	"turnstile.site_key", "turnstile.secret_key",
+	// 방문 통계 GA4 측정 ID (FR-714). 공개 화면의 <script> 에 들어간다 — 형식은 ga4ID 가 본다.
+	"analytics.ga4_id",
 }
+
+// ga4ID is a GA4 measurement ID: 「G- + 숫자·문자」 (Google 애널리틱스 도움말, 2026-10-08 확인).
+// 길이 상한은 문서에 없다 — 30자는 실제 ID(10자 안팎)보다 넉넉한 우리 상한이다.
+var ga4ID = regexp.MustCompile(`^G-[A-Z0-9]{1,30}$`)
 
 // adminThemes 는 admin.css 가 아는 배색이다 (`data-admin-theme="1a"` … `1e`).
 //
@@ -221,6 +228,15 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 비밀키 빈 칸은 「그대로 두라」다 (MailSettingsSave 와 같은 이유). 끄려면 사이트 키를 비운다.
 	if kv["turnstile.secret_key"] == "" {
 		delete(kv, "turnstile.secret_key")
+	}
+	// 붙여넣은 공백·소문자는 고쳐 받는다. 빈 값은 끄기다.
+	if v, ok := kv["analytics.ga4_id"]; ok {
+		kv["analytics.ga4_id"] = strings.ToUpper(strings.TrimSpace(v))
+		if v := kv["analytics.ga4_id"]; v != "" && !ga4ID.MatchString(v) {
+			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+				http.StatusUnprocessableEntity, "GA4 측정 ID 는 G- 로 시작하는 영문·숫자입니다 (예: G-PSW1MY7HB4).")
+			return
+		}
 	}
 	for _, k := range []string{"turnstile.site_key", "turnstile.secret_key"} {
 		if len(kv[k]) > 200 {

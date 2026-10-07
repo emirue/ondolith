@@ -69,6 +69,13 @@
       </label>
     </div>
 
+    {{/* 방문 통계 (FR-714). 공개 화면의 <head> 에 Google gtag.js 가 붙는다. */}}
+    <label class="adm-field">
+      <span>GA4 측정 ID</span>
+      <input type="text" name="analytics.ga4_id" value="{{index .Settings "analytics.ga4_id"}}" maxlength="32" placeholder="G-XXXXXXXXXX" autocomplete="off">
+      <span class="adm-hint">Google 애널리틱스 → 관리 → 데이터 스트림 → 웹 스트림의 첫 줄에 있습니다. 비우면 측정 스크립트가 붙지 않습니다.</span>
+    </label>
+
     {{/* 사이트 유형 전환은 파괴적 작업이다 (D15 SC-5 4항) — 유형이 바뀔 때만 본다. */}}
     {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">

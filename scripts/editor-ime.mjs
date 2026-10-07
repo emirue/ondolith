@@ -81,17 +81,32 @@ for (let i = 0; i < 50 && !src; i++) {
 if (!/^\/media\/[0-9a-f-]{36}$/.test(src)) fail(`에디터에 들어간 사진 주소가 「${src.slice(0, 40)}…」 다 — 서버 업로드(P-214)를 거치지 않았다`)
 console.log('  ✓ 사진이 서버로 올라가 /media/{id} 로 들어간다')
 
+// 지도: 구글 지도 「지도 퍼가기」 의 iframe 을 「삽입」 으로 넣는다 (FR-513 지도 삽입).
+const MAP = 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3162!2d126.97!3d37.56'
+const mapOK = await ev(`Promise.resolve(document.querySelector('textarea[data-editor]').sunEditor.$.plugins.embed
+  .submitSRC('<iframe src="${MAP}" width="600" height="450"></iframe>')).then(Boolean)`)
+if (!mapOK) fail('에디터가 구글 지도 iframe 을 받지 않았다 (embed 플러그인 embedQuery)')
+let mapSrc = ''
+for (let i = 0; i < 30 && !mapSrc; i++) {
+  mapSrc = await ev(`(document.querySelector('.se-wrapper-wysiwyg iframe') || {}).getAttribute?.('src') || ''`)
+  if (!mapSrc) await sleep(100)
+}
+if (!mapSrc.startsWith('https://www.google.com/maps/embed?')) fail(`에디터에 들어간 지도 주소가 「${mapSrc.slice(0, 60)}」 다`)
+console.log('  ✓ 구글 지도 iframe 이 에디터에 들어간다')
+
 const posted = cdp.once('Page.loadEventFired', sessionId)
 posted.catch(() => {})
 await ev(`document.querySelector('form.form').requestSubmit()`)
 await Promise.race([posted, new Promise((r) => setTimeout(r, 8000))])
 await sleep(300)
 const view = await ev(`(() => { const r = document.querySelector('.page-body.rich');
-  return r ? { text: r.textContent, img: (r.querySelector('img') || {}).getAttribute?.('src') || '', path: location.pathname } : null })()`)
+  return r ? { text: r.textContent, img: (r.querySelector('img') || {}).getAttribute?.('src') || '',
+    map: (r.querySelector('iframe') || {}).getAttribute?.('src') || '', path: location.pathname } : null })()`)
 if (!view) fail('저장한 글이 에디터 본문(.rich)으로 그려지지 않았다: ' + (await ev('location.pathname')))
 if (!view.text.includes('시공 사례')) fail(`저장한 글의 본문이 「${view.text}」 다`)
 if (view.img !== src) fail(`저장한 글의 사진이 「${view.img}」 다, want ${src}`)
+if (!view.map.startsWith('https://www.google.com/maps/embed?')) fail(`저장한 글의 지도가 「${view.map.slice(0, 60)}」 다 — 정화가 지웠다`)
 const size = await ev(`fetch(${JSON.stringify(src)}).then(r => r.blob()).then(b => createImageBitmap(b)).then(i => i.width + 'x' + i.height)`)
 if (size !== '1920x1280') fail(`올린 사진이 ${size} 로 나간다, want 1920x1280 (긴 변 1920px)`)
-console.log(`  ✓ 저장한 글에 같은 글자와 1920px 로 줄인 사진이 보인다 (${view.path})`)
+console.log(`  ✓ 저장한 글에 같은 글자와 1920px 로 줄인 사진, 지도가 보인다 (${view.path})`)
 process.exit(0)
