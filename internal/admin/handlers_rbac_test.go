@@ -444,7 +444,9 @@ func TestRoleChangesAreReauthedAndLogged(t *testing.T) {
 	assign := url.Values{"user_id": {target}, "role": {"operator"}}
 
 	for name, call := range map[string]func() *httptest.ResponseRecorder{
-		"A-404": func() *httptest.ResponseRecorder { return post(d.RoleGrantPermission, "/admin/roles/permissions", grant) },
+		"A-404": func() *httptest.ResponseRecorder {
+			return post(d.RoleGrantPermission, "/admin/roles/permissions", grant)
+		},
 		"A-405": func() *httptest.ResponseRecorder { return post(d.RoleAssign, "/admin/users/roles", assign) },
 	} {
 		rec := call()

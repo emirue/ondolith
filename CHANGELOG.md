@@ -89,6 +89,10 @@
 
 ### Fixed
 
+- **쓰이지 않던 `POST /admin/users/{id}` 를 지웠다.** 어느 폼도 그곳으로 보내지 않았고, 기존 사용자 주소인데 사용자
+  **생성** 핸들러에 이어져 있었다. 관리자가 표시 이름을 바꾸거나 계정을 되살리는 기능은 아직 없다
+  ([GAP-25](docs/85-gaps.md)).
+
 - **배포 안내의 nginx 업로드 상한이 앱보다 작던 것.** [D72](docs/72-deploy-lightsail.md) 의 `client_max_body_size 24m` 은
   테마 zip 기준이라, 24 MiB 를 넘는 글 첨부·상품 이미지(앱 상한 64 MiB)는 앱의 안내 대신 nginx 의 413 화면을 봤다.
   안내를 `65m` 으로 고쳤다 — 이미 배포한 서버는 nginx 설정의 그 한 줄을 고치고 `nginx -s reload` 한다.

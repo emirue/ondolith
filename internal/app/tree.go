@@ -218,8 +218,6 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "user.update", Handler: ad.UserDetail})
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/new", Class: SC5,
 		Permission: "user.create", Handler: ad.UserCreate})
-	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}", Class: SC5,
-		Permission: "user.create", Handler: ad.UserCreate})
 	// The three destructive account operations enforce re-authentication in the
 	// handlers (D15 5.3-1), not here. A wrapper was written first and removed:
 	// it duplicated a check the handlers already make, and the only behaviour it

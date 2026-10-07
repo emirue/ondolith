@@ -111,20 +111,6 @@ func Nav(can func(string) bool, shop bool) []NavGroup {
 	return out
 }
 
-// NavScreens is the set of screen ids the menu points at, so a test can compare
-// it against the registered routes.
-func NavScreens(shop bool) []string {
-	out := make([]string, 0, len(nav))
-	for _, it := range nav {
-		if it.Shop && !shop {
-			continue
-		}
-		out = append(out, it.Screen)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // NavPaths is the same for paths.
 func NavPaths(shop bool) []string {
 	out := make([]string, 0, len(nav))

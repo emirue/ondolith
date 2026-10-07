@@ -2638,8 +2638,10 @@ D15 7절 표를 고친다 — 화면마다 즉석에서 정하면 이 문서가 
 | **삭제** | POST | **`user.delete`** |
 | **타인 비밀번호 재설정 강제** | POST | **`user.reset_password`** |
 
-> D11 A-402의 메서드는 GET, POST뿐이고 DELETE가 없다. D15 2.2는 `user.delete`의 사용 화면을
-> A-402로 적는다 → **삭제는 POST 동작으로 수행한다**고 읽어야 두 문서가 모두 성립한다.
+> D11 A-402의 주소(`/admin/users/{id}`)는 GET 이고, 동작은 하위 주소의 POST 다(`/admin/users/new`·
+> `…/{id}/deactivate`·`…/{id}/delete`·`…/{id}/reset-password`). DELETE 는 없다. D15 2.2는 `user.delete`의
+> 사용 화면을 A-402로 적는다 → **삭제는 POST 동작으로 수행한다.** 「수정」(표시 이름·재활성화)은 아직
+> 없다 ([GAP-25](85-gaps.md)).
 
 **거부 조건**
 

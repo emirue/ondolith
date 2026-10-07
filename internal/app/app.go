@@ -4,7 +4,6 @@ package app
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,28 +33,8 @@ import (
 	"github.com/emirue/ondolith/internal/theme"
 )
 
-//go:embed templates/*.html
-var templatesFS embed.FS
-
 // sessionLifetime is how long a session survives without activity.
 const sessionLifetime = 12 * time.Hour
-
-// siteView is everything a theme template may learn about the site.
-//
-// It exists so that config.Config never reaches a template. That struct holds
-// DatabaseURL — the DSN, password included — and themes are third-party files
-// swapped at runtime (FR-302, FR-303). A single `{{.DatabaseURL}}` added to a
-// theme for debugging would publish the database credential to every visitor.
-//
-// Widen this deliberately, one field at a time. docs/17-theme-contract.md
-// defines what belongs here.
-type siteView struct {
-	Name string
-}
-
-func newSiteView(cfg *config.Config) siteView {
-	return siteView{Name: cfg.SiteName}
-}
 
 // newSessionManager applies the session cookie hardening NFR-204 requires.
 //

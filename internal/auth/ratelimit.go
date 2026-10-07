@@ -106,15 +106,6 @@ func (l *Limiter) Forget(key string) {
 	l.mu.Unlock()
 }
 
-// Sweep removes buckets untouched for longer than maxIdle. Allow does this on
-// its own once the map is large (sweepAt); Sweep is for callers that want it
-// at a moment of their choosing. There is no background worker (NFR-103).
-func (l *Limiter) Sweep(maxIdle time.Duration) int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.sweepLocked(l.now(), maxIdle)
-}
-
 // sweepAt is the map size at which Allow sweeps before inserting. 4096 개의
 // 활성 클라이언트 아래서는 아무 일도 없다.
 const sweepAt = 4096

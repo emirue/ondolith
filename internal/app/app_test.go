@@ -1,19 +1,14 @@
 package app
 
 import (
-	"bytes"
-	"html/template"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alexedwards/scs/v2/memstore"
-
-	"github.com/emirue/ondolith/internal/config"
 )
 
 // NFR-204. Each flag is asserted on its own so that flipping any single one
@@ -48,55 +43,6 @@ func TestSessionManagerUsesGivenStore(t *testing.T) {
 	store := memstore.New()
 	if s := newSessionManager(store, true); s.Store != store {
 		t.Error("전달한 스토어가 세션 매니저에 설정되지 않았다")
-	}
-}
-
-// The theme is a third-party file swapped at runtime (FR-302, FR-303). If the
-// view model carries the DSN, one `{{.DatabaseURL}}` added to a theme publishes
-// the database password to every visitor.
-func TestSiteViewCarriesNoSecret(t *testing.T) {
-	const secret = "s3cr3t-db-password"
-	cfg := &config.Config{
-		DatabaseURL: "postgres://postgres:" + secret + "@127.0.0.1:5432/ondolith",
-		SiteName:    "온돌 사이트",
-	}
-
-	tmpl, err := template.ParseFS(templatesFS, "templates/*.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&out, "home.html", newSiteView(cfg)); err != nil {
-		t.Fatal(err)
-	}
-
-	if strings.Contains(out.String(), secret) {
-		t.Fatal("렌더링 결과에 DB 비밀번호가 들어 있다")
-	}
-	if strings.Contains(out.String(), "postgres://") {
-		t.Fatal("렌더링 결과에 DSN 이 들어 있다")
-	}
-	if !strings.Contains(out.String(), cfg.SiteName) {
-		t.Error("사이트 이름이 렌더링되지 않았다 — 뷰 모델이 너무 좁다")
-	}
-}
-
-// Widening the view model must be a deliberate act. Adding a field fails this
-// test, which is the point: the next field could be a credential.
-func TestSiteViewFieldsAreAllowlisted(t *testing.T) {
-	allowed := map[string]bool{"Name": true}
-
-	typ := reflect.TypeOf(siteView{})
-	for i := 0; i < typ.NumField(); i++ {
-		name := typ.Field(i).Name
-		if !allowed[name] {
-			t.Errorf("뷰 모델에 허용되지 않은 필드가 있다: %s "+
-				"— docs/17-theme-contract.md 를 보고 의도한 것이면 이 목록에 추가할 것", name)
-		}
-		delete(allowed, name)
-	}
-	for name := range allowed {
-		t.Errorf("뷰 모델에서 사라진 필드: %s", name)
 	}
 }
 
