@@ -89,6 +89,10 @@ const AUDIT = String.raw`(() => {
     if (!vis(el)) continue
     const cs = getComputedStyle(el)
     if (['hidden', 'checkbox', 'radio', 'file'].includes(el.type)) continue
+    // 에디터(SunEditor, FR-513)의 툴바는 아이콘 버튼이다 — 테두리·배경 없이 그리고 누르거나
+    // 올렸을 때 배경이 생기는 것이 그 디자인이며, 모양은 내장한 suneditor.min.css 가 정한다.
+    // 우리 테마가 빠뜨린 폼 요소가 아니다. 에디터 밖의 폼 요소는 그대로 잰다.
+    if (el.closest('.sun-editor')) continue
     const bare = parseFloat(cs.borderTopWidth) === 0 &&
       (cs.backgroundColor === 'rgba(0, 0, 0, 0)' || cs.backgroundColor === 'transparent')
     if (bare) out.push('스타일 없는 폼 요소: ' + name(el))
@@ -132,14 +136,12 @@ const AUDIT = String.raw`(() => {
 
   // 8) **같은 화면의 버튼 높이가 제각각이다.** 두 종류까지는 크기 위계로
   //    읽히지만(주 동작과 보조 동작), 그 이상은 통일감이 없는 것이다.
-  const btnH = new Set()
-  for (const el of document.querySelectorAll('button, .btn, .adm-btn')) {
-    if (!vis(el)) continue
-    btnH.add(Math.round(el.getBoundingClientRect().height))
-  }
+  //    에디터(SunEditor) 툴바의 아이콘 버튼은 그 에디터의 크기 체계라 세지 않는다 — 5) 와 같은 이유.
+  const btns = [...document.querySelectorAll('button, .btn, .adm-btn')]
+    .filter((el) => vis(el) && !el.closest('.sun-editor'))
+  const btnH = new Set(btns.map((el) => Math.round(el.getBoundingClientRect().height)))
   if (btnH.size > 2) {
-    const who = [...document.querySelectorAll('button, .btn, .adm-btn')].filter(vis)
-      .map((e) => Math.round(e.getBoundingClientRect().height) + '=' + name(e).slice(0, 34))
+    const who = btns.map((e) => Math.round(e.getBoundingClientRect().height) + '=' + name(e).slice(0, 34))
     out.push('버튼 높이가 ' + btnH.size + ' 종류: ' + [...new Set(who)].join(' | '))
   }
 

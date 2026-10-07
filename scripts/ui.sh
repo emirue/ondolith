@@ -220,7 +220,7 @@ cat "$PUBLIC_URLS" >>"$ANON_URLS"
 		/admin/menus /admin/users /admin/users/new \
 		/admin/user-fields /admin/roles /admin/settings /admin/settings/mail \
 		/admin/settings/payment /admin/settings/business /admin/settings/social \
-		/admin/themes /admin/themes/upload /admin/oplog /admin/system \
+		/admin/themes /admin/themes/upload /admin/oplog /admin/system /admin/backup \
 		/admin/webhooks /admin/products /admin/products/new /admin/categories \
 		/admin/orders /admin/terms /admin/commerce/policy /admin/reconcile \
 		/admin/stock
