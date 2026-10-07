@@ -57,3 +57,18 @@ func TestStockRowFormsAreDrawnOnlyForManagers(t *testing.T) {
 		}
 	}
 }
+
+// **A-507 폼이 화면이 발급한 요청 키를 되돌려 보낸다** (D19 A-507).
+//
+// 키가 폼에 없으면 서버는 재전송을 알아보지 못한다 — 그래서 POST 는 키 없는
+// 요청을 422 로 거절하고, 이 필드가 빠지면 환불 화면 자체가 쓸 수 없게 된다.
+func TestRefundFormCarriesTheIssuedRequestKey(t *testing.T) {
+	order := &commerce.OrderDetail{OrderNo: "20261007-ABCDEFGHJK"}
+	// renderRefund 가 넘기는 값 전부다 — 빠지면 템플릿이 nil 을 그리다 실패한다.
+	view := renderAdmin(t, "admin/refund.html", map[string]any{
+		"Order": order, "Refunds": []commerce.Refund{}, "RequestKey": "Key_issued-by-the-server-0123456",
+		"Approved": 0, "Refunded": 0, "Remaining": 0, "NeedsReauth": false, "Error": ""})
+	if !strings.Contains(view, `<input type="hidden" name="request_key" value="Key_issued-by-the-server-0123456">`) {
+		t.Error("환불 폼에 발급된 요청 키가 실리지 않았다")
+	}
+}

@@ -51,9 +51,30 @@ func newRandomKey() (string, error) {
 
 // NewRequestKey is the idempotency key for a refund request.
 //
-// 서버가 만든다. 폼에서 받으면 같은 키를 두 번 보내 접수를 막거나, 매번 다른
-// 키를 보내 이중 접수를 만들 수 있다 — 멱등 키의 목적이 뒤집힌다.
+// 서버가 만든다. 구매자 화면(P-507)은 POST 마다 만든다 — 폼에서 받으면 같은
+// 키로 남의 접수를 막거나 키를 바꿔 이중 접수를 만들 수 있다. 관리자 화면
+// (A-507)은 **화면을 그릴 때 만들어 폼이 되돌려 준다** (D19 A-507): 그래야 같은
+// 폼의 재전송(더블클릭·502 새로고침)이 같은 키로 와서 UNIQUE 가 알아본다.
+// 그쪽은 주문 범위를 붙여 저장하므로(AdminRefundKey) 다른 주문의 키와 겹치지 않는다.
 func NewRequestKey() (string, error) { return newRandomKey() }
+
+// ValidRequestKey reports whether s has NewRequestKey's shape. 폼이 되돌려 준 값을
+// 쓰기 전에 본다 — 모양이 다르면 이 서버가 발급한 것이 아니다.
+func ValidRequestKey(s string) bool {
+	if len(s) != 32 { // base64url(24바이트), 패딩 없음
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// AdminRefundKey scopes a form-returned key to one order, so a key can only ever
+// collide with a resubmission of the same order's form.
+func AdminRefundKey(orderID, formKey string) string { return "A-507:" + orderID + ":" + formKey }
 
 // NewReturnNo is the same shape as an order number, with an R prefix.
 //

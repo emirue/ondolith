@@ -30,6 +30,9 @@
 {{/* **금액 입력란이 없다.** 관리자 화면이라고 예외를 두면 그 경로만 위변조
      가능해진다 (FR-625). 품목·수량만 받고 서버가 스냅샷에서 계산한다. */}}
 <form method="post" class="adm-form">
+  {{/* 화면이 발급한 요청 키다. 같은 폼을 다시 보내면 같은 키로 와서 서버가
+       「이미 처리된 요청」으로 알아본다 (D19 A-507). */}}
+  <input type="hidden" name="request_key" value="{{.RequestKey}}">
   <fieldset>
     <legend>환불할 품목</legend>
     {{range .Order.Items}}

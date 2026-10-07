@@ -387,7 +387,11 @@ ITEM=$(sql "select oi.id from order_items oi join orders o on o.id=oi.order_id
 # 이 시나리오의 PG 키는 가짜이고 결제도 SQL 로 넣은 것이라 **PG 가 거부한다** —
 # 그때의 정답은 502 이고 선점은 남는다(「미환불이 이중환불보다 낫다」, D13).
 # 실제 환불 한 바퀴는 D73 의 실측이 본다.
+# 요청 키는 화면이 발급하고 폼이 되돌려 준다 (D19 A-507) — 화면을 열어 읽는다.
+RKEY=$(body GET "/admin/orders/$NO/refund" | grep -o 'name="request_key" value="[^"]*"' | sed 's/.*value="//; s/"$//')
+[ -n "$RKEY" ] && ok "T7.4 환불 화면이 요청 키를 싣는다" || bad "T7.4 환불 화면에 요청 키가 없다"
 want "T7.4 PG 가 거부한 환불은 502" 502 "$(code POST "/admin/orders/$NO/refund" \
+	--data-urlencode "request_key=$RKEY" \
 	--data-urlencode "item_id=$ITEM" --data-urlencode "qty_$ITEM=1" \
 	--data-urlencode "reason=단순 변심" --data-urlencode "password=$ADMIN_PW")"
 want "T7.4 선점은 남는다 — 완료로 넘어가지 않았다" 0 \

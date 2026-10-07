@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -80,7 +81,7 @@ func TestAdminRefundRequiresReauth(t *testing.T) {
 
 	rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 		map[string]string{"no": order.OrderNo},
-		url.Values{"item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"}})
+		url.Values{"request_key": {newRefundKey(t)}, "item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"}})
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("재인증 미충족 = HTTP %d, want 403", rec.Code)
@@ -100,7 +101,7 @@ func TestAdminRefundRequiresReauth(t *testing.T) {
 	// 틀린 비밀번호도 막힌다.
 	rec = postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 		map[string]string{"no": order.OrderNo},
-		url.Values{"item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"},
+		url.Values{"request_key": {newRefundKey(t)}, "item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"},
 			"password": {"틀린 비밀번호"}})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("틀린 비밀번호 = HTTP %d, want 403", rec.Code)
@@ -110,7 +111,7 @@ func TestAdminRefundRequiresReauth(t *testing.T) {
 	// 15분이 지난 운영자는 로그아웃 전에는 환불을 못 한다.
 	rec = postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 		map[string]string{"no": order.OrderNo},
-		url.Values{"item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"},
+		url.Values{"request_key": {newRefundKey(t)}, "item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"},
 			"password": {"correct horse battery"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
@@ -136,7 +137,7 @@ func TestAdminRefundIgnoresAnyAmountField(t *testing.T) {
 	rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 		map[string]string{"no": order.OrderNo},
 		url.Values{
-			"item_id": {item.ID}, "qty_" + item.ID: {"1"},
+			"request_key": {newRefundKey(t)}, "item_id": {item.ID}, "qty_" + item.ID: {"1"},
 			"amount": {"999999"}, "refund_amount": {"999999"},
 		})
 	if rec.Code != http.StatusSeeOther {
@@ -153,6 +154,85 @@ func TestAdminRefundIgnoresAnyAmountField(t *testing.T) {
 	}
 }
 
+// cancelCounter 는 PG 취소가 몇 번 나갔는지 센다 — 이중 환불은 결국 이 숫자다.
+type cancelCounter struct {
+	adminFakeGateway
+	cancels int
+}
+
+func (g *cancelCounter) Cancel(context.Context, commerce.CancelRequest) (*commerce.Payment, error) {
+	g.cancels++
+	return nil, nil
+}
+
+// newRefundKey 는 A-507 화면이 발급했을 키와 같은 모양의 값이다. 이 시험들의
+// 주제는 키가 아니라서, 화면을 거치지 않고 만든다.
+func newRefundKey(t *testing.T) string {
+	t.Helper()
+	k, err := commerce.NewRequestKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// refundFormKey 는 A-507 화면이 폼에 실어 준 요청 키다.
+func refundFormKey(t *testing.T, d *Deps, orderNo string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/admin/orders/"+orderNo+"/refund", nil)
+	req.SetPathValue("no", orderNo)
+	rec := httptest.NewRecorder()
+	d.RefundForm(rec, req)
+	// 이 패키지의 시험용 Render 는 데이터를 `|키=값` 으로 쓴다 (fixture). 실제 폼에
+	// hidden 필드로 실리는지는 app 패키지의 렌더 시험이 본다.
+	m := regexp.MustCompile(`\|RequestKey=([A-Za-z0-9_-]+)`).FindStringSubmatch(rec.Body.String())
+	if m == nil {
+		t.Fatalf("환불 화면이 요청 키를 싣지 않았다 (HTTP %d)", rec.Code)
+	}
+	return m[1]
+}
+
+// **같은 폼을 다시 보내면 「이미 처리된 요청」이지 두 번째 환불이 아니다** (D19 A-507).
+//
+// 앞 판은 POST 마다 요청 키를 새로 만들어서 `refunds_request_key_uniq` 가 아무것도
+// 막지 못했다. 수량 2개 중 1개를 환불하는 폼을 더블클릭하거나, 502 화면을
+// 새로고침해 재전송하면 환불 행이 둘 생기고 PG 취소가 두 번 나갔다 — 남은 수량
+// 검사는 남은 것을 전부 환불할 때만 막는다.
+func TestAdminRefundResubmitIsRecognisedNotRepeated(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	gw := &cancelCounter{}
+	d.Gateway = func() commerce.Gateway { return gw }
+	order, _ := paidAdminOrder(t, d, pool) // 수량 2
+	item := order.Items[0]
+	path := "/admin/orders/" + order.OrderNo + "/refund"
+	pv := map[string]string{"no": order.OrderNo}
+
+	form := url.Values{"item_id": {item.ID}, "qty_" + item.ID: {"1"},
+		"request_key": {refundFormKey(t, d, order.OrderNo)}}
+	if rec := postAdmin(t, d.RefundSave, path, pv, form); rec.Code != http.StatusSeeOther {
+		t.Fatalf("첫 제출 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	rec := postAdmin(t, d.RefundSave, path, pv, form) // 같은 폼을 다시
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "이미 처리된 요청") {
+		t.Errorf("재전송 = HTTP %d, want 200 「이미 처리된 요청」 (%q)", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM refunds`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || gw.cancels != 1 {
+		t.Errorf("환불 %d건 · PG 취소 %d회, want 1·1 — 재전송이 두 번째 환불이 됐다", n, gw.cancels)
+	}
+
+	// 키 없는 요청은 접수하지 않는다 — 키가 없으면 재전송을 알아볼 수 없다.
+	delete(form, "request_key")
+	if rec := postAdmin(t, d.RefundSave, path, pv, form); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("키 없이 = HTTP %d, want 422", rec.Code)
+	}
+}
+
 // 남은 수량을 넘는 요청은 422 다. 관리자라고 넘길 수 없다.
 func TestAdminRefundRespectsRemainingQuantity(t *testing.T) {
 	caller := &fakeCaller{perms: map[string]bool{"order.refund": true},
@@ -163,7 +243,7 @@ func TestAdminRefundRespectsRemainingQuantity(t *testing.T) {
 
 	rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 		map[string]string{"no": order.OrderNo},
-		url.Values{"item_id": {item.ID}, "qty_" + item.ID: {"3"}})
+		url.Values{"request_key": {newRefundKey(t)}, "item_id": {item.ID}, "qty_" + item.ID: {"3"}})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("수량 초과 = HTTP %d, want 422", rec.Code)
 	}
@@ -344,7 +424,7 @@ func TestAdminRefundIsRecordedInTheOperationLog(t *testing.T) {
 
 	rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 		map[string]string{"no": order.OrderNo},
-		url.Values{"item_id": {item.ID}, "qty_" + item.ID: {"1"}})
+		url.Values{"request_key": {newRefundKey(t)}, "item_id": {item.ID}, "qty_" + item.ID: {"1"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
@@ -1587,7 +1667,7 @@ func TestAdminRefundIsExecutedAtThePG(t *testing.T) {
 
 	rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 		map[string]string{"no": order.OrderNo},
-		url.Values{"item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"},
+		url.Values{"request_key": {newRefundKey(t)}, "item_id": {order.Items[0].ID}, "qty_" + order.Items[0].ID: {"1"},
 			"password": {"correct horse battery"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
@@ -1614,7 +1694,7 @@ func TestAdminFullRefundClosesTheOrderAndRestocks(t *testing.T) {
 	refund := func(qty string) int {
 		return postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund",
 			map[string]string{"no": order.OrderNo},
-			url.Values{"item_id": {item.ID}, "qty_" + item.ID: {qty}}).Code
+			url.Values{"request_key": {newRefundKey(t)}, "item_id": {item.ID}, "qty_" + item.ID: {qty}}).Code
 	}
 	state := func() (status string, stock int) {
 		if err := pool.QueryRow(ctx, `SELECT status FROM orders WHERE order_no = $1`, order.OrderNo).Scan(&status); err != nil {

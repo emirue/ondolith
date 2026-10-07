@@ -394,8 +394,15 @@ func (d *Deps) renderRefund(w http.ResponseWriter, r *http.Request, c Caller,
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// 요청 키는 화면을 그릴 때 발급하고 폼이 되돌려 준다 (D19 A-507). POST 마다
+	// 만들면 같은 폼의 재전송이 매번 새 키라 UNIQUE 가 아무것도 막지 못한다.
+	key, err := commerce.NewRequestKey()
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
 	d.Render(w, r, "admin/refund.html", code, map[string]any{
-		"Order": order, "Refunds": refunds,
+		"Order": order, "Refunds": refunds, "RequestKey": key,
 		"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
 		// D15 5.3-1: 최근 15분 내 확인이 있으면 비밀번호 필드를 그리지 않는다.
 		// 매 클릭마다 물으면 관리자가 비밀번호를 브라우저에 저장하게 된다.
@@ -434,15 +441,21 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 			"환불할 품목과 수량을 고르세요.")
 		return
 	}
-	key, err := commerce.NewRequestKey()
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	formKey := r.PostFormValue("request_key")
+	if !commerce.ValidRequestKey(formKey) {
+		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity,
+			"요청이 올바르지 않습니다. 화면을 새로 고친 뒤 다시 시도하세요.")
 		return
 	}
 
 	refundID, amount, err := d.Commerce.RequestRefund(r.Context(), order.OrderNo, lines,
-		"관리자", r.PostFormValue("reason"), key)
+		"관리자", r.PostFormValue("reason"), commerce.AdminRefundKey(order.ID, formKey))
 	switch {
+	case errors.Is(err, commerce.ErrRefundDuplicate):
+		// 같은 폼의 재전송이다. 첫 요청이 이미 접수했다 — 두 번째 환불을 만들지
+		// 않고 지금 상태를 보여 준다. 로그는 남기지 않는다 (D19 A-507 오류 표).
+		d.renderRefund(w, r, c, order, http.StatusOK, "이미 처리된 요청입니다.")
+		return
 	case errors.Is(err, commerce.ErrNoPayment):
 		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "환불할 결제가 없습니다.")
 		return
