@@ -39,7 +39,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-102", Method: "POST", Pattern: "/logout", Class: SC2, Handler: lg.logout})
 	r.Add(Route{Screen: "P-103", Method: "GET", Pattern: "/signup", Class: SC2, Handler: acc.signupForm})
 	r.Add(Route{Screen: "P-103", Method: "POST", Pattern: "/signup", Class: SC2, Handler: acc.signup})
-	r.Add(Route{Screen: "P-112", Method: "GET", Pattern: "/verify/{token}", Class: SC2, Handler: acc.verify})
+	r.Add(Route{Screen: "P-112", Method: "GET", Pattern: "/verify/{token}", Class: SC2,
+		UnsafeGETReason: "메일의 링크는 GET 이다. 무엇을 인증할지는 한 번 쓰면 버리는 토큰이 정하고, " +
+			"인증되는 것은 그 메일을 받은 주소뿐이다",
+		Handler: acc.verify})
 	r.Add(Route{Screen: "P-104", Method: "GET", Pattern: "/password/reset", Class: SC2,
 		Handler: acc.resetRequestForm})
 	r.Add(Route{Screen: "P-104", Method: "POST", Pattern: "/password/reset", Class: SC2,
