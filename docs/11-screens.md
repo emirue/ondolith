@@ -81,8 +81,8 @@
 |---|---|---|---|---|---|---|---|
 | P-101 | 로그인 | `/login` | GET, POST | 공개 | 있음 | SC-2 | FR-201, FR-202, FR-204, FR-209 |
 | P-102 | 로그아웃 | `/logout` | POST | 로그인 | 있음 | SC-2 | FR-203 |
-| P-103 | 회원가입 | `/signup` | GET, POST | 공개 | 있음 | SC-2 | FR-210 |
-| P-104 | 비밀번호 재설정 요청 | `/password/reset` | GET, POST | 공개 | 있음 | SC-2 | FR-207 |
+| P-103 | 회원가입 | `/signup` | GET, POST | 공개 | 있음 | SC-2 | FR-210, FR-216 |
+| P-104 | 비밀번호 재설정 요청 | `/password/reset` | GET, POST | 공개 | 있음 | SC-2 | FR-207, FR-216 |
 | P-105 | 비밀번호 재설정 수행 | `/password/reset/{token}` | GET, POST | 공개 | 있음 | SC-2 | FR-207 |
 | P-106 | 소셜 로그인 시작 | `/auth/{provider}` | POST | 공개 | 있음 | SC-2 | FR-208 |
 | P-107 | 소셜 로그인 콜백 | `/auth/{provider}/callback` | GET | 공개 | 있음 | SC-2 | FR-208, FR-204 |
@@ -98,13 +98,13 @@
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
 | P-201 | 홈 | `/{$}` | GET | 공개 | 없음 | SC-1 | FR-301, FR-308, FR-511 |
-| P-202 | 정적 페이지 | `/{slug}` | GET | 공개 | 없음 | SC-1 | FR-401, FR-402, FR-403, FR-511 |
-| P-203 | 게시판 목록 | `/board/{slug}` | GET | 권한:post.read | 없음 | SC-1 | FR-501, FR-503, FR-507, FR-508 |
-| P-204 | 글 보기 | `/board/{slug}/{id}` | GET | 권한:post.read | 없음 | SC-1 | FR-504, FR-505, FR-511, FR-512 |
-| P-205 | 글 쓰기 | `/board/{slug}/write` | GET, POST | 권한:post.write | 있음 | SC-2 | FR-502, FR-503, FR-504, FR-506 |
-| P-206 | 글 수정 | `/board/{slug}/{id}/edit` | GET, POST | 본인 | 있음 | SC-3 | FR-502, FR-503, FR-504, FR-506 |
+| P-202 | 정적 페이지 | `/{slug}` | GET | 공개 | 없음 | SC-1 | FR-401, FR-402, FR-403, FR-511, FR-513 |
+| P-203 | 게시판 목록 | `/board/{slug}` | GET | 권한:post.read | 없음 | SC-1 | FR-501, FR-503, FR-507, FR-508, FR-515 |
+| P-204 | 글 보기 | `/board/{slug}/{id}` | GET | 권한:post.read | 없음 | SC-1 | FR-504, FR-505, FR-511, FR-512, FR-513 |
+| P-205 | 글 쓰기 | `/board/{slug}/write` | GET, POST | 권한:post.write | 있음 | SC-2 | FR-502, FR-503, FR-504, FR-506, FR-216, FR-513, FR-514 |
+| P-206 | 글 수정 | `/board/{slug}/{id}/edit` | GET, POST | 본인 | 있음 | SC-3 | FR-502, FR-503, FR-504, FR-506, FR-513, FR-514 |
 | P-207 | 글 삭제 | `/board/{slug}/{id}/delete` | POST | 본인 | 있음 | SC-3 | FR-504 |
-| P-208 | 댓글 작성 | `/board/{slug}/{id}/comments` | POST | 권한:comment.write | 있음 | SC-2 | FR-505 |
+| P-208 | 댓글 작성 | `/board/{slug}/{id}/comments` | POST | 권한:comment.write | 있음 | SC-2 | FR-505, FR-216 |
 | P-209 | 댓글 수정 | `/comments/{id}/edit` | GET, POST | 본인 | 있음 | SC-3 | FR-505 |
 | P-210 | 댓글 삭제 | `/comments/{id}/delete` | POST | 본인 | 있음 | SC-3 | FR-505 |
 | P-211 | 첨부파일 다운로드 | `/attachments/{id}` | GET | 권한:post.read | 없음 | SC-7 | FR-506, NFR-206 |
@@ -187,7 +187,7 @@
 
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
-| A-201 | 사이트 설정 | `/admin/settings` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-306, FR-511, FR-703, FR-710 |
+| A-201 | 사이트 설정 | `/admin/settings` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-306, FR-511, FR-703, FR-710, FR-714 |
 | A-202 | 테마 목록·활성화 | `/admin/themes` | GET, POST | 권한:theme.activate | 있음 | SC-5 | FR-302, FR-303, FR-308 |
 | A-203 | 테마 업로드 | `/admin/themes/upload` | GET, POST | 권한:theme.upload | 있음 | SC-7 | FR-307, NFR-206 |
 | A-204 | 메뉴 관리 | `/admin/menus` | GET, POST | 권한:menu.manage | 있음 | SC-5 | FR-405 |
@@ -202,10 +202,10 @@
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
 | A-301 | 페이지 목록 | `/admin/pages` | GET | 권한:page.view | 없음 | SC-4 | FR-401, FR-403 |
-| A-302 | 페이지 편집 | `/admin/pages/{id}` | GET, POST | 권한:page.update | 있음 | SC-5 | FR-401, FR-402, FR-404 |
+| A-302 | 페이지 편집 | `/admin/pages/{id}` | GET, POST | 권한:page.update | 있음 | SC-5 | FR-401, FR-402, FR-404, FR-513, FR-514 |
 | A-303 | 페이지 발행 | `/admin/pages/{id}/publish` | POST | 권한:page.publish | 있음 | SC-5 | FR-403 |
 | A-304 | 게시판 목록 | `/admin/boards` | GET | 권한:board.view | 없음 | SC-4 | FR-501, FR-705 |
-| A-305 | 게시판 생성·설정 | `/admin/boards/{id}` | GET, POST | 권한:board.manage | 있음 | SC-5 | FR-501, FR-505, FR-506, FR-512, FR-705 |
+| A-305 | 게시판 생성·설정 | `/admin/boards/{id}` | GET, POST | 권한:board.manage | 있음 | SC-5 | FR-501, FR-505, FR-506, FR-512, FR-705, FR-515 |
 | A-306 | 커스텀 필드 스키마 편집기 | `/admin/boards/{id}/fields` | GET, POST | 권한:board.manage | 있음 | SC-5 | FR-502, FR-503, FR-509, FR-705 |
 | A-307 | 글 관리 | `/admin/posts` | GET, POST | 권한:post.moderate | 있음 | SC-5 | FR-504, FR-507, FR-512 |
 | A-308 | 댓글 관리 | `/admin/comments` | GET, POST | 권한:comment.moderate | 있음 | SC-5 | FR-505 |
@@ -268,6 +268,7 @@
 |---|---|
 | FR-304 | 코어가 테마에 제공하는 **템플릿 함수맵**이다. 플랫폼 계약이지 화면이 아니다 ([D40](40-theme.md)) |
 | FR-305 | "테마에 비즈니스 로직을 넣을 수 없다"는 **금지 규칙**이다. 실현하는 화면이 아니라 모든 화면이 지켜야 할 제약이다 |
+| FR-713 | **아직 만들지 않았다** — [D81](81-work-breakdown.md) W6-06 이 백업 화면을 만들면 이 행을 지운다 (2026-10-08 계획) |
 
 `NFR-###`는 이 검사 대상이 아니다. 비기능 요구사항은 특정 화면이 아니라 시스템 전체에
 걸리는 것이 정상이다.
