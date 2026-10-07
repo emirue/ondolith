@@ -165,6 +165,12 @@ func TestProductImageRoundTripsAndShowsOnTheShop(t *testing.T) {
 	if v := resp.Header.Get("Content-Disposition"); v != "inline" {
 		t.Errorf("Content-Disposition = %q, want inline", v)
 	}
+	// **보이는 이미지는 브라우저가 하루 캐시하고, 공유 캐시는 들지 않는다.** 헤더가
+	// 없던 앞 판은 캐시 여부가 추정에 맡겨졌다 — 공유 캐시가 Last-Modified 로 들고
+	// 있으면 상품을 숨긴 뒤에도 남에게 나간다.
+	if cc := resp.Header.Get("Cache-Control"); cc != "private, max-age=86400" {
+		t.Errorf("Cache-Control = %q, want private, max-age=86400", cc)
+	}
 
 	// Content-Type 은 **기록된 값**이다. 내용을 다시 추측하면 GIF 는 어차피
 	// image/gif 로 나와 이 단언이 헛돌므로, 기록을 바꿔 놓고 그 값이 오는지 본다.

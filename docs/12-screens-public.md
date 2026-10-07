@@ -190,7 +190,9 @@
   예외는 `product.manage` 하나다: A-502가 이 주소로 미리보기를 그리므로 그 권한이 있는 로그인
   사용자에게는 숨긴 상품의 이미지도 내보내고, 그 응답은 `Cache-Control: private, no-store`다
 - **헤더**: `Content-Type`은 업로드 때 서버가 잰 값(`mime_type`), `X-Content-Type-Options: nosniff`,
-  `Content-Disposition: inline`. 첨부(P-211)가 언제나 `attachment`인 것과 다른 이유는 타입이다 —
+  `Content-Disposition: inline`, 보이는 상품이면 `Cache-Control: private, max-age=86400` — id 는 올릴 때마다
+  새로 생겨 내용이 바뀌지 않으므로 브라우저가 하루 들고 있고, 공유 캐시는 들지 않아 숨김이 남에게 바로
+  반영된다(2026-10-07). 첨부(P-211)가 언제나 `attachment`인 것과 다른 이유는 타입이다 —
   이 표에는 jpg·png·gif·webp만 들어올 수 있고(검증기 + DB `CHECK`) 그것들은 문서로 해석되지 않는다
 
 ---

@@ -186,6 +186,12 @@ func (d *shopDeps) productImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		// id 는 올릴 때마다 새로 생겨 내용이 바뀌지 않는다 — 목록을 열 때마다
+		// 이미지마다 묻지 않게 하루 캐시한다. **private 이다:** 공유 캐시(CDN)가
+		// 들고 있으면 상품을 숨긴 뒤에도 남에게 나간다 (위의 노출 재확인, D15 SC-7).
+		// 헤더가 없으면 공유 캐시가 Last-Modified 로 추정 캐시할 수 있었다.
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 	}
 	f, err := d.images.Open(img)
 	if err != nil {
