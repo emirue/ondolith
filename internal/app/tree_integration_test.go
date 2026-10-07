@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -639,5 +640,40 @@ func TestAdminWithoutTrailingSlashRedirects(t *testing.T) {
 	defer res2.Body.Close()
 	if res2.StatusCode != http.StatusOK {
 		t.Errorf("/admin/ → HTTP %d", res2.StatusCode)
+	}
+}
+
+// **프록시 뒤에서도 로그인 제한은 방문자마다다** (D72, D86 1.12).
+//
+// 앞 판은 RemoteAddr 만 보아서, D72 처럼 nginx 뒤에 두면 모든 요청이 127.0.0.1 이었다.
+// 로그인은 IP 버킷이 비면 계정 확인 전에 429 를 내므로, 익명 한 명이 분당 10번
+// 틀리면 관리자를 포함한 **모든 사람의 로그인**이 막혔다. httptest 서버의 연결은
+// 루프백이라 그 구성을 그대로 재현한다.
+func TestLoginRateLimitIsPerVisitorBehindTheProxy(t *testing.T) {
+	srv, _ := liveSiteWith(t, func(c *config.Config) { c.ProxyIPHeader = "X-Real-IP" })
+	try := func(visitor string, n int) int {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/login", strings.NewReader(
+			url.Values{"email": {fmt.Sprintf("nobody%d@example.com", n)}, "password": {"guess"}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", srv.URL)
+		req.Header.Set("X-Real-IP", visitor)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	// 한 방문자가 한도(분당 10)를 넘긴다 — 계정은 매번 달리해 IP 버킷만 찬다.
+	last := 0
+	for i := 0; i < 11; i++ {
+		last = try("203.0.113.5", i)
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("한도를 넘긴 방문자의 11번째 = HTTP %d, want 429", last)
+	}
+	// 다른 방문자는 막히지 않는다.
+	if code := try("203.0.113.9", 99); code == http.StatusTooManyRequests {
+		t.Error("다른 방문자의 로그인이 429 다 — 프록시 뒤에서 IP 제한이 사이트 전체 제한이 됐다")
 	}
 }

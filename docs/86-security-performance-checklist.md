@@ -40,7 +40,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 1.9 | OAuth `state` 32바이트·세션 보관·**상수 시간 비교**·1회용, 콜백 프로바이더 허용목록 | `handler_social.go` | 코드 읽기 | ✓ `subtle.ConstantTimeCompare` |
 | 1.10 | 소셜 계정은 **기존 계정에만 연결**(이메일 일치로 자동 연결 없음) | `internal/auth/social.go` | 코드 읽기 | ✓ `(provider, uid)` 로만 찾는다 |
 | 1.11 | 속도 제한: 로그인 IP 10/분·계정 5/분, 재설정 3/시간, 가입 5/시간, 재인증 5/분 | `internal/auth/ratelimit.go` `DefaultLimits` | 단위 테스트가 D15 4.3-2 와 대조 | ✓ |
-| 1.12 | **프록시 뒤에서 IP 별 제한이 사이트 전체 제한이 된다** | `middleware_gate.go` `clientIP` — `RemoteAddr` 만 | [D72](72-deploy-lightsail.md) 「프록시 뒤의 속도 제한」 | — 코드로는 안 고친다(`X-Forwarded-For` 신뢰는 CloudFront 구성에서 오히려 틀린다). 프록시의 `limit_req` 가 맡는다 |
+| 1.12 | **프록시 뒤에서 IP 별 제한이 사이트 전체 제한이 된다** | `middleware_gate.go` `withProxyClientIP`·`clientIP`, 설정 `proxy_ip_header` | `TestLoginRateLimitIsPerVisitorBehindTheProxy`·`TestProxyClientIPIsTrustedOnlyFromLoopback` | ✓ 2026-10-07 고침. 앞의 「— 프록시의 limit_req 가 맡는다」는 틀렸다 — 앱 안의 전역 버킷이 남아 익명 한 명이 모든 로그인을 막을 수 있었다. 이제 루프백에서 온 연결에 한해 설정한 헤더(`X-Real-IP`)를 클라이언트로 본다. 로그인 성공이 IP 버킷을 지우던 것도 함께 고침 |
 | 1.13 | 재인증 창 15분, 위험 작업(테마 업로드·환불·계정 조작·결제 설정)에 요구 | `internal/app/reauth.go`·각 핸들러 | 코드 읽기 | ✓ |
 | 1.14 | FR-214: 켜져 있으면 미인증 계정은 글·댓글·주문 불가 | `handler_board.go`·`handler_comment.go`·`handler_checkout.go` | `TestUnverifiedAccountCannotWriteWhenRequired` | ✓ 2026-09-13 에 고침 |
 | 1.15 | OAuth 외부 요청 시한 | `auth/social_provider.go` | `TestSocialProvidersBoundOutboundRequests` | ✓ 2026-09-30: 세 프로바이더의 코드 교환·프로필 조회에 요청당 15초 |

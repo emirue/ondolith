@@ -99,20 +99,35 @@ server {
         proxy_set_header   Host              $host;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;   # ← 이 줄이 중요하다
+        proxy_set_header   X-Real-IP         $remote_addr;  # ← 속도 제한이 방문자마다 되려면
     }
 }
 ```
 
+그리고 `/opt/ondolith/ondolith.json` 에 한 줄을 더한다 (아래 「프록시 뒤의 속도 제한」):
+
+```json
+"proxy_ip_header": "X-Real-IP"
+```
+
 ### 프록시 뒤의 속도 제한
 
-D15 4.3-2 의 IP 별 제한(로그인 10/분, 재설정 3/시간 …)은 **`RemoteAddr`** 로 센다.
-`X-Forwarded-For` 는 누구나 보낼 수 있어 믿지 않는다 — 믿으면 요청자가 자기 버킷을
-고르고 제한은 없는 것이 된다. 그 대가로, 위 nginx 처럼 같은 인스턴스의 프록시 뒤에서는
-**모든 방문자의 `RemoteAddr` 가 127.0.0.1** 이라 IP 별 제한이 **사이트 전체 제한**이
-된다: 누군가 1분에 10번 틀리면 모든 방문자의 로그인이 잠시 막히고, 계정별 제한
-(5/분)만이 남는다. 이 구성에서는 **프록시가 IP 별 제한을 맡는다** —
-`limit_req_zone $binary_remote_addr` 로 `/login`·`/password/reset`·`/signup` 을 묶는다.
-CloudFront 를 앞에 두면 WAF 의 레이트 리밋이 같은 자리다.
+D15 4.3-2 의 IP 별 제한(로그인 10/분, 재설정 3/시간, 관리자 화면 60/분 …)은 클라이언트
+주소로 센다. 같은 인스턴스의 프록시 뒤에서는 **모든 연결의 `RemoteAddr` 가 127.0.0.1** 이므로,
+`proxy_ip_header` 가 없으면 IP 별 제한이 **사이트 전체 제한 하나**가 된다. 로그인은 IP 버킷이
+비면 계정 확인 전에 거절하므로, **익명 한 명이 분당 10번 틀리는 것만으로 관리자를 포함한 모든
+로그인이 막힌다.** 관리자 화면 제한도 같아서 초당 1회면 관리자 화면 전체가 잠긴다
+(2026-10-07 감사에서 확인). nginx 의 `limit_req` 를 더해도 앱 안의 전역 버킷은 그대로라 풀리지 않는다.
+
+그래서 위 nginx 블록이 `X-Real-IP` 를 **덮어써** 넘기고, `ondolith.json` 의
+`"proxy_ip_header": "X-Real-IP"` 가 그 헤더를 클라이언트 주소로 쓰게 한다. 앱은 이 헤더를
+**루프백에서 온 연결에서만** 읽는다 — 밖에서 곧장 들어와 같은 헤더를 보내는 요청은 무시하므로,
+요청자가 자기 버킷을 고를 수 없다. 값이 IP 하나가 아니면 역시 무시한다(그래서
+`X-Forwarded-For` 가 아니라 `X-Real-IP` 다). 작업 로그·웹훅 로그의 IP 도 함께 실제 주소가 된다.
+
+**CloudFront 를 앞에 두면** nginx 의 `$remote_addr` 가 CloudFront 엣지 주소다. nginx 의 realip
+모듈로 CloudFront 대역에서 온 연결에 한해 실제 방문자 주소를 꺼내야 `X-Real-IP` 가 방문자가 된다
+(4절). 그러지 않으면 엣지 하나를 거치는 방문자들이 버킷 하나를 나눠 쓴다.
 
 ### `X-Forwarded-Proto`와 `secure_cookies`
 

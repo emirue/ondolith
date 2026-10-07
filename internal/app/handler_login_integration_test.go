@@ -230,3 +230,27 @@ func TestLoginRateLimited(t *testing.T) {
 		t.Errorf("HTTP %d, want 429", rec.Code)
 	}
 }
+
+// **로그인에 성공해도 IP 버킷은 그대로다.**
+//
+// 앞 판은 성공한 로그인 뒤 IP 버킷까지 지웠다. 그러면 자기 계정 하나만 있으면
+// 몇 번 틀릴 때마다 한 번씩 로그인해 IP 제한을 계속 새로 시작할 수 있다 — IP
+// 제한이 막으려는 것이 여러 계정에 걸친 비밀번호 대입인데(D15 4.3-2) 그것이
+// 무력해진다. 오타 낸 사람을 풀어 주는 것은 계정 버킷을 지우는 것으로 충분하다.
+func TestSuccessfulLoginDoesNotResetTheIPBucket(t *testing.T) {
+	d, h, store := loginFixture(t)
+	mkAccount(t, store, "me@example.com", "correct-horse-battery")
+	d.limits.LoginPerIP = auth.Limit{Burst: 3, Window: 60_000_000_000}
+
+	// 남의 계정 둘을 틀리고(2), 자기 계정으로 성공(3)
+	postForm(h, "/login", url.Values{"email": {"v1@example.com"}, "password": {"guess"}}, nil)
+	postForm(h, "/login", url.Values{"email": {"v2@example.com"}, "password": {"guess"}}, nil)
+	if rec := postForm(h, "/login", url.Values{"email": {"me@example.com"},
+		"password": {"correct-horse-battery"}}, nil); rec.Code != http.StatusSeeOther {
+		t.Fatalf("자기 계정 로그인 = HTTP %d", rec.Code)
+	}
+	rec := postForm(h, "/login", url.Values{"email": {"v3@example.com"}, "password": {"guess"}}, nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("IP 한도를 넘긴 네 번째 시도 = HTTP %d, want 429 — 성공한 로그인이 IP 버킷을 지웠다", rec.Code)
+	}
+}

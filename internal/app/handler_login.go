@@ -117,10 +117,11 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 	}
 	stampAuthAt(d.sm, ctx, authAt)
 
-	// Successful login clears the failure counters: someone who mistyped four
-	// times must not stay throttled afterwards.
+	// Successful login clears the ACCOUNT counter: someone who mistyped four
+	// times must not stay throttled afterwards. **IP 버킷은 지우지 않는다** — 지우면
+	// 자기 계정으로 몇 번에 한 번 로그인해 IP 제한을 계속 새로 시작할 수 있고,
+	// 그 제한이 막으려던 여러 계정 대입이 열린다 (D15 4.3-2).
 	d.limiter.Forget("login:acct:" + email)
-	d.limiter.Forget("login:ip:" + ip)
 
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }

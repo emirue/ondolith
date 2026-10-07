@@ -518,7 +518,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// — 기동 검사가 D11 과 대조하는 것이 그 표다.
 	staticOutside := httpsec.Headers(http.HandlerFunc(static))
 	main := h
-	h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h = withProxyClientIP(cfg.ProxyIPHeader)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/static/"):
 			staticOutside.ServeHTTP(w, r)
@@ -527,7 +527,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		default:
 			main.ServeHTTP(w, r)
 		}
-	})
+	}))
 
 	// 결제대기 만료 (D14: 결제대기 → 결제실패, 시스템). NFR-103 대로 고루틴이다.
 	// AuthWindow 가 지난 주문은 P-408 이 승인을 거부하므로 결제될 길이 없는데,

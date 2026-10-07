@@ -59,6 +59,16 @@ type Config struct {
 	// ThemeDir is where disk themes live, for the same reason.
 	ThemeDir string `json:"theme_dir"`
 
+	// ProxyIPHeader names the header a reverse proxy on THIS machine sets to the
+	// client's address (nginx: `proxy_set_header X-Real-IP $remote_addr;`). Empty
+	// means none: the client is RemoteAddr.
+	//
+	// It is read only when the connection comes from loopback — i.e. from that
+	// proxy. A client reaching the app directly cannot choose its rate-limit
+	// bucket by sending the header. Without it, behind the proxy every visitor
+	// is 127.0.0.1 and each per-IP limit becomes one site-wide limit (D72).
+	ProxyIPHeader string `json:"proxy_ip_header,omitempty"`
+
 	// Path is where this config was read from. It is not serialised — it is
 	// where the file IS, not something the file says — and it is what relative
 	// UploadDir/ThemeDir resolve against.
