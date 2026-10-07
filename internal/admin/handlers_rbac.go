@@ -137,15 +137,23 @@ func (d *Deps) MenuDelete(w http.ResponseWriter, r *http.Request) {
 // ---- A-403 / A-404 / A-405 역할·권한 ------------------------------------------
 
 func (d *Deps) RoleList(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "role.view"); !ok {
+	c, ok := d.require(w, r, "role.view")
+	if !ok {
 		return
 	}
+	d.renderRoles(w, r, c, http.StatusOK, "")
+}
+
+// renderRoles draws A-403, whose forms post to A-404·A-405. 재인증이 모자라면
+// 그 두 화면이 이것을 403 으로 다시 그린다 (D15 5.3-1, D19 C7).
+func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, code int, msg string) {
 	roles, err := d.Auth.Roles(r.Context())
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/roles.html", http.StatusOK, map[string]any{"Roles": roles})
+	d.Render(w, r, "admin/roles.html", code, map[string]any{
+		"Roles": roles, "NeedsReauth": c.NeedsReauth(), "Error": msg})
 }
 
 // RoleGrantPermission is A-404. R4 and R5 are enforced HERE, on the server —
@@ -157,6 +165,11 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	// 권한 상승의 최종 단계다 — 재인증 (D15 5.3-1).
+	if !reauthOK(c, r) {
+		d.renderRoles(w, r, c, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
 	}
 	ctx := r.Context()
@@ -187,6 +200,8 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: actorPerms}
 	if err := auth.CanAddPermissionToRole(actor, role, permKey); err != nil {
+		// R4·R5 위반은 권한 상승 시도다 — 남긴다 (D19 A-404).
+		d.log(r, c, "role.manage", "role", role.Key, "권한 부여 거부 ("+permKey+") — "+err.Error())
 		Forbidden(w)
 		return
 	}
@@ -207,6 +222,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	d.log(r, c, "role.manage", "role", role.Key, "권한 부여: "+permKey)
 	http.Redirect(w, r, "/admin/roles", http.StatusSeeOther)
 }
 
@@ -218,6 +234,11 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	// 최고 위험 화면이다 — 재인증 (D15 5.3-1).
+	if !reauthOK(c, r) {
+		d.renderRoles(w, r, c, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
 	}
 	ctx := r.Context()
@@ -243,6 +264,8 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: actorPerms}
 	if err := auth.CanAssignRole(actor, targetUser, role); err != nil {
+		// R1·R2·R3 위반은 남긴다 (D19 A-405).
+		d.log(r, c, "role.assign", "user", targetUser, "역할 부여 거부 ("+role.Key+") — "+err.Error())
 		Forbidden(w)
 		return
 	}
@@ -250,6 +273,7 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	d.log(r, c, "role.assign", "user", targetUser, "역할 부여: "+role.Key)
 	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 

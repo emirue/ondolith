@@ -422,3 +422,56 @@ func TestScopedGrantIsStoredScoped(t *testing.T) {
 		t.Error("게시판 하나에 준 권한이 전역으로 저장됐다")
 	}
 }
+
+// **역할·권한 변경(A-404·A-405)은 재인증을 거친다** (D15 5.3-1 — 권한 상승의 최종
+// 단계). 미충족이면 403 과 A-403 폼 재표시이고 아무것도 바뀌지 않는다. 성공과
+// R 규칙 위반은 작업 로그에 남는다 (D19 A-404·A-405 오류 표).
+func TestRoleChangesAreReauthedAndLogged(t *testing.T) {
+	d, pool := fixture(t, nil)
+	d.OpLog = content.NewStore(pool).OpLog()
+	ctx := context.Background()
+	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	target, _ := d.Auth.CreateUser(ctx, "t@example.com", "h", "대상")
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`, me); err != nil {
+		t.Fatal(err)
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"role.manage": true, "role.assign": true}, id: me,
+			email: "me@example.com", superuser: true, reauth: true, password: "correct horse battery"}
+	}
+	grant := url.Values{"role": {"operator"}, "permission": {"page.view"}}
+	assign := url.Values{"user_id": {target}, "role": {"operator"}}
+
+	for name, call := range map[string]func() *httptest.ResponseRecorder{
+		"A-404": func() *httptest.ResponseRecorder { return post(d.RoleGrantPermission, "/admin/roles/permissions", grant) },
+		"A-405": func() *httptest.ResponseRecorder { return post(d.RoleAssign, "/admin/users/roles", assign) },
+	} {
+		rec := call()
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "admin/roles.html") {
+			t.Errorf("%s 재인증 없이 = HTTP %d (%q), want 403 과 폼 재표시", name, rec.Code, rec.Body.String())
+		}
+	}
+	if perms, _ := d.Auth.LoadPermissions(ctx, target); perms.Can("admin.access") {
+		t.Fatal("재인증 없이 역할이 부여됐다")
+	}
+
+	grant.Set("password", "correct horse battery")
+	assign.Set("password", "correct horse battery")
+	if rec := post(d.RoleGrantPermission, "/admin/roles/permissions", grant); rec.Code != http.StatusSeeOther {
+		t.Errorf("A-404 재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if rec := post(d.RoleAssign, "/admin/users/roles", assign); rec.Code != http.StatusSeeOther {
+		t.Errorf("A-405 재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	self := url.Values{"user_id": {me}, "role": {"operator"}, "password": {"correct horse battery"}}
+	if rec := post(d.RoleAssign, "/admin/users/roles", self); rec.Code != http.StatusForbidden {
+		t.Errorf("자기 계정 = HTTP %d, want 403 (R1)", rec.Code)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs
+		WHERE action IN ('role.manage', 'role.assign')`).Scan(&n); err != nil || n != 3 {
+		t.Errorf("작업 로그 %d건 (%v), want 3 — 부여 둘과 R1 위반", n, err)
+	}
+}

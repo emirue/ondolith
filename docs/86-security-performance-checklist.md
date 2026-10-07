@@ -53,6 +53,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 2.2 | 게시판 범위 권한이 **범위째 저장**된다 | `internal/auth/store.go` `GrantPermission` | `TestGrantPermissionKeepsBoardScope` | ✓ 2026-09-13 에 고침(전역 저장이었다) |
 | 2.3 | 권한 상승 사다리 R1~R6, superuser 유일·편집 불가, 마지막 superuser 보호 | `internal/auth/escalation.go`·`roles_one_superuser_idx`·`withLastSuperuserGuard` | 단위·통합 테스트 | ✓ |
 | 2.4 | A-404·A-405 폼이 **실제 라우트에 닿는다** | `tree.go` `/admin/roles/permissions`·`/admin/users/roles` | `TestRoleFormsReachTheirHandlers` | ✓ 2026-09-13 에 고침(`guardID` 에 막혀 아무도 관리자가 될 수 없었다) |
+| 2.4a | A-404·A-405 가 재인증(D15 5.3-1)을 거치고, 성공·R 규칙 위반을 작업 로그에 남긴다 | `admin/handlers_rbac.go` | `TestRoleChangesAreReauthedAndLogged` | ✓ 2026-10-07 에 고침(둘 다 없었다) |
 | 2.5 | 대량 할당: 폼은 고정 구조체, 예약 키(`is_admin`·`is_active`·`email`…) 거부 | `content/customfield.go`·`handler_account.go` | 코드 읽기 | ✓ |
 | 2.6 | 소유권은 **SQL 술어**로: 주문·환불·반품·댓글·글·첨부 | `commerce/order.go`·`returns.go`·`handler_board.go`·`handler_comment.go` | 통합 테스트(`TestOrderDetailNeedsAGrantOrOwnership` 등) | ✓ |
 | 2.7 | `{id}` 경로는 uuid 만(`guardID`), 형식 불량은 404 | `internal/app/routes.go` | 통합 테스트 | ✓ |
