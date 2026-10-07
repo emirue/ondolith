@@ -159,7 +159,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 8.6 | 속도 제한기 지도 정리 비용 | `auth/ratelimit.go` | `TestAllowSweepsIdleBucketsOnceLarge`·`BenchmarkLimiterNewKeyWithActiveBuckets` | ✓ 2026-09-30: 4,096개부터 최대 1분에 한 번 정리. M4 Pro에서 활성 버킷 4,096개 + 새 키 허용·삭제 벤치마크 27.4μs → 66.5ns. 전체 사이트 성능 수치는 아님 |
 | 8.7 | 사이트맵: 질의 하나 + `Cache-Control` 1시간 | `handler_seo.go`·`content.SitemapPosts` | 코드 읽기 | ✓ 2026-09-13 |
 | 8.8 | bcrypt 비용 10 = 1 vCPU 에서 시도당 수십~백 ms | `auth/login.go` | — | — 의도적. IP·계정 제한이 앞에 있다 |
-| 8.9 | A-508 대사: 조회 하나 5초, 요청 전체 40초 예산, 넘긴 행은 「조회하지 않았다」 | `commerce/webhook.go` `Reconcile` | 코드 읽기 | ✓ 2026-09-14 |
+| 8.9 | A-508 대사: 조회 하나 5초, 요청 전체 20초 예산(합이 CloudFront 기본 응답 시한 30초 안 — `TestReconcileFitsInsideCloudFrontsDefaultResponseTimeout`, 2026-10-07 에 40초에서 줄임), 넘긴 행은 「조회하지 않았다」 | `commerce/webhook.go` `Reconcile` | 코드 읽기 | ✓ 2026-09-14 |
 | 8.10 | 1 vCPU/512MB 실측 | `make measure` | 실기 | ✓ 2026-09-02 Lightsail: 앱 RSS 15.6 MB, PG 125 MB, 가용 165 MB |
 | 8.11 | 응답 압축(gzip/br) 없음 | `net/http` 에 내장 없음 | — | — 프록시(nginx `gzip on`, CloudFront)가 한다. 앱은 정적 자산에 `immutable` 캐시(8.3)로 재요청 자체를 줄인다 |
 

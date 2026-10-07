@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Reconcile 은 Store 의 메서드지만 DB 를 하나도 쓰지 않는다 — 조회는 전부 gw 가
@@ -95,5 +96,17 @@ func TestReconcileAcceptsAFullyCancelledPayment(t *testing.T) {
 	out = (&Store{}).Reconcile(context.Background(), gw, ours)
 	if out[0].Diff != "환불액 불일치" {
 		t.Fatalf("잔고 500 vs 우리 잔여 0 인데 %q", out[0].Diff)
+	}
+}
+
+// **A-508 한 번이 CloudFront 기본 응답 시한(30초) 안에 끝난다** (D72 4절).
+//
+// 시한을 넘기면 CloudFront 는 GET 을 끊고 연결 시도 횟수만큼 다시 보낸다 — 대사가
+// 처음부터 다시 돌아 PG 호출이 그 배수가 되고, 관리자는 504 를 본다. 마지막 조회는
+// 예산 직전에 시작해 reconcileCallTimeout 만큼 걸릴 수 있으므로 둘의 합으로 잰다.
+func TestReconcileFitsInsideCloudFrontsDefaultResponseTimeout(t *testing.T) {
+	const cloudFrontDefault = 30 * time.Second
+	if worst := ReconcileBudget + reconcileCallTimeout; worst >= cloudFrontDefault {
+		t.Errorf("대사 최악 %v, want < %v (CloudFront 기본 응답 시한)", worst, cloudFrontDefault)
 	}
 }

@@ -129,6 +129,19 @@ D15 4.3-2 의 IP 별 제한(로그인 10/분, 재설정 3/시간, 관리자 화�
 모듈로 CloudFront 대역에서 온 연결에 한해 실제 방문자 주소를 꺼내야 `X-Real-IP` 가 방문자가 된다
 (4절). 그러지 않으면 엣지 하나를 거치는 방문자들이 버킷 하나를 나눠 쓴다.
 
+```nginx
+# server 블록 안. 대역은 AWS 가 공개하는 CloudFront 오리진 쪽 주소다 — ip-ranges.json 의
+# "service": "CLOUDFRONT" 항목, 또는 관리형 접두사 목록 com.amazonaws.global.cloudfront.origin-facing.
+set_real_ip_from  <CloudFront 대역>;   # 대역마다 한 줄
+real_ip_header    X-Forwarded-For;
+# real_ip_recursive 는 기본값(off) 그대로 — 헤더의 **마지막** 주소를 쓴다. CloudFront 는
+# 방문자 주소를 X-Forwarded-For 의 끝에 덧붙이므로, 방문자가 보낸 앞부분은 쓰이지 않는다.
+```
+
+(2026-10-07 확인: AWS CloudFront 개발자 안내서 「Request and response behavior for custom origins」의
+Client IP addresses 절, 「Locations and IP address ranges of CloudFront edge servers」, nginx
+`ngx_http_realip_module` 문서.) 대역은 바뀌므로 갱신 방법을 정해 둔다.
+
 ### `X-Forwarded-Proto`와 `secure_cookies`
 
 **설치 마법사는 이 헤더를 보고 `secure_cookies`를 정한다.** HTTPS로 접속했다고 판단하면
@@ -162,8 +175,22 @@ WAF를 CloudFront에 붙인다.
 | 오리진 프로토콜 | HTTPS only | 오리진 구간도 평문으로 두지 않는다 |
 | 캐시 정책 | `/static/*`만 캐시 | 나머지는 세션에 따라 내용이 달라진다 |
 | **캐시하지 않을 것** | `/healthz`, `/admin/*`, `/orders/*`, `/cart` | 캐시된 `ok`는 죽은 인스턴스를 살아 있다고 보고한다 |
-| 전달 헤더 | `Host`, `X-Forwarded-Proto`, `Cookie` | 위 절의 이유 |
+| 오리진 요청 정책 — 헤더 | **`Host`, `Origin`, `Sec-Fetch-Site`** (「Include the following headers」) | 아래 「`Origin`·`Sec-Fetch-Site`」. `Host` 를 넘기면 오리진 인증서가 방문자 도메인과 맞아야 한다 |
+| 오리진 요청 정책 — 쿠키 | All | 세션 쿠키. 「None」 이면 로그인이 유지되지 않는다 |
+| 오리진 요청 정책 — 쿼리 문자열 | All | 「None」 이면 `?page=`·`?q=`·`?sort=` 가 오리진에 닿지 않는다 |
+| 오리진 응답 시한 | 기본 30초 그대로 | A-508 은 조회 예산 20초 + 조회 하나 5초로 그 안에 끝난다. 넘기면 CloudFront 가 GET 을 끊고 다시 보내 대사가 처음부터 다시 돈다 |
 | WAF 룰 | AWS 관리형 공통 룰셋 + 레이트 리밋 | |
+
+**`Origin`·`Sec-Fetch-Site` 를 넘기지 않으면 CSRF 방어가 꺼진다.** 앱의 CSRF 방어는 Go 의
+`http.CrossOriginProtection` 하나이고, 그것은 이 두 헤더로 교차 출처를 판단한다 — **둘 다 없으면
+「같은 출처이거나 브라우저가 아닌 요청」으로 보고 통과시킨다** (`go doc net/http.CrossOriginProtection`).
+오리진 요청 정책이 「Include the following headers」 이면 거기 적지 않은 방문자 헤더는 오리진에 가지
+않으므로, 예전 이 표의 `Host`·`X-Forwarded-Proto`·`Cookie` 대로 두면 남의 사이트가 보낸 POST 가 전부
+통과한다. 오류도 경고도 없다 — 같은 사이트에서는 모든 것이 정상으로 보인다. `X-Forwarded-Proto` 는
+적을 필요가 없다: CloudFront 는 방문자가 보낸 그 헤더를 지우고, nginx 가 자기 `$scheme`(오리진이
+HTTPS only 라 `https`)으로 채운다. (2026-10-07 확인: AWS CloudFront 개발자 안내서 「Understand origin
+request policies」·「Request and response behavior for custom origins」의 헤더 표·「Origin settings」의
+Response timeout.)
 
 **웹훅 경로(`/webhooks/payment/*`)를 WAF가 막지 않게 한다.** PG 서버는 브라우저가 아니라
 봇 탐지 룰에 걸리기 쉽다. 이 경로가 막히면 가상계좌 입금이 주문에 반영되지 않고, 그 사실은

@@ -138,9 +138,11 @@ func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent
 }
 
 // ReconcileBudget bounds one A-508 request's gateway time; reconcileCallTimeout
-// bounds one lookup. 둘 다 WriteTimeout(60초) 안이다.
+// bounds one lookup. 둘의 합이 CloudFront 기본 응답 시한(30초, D72 4절) 안이다 —
+// 넘기면 CloudFront 가 GET 을 끊고 다시 보내 대사가 처음부터 다시 돈다. 40초였던
+// 앞 판은 WriteTimeout(60초)만 봤다.
 const (
-	ReconcileBudget      = 40 * time.Second
+	ReconcileBudget      = 20 * time.Second
 	reconcileCallTimeout = 5 * time.Second
 )
 
