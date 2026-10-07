@@ -141,12 +141,20 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 		// 돌려준다 — 새로 만들면 재시도가 두 번째 승인이 된다.
 		IdempotencyKey: paymentID,
 	})
-	if err != nil {
-		// 결과 불명(타임아웃·5xx)은 '대기' 로 남긴다. 그것이 A-508 대사 대상이고,
-		// 재승인 대신 조회 API 로 확인한다 (D50).
-		if errors.Is(err, ErrPaymentUnknown) {
+	if err != nil && errors.Is(err, ErrPaymentUnknown) {
+		// 결과 불명(타임아웃·5xx)이면 재승인 대신 조회 API 로 한 번 묻는다 (D50).
+		// 승인·실패만 답으로 받는다 — 조회의 '대기' 는 READY·IN_PROGRESS 와
+		// 가상계좌 WAITING_FOR_DEPOSIT 를 가르지 못한다. 그 밖은 '대기' 로
+		// 남기고 A-508 이 닫는다. paymentKey 는 브라우저가 준 값이라 주문번호도
+		// 대조한다 — 승인 API 와 달리 조회는 주문을 묶어 검사하지 않는다.
+		if got, gerr := gw.Get(ctx, paymentKey); gerr == nil && got != nil && got.OrderNo == orderNo &&
+			(got.Status == PaymentApproved || got.Status == PaymentFailed) {
+			res, err = got, nil
+		} else {
 			return nil, err
 		}
+	}
+	if err != nil {
 		// 확정된 실패만 '실패' 로 내린다. 부분 유니크의 `status <> '실패'` 가
 		// 재결제 경로를 열어 준다.
 		if uerr := s.q.FailPaymentByID(ctx, paymentID); uerr != nil {
