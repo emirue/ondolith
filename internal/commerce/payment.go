@@ -318,4 +318,3 @@ func lower(s string) string {
 	}
 	return string(b)
 }
-

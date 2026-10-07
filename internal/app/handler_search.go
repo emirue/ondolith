@@ -48,6 +48,7 @@ func (d *boardDeps) search(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, "검색", "")
 	v.Data = map[string]any{
 		"Query": q, "Results": results, "Total": total, "Boards": byID,
+		"Pager": pagerFor("/search", q, total),
 	}
 	d.renderPage(w, r, "search.html", http.StatusOK, v)
 }

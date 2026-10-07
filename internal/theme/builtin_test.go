@@ -128,6 +128,9 @@ type pageLike struct {
 	Body  string
 }
 
+// pagerLike is partials/pager.html's data with both links, so both branches render.
+var pagerLike = map[string]any{"PageNo": 2, "PrevURL": "/shop?sort=price", "NextURL": "/shop?page=3&sort=price"}
+
 // payloadFor returns the .Data a given screen is written against (D12/D13 pin
 // this down per screen).
 func payloadFor(name string) any {
@@ -143,11 +146,13 @@ func payloadFor(name string) any {
 			"Categories": []categoryLike{{ID: "c1", Slug: "top", Name: "상의"}},
 			"Sort":       "price",
 			"Page":       1,
+			"Pager":      pagerLike,
 		}
 	case "shop/search.html":
 		return map[string]any{
 			"Query":    "티",
 			"Products": []productLike{{ID: "p1", Slug: "tee", Name: "티셔츠", BasePrice: 12000}},
+			"Pager":    pagerLike,
 		}
 	case "shop/product.html":
 		return map[string]any{
@@ -189,7 +194,8 @@ func payloadFor(name string) any {
 		return map[string]any{
 			"Orders": []orderLike{{OrderNo: "20260805-ABCDEFGHJK", Status: "결제완료", Total: 29000,
 				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
-			"Page": 1,
+			"Page":  1,
+			"Pager": pagerLike,
 		}
 	case "order/view.html":
 		return map[string]any{
@@ -323,6 +329,11 @@ func payloadFor(name string) any {
 			"Boards": map[string]boardLike{"b1": {ID: "b1", Slug: "free", Name: "자유게시판"}},
 			"Results": []postLike{{ID: "p1", BoardID: "b1", Title: "찾은 글", Body: "본문",
 				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
+			"Pager": map[string]any{
+				"Base": "/search", "Query": struct{ Search string }{Search: "검색어"},
+				"Total": int64(1), "PageNo": 2, "PrevPage": 1, "NextPage": 3,
+				"HasPrev": true, "HasNext": true,
+			},
 		}
 	case "comment/form.html":
 		return map[string]any{

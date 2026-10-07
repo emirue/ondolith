@@ -327,13 +327,18 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
 }
 
-// pageOf reads the page number, clamped to 1.
+// adminMaxPage 는 관리자 목록의 쪽 번호 상한이다. 공개 목록(100쪽)과 달리 오래된
+// 주문까지 닿아야 해서 사실상 열어 두되, 가장 큰 쪽 크기(100)를 곱해도 OFFSET 이
+// int32 를 넘지 않게 한다 — 상한이 없던 판은 쪽 번호 하나로 음수 OFFSET 500 이 났다.
+const adminMaxPage = 1_000_000
+
+// pageOf reads the page number, clamped to 1..adminMaxPage.
 func pageOf(r *http.Request) int {
 	n, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil || n < 1 {
 		return 1
 	}
-	return n
+	return min(n, adminMaxPage)
 }
 
 // pager fills the previous/next links of a 1-based list (A-501, A-504, FR-706).
@@ -344,15 +349,15 @@ func pageOf(r *http.Request) int {
 func pager(data map[string]any, path string, q url.Values, page int, more bool) {
 	data["PageNo"] = page
 	if page > 1 {
-		data["PrevURL"] = listURL(path, q, page-1)
+		data["PrevURL"] = ListURL(path, q, page-1)
 	}
 	if more {
-		data["NextURL"] = listURL(path, q, page+1)
+		data["NextURL"] = ListURL(path, q, page+1)
 	}
 }
 
-// listURL is one list address: 빈 조건과 1쪽은 싣지 않는다.
-func listURL(path string, q url.Values, page int) string {
+// ListURL is one list address: 빈 조건과 1쪽은 싣지 않는다. 공개 목록(app)도 쓴다.
+func ListURL(path string, q url.Values, page int) string {
 	v := url.Values{}
 	for k, vals := range q {
 		if len(vals) > 0 && vals[0] != "" {

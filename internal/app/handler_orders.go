@@ -20,13 +20,15 @@ func (d *shopDeps) orderList(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, loginPath, http.StatusSeeOther)
 		return
 	}
-	orders, err := d.store.MyOrders(r.Context(), a.User.ID, pageOf(r))
+	page := pageOf(r)
+	orders, more, err := d.store.MyOrders(r.Context(), a.User.ID, page)
 	if err != nil {
 		d.serverError(w, r, err)
 		return
 	}
 	d.renderPage(w, r, "order/list.html", http.StatusOK,
-		d.shopView(r, "주문 내역", map[string]any{"Orders": orders, "Page": pageOf(r)}))
+		d.shopView(r, "주문 내역", map[string]any{"Orders": orders, "Page": page,
+			"Pager": listPager("/orders", nil, page, more)}))
 }
 
 // visibleOrder loads one order for whoever is asking, or ErrNotFound.

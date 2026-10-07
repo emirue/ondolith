@@ -1,0 +1,12 @@
+{{/* 「이전·다음」 (상품 목록·상품 검색·주문 내역). 전체 건수를 세지 않는 목록이다 —
+     한 행 더 읽어 다음 쪽을 안다. 주소는 Go 가 통째로 만들어 넘긴다: 정렬·검색어를
+     여기서 이으면 화면마다 빠뜨릴 자리가 생긴다.
+
+     기대하는 데이터: {PageNo, PrevURL, NextURL} — 빈 주소는 그 링크가 없다는 뜻 */}}
+{{if or .PrevURL .NextURL}}
+<nav class="pager">
+  {{with .PrevURL}}<a class="btn btn--sm" href="{{.}}">이전</a>{{end}}
+  <span class="page-current">{{.PageNo}}</span>
+  {{with .NextURL}}<a class="btn btn--sm" href="{{.}}">다음</a>{{end}}
+</nav>
+{{end}}

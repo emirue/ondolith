@@ -497,6 +497,8 @@ func pagerFor(base string, q content.ListQuery, total int64) map[string]any {
 		"PrevPage": prev,
 		"NextPage": q.Page + 2,
 		"HasPrev":  q.Page > 0,
-		"HasNext":  int64((q.Page+1)*q.PerPage) < total,
+		// 상한 쪽(content.MaxPage)에서는 다음이 없다 — 그 뒤는 상한으로 접혀
+		// 같은 쪽이 끝없이 이어진다.
+		"HasNext": int64((q.Page+1)*q.PerPage) < total && q.Page+1 < content.MaxPage,
 	}
 }

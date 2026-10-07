@@ -452,20 +452,25 @@ func (s *Store) DeleteCategory(ctx context.Context, id string) error {
 //
 // 게시판 검색과 같은 이유로 `simple` config + 접두 질의다 (D30 Phase 2 측정):
 // 한국어에 형태소 사전이 없으면 `english` 는 어간 추출로 오히려 덜 맞는다.
-// 미노출 상품은 여기서도 나오지 않는다.
-func (s *Store) SearchProducts(ctx context.Context, term string, page int) ([]Product, error) {
+// 미노출 상품은 여기서도 나오지 않는다. 한 행 더 읽어 다음 쪽이 있는지 함께
+// 돌려준다 (ListProductsMore 와 같다).
+func (s *Store) SearchProducts(ctx context.Context, term string, page int) ([]Product, bool, error) {
 	q := ProductQuery{VisibleOnly: true, Page: page}
 	limit, offset := q.clamp()
 	rows, err := s.q.SearchProducts(ctx, commerceq.SearchProductsParams{
-		Query: ToPrefixQuery(term), Limit: int32(limit), Offset: int32(offset)})
+		Query: ToPrefixQuery(term), Limit: int32(limit + 1), Offset: int32(offset)})
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
 	}
 	var out []Product
 	for _, r := range rows {
 		out = append(out, productFromList(commerceq.ListProductsRow(r)))
 	}
-	return out, nil
+	return out, more, nil
 }
 
 // ToPrefixQuery turns user text into a tsquery.

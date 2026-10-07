@@ -95,7 +95,8 @@ themes/{이름}/
 | `partials/head.html` | (전체) | 폴백 | `<head>` 내용. 메타·OG 태그 (FR-511) |
 | `partials/header.html` | (전체) | 폴백 | 상단. 메뉴(FR-405)와 로그인 상태 |
 | `partials/footer.html` | (전체) | 폴백 | 하단. 사업자 정보(FR-711)가 여기 들어간다 |
-| `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508) |
+| `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508). 전체 건수를 세는 게시판(P-203)·통합 검색(P-212) |
+| `partials/pager.html` | P-301, P-302, P-305, P-501 | 폴백 | 「이전·다음」. 건수를 세지 않고 한 행 더 읽는 목록. 데이터 `{PageNo, PrevURL, NextURL}` — 빈 주소는 링크 없음 |
 | `partials/flash.html` | (전체) | 폴백 | 성공·오류 메시지 |
 | `partials/field.html` | P-203, P-204, P-205 | 폴백 | **커스텀 필드 하나를 그린다** (FR-503). 타입별 분기가 여기 있다 |
 | `partials/variant.html` | P-303, P-304 | 폴백 | 고른 옵션 조합의 가격·재고·hidden `variant_id` (FR-602). **상품 화면이 처음 그릴 때와 htmx 가 갈아 끼울 때가 같은 조각을 쓴다** — 두 벌이면 「고르기 전」과 「고른 뒤」가 갈라진다 |

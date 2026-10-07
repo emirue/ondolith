@@ -91,13 +91,16 @@ func TestMyOrdersAreMineNewestFirstAndPaged(t *testing.T) {
 		mine = append(mine, place(CartOwner{UserID: me}))
 	}
 
-	page1, err := s.MyOrders(ctx, me, 1)
+	page1, more1, err := s.MyOrders(ctx, me, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	page2, err := s.MyOrders(ctx, me, 2)
+	page2, more2, err := s.MyOrders(ctx, me, 2)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !more1 || more2 {
+		t.Errorf("다음 쪽 = %v·%v, want true·false", more1, more2)
 	}
 	if len(page1) != 20 {
 		t.Fatalf("1쪽 %d건, want 20건", len(page1))
@@ -263,7 +266,7 @@ func TestSearchProductsPrefixRankAndPaging(t *testing.T) {
 	mk("", "hidden", "온돌매트 숨김", "", false)
 	mk("", "unrelated", "방석", "푹신하다", true)
 
-	got, err := s.SearchProducts(ctx, "온돌", 1)
+	got, _, err := s.SearchProducts(ctx, "온돌", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,24 +278,27 @@ func TestSearchProductsPrefixRankAndPaging(t *testing.T) {
 	if fmt.Sprint(slugs) != "[thrice once]" {
 		t.Errorf("검색 결과 %v, want [thrice once]", slugs)
 	}
-	if none, err := s.SearchProducts(ctx, "없는말", 1); err != nil || len(none) != 0 {
+	if none, _, err := s.SearchProducts(ctx, "없는말", 1); err != nil || len(none) != 0 {
 		t.Errorf("맞지 않는 검색어 = %d건, %v, want 0건", len(none), err)
 	}
 	// tsquery 문법 문자는 검색어가 되지 못한다 — 오류가 아니라 같은 결과다.
-	if safe, err := s.SearchProducts(ctx, "온돌 & !(", 1); err != nil || len(safe) != 2 {
+	if safe, _, err := s.SearchProducts(ctx, "온돌 & !(", 1); err != nil || len(safe) != 2 {
 		t.Errorf("문법 문자가 섞인 검색어 = %d건, %v, want 2건", len(safe), err)
 	}
 
 	for i := range 21 {
 		mk("", fmt.Sprintf("page-%02d", i), "쪽나눔 상품", "", true)
 	}
-	page1, err := s.SearchProducts(ctx, "쪽나눔", 1)
+	page1, more1, err := s.SearchProducts(ctx, "쪽나눔", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	page2, err := s.SearchProducts(ctx, "쪽나눔", 2)
+	page2, more2, err := s.SearchProducts(ctx, "쪽나눔", 2)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !more1 || more2 {
+		t.Errorf("다음 쪽 = %v·%v, want true·false", more1, more2)
 	}
 	if len(page1) != 20 {
 		t.Errorf("1쪽 %d건, want 20건", len(page1))

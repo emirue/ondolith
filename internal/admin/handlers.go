@@ -586,7 +586,7 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	}
 	page := 0
 	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
-		page = n
+		page = min(n, adminMaxPage) // OFFSET 이 int32 를 넘지 않게
 	}
 	// **한 행 더 읽어 다음 쪽이 있는지 본다.** 앞 판은 「다음」을 조건 없이
 	// 그려서, 사용자가 한 명뿐인 사이트도 무한히 다음 쪽을 제시했다 — 링크를
@@ -875,7 +875,7 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 	}
 	page := 0
 	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
-		page = n
+		page = min(n, adminMaxPage) // OFFSET 이 int32 를 넘지 않게
 	}
 	// 기간 조회 (D19 0.6): 기록 시각 기준. 기본은 기간 조건 없음.
 	q := r.URL.Query()
@@ -913,7 +913,7 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 		if n > 0 {
 			v.Set("page", strconv.Itoa(n))
 		}
-		return listURL("/admin/oplog", v, 0)
+		return ListURL("/admin/oplog", v, 0)
 	}
 	if page > 0 {
 		data["PrevURL"] = link(page - 1)

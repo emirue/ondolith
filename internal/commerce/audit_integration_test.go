@@ -539,14 +539,14 @@ func TestSearchProductsRanksBeforePaging(t *testing.T) {
 		VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'best', '쪽나눔 쪽나눔', '쪽나눔 쪽나눔', 1000, true)`); err != nil {
 		t.Fatal(err)
 	}
-	page1, err := s.SearchProducts(ctx, "쪽나눔", 1)
+	page1, _, err := s.SearchProducts(ctx, "쪽나눔", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page1) != 20 || page1[0].Slug != "best" {
 		t.Errorf("1쪽 %d건, 첫 항목 %q — want 20건, 첫 항목 best", len(page1), page1[0].Slug)
 	}
-	page2, err := s.SearchProducts(ctx, "쪽나눔", 2)
+	page2, _, err := s.SearchProducts(ctx, "쪽나눔", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
