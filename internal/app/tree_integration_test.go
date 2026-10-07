@@ -50,7 +50,9 @@ func liveSiteWith(t *testing.T, tweak ...func(*config.Config)) (*httptest.Server
 		}
 	}
 
-	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트"}
+	// 업로드는 시험마다 임시 폴더다. 비우면 기본값 `uploads` 가 시험의 현재 폴더
+	// (internal/app) 아래로 잡혀 올린 파일이 저장소에 남는다 — 실제로 그렇게 커밋됐다.
+	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트", UploadDir: t.TempDir()}
 	for _, f := range tweak {
 		f(cfg)
 	}
@@ -354,7 +356,7 @@ func TestBootRefusesWhenARouteNamesAMissingPermission(t *testing.T) {
 		}
 	}
 
-	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트"}
+	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트", UploadDir: t.TempDir()}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h, cleanup, err := New(ctx, cfg, "1.0.0", log, nil)
 	if cleanup != nil {

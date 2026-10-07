@@ -120,6 +120,13 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	// 순으로 거슬러 올라가 post.read 를 **다시** 검사한다 (D15 8절 1번).
 	r.Add(Route{Screen: "P-211", Method: "GET", Pattern: "/attachments/{id}", Class: SC7,
 		Handler: bd.attachmentDownload})
+	// 에디터로 올린 본문 사진 (FR-514). 올리기는 글쓰기와 같은 권한, 받기는 누구나.
+	r.Add(Route{Screen: "P-213", Method: "GET", Pattern: "/media/{id}", Class: SC7,
+		Handler: bd.mediaServe(false)})
+	r.Add(Route{Screen: "P-213", Method: "GET", Pattern: "/media/{id}/thumb", Class: SC7,
+		Handler: bd.mediaServe(true)})
+	r.Add(Route{Screen: "P-214", Method: "POST", Pattern: "/board/{slug}/media", Class: SC7,
+		Handler: bd.mediaUpload})
 
 	r.Add(Route{Screen: "P-212", Method: "GET", Pattern: "/search", Class: SC1,
 		Handler: bd.search})
@@ -201,6 +208,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "page.create", Handler: ad.PageForm})
 	r.Add(Route{Screen: "A-302", Method: "POST", Pattern: "/admin/pages/new", Class: SC5,
 		Permission: "page.create", Handler: ad.PageSave})
+	// 페이지 편집기의 사진 올리기 (FR-514). 만들기·고치기 어느 쪽이든 — 핸들러가 둘 중
+	// 하나를 본다. 라우트는 고치기를 적는다.
+	r.Add(Route{Screen: "A-310", Method: "POST", Pattern: "/admin/pages/media", Class: SC7,
+		Permission: "page.update", Handler: ad.PageMediaUpload})
 	r.Add(Route{Screen: "A-302", Method: "GET", Pattern: "/admin/pages/{id}", Class: SC4,
 		Permission: "page.update", Handler: ad.PageForm})
 	r.Add(Route{Screen: "A-302", Method: "POST", Pattern: "/admin/pages/{id}", Class: SC5,

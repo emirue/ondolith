@@ -74,6 +74,8 @@ type Deps struct {
 	// 것이고 (FR-710), 그 라우트는 애초에 트리에 없다.
 	Commerce    *commerce.Store
 	Attachments *content.Attachments
+	// Media 는 에디터로 올린 본문 사진이다 (A-310, FR-514).
+	Media *content.MediaStore
 	// Images 는 A-502 의 상품 이미지 저장소다. Attachments 와 같은 이유로
 	// 주입한다 — 업로드 디렉터리는 설정이다 (NFR-304).
 	Images *commerce.Images

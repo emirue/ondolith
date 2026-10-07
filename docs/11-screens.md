@@ -109,6 +109,8 @@
 | P-210 | 댓글 삭제 | `/comments/{id}/delete` | POST | 본인 | 있음 | SC-3 | FR-505 |
 | P-211 | 첨부파일 다운로드 | `/attachments/{id}` | GET | 권한:post.read | 없음 | SC-7 | FR-506, NFR-206 |
 | P-212 | 검색 결과 | `/search` | GET | 공개 | 없음 | SC-1 | FR-507, FR-508 |
+| P-213 | 본문 사진 | `/media/{id}` | GET | 공개 | 없음 | SC-7 | FR-514 |
+| P-214 | 본문 사진 올리기 | `/board/{slug}/media` | POST | 권한:post.write | 있음 | SC-7 | FR-513, FR-514 |
 
 ### P-3xx 상품
 
@@ -210,6 +212,7 @@
 | A-307 | 글 관리 | `/admin/posts` | GET, POST | 권한:post.moderate | 있음 | SC-5 | FR-504, FR-507, FR-512 |
 | A-308 | 댓글 관리 | `/admin/comments` | GET, POST | 권한:comment.moderate | 있음 | SC-5 | FR-505 |
 | A-309 | 첨부파일 관리 | `/admin/attachments` | GET, POST | 권한:post.moderate | 있음 | SC-7 | FR-506, NFR-206 |
+| A-310 | 페이지 사진 올리기 | `/admin/pages/media` | POST | 권한:page.update | 있음 | SC-7 | FR-513, FR-514 |
 
 ### A-4xx 사용자·역할
 

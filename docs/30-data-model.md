@@ -694,6 +694,24 @@ CREATE INDEX comments_author_id_idx ON comments (author_id);
 `comments.parent_id`는 **삽입 시점에 확정되고 이후 어떤 화면도 받지 않으므로**(P-209) 순환이
 구조적으로 만들어지지 않는다.
 
+**`media`** — 에디터로 올린 본문 사진 (FR-514, `00027`)
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `uploader_id` | uuid | **NULL 허용** REFERENCES `users(id)` ON DELETE SET NULL — 올린 사람이 사라져도 글 속 사진은 남는다 |
+| `stored_path` | text | NOT NULL UNIQUE, `CHECK (stored_path ~ '^media/[0-9]{4}/[0-9]{2}/[0-9a-f-]{36}$')`. 썸네일은 그 옆의 `-thumb` |
+| `mime_type` | text | NOT NULL, `CHECK (mime_type IN ('image/jpeg','image/png','image/gif'))` — **다시 인코딩한 결과의 타입**(webp 는 jpeg 가 된다) |
+| `thumb_mime` | text | NOT NULL, `CHECK (thumb_mime IN ('image/jpeg','image/png'))` |
+| `width` · `height` | integer | NOT NULL, `CHECK (> 0)` |
+| `byte_size` | bigint | NOT NULL, `CHECK (byte_size > 0)` |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() |
+
+**`post_id` 가 없다.** 사진은 글을 저장하기 전에 에디터에서 올라오므로 부모가 아직 없다 — 글이 본문 HTML 로
+사진(`/media/{id}`)을 가리킨다. 그래서 첨부처럼 글의 읽기 권한을 다시 볼 수 없고, uuid 주소를 아는 사람만
+닿는다 ([D12](12-screens-public.md) P-213). 원본은 저장하지 않는다(EXIF 가 디스크에도 없다). 저장하지 않고
+떠난 글의 사진은 남는다 — 지우는 경로는 디스크가 문제가 될 때 둔다.
+
 **`attachments`**
 
 | 컬럼 | 타입 | 제약 |

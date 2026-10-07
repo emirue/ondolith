@@ -21,6 +21,8 @@ type boardDeps struct {
 	log         *slog.Logger
 	// siteURL is config.SiteURL — 운영자가 정한 출처. 사이트맵·robots 가 쓴다.
 	siteURL string
+	// media 는 에디터로 올린 본문 사진이다 (P-213·P-214, FR-514).
+	media *content.MediaStore
 }
 
 // countView bumps the counter once per browser session per post.

@@ -105,6 +105,7 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		// 그 사실이 테스트에서는 보이지 않는다.
 		Attachments: store.AttachmentsIn(uploads),
 		Images:      shop.ImagesIn(uploads),
+		Media:       store.MediaIn(uploads),
 		// **작업 로그도 운영과 같이 붙인다.** 비워 두면 d.log 가 조용히
 		// 아무것도 안 하고, "로그에 남는다" 를 확인하는 검사가 전부 무의미해진다
 		// (D15 7절이 요구하는 것이 바로 그 기록이다).

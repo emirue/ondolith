@@ -52,6 +52,7 @@
 | `rsc.io/qr` | `v0.2.0` | QR 인코딩 (FR-620) | **비트맵까지만 준다** — 사각형을 찍는 것은 우리 코드라 뷰박스·여백·SVG 출력을 우리가 정한다 (D50 은 서버에서 SVG 를 요구한다). API 가 `Encode`·`Black` 둘뿐이라 표면이 작고, 이미지 인코더·폰트 같은 딸린 의존성이 없다. 2026-08-06 조회: OSV 취약점 없음 |
 | `github.com/microcosm-cc/bluemonday` | `v1.0.27` | 본문 HTML 정화 (FR-513) | 허용목록 HTML 정화는 자작하지 않는다(인증·업로드 검증과 같은 이유, CLAUDE.md 규칙 6). UGC 정책에서 출발해 에디터가 쓰는 것만 더한다 ([D60](60-security.md) 「리치 텍스트 본문」). 딸린 모듈은 CSS 파서 둘(`aymerick/douceur`·`gorilla/css`). 2026-10-08 조회: OSV 4건 모두 1.0.16 이하에서 수정됨 |
 | `golang.org/x/net` | `v0.57.0` | HTML 토크나이저 — 본문 평문 추출 (FR-513) | bluemonday 가 이미 끌어오는 모듈이라 새로 들어오는 코드가 없다. 2026-10-08 조회: OSV 의 가장 늦은 수정판(0.55.0)보다 뒤다 |
+| `golang.org/x/image` | `v0.46.0` | 본문 사진 축소(`draw.CatmullRom`)·webp 읽기 (FR-514) | Go 팀의 준표준 모듈이다. 표준 라이브러리에 축소 보간과 webp 디코더가 없다. webp **인코더**는 여기에도 없어 webp 는 JPEG 로 다시 쓴다. 2026-10-08 조회: OSV 19건 모두 0.45.0 이하에서 수정됨 |
 | `golang.org/x/oauth2` | `v0.27.0` | **시험만** — 소셜 로그인 통합 시험이 토큰 응답을 흉내 낸다 | goth 가 이미 끌어오는 모듈이다. 시험 파일이 직접 가져다 써서 `go mod tidy` 가 직접 의존성으로 적는다 |
 | `github.com/markbates/goth` | `v1.82.0` | 소셜 로그인 OAuth2 (FR-208) | 프로바이더별 인가 흐름은 자작 금지 대상이다 (NFR-201). **`gothic` 하위 패키지는 쓰지 않는다** — gorilla/sessions 를 쓰는데 우리 세션은 scs 라 (NFR-204) 두 스토어가 한 요청에 있으면 어느 쪽이 진짜 로그인 상태인지가 코드마다 달라진다. `goth.Provider`·`goth.Session` 만 쓴다. 2026-08-07 조회: OSV 취약점 없음 |
 

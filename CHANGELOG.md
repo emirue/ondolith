@@ -20,6 +20,7 @@
 
 | 파일 | 내용 |
 |---|---|
+| `00027_media.sql` | `media` 표 — 에디터로 올린 본문 사진 (FR-514). 되돌릴 수 있다 — Down 이 표를 지우며, 그때 본문의 `/media/…` 사진이 404 가 된다. 파일은 디스크에 남는다 |
 | `00026_rich_text.sql` | `posts.body_html`·`pages.body_html` (FR-513). 되돌릴 수 있다 — Down 이 컬럼을 지우며, 그때 에디터로 쓴 글은 서식·사진 위치 없이 평문만 남는다 |
 | `00025_product_images.sql` | `product_images` 테이블 (FR-601). 되돌릴 수 있다 — Down 이 테이블을 지우며, 그때 이미지 행은 사라지고 업로드 디렉터리의 파일은 남는다 |
 | `00024_variant_barcode.sql` | `product_variants.barcode` 컬럼과 부분 유일 인덱스 (FR-627). 되돌릴 수 있다 — Down 이 컬럼을 지우며, 그때 등록해 둔 바코드는 사라진다 |
