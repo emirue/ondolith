@@ -53,6 +53,22 @@
       </label>
     </div>
 
+    {{/* 공개 폼 스팸 방지 (FR-216). 숨은 칸은 늘 켜져 있고, 키를 둘 다 넣으면 가입·비밀번호
+         재설정 요청·글쓰기·댓글 폼에 Cloudflare Turnstile 이 붙는다. */}}
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>Turnstile 사이트 키</span>
+        <input type="text" name="turnstile.site_key" value="{{index .Settings "turnstile.site_key"}}" maxlength="200" autocomplete="off">
+        <span class="adm-hint">비우면 꺼집니다. 꺼져 있어도 숨은 칸으로 단순한 자동 입력은 막습니다.</span>
+      </label>
+      <label class="adm-field">
+        <span>Turnstile 비밀 키</span>
+        <input type="password" name="turnstile.secret_key" value="" maxlength="200" autocomplete="new-password">
+        <span class="adm-hint">{{if index .SecretSaved "turnstile.secret_key"}}저장돼 있습니다. 바꿀 때만 입력하세요.{{else}}아직 저장되지 않았습니다.{{end}}
+          저장된 값은 화면에 다시 표시하지 않습니다. 키는 Cloudflare 대시보드의 Turnstile 에서 만듭니다.</span>
+      </label>
+    </div>
+
     {{/* 사이트 유형 전환은 파괴적 작업이다 (D15 SC-5 4항) — 유형이 바뀔 때만 본다. */}}
     {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">

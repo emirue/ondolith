@@ -23,6 +23,7 @@ type boardDeps struct {
 	siteURL string
 	// media 는 에디터로 올린 본문 사진이다 (P-213·P-214, FR-514).
 	media *content.MediaStore
+	spam  spamGuard
 }
 
 // countView bumps the counter once per browser session per post.
@@ -180,7 +181,8 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
 		"Attachments": files,
 		"CanComment":  b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID)),
-		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments"},
+		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
+			"Turnstile": v.Site.Turnstile},
 		"CanEdit":     p.AuthorID != "" && p.AuthorID == actorID(a),
 		"CanModerate": a.CanOn("post.moderate", auth.BoardID(b.ID)),
 	}
@@ -230,7 +232,7 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 
 	custom, err := content.ValidateCustomFields(fields, customValues(r), nil)
 	if err != nil {
-		d.renderFormError(w, r, b, fields, form, err)
+		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, err)
 		return
 	}
 	// board_id and author_id are NOT read from the form (SC-2 5항). The board
@@ -239,6 +241,11 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 	form.BoardID = b.ID
 	form.AuthorID = a.User.ID
 	form.CustomFields = custom
+	// 다른 검증을 다 지난 뒤에 본다 — Turnstile 은 바깥 호출이고 토큰은 한 번만 쓴다.
+	if code, msg := d.spam.check(r); code != 0 {
+		d.renderFormError(w, r, b, fields, form, code, errors.New(msg))
+		return
+	}
 
 	id, err := d.content.CreatePost(ctx, form)
 	if err != nil {
@@ -338,7 +345,7 @@ func (d *boardDeps) postUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	custom, err := content.ValidateCustomFields(fields, customValues(r), p.CustomFields)
 	if err != nil {
-		d.renderFormError(w, r, b, fields, form, err)
+		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, err)
 		return
 	}
 	form.CustomFields = custom
@@ -413,20 +420,20 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 		IsSecret: b.AllowSecret && r.PostFormValue("is_secret") != "",
 	}
 	if p.Title == "" {
-		d.renderFormError(w, r, b, fields, p, errors.New("제목을 입력하세요."))
+		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, errors.New("제목을 입력하세요."))
 		return content.Post{}, nil, false
 	}
 	return p, fields, true
 }
 
 func (d *boardDeps) renderFormError(w http.ResponseWriter, r *http.Request,
-	b *content.Board, fields []content.FieldSchema, p content.Post, err error,
+	b *content.Board, fields []content.FieldSchema, p content.Post, code int, err error,
 ) {
 	v := d.view(r, b.Name+" 글쓰기", "")
 	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": &p,
 		"Inputs":    content.FieldInputs(fields, p.CustomFields),
 		"CanSecret": b.AllowSecret, "Error": err.Error()}
-	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), http.StatusUnprocessableEntity, v)
+	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), code, v)
 }
 
 // renderUploadError draws the edit form of a post that saved but whose
@@ -460,7 +467,8 @@ func customValues(r *http.Request) map[string][]string {
 	out := map[string][]string{}
 	for k, v := range r.PostForm {
 		switch k {
-		case "title", "body", "body_html", "is_secret", "attachments":
+		case "title", "body", "body_html", "is_secret", "attachments",
+			honeypotField, auth.TurnstileField:
 			continue
 		}
 		out[k] = v

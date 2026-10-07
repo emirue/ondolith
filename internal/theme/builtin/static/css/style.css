@@ -224,6 +224,8 @@ main { max-width: var(--shell); margin: 0 auto; padding: 32px var(--pad) 64px; }
 .gallery-card img, .gallery-blank { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover;
   border-radius: 6px; background: var(--line); }
 .gallery-title { display: block; margin-top: .4em; font-weight: 600; }
+/* 공개 폼의 Turnstile 위젯 (FR-216, partials/spam.html) — 위젯 자체는 Cloudflare 가 그린다. */
+.cf-turnstile { margin: .5rem 0; }
 
 /* ---- 폼 ----------------------------------------------------------------- */
 .form {

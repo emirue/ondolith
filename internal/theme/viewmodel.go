@@ -50,6 +50,9 @@ type Site struct {
 	Type string
 	// Business is the trader information rendered in the footer (FR-711).
 	Business map[string]string
+	// Turnstile is the Cloudflare Turnstile **site** key (공개값) when A-201 turned
+	// the check on, else empty (FR-216). 비밀키는 여기 오지 않는다.
+	Turnstile string
 }
 
 // ViewUser is the logged-in caller as a template sees them: enough to greet

@@ -23,6 +23,7 @@ type accountDeps struct {
 	// (FR-214). Sites that cannot send mail — an intranet — turn it off.
 	verifyRequired func() bool
 	baseURL        string
+	spam           spamGuard
 }
 
 // signupForm is the whole of what P-103 accepts.
@@ -70,6 +71,12 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 	if err := content.ValidatePassword(f.Password); err != nil {
 		d.render(w, r, "auth/signup.html", http.StatusBadRequest,
 			map[string]any{"Error": "비밀번호는 10자 이상이어야 합니다.", "Form": f})
+		return
+	}
+
+	// 해시보다 먼저 본다 — 봇의 제출마다 비밀번호 해시(CPU)를 치르지 않는다.
+	if code, msg := d.spam.check(r); code != 0 {
+		d.render(w, r, "auth/signup.html", code, map[string]any{"Error": msg, "Form": f})
 		return
 	}
 

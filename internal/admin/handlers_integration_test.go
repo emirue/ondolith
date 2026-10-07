@@ -214,6 +214,49 @@ func TestSecretsAreNeverRedisplayed(t *testing.T) {
 	}
 }
 
+// **Turnstile 키는 A-201 에서 넣는다** (FR-216). 비밀키는 다시 보이지 않고, 빈 칸은
+// 「그대로 두라」이고, 바꾸면 작업 로그에 남되 값은 남지 않는다. 길이는 서버가 막는다.
+func TestTurnstileKeysOnSiteSettings(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"})
+	ctx := context.Background()
+
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+		"turnstile.site_key": {"0x4AAAAAAAsitekey"}, "turnstile.secret_key": {"0x4AAAAAAA-SUPERSECRET"},
+	}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("저장 = HTTP %d (%s)", rec.Code, rec.Body.String())
+	}
+	body := get(d.SettingsForm, "/admin/settings").Body.String()
+	if strings.Contains(body, "SUPERSECRET") {
+		t.Errorf("Turnstile 비밀키가 화면에 다시 표시됐다")
+	}
+	if !strings.Contains(body, "0x4AAAAAAAsitekey") {
+		t.Errorf("사이트 키가 보이지 않는다: %s", body)
+	}
+
+	post(d.SettingsSave, "/admin/settings", url.Values{
+		"turnstile.site_key": {"0x4AAAAAAAsitekey"}, "turnstile.secret_key": {""}, "site.name": {"온돌"}})
+	kv, err := d.Content.Settings(ctx, "turnstile.secret_key")
+	if err != nil || kv["turnstile.secret_key"] != "0x4AAAAAAA-SUPERSECRET" {
+		t.Errorf("빈 칸이 저장된 비밀키를 지웠다: %q (%v)", kv["turnstile.secret_key"], err)
+	}
+
+	var n int
+	var leaked bool
+	if err := pool.QueryRow(ctx, `SELECT count(*), coalesce(bool_or(summary LIKE '%SUPERSECRET%'), false)
+		FROM operation_logs WHERE target_id = 'turnstile'`).Scan(&n, &leaked); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || leaked {
+		t.Errorf("Turnstile 변경 작업 로그 %d건(want 1), 키가 남았나 %v", n, leaked)
+	}
+
+	for _, k := range []string{"turnstile.site_key", "turnstile.secret_key"} {
+		if rec := post(d.SettingsSave, "/admin/settings", url.Values{k: {strings.Repeat("k", 201)}}); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 201자 = HTTP %d, want 422", k, rec.Code)
+		}
+	}
+}
+
 // An empty secret box means "leave it alone": the form cannot show the current
 // value, so empty is the normal state of a screen opened to change something
 // else. Treating it as "erase" silently breaks mail on the next save.

@@ -1,0 +1,9 @@
+{{/* 공개 폼 스팸 방지 (FR-216, D17 「폼」). 넘겨받는 값은 Turnstile **사이트** 키다 — 비어 있으면
+     위젯도 바깥 스크립트도 없다. 숨은 칸은 늘 둔다: 화면 밖·탭 순서 밖·보조기기 밖이라 사람은
+     채우지 않고, 채워 온 제출은 저장되지 않는다. 칸 이름(website-url)은 코어가 정한다.
+     스타일을 인라인으로 두는 것은 테마 CSS 가 없어도 숨어야 하기 때문이다. */}}
+<div style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+  <label>이 칸은 비워 두세요 <input type="text" name="website-url" tabindex="-1" autocomplete="off"></label>
+</div>
+{{with .}}<div class="cf-turnstile" data-sitekey="{{.}}"></div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{{end}}

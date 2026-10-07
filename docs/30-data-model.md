@@ -462,6 +462,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 |---|---|---|---|
 | `site.name` · `site.meta_description` · `site.og_image` · `site.dev_mode` · `site.type` | text / text / text / bool / `cms`\|`shop` | A-201 | 1 |
 | `auth.email_verification_required` | bool | A-201 | 1 |
+| `turnstile.site_key` · `turnstile.secret_key` | text / **자격증명** | A-201 | 6 |
 | `mail.smtp_host` · `smtp_port` · `smtp_user` · `smtp_password` · `tls_mode` · `from_address` · `from_name` | text / int / text / **자격증명** / `none`\|`starttls`\|`tls` / text / text | A-205 | 1 |
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
 | `business.*` | text | A-208 | 3 |

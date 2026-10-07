@@ -102,6 +102,8 @@ func TestSiteCarriesOnlyRenderableFields(t *testing.T) {
 	allowed := map[string]bool{
 		"Name": true, "MetaDescription": true, "OGImage": true,
 		"Type": true, "Business": true,
+		// Turnstile 의 **사이트** 키 — 위젯이 페이지에 싣는 공개값이다 (FR-216). 비밀 키는 아니다.
+		"Turnstile": true,
 	}
 	for i := 0; i < ty.NumField(); i++ {
 		if f := ty.Field(i); !allowed[f.Name] {

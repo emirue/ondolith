@@ -43,6 +43,12 @@ func (d *accountDeps) resetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 스팸 판정도 계정이 아니라 제출의 성질이다 — 계정 유무와 무관하게 같은 답이다.
+	if code, msg := d.spam.check(r); code != 0 {
+		d.render(w, r, "auth/password-reset-request.html", code, map[string]any{"Error": msg})
+		return
+	}
+
 	// FindActiveUserByEmail filters on is_active, so a disabled account takes
 	// the same silent path as a missing one.
 	user, _, err := d.store.FindActiveUserByEmail(ctx, email)

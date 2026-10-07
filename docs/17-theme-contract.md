@@ -40,6 +40,12 @@ DELETE 를 보낼 수 없어서 장바구니(`/cart/items/…`)의 수량 변경
 (내장 테마가 본보기다 — 사용자 테마에 그 파일이 없으면 내장 것이 나간다). 셋 중 하나라도 빠지면 그 테마는
 **평문 칸으로 동작한다** — 깨지지 않는다.
 
+**스팸 방지(FR-216).** 가입(`auth/signup.html`)·재설정 요청(`auth/password-reset-request.html`)·새 글
+(`board/form.html`)·새 댓글(`partials/comment-form.html`) 폼 안에 `{{template "partials/spam.html" .Site.Turnstile}}`
+을 둔다. 숨은 칸(`website-url`)과, A-201 에 Turnstile 키가 있으면 위젯과 Cloudflare 스크립트를 그린다.
+**키가 켜졌는데 이 줄이 없는 테마는 그 폼의 제출이 전부 거부된다**(토큰이 오지 않는다) — 사용자 테마가 위 폼을
+덮어쓴다면 이 줄을 옮겨 적는다. 숨은 칸만 빠뜨린 테마는 거부되지 않는다(빈 칸과 같다).
+
 ## 디렉터리 구조
 
 ```
@@ -310,7 +316,7 @@ themes/{이름}/
 
 | 이름 | 내용 |
 |---|---|
-| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보 |
+| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216) |
 | `.Menu` | 메뉴 트리 (FR-405) |
 | `.User` | 로그인 사용자 (미로그인이면 nil). 이메일·표시이름만. **역할·권한 원본은 넘기지 않는다** |
 | `.Can` | 미리 계산된 권한 불리언 맵 ([D15](15-access-control.md) 4.3) |

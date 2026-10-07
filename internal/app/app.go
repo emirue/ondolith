@@ -205,6 +205,12 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 		return kv
 	}
+	// A-201 의 Turnstile 키 (FR-216). 둘 다 있어야 켜진다 — spamGuard.check 와 위젯이
+	// 같은 조건을 봐야 「위젯은 없는데 토큰을 요구한다」가 생기지 않는다.
+	turnstileKeys := func() (string, string) {
+		kv := setting("turnstile.site_key", "turnstile.secret_key")
+		return kv["turnstile.site_key"], kv["turnstile.secret_key"]
+	}
 	site := func() theme.Site {
 		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type")
 		s := theme.Site{
@@ -218,6 +224,9 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 		if s.Type == "" {
 			s.Type = "cms"
+		}
+		if key, secret := turnstileKeys(); key != "" && secret != "" {
+			s.Turnstile = key
 		}
 		// 사업자 정보는 shop 모드에서만 푸터에 나간다 (FR-711). cms 사이트는
 		// 표시 의무가 없고, 비어 있는 여덟 줄을 그리면 그것이 곧 오류로 보인다.
@@ -308,8 +317,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	if cfg.SiteURL == "" {
 		log.Warn("site_url 이 비어 있어 메일의 링크에 주소가 없습니다 — ondolith.json 에 site_url 을 적으세요 (예: https://example.com)")
 	}
+	turnstile := auth.Turnstile{Client: &http.Client{Timeout: 10 * time.Second}, URL: auth.TurnstileVerifyURL}
+	spam := spamGuard{keys: turnstileKeys, verify: turnstile.Verify, log: log}
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
-		userFields: contentStore.UserFields, verifyRequired: verifyRequired}
+		userFields: contentStore.UserFields, verifyRequired: verifyRequired, spam: spam}
 
 	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
 	// five directions share one markup, so switching is a token swap.
@@ -381,7 +392,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
 		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore, siteURL: cfg.SiteURL,
-		media: contentStore.MediaIn(cfg.Uploads())}
+		media: contentStore.MediaIn(cfg.Uploads()), spam: spam}
 
 	// **이름과 어댑터를 한 곳에서 낸다.** 둘을 따로 읽으면 갈라진다 — 실제로
 	// 「사용 안 함」을 처음 넣었을 때 이름 쪽만 고쳐서, 웹훅 경로와

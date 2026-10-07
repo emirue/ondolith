@@ -170,6 +170,8 @@ var siteSettingKeys = []string{
 	// 관리자 콘솔 배색. **부팅 때 읽던 값인데 그것을 저장하는 화면이 없었다** —
 	// 다섯 방향이 스타일시트에 있는데 고를 방법이 없었다.
 	"admin.theme",
+	// 공개 폼 스팸 방지 (FR-216). 둘 다 있어야 켜진다. 비밀키는 봉인되고 다시 보이지 않는다.
+	"turnstile.site_key", "turnstile.secret_key",
 }
 
 // adminThemes 는 admin.css 가 아는 배색이다 (`data-admin-theme="1a"` … `1e`).
@@ -184,12 +186,8 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "settings.update"); !ok {
 		return
 	}
-	kv, err := d.Content.Settings(r.Context(), siteSettingKeys...)
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-		return
-	}
-	d.Render(w, r, "admin/settings.html", http.StatusOK, map[string]any{"Settings": kv})
+	// renderSettings 를 거친다 — Turnstile 비밀키는 「저장됐는지」 만 나간다.
+	d.renderSettings(w, r, "admin/settings.html", siteSettingKeys, http.StatusOK, "")
 }
 
 // assemblyKeys are read when the operating tree is built, not per request.
@@ -216,6 +214,17 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			kv[k] = v
 		}
 	}
+	// 비밀키 빈 칸은 「그대로 두라」다 (MailSettingsSave 와 같은 이유). 끄려면 사이트 키를 비운다.
+	if kv["turnstile.secret_key"] == "" {
+		delete(kv, "turnstile.secret_key")
+	}
+	for _, k := range []string{"turnstile.site_key", "turnstile.secret_key"} {
+		if len(kv[k]) > 200 {
+			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+				http.StatusUnprocessableEntity, "Turnstile 키가 너무 깁니다 (200자 이내).")
+			return
+		}
+	}
 	// FR-710: the site type is a closed vocabulary. An unknown value would
 	// leave the router assembling a tree nobody described.
 	if t, ok := kv["site.type"]; ok && t != "cms" && t != "shop" {
@@ -231,7 +240,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "관리자 배색은 1a~1e 중 하나여야 합니다.")
 		return
 	}
-	prev, err := d.Content.Settings(r.Context(), assemblyKeys...)
+	prev, err := d.Content.Settings(r.Context(), append([]string{"turnstile.site_key"}, assemblyKeys...)...)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
@@ -270,6 +279,10 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	if typeChanged {
 		d.log(r, c, "settings.update", "settings", "site.type",
 			"사이트 유형 "+prev["site.type"]+" → "+kv["site.type"])
+	}
+	// 자격증명 변경은 작업 로그 대상이다 (D15 7절). 값은 남기지 않는다.
+	if changed(kv, prev, "turnstile.site_key") || kv["turnstile.secret_key"] != "" {
+		d.log(r, c, "settings.update", "settings", "turnstile", "스팸 방지(Turnstile) 키 변경")
 	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
 	if !typeChanged && !changed(kv, prev, "admin.theme") {

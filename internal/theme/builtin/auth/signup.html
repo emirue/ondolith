@@ -19,6 +19,7 @@
     <label for="f-{{.Field.Key}}">{{.Field.Label}}{{if .Field.Required}} *{{end}}</label>
     {{template "partials/field.html" .}}
   {{end}}{{end}}
+  {{template "partials/spam.html" .Site.Turnstile}}
   <button type="submit">가입</button>
 </form>
 </div>

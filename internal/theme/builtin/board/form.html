@@ -42,6 +42,8 @@
       </label>
     {{end}}
 
+    {{/* 새 글에만 (FR-216). 수정은 이미 쓴 사람의 것이다. */}}
+    {{if not .Post.ID}}{{template "partials/spam.html" $.Site.Turnstile}}{{end}}
     <button>{{if .Post.ID}}수정{{else}}등록{{end}}</button>
   </form>
 </section>
