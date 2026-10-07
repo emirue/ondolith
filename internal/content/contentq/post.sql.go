@@ -56,8 +56,10 @@ SELECT c.id, c.post_id, coalesce(c.parent_id::text, '')::text AS parent_id,
        c.body, coalesce(c.deleted_at, 'epoch'::timestamptz)::timestamptz AS deleted_at, c.created_at
 FROM comments c
 LEFT JOIN users u ON u.id = c.author_id
+LEFT JOIN comments root ON root.id = c.parent_id
 WHERE c.post_id = $1
-ORDER BY coalesce(c.parent_id, c.id), c.created_at, c.id
+ORDER BY coalesce(root.created_at, c.created_at), coalesce(c.parent_id, c.id),
+         c.parent_id IS NOT NULL, c.created_at, c.id
 `
 
 type CommentsRow struct {
@@ -71,6 +73,8 @@ type CommentsRow struct {
 	CreatedAt  time.Time
 }
 
+// 스레드는 그 첫 댓글의 시각 순이다. 묶는 열(coalesce(parent_id, id))만으로 정렬하면
+// 무작위 uuid 순이 된다. 스레드 안에서는 첫 댓글, 그다음 답이 시각 순 (대댓글은 1단계).
 func (q *Queries) Comments(ctx context.Context, postID string) ([]CommentsRow, error) {
 	rows, err := q.db.Query(ctx, comments, postID)
 	if err != nil {

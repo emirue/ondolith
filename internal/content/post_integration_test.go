@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -415,5 +416,37 @@ func TestSearchWithNoTermReturnsNothing(t *testing.T) {
 	q2 := ParseListQuery(url.Values{"q": {"어떤"}}, 20)
 	if got, err := s.SearchPosts(ctx, nil, nil, q2, ""); err != nil || len(got) != 0 {
 		t.Errorf("읽을 게시판이 없는데 %d행 (err=%v)", len(got), err)
+	}
+}
+
+// **댓글 스레드는 먼저 단 것이 먼저다** (D12 P-204). 앞 판은 스레드를
+// `coalesce(parent_id, id)` — 무작위 uuid — 로 묶어 정렬해서, 스레드 순서가 시간과
+// 무관했다: 어제 단 댓글이 오늘 단 댓글 뒤로 갈 수 있었다. uuid 순서가 시간과
+// 거꾸로인 행을 일부러 넣어 본다.
+func TestCommentThreadsAreChronological(t *testing.T) {
+	s, pool := testStore(t)
+	boardID := seedBoard(t, s)
+	postID := mkPost(t, s, boardID, "글")
+	ctx := context.Background()
+	for _, c := range []struct{ id, parent, at string }{
+		{"ffffffff-0000-4000-8000-000000000001", "", "2026-10-01 09:00"},                                     // 첫 댓글
+		{"00000000-0000-4000-8000-000000000002", "", "2026-10-01 10:00"},                                     // 둘째 댓글
+		{"88888888-0000-4000-8000-000000000003", "ffffffff-0000-4000-8000-000000000001", "2026-10-01 11:00"}, // 첫 댓글의 답
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO comments (id, post_id, parent_id, body, created_at)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, '본문', $4::timestamptz)`, c.id, postID, c.parent, c.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Comments(ctx, postID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, c := range got {
+		ids = append(ids, c.ID[:8])
+	}
+	if want := []string{"ffffffff", "88888888", "00000000"}; strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Errorf("댓글 순서 %v, want %v — 첫 댓글, 그 답, 둘째 댓글", ids, want)
 	}
 }
