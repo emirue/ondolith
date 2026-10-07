@@ -156,7 +156,7 @@ Client IP addresses 절, 「Locations and IP address ranges of CloudFront edge s
 뒤 두 경우는 `/opt/ondolith/ondolith.json`의 `secure_cookies`를 직접 `true`로 고치고
 재시작한다. **설치를 다시 하지 않는다** — 설정 파일 한 줄이다.
 
-`site_url`도 같은 파일에 있다. 설치 요청의 주소를 그대로 잡으므로, 도메인을 붙이거나 TLS 로
+`site_url`도 같은 파일에 있다(메일 링크와 사이트맵·robots.txt 가 이 값을 쓴다). 설치 요청의 주소를 그대로 잡으므로, 도메인을 붙이거나 TLS 로
 옮긴 뒤에는 `https://<도메인>` 으로 고친다 — 재설정·인증 메일의 링크가 이 값으로 만들어진다.
 
 ---

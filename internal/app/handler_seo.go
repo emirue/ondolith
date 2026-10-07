@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/xml"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
@@ -111,12 +112,17 @@ func (d *boardDeps) robots(w http.ResponseWriter, r *http.Request) {
 		"Sitemap: " + d.baseURL(r) + "/sitemap.xml\n"))
 }
 
-// baseURL reconstructs the site's own origin.
+// baseURL is the site's own origin: 설정의 site_url 이 먼저다. 요청으로 짐작하면
+// nginx 가 TLS 를 끝내는 배포(D72)에서 r.TLS 가 비어 https 사이트에 http 주소가
+// 실린다. site_url 은 설치가 정하고 메일 링크도 그것을 쓴다.
 //
-// It uses the request's Host and NOT a forwarded header: X-Forwarded-Host is
-// attacker-controlled on any deployment that does not strip it, and a sitemap
-// full of somebody else's origin is a gift to whoever sent the header.
+// 없을 때만 요청에서 만든다 — Host 를 쓰고 전달 헤더는 쓰지 않는다:
+// X-Forwarded-Host is attacker-controlled on any deployment that does not strip
+// it, and a sitemap full of somebody else's origin is a gift to whoever sent it.
 func (d *boardDeps) baseURL(r *http.Request) string {
+	if d.siteURL != "" {
+		return strings.TrimRight(d.siteURL, "/")
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"

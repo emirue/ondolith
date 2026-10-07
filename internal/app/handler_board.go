@@ -19,6 +19,8 @@ type boardDeps struct {
 	attachments *content.Attachments
 	authStore   *auth.Store
 	log         *slog.Logger
+	// siteURL is config.SiteURL — 운영자가 정한 출처. 사이트맵·robots 가 쓴다.
+	siteURL string
 }
 
 // countView bumps the counter once per session per post.

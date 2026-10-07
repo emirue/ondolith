@@ -72,7 +72,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 3.6 | 본문 렌더링 파이프라인(마크다운·리치텍스트) | 없음 — 글·페이지 본문은 `nl2br` 뿐 | 코드 읽기 | ✓ 살균기가 필요 없다 |
 | 3.7 | 보안 헤더: `X-Frame-Options: DENY`·`nosniff`·`Referrer-Policy`·CSP | `internal/httpsec/headers.go` | 단위 테스트 | ✓ 정적 자산·첨부에도 (트리 밖으로 옮기며 유지) |
 | 3.8 | CSP 에 `script-src`/`default-src` 없음 (인라인 스크립트 허용) | `headers.go` | — | — 의도적. XSS 방어는 3.3~3.5 에 있다. 테마가 인라인을 쓴다 |
-| 3.9 | `Host`·`X-Forwarded-Host` 신뢰 | `handler_seo.go`(사이트맵 origin)·`app.go`(OAuth `redirect_uri`) | `grep X-Forwarded-Host` | ✓ `X-Forwarded-Host` 0건. 메일 링크는 요청이 아니라 `site_url`(4.6) |
+| 3.9 | `Host`·`X-Forwarded-Host` 신뢰 | `handler_seo.go`(사이트맵 origin)·`app.go`(OAuth `redirect_uri`) | `grep X-Forwarded-Host` | ✓ `X-Forwarded-Host` 0건. 메일 링크와 사이트맵·robots 는 요청이 아니라 `site_url`(4.6, 사이트맵은 2026-10-07 부터) |
 | 3.10 | 오류 페이지가 내부를 말하지 않는다 | `handler_public.go` `serverError` | 코드 읽기 | ✓ 원문은 **개발 빌드**에서만 (2026-09-13 에 고침 — DB 설정 하나로 켜졌었다) |
 | 3.11 | HSTS | 앱은 TLS 를 모른다 — [D72](72-deploy-lightsail.md) 3절 nginx 블록의 `Strict-Transport-Security` | 프록시 응답 헤더 확인 | ✓ 2026-09-14 에 문서에 넣음. **실기로 확인한 적은 없다** |
 

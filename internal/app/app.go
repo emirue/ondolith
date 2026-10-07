@@ -400,7 +400,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
-		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore}
+		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore, siteURL: cfg.SiteURL}
 
 	// **이름과 어댑터를 한 곳에서 낸다.** 둘을 따로 읽으면 갈라진다 — 실제로
 	// 「사용 안 함」을 처음 넣었을 때 이름 쪽만 고쳐서, 웹훅 경로와
