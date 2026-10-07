@@ -194,7 +194,7 @@ func TestEachHandlerChecksItsOwnPermission(t *testing.T) {
 // FR-708: the secret is written once and never travels back. "Masked in the UI"
 // is not the same as "never sent" — the value would be in the HTML source.
 func TestSecretsAreNeverRedisplayed(t *testing.T) {
-	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	d, _ := fixture(t, &fakeCaller{superuser: true}) // SMTP 저장은 superuser 만 (R7)
 
 	post(d.MailSettingsSave, "/admin/settings/mail", url.Values{
 		"mail.smtp_host":     {"smtp.example.com"},
@@ -217,7 +217,7 @@ func TestSecretsAreNeverRedisplayed(t *testing.T) {
 // value, so empty is the normal state of a screen opened to change something
 // else. Treating it as "erase" silently breaks mail on the next save.
 func TestEmptySecretDoesNotEraseTheStoredOne(t *testing.T) {
-	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	d, pool := fixture(t, &fakeCaller{superuser: true}) // SMTP 저장은 superuser 만 (R7)
 	ctx := context.Background()
 
 	post(d.MailSettingsSave, "/admin/settings/mail", url.Values{
@@ -1249,6 +1249,51 @@ func TestPaymentSettingsRequireReauth(t *testing.T) {
 		"password": {"correct horse battery"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+}
+
+// **SMTP 설정은 superuser 만 바꾼다** (D15 5.1 R7).
+//
+// 비밀번호 재설정 토큰은 이 SMTP 로 나간다. `settings.update` 만 가진 운영자가
+// 호스트를 자기 서버로 돌리고 superuser 이메일로 재설정을 요청하면 토큰을 받아
+// superuser 가 된다 — R6 이 막은 「계정 조작은 superuser 만」을 메일 경로로
+// 우회하는 길이었다. 재인증·작업 로그도 없어서 되돌려 놓으면 흔적이 남지 않았다.
+func TestMailSettingsAreSuperuserOnlyReauthedAndLogged(t *testing.T) {
+	op := &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"}
+	d, pool := fixture(t, op)
+	ctx := context.Background()
+
+	rec := postAdmin(t, d.MailSettingsSave, "/admin/settings/mail", nil, url.Values{
+		"mail.smtp_host": {"attacker.example"}, "mail.tls_mode": {"none"}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("settings.update 만 있는 운영자의 SMTP 저장 = HTTP %d, want 403", rec.Code)
+	}
+	if kv, _ := d.Content.Settings(ctx, "mail.smtp_host"); kv["mail.smtp_host"] != "" {
+		t.Fatalf("운영자가 SMTP 호스트를 바꿨다: %q", kv["mail.smtp_host"])
+	}
+
+	// superuser 도 재인증 창이 지났으면 비밀번호를 다시 넣어야 한다.
+	su := &fakeCaller{superuser: true, reauth: true, email: "su@example.com",
+		password: "correct horse battery"}
+	d.Caller = func(*http.Request) Caller { return su }
+	rec = postAdmin(t, d.MailSettingsSave, "/admin/settings/mail", nil, url.Values{
+		"mail.smtp_host": {"smtp.example.com"}, "mail.tls_mode": {"starttls"}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("재인증 없이 = HTTP %d, want 403", rec.Code)
+	}
+	rec = postAdmin(t, d.MailSettingsSave, "/admin/settings/mail", nil, url.Values{
+		"mail.smtp_host": {"smtp.example.com"}, "mail.tls_mode": {"starttls"},
+		"password": {"correct horse battery"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs
+		WHERE action = 'settings.update' AND target_id = 'mail'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("SMTP 변경 작업 로그 %d건, want 1", n)
 	}
 }
 

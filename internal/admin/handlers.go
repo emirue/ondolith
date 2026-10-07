@@ -344,8 +344,26 @@ func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
 	d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusOK, "")
 }
 
+// MailSettingsSave is A-205's write. **superuser 만 저장한다** (D15 5.1 R7).
+//
+// 비밀번호 재설정·인증 토큰은 이 SMTP 로 나간다. `settings.update` 만 가진
+// 운영자가 호스트를 자기 서버로 돌린 뒤 superuser 이메일로 재설정을 요청하면
+// 토큰을 받아 superuser 가 된다 — R6 이 막은 계정 조작을 메일 경로로 우회하는
+// 길이다. 보는 것(GET)은 settings.update 로 남긴다: 호스트 이름은 비밀이 아니다.
 func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "settings.update"); !ok {
+	c, ok := d.require(w, r, "settings.update")
+	if !ok {
+		return
+	}
+	if !c.IsSuperuser() {
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusForbidden,
+			"메일(SMTP) 설정은 최고 관리자만 바꿀 수 있습니다.")
+		return
+	}
+	// 메일 경로를 바꾸면 이후 모든 계정 복구 메일의 수신처가 바뀐다 (D15 5.3-1).
+	if !reauthOK(c, r) {
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusForbidden,
+			"비밀번호를 다시 입력하세요.")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -372,6 +390,8 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// 값은 남기지 않는다 — 비밀번호가 섞여 있고 로그는 지워지지 않는다 (D15 7절).
+	d.log(r, c, "settings.update", "settings", "mail", "메일(SMTP) 설정 변경")
 	http.Redirect(w, r, "/admin/settings/mail", http.StatusSeeOther)
 }
 
