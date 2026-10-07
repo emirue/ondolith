@@ -29,6 +29,8 @@ type fakeGateway struct {
 	cancelResponse *Payment
 	cancelErr      error
 	cancelReqs     []CancelRequest
+	// onCancel 은 취소 API 왕복 중에 일어나는 일을 흉내낸다.
+	onCancel func()
 }
 
 func (g *fakeGateway) Confirm(_ context.Context, req ConfirmRequest) (*Payment, error) {
@@ -52,6 +54,9 @@ func (g *fakeGateway) Cancel(_ context.Context, req CancelRequest) (*Payment, er
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.cancelReqs = append(g.cancelReqs, req)
+	if g.onCancel != nil {
+		g.onCancel()
+	}
 	if g.cancelErr != nil {
 		return nil, g.cancelErr
 	}

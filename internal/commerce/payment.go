@@ -42,6 +42,17 @@ const AuthWindow = 10 * time.Minute
 // 불명은 ErrPaymentUnknown 으로 조회 경로를 탄다 (D50).
 const GatewayTimeout = 30 * time.Second
 
+// moneyCtx is the context for a path that calls the PG and then records what it
+// said: ConfirmPayment, ExecuteRefund, ConfirmExchangeDiff.
+//
+// **요청 취소에서 떼어 낸다.** net/http 는 클라이언트 연결이 끊기면 요청 컨텍스트를
+// 취소한다. 그 컨텍스트로 PG 를 부르고 기록하면, PG 는 승인·취소를 끝냈는데 직후의
+// DB 기록이 실패해 「PG 는 승인, 우리는 대기」가 남는다 — 탭을 닫는 것만으로.
+// 상한은 남긴다: PG 호출 하나와 기록 몇 번이 들어갈 시간이다.
+func moneyCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), GatewayTimeout+30*time.Second)
+}
+
 // ConfirmPayment is P-408's body.
 //
 // 순서가 방어다. D50 결제 흐름의 ★ 표시 두 개가 **승인 API 호출보다 앞**에
@@ -57,6 +68,8 @@ const GatewayTimeout = 30 * time.Second
 //  6. 결과 기록 + 상태 전이 (상태머신을 거친다).
 func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 	orderNo, paymentKey string, callbackAmount int, now time.Time) (*Payment, error) {
+	ctx, cancel := moneyCtx(ctx)
+	defer cancel()
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

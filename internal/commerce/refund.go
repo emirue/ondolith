@@ -455,6 +455,8 @@ var ErrRefundState = errors.New("commerce: 실행할 수 있는 환불 건이 �
 // (타임아웃·5xx·IDEMPOTENT_REQUEST_PROCESSING)은 '승인' 에 둔다 —
 // **미환불이 이중환불보다 낫다** (D13).
 func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string) error {
+	ctx, cancel := moneyCtx(ctx) // PG 호출 뒤 기록까지 끝낸다 (payment.go)
+	defer cancel()
 	if gw == nil {
 		return errors.New("commerce: PG 가 설정되어 있지 않아 환불을 실행할 수 없습니다")
 	}
