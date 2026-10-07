@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Uu3gImDRR5UVTSdX530DoZ9XaXZkncQcOW5bINAZVrl5L5nqM4DQ3VPETNOm6xv
+\restrict XWeDMBQkbyFvXKNnyCyxpxHzfiFsOa5pqrObhUJWLUUIiu5gqulrgdVgCDhj2re
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -362,6 +362,8 @@ CREATE TABLE public.pages (
     template text DEFAULT ''::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    body_html text DEFAULT ''::text NOT NULL,
+    CONSTRAINT pages_body_html_len CHECK ((length(body_html) <= 200000)),
     CONSTRAINT pages_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'published'::text])))
 );
 
@@ -444,7 +446,9 @@ CREATE TABLE public.posts (
     search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, ((title || ' '::text) || body))) STORED,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    body_html text DEFAULT ''::text NOT NULL,
     CONSTRAINT posts_body_check CHECK ((length(body) <= 50000)),
+    CONSTRAINT posts_body_html_len CHECK ((length(body_html) <= 200000)),
     CONSTRAINT posts_custom_fields_shape CHECK (((jsonb_typeof(custom_fields) = 'object'::text) AND (octet_length((custom_fields)::text) <= 16384))),
     CONSTRAINT posts_status_check CHECK ((status = ANY (ARRAY['published'::text, 'hidden'::text]))),
     CONSTRAINT posts_title_check CHECK (((length(title) >= 1) AND (length(title) <= 200))),
@@ -2226,5 +2230,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Uu3gImDRR5UVTSdX530DoZ9XaXZkncQcOW5bINAZVrl5L5nqM4DQ3VPETNOm6xv
+\unrestrict XWeDMBQkbyFvXKNnyCyxpxHzfiFsOa5pqrObhUJWLUUIiu5gqulrgdVgCDhj2re
 

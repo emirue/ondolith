@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -85,4 +86,29 @@ func postAs(d *Deps, target, id string, form url.Values) *httptest.ResponseRecor
 	req.SetPathValue("no", "NOPE")
 	d.OrderTransition(rec, req)
 	return rec
+}
+
+// **페이지도 에디터 HTML 을 정화해 저장하고, 평문은 그 글자다** (FR-513, A-302).
+func TestPageSaveStoresSanitizedEditorHTML(t *testing.T) {
+	creator := &fakeCaller{perms: map[string]bool{"page.create": true}, email: "e@example.com"}
+	d, pool := fixture(t, creator)
+	rec := postAs(d, "/admin/pages/new", "new", url.Values{
+		"slug": {"location"}, "title": {"오시는 길"}, "body": {"평문 사본"},
+		"body_html": {`<p>서울 <a href="javascript:alert(1)">지도</a></p>` +
+			`<iframe src="https://www.google.com/maps/embed?pb=!1m18"></iframe>`},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	var body, html string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT body, body_html FROM pages WHERE slug = 'location'`).Scan(&body, &html); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(html, "javascript:") || !strings.Contains(html, "google.com/maps/embed") {
+		t.Errorf("정화 결과가 틀렸다: %s", html)
+	}
+	if body != "서울 지도" {
+		t.Errorf("평문 = %q, want %q", body, "서울 지도")
+	}
 }

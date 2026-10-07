@@ -2,7 +2,7 @@
 {{with .Data}}
 <article class="page">
   <h1>{{.Title}}</h1>
-  <div class="page-body">{{nl2br .Body}}</div>
+  {{with .Rendered}}<div class="page-body rich">{{.}}</div>{{else}}<div class="page-body">{{nl2br $.Data.Body}}</div>{{end}}
 </article>
 {{end}}
 {{end}}

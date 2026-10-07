@@ -455,7 +455,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 
 | ID | 작업 | 선행 | 산출물 | 완료 기준 |
 |---|---|---|---|---|
-| W6-01 | 본문 HTML 저장과 정화 | — | `00026`, `internal/content/richtext.go` | `posts`·`pages` 에 `body_html`. 정화(bluemonday)를 지난 HTML 만 저장되고 `body` 는 그 평문이라 검색·요약이 그대로다. XSS 입력 표 시험 통과. 에디터 이전 글은 평문으로 보인다 (FR-513) |
+| W6-01 | 본문 HTML 저장과 정화 **(완료)** | — | `00026`, `internal/content/richtext.go` | `posts`·`pages` 에 `body_html`. 정화(bluemonday)를 지난 HTML 만 저장되고 `body` 는 그 평문이라 검색·요약이 그대로다. XSS 입력 표 시험 통과. 에디터 이전 글은 평문으로 보인다 (FR-513) |
 | W6-02 | 본문 사진 업로드·축소·썸네일 | W6-01 | `media` 표, `internal/content/media.go` | 긴 변 1920px·썸네일 480px, EXIF 회전 반영·제거, 픽셀 상한은 디코드 전에 거부. 권한 없는 업로드 403 (FR-514) |
 | W6-03 | 에디터 내장과 폼 연결 | W6-01, W6-02 | 내장 테마 `static/vendor/suneditor`, `editor.js` | 글쓰기(P-205)·페이지 편집(A-302)이 에디터로 열리고, JS 없이도 평문으로 저장된다. 한글 IME 조합 브라우저 시험 통과 (FR-513) |
 | W6-04 | 갤러리 목록 (선택) | W6-02 | 게시판 설정, `board/list.html` | 갤러리 게시판의 목록이 첫 사진 썸네일 카드로 나온다 (FR-515) |

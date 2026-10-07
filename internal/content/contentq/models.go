@@ -40,4 +40,5 @@ type Page struct {
 	Template  string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	BodyHtml  string
 }

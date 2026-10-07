@@ -142,6 +142,7 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `pages.slug` | 100 | `/{slug}`가 전체 경로다 |
 | `pages.title` | 200 | `<title>`·OG 제목이 된다 (FR-511) |
 | `pages.body` | 100,000 | 본문 계열. 한 요청이 버퍼링해도 되는 크기 |
+| `posts.body_html` · `pages.body_html` | 200,000 | 정화된 본문 HTML (FR-513, `00026`). 태그·속성이 글자보다 길어 평문 상한의 몇 배다 |
 | `settings.key` | 80 | 3 세그먼트 + 프로바이더 이름 최악값 |
 | `settings.value` | 4,000 | **짧은 스칼라만 담는다.** 긴 본문은 전용 표의 몫. 최장 후보가 OG 이미지 URL(2,048) |
 | `menus.title` · `menus.url` | 50 / 500 | 내비게이션 한 항목 / 외부 URL 포함 |
@@ -436,7 +437,8 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `id` | uuid | PK |
 | `slug` | text | NOT NULL UNIQUE |
 | `title` | text | NOT NULL |
-| `body` | text | NOT NULL |
+| `body` | text | NOT NULL. 에디터로 쓴 페이지면 `body_html` 의 평문 |
+| `body_html` | text | NOT NULL DEFAULT '', `CHECK (length(body_html) <= 200000)` — 정화된 본문 HTML (FR-513, `00026`). 빈 값이 평문 페이지다 |
 | `status` | text | NOT NULL DEFAULT 'draft', `CHECK (status IN ('draft','published'))` |
 | `template` | text | NOT NULL DEFAULT '' |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
@@ -600,7 +602,8 @@ ALTER TABLE board_fields ADD CONSTRAINT board_fields_options_when
 | `id` | uuid | PK |
 | `board_id` | uuid | NOT NULL REFERENCES `boards(id)` |
 | `author_id` | uuid | **NULL 허용** REFERENCES `users(id)` — 3-1이 SET NULL이다 |
-| `title` · `body` | text | NOT NULL |
+| `title` · `body` | text | NOT NULL. 에디터로 쓴 글이면 `body` 는 `body_html` 의 평문이다 — 검색·요약·OG 가 이것을 쓴다 |
+| `body_html` | text | NOT NULL DEFAULT '', `CHECK (length(body_html) <= 200000)` — **정화를 지난** 본문 HTML(FR-513, `00026`). 빈 값이 평문 글이다 |
 | `custom_fields` | jsonb | NOT NULL DEFAULT '{}' |
 | `status` | text | NOT NULL DEFAULT 'published', `CHECK (status IN ('published','hidden'))` |
 | `is_pinned` · `is_secret` | boolean | NOT NULL DEFAULT false |

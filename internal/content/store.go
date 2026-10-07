@@ -73,10 +73,12 @@ func IsSecretSetting(key string) bool {
 }
 
 type Page struct {
-	ID       string
-	Slug     string
-	Title    string
-	Body     string
+	ID    string
+	Slug  string
+	Title string
+	Body  string
+	// BodyHTML 은 Post.BodyHTML 과 같다 — 정화된 본문 HTML, 평문 페이지면 빈 값.
+	BodyHTML string
 	Status   PageStatus
 	Template string
 }
@@ -84,7 +86,7 @@ type Page struct {
 // pageOf is the one place a pages row becomes a Page. 읽기 질의가 전부 열
 // 전체를 고르는 것은 이 때문이다 — sqlc 가 모델 하나를 돌려주고 변환도 하나다.
 func pageOf(r contentq.Page) Page {
-	return Page{ID: r.ID, Slug: r.Slug, Title: r.Title, Body: r.Body,
+	return Page{ID: r.ID, Slug: r.Slug, Title: r.Title, Body: r.Body, BodyHTML: r.BodyHtml,
 		Status: PageStatus(r.Status), Template: r.Template}
 }
 
@@ -142,7 +144,7 @@ func (s *Store) PageByID(ctx context.Context, id string) (*Page, error) {
 // serialises them (D30 pages).
 func (s *Store) CreatePage(ctx context.Context, p Page) (string, error) {
 	id, err := s.q.CreatePage(ctx, contentq.CreatePageParams{
-		Slug: p.Slug, Title: p.Title, Body: p.Body, Template: p.Template})
+		Slug: p.Slug, Title: p.Title, Body: p.Body, BodyHtml: p.BodyHTML, Template: p.Template})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrSlugTaken
@@ -155,7 +157,7 @@ func (s *Store) CreatePage(ctx context.Context, p Page) (string, error) {
 // hand the first permission the second one's power.
 func (s *Store) UpdatePage(ctx context.Context, id string, p Page) error {
 	n, err := s.q.UpdatePage(ctx, contentq.UpdatePageParams{
-		ID: id, Slug: p.Slug, Title: p.Title, Body: p.Body, Template: p.Template})
+		ID: id, Slug: p.Slug, Title: p.Title, Body: p.Body, BodyHtml: p.BodyHTML, Template: p.Template})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return ErrSlugTaken

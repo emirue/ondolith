@@ -400,9 +400,11 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 		d.serverError(w, r, err)
 		return content.Post{}, nil, false
 	}
+	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
 	p := content.Post{
-		Title: strings.TrimSpace(r.PostFormValue("title")),
-		Body:  r.PostFormValue("body"),
+		Title:    strings.TrimSpace(r.PostFormValue("title")),
+		Body:     body,
+		BodyHTML: bodyHTML,
 		// A board with secret posts turned off cannot have one, whatever the
 		// form says — the checkbox is absent from the page, and a posted value
 		// is somebody trying it anyway.
@@ -456,7 +458,7 @@ func customValues(r *http.Request) map[string][]string {
 	out := map[string][]string{}
 	for k, v := range r.PostForm {
 		switch k {
-		case "title", "body", "is_secret", "attachments":
+		case "title", "body", "body_html", "is_secret", "attachments":
 			continue
 		}
 		out[k] = v

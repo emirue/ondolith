@@ -1,29 +1,29 @@
 -- name: PublishedPageBySlug :one
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE slug = $1 AND status = 'published';
 
 -- name: PageBySlug :one
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE slug = $1;
 
 -- name: PageByID :one
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE id = $1;
 
 -- name: Pages :many
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages ORDER BY updated_at DESC, id;
 
 -- name: PublishedPages :many
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE status = 'published' ORDER BY slug;
 
 -- name: CreatePage :one
-INSERT INTO pages (slug, title, body, template)
-VALUES ($1, $2, $3, $4) RETURNING id;
+INSERT INTO pages (slug, title, body, body_html, template)
+VALUES ($1, $2, $3, $4, $5) RETURNING id;
 
 -- name: UpdatePage :execrows
-UPDATE pages SET slug = $2, title = $3, body = $4, template = $5, updated_at = now()
+UPDATE pages SET slug = $2, title = $3, body = $4, body_html = $5, template = $6, updated_at = now()
 WHERE id = $1;
 
 -- name: PageStatus :one

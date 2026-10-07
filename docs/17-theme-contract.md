@@ -268,6 +268,22 @@ themes/{이름}/
 
 ---
 
+## 본문 그리기 (FR-513)
+
+글(`board/view.html` 의 `.Post`)과 페이지(`page.html` 의 `.Data`)는 **두 가지 본문**을 가진다.
+
+| 이름 | 내용 |
+|---|---|
+| `.Rendered` | 에디터로 쓴 본문의 HTML(코어가 정화한 것). 평문 글이면 빈 값 |
+| `.Body` | 평문. 에디터 이전의 글은 이것뿐이고, 에디터로 쓴 글이면 HTML 의 글자다 |
+
+```
+{{with .Post.Rendered}}<div class="page-body rich">{{.}}</div>{{else}}<div class="page-body">{{nl2br .Post.Body}}</div>{{end}}
+```
+
+`.Rendered` 를 쓰지 않는 테마도 깨지지 않는다 — 에디터로 쓴 글이 평문으로 보일 뿐이다.
+본문 사진은 원본 폭이 클 수 있으니 테마가 `img { max-width: 100% }` 를 준다(내장 테마의 `.rich`).
+
 ## 뷰 모델 규약
 
 모든 템플릿이 공통으로 받는 것.

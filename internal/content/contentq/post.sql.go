@@ -196,8 +196,8 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (s
 }
 
 const createPost = `-- name: CreatePost :one
-INSERT INTO posts (board_id, author_id, title, body, custom_fields, is_secret)
-VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+INSERT INTO posts (board_id, author_id, title, body, body_html, custom_fields, is_secret)
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
 `
 
 type CreatePostParams struct {
@@ -205,6 +205,7 @@ type CreatePostParams struct {
 	AuthorID     *string
 	Title        string
 	Body         string
+	BodyHtml     string
 	CustomFields []byte
 	IsSecret     bool
 }
@@ -215,6 +216,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (string,
 		arg.AuthorID,
 		arg.Title,
 		arg.Body,
+		arg.BodyHtml,
 		arg.CustomFields,
 		arg.IsSecret,
 	)
@@ -249,7 +251,7 @@ func (q *Queries) DeletePost(ctx context.Context, id string) (int64, error) {
 
 const listPosts = `-- name: ListPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -297,6 +299,7 @@ type ListPostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -335,6 +338,7 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPos
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -357,7 +361,7 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPos
 
 const listPostsSearch = `-- name: ListPostsSearch :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -411,6 +415,7 @@ type ListPostsSearchRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -447,6 +452,7 @@ func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -526,7 +532,7 @@ func (q *Queries) ModerateComments(ctx context.Context, arg ModerateCommentsPara
 
 const moderatePosts = `-- name: ModeratePosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -549,6 +555,7 @@ type ModeratePostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -576,6 +583,7 @@ func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -598,7 +606,7 @@ func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([
 
 const postByID = `-- name: PostByID :one
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, p.body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -620,6 +628,7 @@ type PostByIDRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -641,6 +650,7 @@ func (q *Queries) PostByID(ctx context.Context, arg PostByIDParams) (PostByIDRow
 		&i.AuthorName,
 		&i.Title,
 		&i.Body,
+		&i.BodyHtml,
 		&i.CustomFields,
 		&i.Status,
 		&i.IsPinned,
@@ -656,7 +666,7 @@ func (q *Queries) PostByID(ctx context.Context, arg PostByIDParams) (PostByIDRow
 
 const recentPosts = `-- name: RecentPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -683,6 +693,7 @@ type RecentPostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -715,6 +726,7 @@ func (q *Queries) RecentPosts(ctx context.Context, arg RecentPostsParams) ([]Rec
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -737,7 +749,7 @@ func (q *Queries) RecentPosts(ctx context.Context, arg RecentPostsParams) ([]Rec
 
 const searchPosts = `-- name: SearchPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, ''::text AS body_html, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -790,6 +802,7 @@ type SearchPostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -826,6 +839,7 @@ func (q *Queries) SearchPosts(ctx context.Context, arg SearchPostsParams) ([]Sea
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -942,7 +956,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (i
 }
 
 const updatePost = `-- name: UpdatePost :execrows
-UPDATE posts SET title = $2, body = $3, custom_fields = $4, is_secret = $5,
+UPDATE posts SET title = $2, body = $3, body_html = $4, custom_fields = $5, is_secret = $6,
        updated_at = now()
 WHERE id = $1
 `
@@ -951,6 +965,7 @@ type UpdatePostParams struct {
 	ID           string
 	Title        string
 	Body         string
+	BodyHtml     string
 	CustomFields []byte
 	IsSecret     bool
 }
@@ -960,6 +975,7 @@ func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (int64, 
 		arg.ID,
 		arg.Title,
 		arg.Body,
+		arg.BodyHtml,
 		arg.CustomFields,
 		arg.IsSecret,
 	)

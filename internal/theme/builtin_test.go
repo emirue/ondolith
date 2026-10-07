@@ -2,6 +2,7 @@ package theme
 
 import (
 	"bytes"
+	"html/template"
 	"io/fs"
 	"os"
 	"regexp"
@@ -124,9 +125,13 @@ func TestPageTemplateEscapesBody(t *testing.T) {
 }
 
 type pageLike struct {
-	Title string
-	Body  string
+	Title    string
+	Body     string
+	BodyHTML string
 }
+
+// Rendered mirrors content.Page.Rendered: 정화된 HTML 이거나 빈 값 (D17).
+func (p pageLike) Rendered() template.HTML { return template.HTML(p.BodyHTML) }
 
 // pagerLike is partials/pager.html's data with both links, so both branches render.
 var pagerLike = map[string]any{"PageNo": 2, "PrevURL": "/shop?sort=price", "NextURL": "/shop?page=3&sort=price"}
@@ -307,7 +312,8 @@ func payloadFor(name string) any {
 			// 첨부가 있는 글이다 — 목록이 비면 첨부 절이 통째로 안 그려져
 			// 그 조각은 렌더링 검사를 지나가지 않는다.
 			"Attachments": []attachmentLike{{ID: "a1", OriginalName: "설명서.pdf", ByteSize: 20480}},
-			"Post": postLike{ID: "p1", Title: "첫 글", Body: "본문\n둘째 줄",
+			// 에디터로 쓴 글이다 — 평문 갈래는 page.html 이 지난다.
+			"Post": postLike{ID: "p1", Title: "첫 글", Body: "본문\n둘째 줄", BodyHTML: "<p><strong>서식</strong> 본문</p>",
 				AuthorName: "홍길동", ViewCount: 12,
 				CustomFields: map[string]any{"color": "빨강"},
 				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)},
@@ -443,8 +449,12 @@ type boardLike struct {
 	PerPage          int
 }
 
+// Rendered mirrors content.Post.Rendered.
+func (p postLike) Rendered() template.HTML { return template.HTML(p.BodyHTML) }
+
 type postLike struct {
 	ID, BoardID, Title, Body, AuthorName string
+	BodyHTML                             string
 	CustomFields                         map[string]any
 	IsPinned, IsSecret                   bool
 	ViewCount, CommentCount              int64

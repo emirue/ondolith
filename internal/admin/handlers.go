@@ -522,10 +522,12 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"Error": err.Error()})
 		return
 	}
+	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
 	p := content.Page{
 		Slug:     slug,
 		Title:    r.PostFormValue("title"),
-		Body:     r.PostFormValue("body"),
+		Body:     body,
+		BodyHTML: bodyHTML,
 		Template: r.PostFormValue("template"),
 	}
 	// Status is absent on purpose: publishing is page.publish, and letting an

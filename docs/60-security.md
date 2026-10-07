@@ -167,6 +167,22 @@ NFR-101의 티어에서 무제한 본문 버퍼링은 그 자체가 DoS 표면�
 하나이고, 그것은 값을 아는 쪽이면 흉내낼 수 있다 — 그래서 **웹훅은 신호로만 쓰고 상태는
 조회 API로 확인한다** (D15 SC-8 2~3항).
 
+## 리치 텍스트 본문 (FR-513)
+
+에디터가 만든 HTML 은 **브라우저가 보낸 값**이다 — 에디터를 거쳤다는 보장이 없다. 그래서
+저장 전에 허용목록 정화를 지나고(`internal/content/richtext.go`, bluemonday v1.0.27 의 UGC
+정책에서 출발), **그릴 때 한 번 더** 지난다 — 정책을 좁힌 뒤에도 예전에 저장된 HTML 이
+예전 정책으로 나가지 않게.
+
+| 남는 것 | 빠지는 것 |
+|---|---|
+| 문단·제목·목록·인용·표·굵게/기울임/밑줄/취소선·링크(http·https·mailto·tel, 외부 링크는 `rel="nofollow noopener"`·새 창) | `script`·`style`·`svg`·`object`·`form`·`meta`·`base`, 모든 `on*` 속성, `javascript:`·`data:` 주소 |
+| 인라인 스타일 중 색(`#hex`·`rgb()`)·정렬(4값)·글자 크기·크기(px·%) — **값까지** 검사 | 그 밖의 스타일(`url(`·`expression(` 이 들어갈 자리가 없다), `class`(사이트의 클래스로 화면을 흉내 낼 수 있다) |
+| `iframe` — `https://www.youtube(-nocookie).com/embed/…`·`https://www.google.com/maps/embed?pb=…` 만, `sandbox` 를 붙여서 | 그 밖의 iframe 은 요소째 |
+
+평문(`body`)은 정화된 HTML 에서 글자만 뽑은 것이다 — 블록이 끝나면 줄을 바꾸고 엔티티를
+글자로 돌린다. 검색(`search_vector`)이 태그를 색인하지 않게 하려는 것이다.
+
 ## 연결 타임아웃 (NFR-101)
 
 `http.Server`의 **네 타임아웃을 전부 설정한다.** 0은 무제한이다.

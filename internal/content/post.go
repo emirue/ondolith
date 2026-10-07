@@ -14,12 +14,17 @@ import (
 
 // Post is one row of posts, plus the counts a list screen shows.
 type Post struct {
-	ID           string
-	BoardID      string
-	AuthorID     string // empty when the author is gone (SET NULL)
-	AuthorName   string
-	Title        string
-	Body         string
+	ID         string
+	BoardID    string
+	AuthorID   string // empty when the author is gone (SET NULL)
+	AuthorName string
+	Title      string
+	// Body 는 평문이다. 에디터로 쓴 글이면 BodyHTML 의 평문이고(검색·요약이 쓴다),
+	// 아니면 쓴 그대로다.
+	Body string
+	// BodyHTML 은 정화를 지난 본문 HTML 이고(FR-513), 평문 글이면 비어 있다.
+	// 편집 폼이 되돌려 싣는 값이다 — 화면에 그릴 때는 Rendered 를 쓴다.
+	BodyHTML     string
 	CustomFields map[string]any
 	Status       string
 	IsPinned     bool
@@ -164,7 +169,7 @@ func (s *Store) CreatePost(ctx context.Context, p Post) (string, error) {
 	}
 	return s.q.CreatePost(ctx, contentq.CreatePostParams{
 		BoardID: p.BoardID, AuthorID: strPtr(p.AuthorID), Title: p.Title, Body: p.Body,
-		CustomFields: fields, IsSecret: p.IsSecret})
+		BodyHtml: p.BodyHTML, CustomFields: fields, IsSecret: p.IsSecret})
 }
 
 // UpdatePost does not touch is_pinned or status: pinning and hiding are
@@ -176,7 +181,7 @@ func (s *Store) UpdatePost(ctx context.Context, id string, p Post) error {
 		return err
 	}
 	return affected(s.q.UpdatePost(ctx, contentq.UpdatePostParams{
-		ID: id, Title: p.Title, Body: p.Body, CustomFields: fields, IsSecret: p.IsSecret}))
+		ID: id, Title: p.Title, Body: p.Body, BodyHtml: p.BodyHTML, CustomFields: fields, IsSecret: p.IsSecret}))
 }
 
 // SetPostFlags is the moderator's edit (A-307).
@@ -411,6 +416,7 @@ type postRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -431,7 +437,7 @@ type postRows interface {
 // Post 를 만드는 곳이 둘이면 custom_fields 풀기 같은 규칙이 갈라진다.
 func postOf(r postRow) (Post, error) {
 	p := Post{ID: r.ID, BoardID: r.BoardID, AuthorID: r.AuthorID, AuthorName: r.AuthorName,
-		Title: r.Title, Body: r.Body, Status: r.Status, IsPinned: r.IsPinned, IsSecret: r.IsSecret,
+		Title: r.Title, Body: r.Body, BodyHTML: r.BodyHtml, Status: r.Status, IsPinned: r.IsPinned, IsSecret: r.IsSecret,
 		ViewCount: int64(r.ViewCount), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		CommentCount: r.CommentCount, HasAttachment: r.HasAttachment}
 	if len(r.CustomFields) > 0 {
