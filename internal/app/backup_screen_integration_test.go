@@ -15,7 +15,7 @@ import (
 )
 
 // **A-604 가 백업 폴더(backup_dir)의 자동 백업을 보인다** (FR-715). 설정을 고른 적이
-// 없으면 화면은 꺼짐·3시·7개를 보인다 — 스케줄러의 기본값(backupSchedule)과 같다.
+// 없으면 화면은 꺼짐·0시·7개를 보인다 — 스케줄러의 기본값(backupSchedule)과 같다.
 func TestBackupScreenListsStoredBackups(t *testing.T) {
 	dir := t.TempDir()
 	srv, pool := liveSiteWith(t, func(c *config.Config) { c.BackupDir = dir })
@@ -31,7 +31,7 @@ func TestBackupScreenListsStoredBackups(t *testing.T) {
 	}
 	for _, want := range []string{
 		`value="auto-20261001-0300.zip"`, "3.0 MB",
-		`name="backup.hour" min="0" max="23" value="3"`, `name="backup.keep" min="1" max="30" value="7"`,
+		`name="backup.hour" min="0" max="23" value="0"`, `name="backup.keep" min="1" max="30" value="7"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("A-604 에 %s 가 없다", want)

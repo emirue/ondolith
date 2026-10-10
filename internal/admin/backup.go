@@ -31,9 +31,10 @@ func (d *Deps) renderBackup(w http.ResponseWriter, r *http.Request, code int, ms
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	// 고른 적이 없으면 새벽 3시·7개다 — 화면이 빈 칸을 보이지 않게.
+	// 고른 적이 없으면 0시(사용이 가장 적은 자정)·7개다 — 화면이 빈 칸을 보이지 않게.
+	// 스케줄러의 기본값(app.backupSchedule)과 같아야 한다.
 	if kv["backup.hour"] == "" {
-		kv["backup.hour"] = "3"
+		kv["backup.hour"] = "0"
 	}
 	if kv["backup.keep"] == "" {
 		kv["backup.keep"] = "7"

@@ -614,11 +614,11 @@ func themePath(cfg *config.Config, name string) string {
 	return filepath.Join(cfg.Themes(), filepath.Base(name))
 }
 
-// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐·새벽 3시·7개다 —
-// A-604 화면이 보이는 기본값과 같아야 한다(admin.renderBackup).
+// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐·0시(사용이 가장 적은
+// 자정)·7개다 — A-604 화면이 보이는 기본값과 같아야 한다(admin.renderBackup).
 func backupSchedule(kv map[string]string) backup.Schedule {
 	return backup.Schedule{Enabled: kv["backup.auto"] != "",
-		Hour: atoiOr(kv["backup.hour"], 3), Keep: atoiOr(kv["backup.keep"], 7)}
+		Hour: atoiOr(kv["backup.hour"], 0), Keep: atoiOr(kv["backup.keep"], 7)}
 }
 
 func truncate(s string, n int) string {

@@ -199,5 +199,5 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 		s.Record("자동 백업 실패", err)
 		return
 	}
-	s.Record(fmt.Sprintf("자동 백업 %s (%d MB)", f.Name, (f.Size+(1<<20)-1)>>20), nil)
+	s.Record("자동 백업 "+f.Name+" ("+f.MB()+")", nil)
 }
