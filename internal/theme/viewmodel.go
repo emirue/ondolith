@@ -57,6 +57,9 @@ type Site struct {
 	Analytics string
 	// Maps are the map providers' browser keys for the map blocks (FR-716).
 	Maps MapKeys
+	// SignupClosed is A-201's 「회원가입 받지 않음」 (FR-217). 테마는 가입 링크·폼을 감춘다 —
+	// 막는 것은 P-103 이고 이것은 안내다.
+	SignupClosed bool
 }
 
 // MapKeys are A-201's map keys (FR-716): 네이버 ncpKeyId, 카카오 JavaScript 키, 구글 API

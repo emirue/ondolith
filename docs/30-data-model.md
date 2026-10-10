@@ -462,6 +462,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 |---|---|---|---|
 | `site.name` · `site.meta_description` · `site.og_image` · `site.dev_mode` · `site.type` | text / text / text / bool / `cms`\|`shop` | A-201 | 1 |
 | `auth.email_verification_required` | bool | A-201 | 1 |
+| `auth.signup_closed` | bool — 빈 값이 「받음」 (FR-217) | A-201 | 6 |
 | `turnstile.site_key` · `turnstile.secret_key` | text / **자격증명** | A-201 | 6 |
 | `analytics.ga4_id` | text (`G-…`) | A-201 | 6 |
 | `map.naver_key` · `map.kakao_key` · `map.google_key` · `map.google_map_id` | text — 공개값 (FR-716) | A-201 | 6 |

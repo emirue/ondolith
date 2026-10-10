@@ -27,6 +27,6 @@
   {{end}}
 </div>
 {{end}}{{end}}
-<p><a href="/signup">회원가입</a> · <a href="/password/reset">비밀번호를 잊으셨나요?</a></p>
+<p>{{if not .Site.SignupClosed}}<a href="/signup">회원가입</a> · {{end}}<a href="/password/reset">비밀번호를 잊으셨나요?</a></p>
 </div>
 {{end}}

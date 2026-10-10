@@ -81,7 +81,7 @@
 |---|---|---|---|---|---|---|---|
 | P-101 | 로그인 | `/login` | GET, POST | 공개 | 있음 | SC-2 | FR-201, FR-202, FR-204, FR-209 |
 | P-102 | 로그아웃 | `/logout` | POST | 로그인 | 있음 | SC-2 | FR-203 |
-| P-103 | 회원가입 | `/signup` | GET, POST | 공개 | 있음 | SC-2 | FR-210, FR-216 |
+| P-103 | 회원가입 | `/signup` | GET, POST | 공개 | 있음 | SC-2 | FR-210, FR-216, FR-217 |
 | P-104 | 비밀번호 재설정 요청 | `/password/reset` | GET, POST | 공개 | 있음 | SC-2 | FR-207, FR-216 |
 | P-105 | 비밀번호 재설정 수행 | `/password/reset/{token}` | GET, POST | 공개 | 있음 | SC-2 | FR-207 |
 | P-106 | 소셜 로그인 시작 | `/auth/{provider}` | POST | 공개 | 있음 | SC-2 | FR-208 |
@@ -189,7 +189,7 @@
 
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
-| A-201 | 사이트 설정 | `/admin/settings` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-306, FR-511, FR-703, FR-710, FR-714, FR-716 |
+| A-201 | 사이트 설정 | `/admin/settings` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-306, FR-511, FR-703, FR-710, FR-714, FR-716, FR-217 |
 | A-202 | 테마 목록·활성화 | `/admin/themes` | GET, POST | 권한:theme.activate | 있음 | SC-5 | FR-302, FR-303, FR-308 |
 | A-203 | 테마 업로드 | `/admin/themes/upload` | GET, POST | 권한:theme.upload | 있음 | SC-7 | FR-307, NFR-206 |
 | A-204 | 메뉴 관리 | `/admin/menus` | GET, POST | 권한:menu.manage | 있음 | SC-5 | FR-405 |

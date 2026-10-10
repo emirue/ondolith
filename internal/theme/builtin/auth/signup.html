@@ -3,6 +3,10 @@
      각자 다른 폭이면 어느 것이 이 화면의 본체인지 눈이 못 고른다. */}}
 <div class="auth">
 <h1>회원가입</h1>
+{{if .Site.SignupClosed}}
+{{/* A-201 이 가입을 닫았다 (FR-217) — 서버는 이 화면을 403 으로 낸다. 계정은 관리자가 만든다. */}}
+<p>지금은 회원가입을 받지 않습니다. 계정이 필요하면 사이트 운영자에게 문의하세요.</p>
+{{else}}
 {{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
 <form method="post" action="/signup" class="form">
   <label for="email">이메일</label>
@@ -22,5 +26,6 @@
   {{template "partials/spam.html" .Site.Turnstile}}
   <button type="submit">가입</button>
 </form>
+{{end}}
 </div>
 {{end}}

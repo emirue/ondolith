@@ -22,8 +22,10 @@ type accountDeps struct {
 	// verifyRequired mirrors the auth.email_verification_required setting
 	// (FR-214). Sites that cannot send mail — an intranet — turn it off.
 	verifyRequired func() bool
-	baseURL        string
-	spam           spamGuard
+	// signupClosed mirrors auth.signup_closed (FR-217). 닫아도 A-401 의 「사용자 추가」는 된다.
+	signupClosed func() bool
+	baseURL      string
+	spam         spamGuard
 }
 
 // signupForm is the whole of what P-103 accepts.
@@ -46,8 +48,22 @@ func readSignup(r *http.Request) signupForm {
 	}
 }
 
+// refuseClosed answers P-103 while A-201 has signup closed (FR-217): 403 on the
+// form's own page, which the theme turns into the reason. 폼과 제출이 같이 막힌다 —
+// 링크를 감춰도 주소를 아는 봇은 바로 POST 한다.
+func (d *accountDeps) refuseClosed(w http.ResponseWriter, r *http.Request) bool {
+	if !d.signupClosed() {
+		return false
+	}
+	d.render(w, r, "auth/signup.html", http.StatusForbidden, nil)
+	return true
+}
+
 // P-103 POST.
 func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
+	if d.refuseClosed(w, r) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return
@@ -312,6 +328,9 @@ func (d *accountDeps) verify(w http.ResponseWriter, r *http.Request) {
 // signupForm's GET. Already-authenticated callers are sent on rather than shown
 // a form that would create a second account under a session they already have.
 func (d *accountDeps) signupForm(w http.ResponseWriter, r *http.Request) {
+	if d.refuseClosed(w, r) {
+		return
+	}
 	if ActorFrom(r.Context()).IsAuthenticated() {
 		http.Redirect(w, r, "/me", http.StatusSeeOther)
 		return

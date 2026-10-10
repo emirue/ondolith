@@ -83,6 +83,7 @@ func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handl
 		},
 		mailer:         m,
 		verifyRequired: func() bool { return verifyRequired },
+		signupClosed:   func() bool { return false },
 		baseURL:        "https://example.com",
 	}
 	// The production tree, not a hand-written one.
@@ -332,5 +333,39 @@ func TestPasswordChangeRequiresCurrentPassword(t *testing.T) {
 	}, []*http.Cookie{c})
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("HTTP %d, want 400", rec.Code)
+	}
+}
+
+// **A-201 에서 가입을 닫으면 운영 사이트가 따른다** (FR-217) — 머리글의 가입 링크가 사라지고,
+// 폼과 제출이 403 이고, 계정이 생기지 않는다. 설정 하나를 P-103 과 테마가 같이 읽는 배선 시험이다.
+func TestClosedSignupOnTheLiveSite(t *testing.T) {
+	srv, pool := liveSite(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES ('auth.signup_closed', '1')`); err != nil {
+		t.Fatal(err)
+	}
+	anon := client()
+	// 로그인 링크가 있어야 「머리글이 그려졌는데 가입 링크만 없다」이다 — 오류 화면도 가입 링크는 없다.
+	if code, body := mustGet(t, anon, srv.URL+"/"); code != http.StatusOK || !strings.Contains(body, `href="/login"`) ||
+		strings.Contains(body, `href="/signup"`) {
+		t.Errorf("홈 = HTTP %d, 로그인 링크 %v, 가입 링크 %v — want 200, 있음, 없음", code,
+			strings.Contains(body, `href="/login"`), strings.Contains(body, `href="/signup"`))
+	}
+	if code, body := mustGet(t, anon, srv.URL+"/signup"); code != http.StatusForbidden ||
+		!strings.Contains(body, "회원가입을 받지 않습니다") {
+		t.Errorf("GET /signup = HTTP %d, want 403 과 이유", code)
+	}
+	resp := httpPost(t, anon, srv.URL+"/signup", url.Values{
+		"email": {"new@example.com"}, "password": {"correct-horse-battery"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("POST /signup = HTTP %d, want 403", resp.StatusCode)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE email = 'new@example.com'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("닫힌 가입으로 계정이 %d개 생겼다", n)
 	}
 }

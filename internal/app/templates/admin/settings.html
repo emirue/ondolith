@@ -32,6 +32,14 @@
           <option value="1"{{if index .Settings "auth.email_verification_required"}} selected{{end}}>예</option>
         </select>
       </label>
+      <label class="adm-field">
+        <span>회원가입</span>
+        <select name="auth.signup_closed">
+          <option value="">받음</option>
+          <option value="1"{{if index .Settings "auth.signup_closed"}} selected{{end}}>받지 않음</option>
+        </select>
+        <span class="adm-hint">받지 않으면 가입 화면이 닫히고 가입 링크가 사라집니다. 계정은 「사용자」에서 직접 만듭니다.</span>
+      </label>
     </div>
 
     <div class="adm-field-row">
