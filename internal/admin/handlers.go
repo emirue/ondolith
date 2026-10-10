@@ -856,16 +856,17 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return
 	}
+	// 문구는 가입(P-103)과 같다. err.Error() 는 `content: …` 접두어가 붙은 내부 문자열이다.
 	email, err := content.ValidateEmail(r.PostFormValue("email"))
 	if err != nil {
 		d.Render(w, r, "admin/user-detail.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": err.Error()})
+			map[string]any{"Error": "이메일 형식이 올바르지 않습니다."})
 		return
 	}
 	password := r.PostFormValue("password")
 	if err := content.ValidatePassword(password); err != nil {
 		d.Render(w, r, "admin/user-detail.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": err.Error()})
+			map[string]any{"Error": "비밀번호는 10자 이상이어야 합니다."})
 		return
 	}
 	name := strings.TrimSpace(r.PostFormValue("display_name"))
