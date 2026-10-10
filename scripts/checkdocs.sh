@@ -37,10 +37,13 @@ begin() { mark=0; }
 # done_ <ok-message>: print it only if the current check recorded nothing.
 done_() { [ "$mark" -eq 0 ] && printf '  ✓ %s\n' "$*"; return 0; }
 
-md_files() { find . -name '*.md' -not -path './.git/*'; }
+# **.claude/skills/ 는 외부 스킬의 MIT 사본이다** (.ai/ENGINEERING.md 6절). 이 저장소의 문서가 아니라
+# 그 스킬 저자의 문서라, ID·링크 규칙을 맞추려고 고치면 원본과 갈라진다 — 그 스킬은 자기 검사
+# 이름으로 「D1」·「D2」 를 쓴다.
+md_files() { find . -name '*.md' -not -path './.git/*' -not -path './.claude/skills/*'; }
 
 # IDs may be cited from docs, code and migrations alike.
-id_files() { find . \( -name '*.md' -o -name '*.go' -o -name '*.sql' \) -not -path './.git/*'; }
+id_files() { find . \( -name '*.md' -o -name '*.go' -o -name '*.sql' \) -not -path './.git/*' -not -path './.claude/skills/*'; }
 
 # Collect every ID matching a pattern, across everything that may cite one.
 used() { id_files | xargs cat 2>/dev/null | perl -nle "while (/$1/g) { print \$1 }" | sort -u; }
@@ -1808,7 +1811,9 @@ if [ ! -f "$ROADMAP" ] || [ ! -f "$WBS" ]; then
 	err "$ROADMAP 또는 $WBS 가 없다"
 else
 	n_phase=0
-	for n in 0 1 2 3 4; do
+	# **번호를 D80 의 제목에서 읽는다.** 0~4 를 적어 둔 판은 Phase 5·6 이 생긴 뒤 그 둘을 한 번도
+	# 대조하지 않았다 — 표시가 틀려도 초록이었다.
+	for n in $(grep -oE '^## Phase [0-9]+ —' "$ROADMAP" | grep -oE '[0-9]+'); do
 		head_line=$(grep -n "^## Phase $n —" "$ROADMAP" | head -1)
 		[ -z "$head_line" ] && continue
 		n_phase=$((n_phase + 1))
@@ -1861,6 +1866,27 @@ else
 	done_ "$TDBS 의 준비 판정을 TCP 로 한다 (초기화 중 임시 서버에 속지 않는다)"
 fi
 
+
+# --- 33. .ai/ 의 파일이 D90 1절 표와 같다 ------------------------------------
+#
+# D90 은 「.ai/ 는 네 파일로 고정」이라고 적은 채 파일이 일곱이 됐다 — 문서에만 적은 규칙은 지켜지지
+# 않는다 (M3). 표에 없는 파일과, 파일이 없는 표 행을 둘 다 잡는다.
+begin
+CONV=docs/90-conventions.md
+(cd .ai 2>/dev/null && ls -- *.md) | sort >"$T"/cd_ai_have
+perl -ne 'if (/^\| `\.ai\/` 파일 \|/) { $in = 1; next }
+	if ($in) { last unless /^\|/; print "$1\n" if /^\| `([^`]+\.md)` \|/ }' "$CONV" | sort >"$T"/cd_ai_doc
+[ -s "$T"/cd_ai_doc ] || err "$CONV 에서 .ai/ 파일 표를 읽지 못했다 (검사가 헛돌았다)"
+comm -23 "$T"/cd_ai_have "$T"/cd_ai_doc | while read -r f; do
+	err "$CONV 1절 표에 없는 .ai/ 파일: $f"
+done
+comm -13 "$T"/cd_ai_have "$T"/cd_ai_doc | while read -r f; do
+	err "파일이 없는 $CONV 1절 .ai/ 표 행: $f"
+done
+# while 이 파이프 안의 하위 셸이라 err 의 fail=1 이 밖으로 나오지 않는다 — 다시 세어 반영한다.
+[ -z "$(comm -3 "$T"/cd_ai_have "$T"/cd_ai_doc)" ] || fail=1
+[ -z "$(comm -3 "$T"/cd_ai_have "$T"/cd_ai_doc)" ] && done_ ".ai/ 파일 $(wc -l <"$T"/cd_ai_have | tr -d ' ')개가 $CONV 1절 표와 같다"
+rm -f "$T"/cd_ai_have "$T"/cd_ai_doc
 
 rm -f "$T"/cd_rm_want "$T"/cd_rm_have "$T"/cd_def_req "$T"/cd_def_req_u "$T"/cd_use_req "$T"/cd_def_dec \
 	"$T"/cd_use_dec "$T"/cd_def_mis "$T"/cd_use_mis "$T"/cd_stale \

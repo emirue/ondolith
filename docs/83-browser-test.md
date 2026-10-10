@@ -104,7 +104,7 @@ mkdir -p /tmp/ondolith-run && cd /tmp/ondolith-run
 - 화면이 200 이고 기대한 문구가 보이면 ✅
 - 500·404·빈 화면·깨진 링크·적용되지 않은 스타일은 ❌ 이고, **고친 뒤 그 단계부터
   다시 돈다**
-- 자동 테스트로 재현 가능한 실패는 테스트를 먼저 쓴다 ([KARPATHY](../.ai/KARPATHY.md) 4절)
+- 자동 테스트로 재현 가능한 실패는 테스트를 먼저 쓴다 (`karpathy-guidelines` 스킬 4절)
 
 ---
 

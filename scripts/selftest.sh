@@ -272,6 +272,16 @@ inject "마이그레이션이 대장에 없는 번호를 인용" internal/migrat
 # 언급한 기록이 영구히 빌드를 깨고, 고칠 방법이 없다.
 ignored "기록(docs/learnings/)의 인용은 대장과 대조하지 않는다" docs/learnings/INDEX.md \
 	'printf "\n대장에 없는 GAP-97 · BUG-97 을 언급한다.\n" >> docs/learnings/INDEX.md'
+# .ai/ 의 파일과 D90 1절 표 — 「네 파일로 고정」 이라 적은 채 일곱이 됐다 (M3).
+inject_new ".ai/ 에 표에 없는 파일" .ai/NOTES.md \
+	'printf "# NOTES\n" > .ai/NOTES.md' \
+	'1절 표에 없는 .ai/ 파일: NOTES.md'
+inject "D90 .ai/ 표에 파일이 없는 행" docs/90-conventions.md \
+	'perl -pi -e "s/^(\| \`PATTERNS.md\` \|.*)$/\$1\n| \`GHOST.md\` | 없는 파일 |/" docs/90-conventions.md' \
+	'파일이 없는 docs/90-conventions.md 1절 .ai/ 표 행: GHOST.md'
+# **외부 스킬 사본은 문서 규칙 대상이 아니다** (.claude/skills/, checkdocs 의 md_files·id_files).
+ignored "외부 스킬 사본(.claude/skills/)은 문서 규칙 대상이 아니다" .claude/skills/karpathy-diff/SKILL.md \
+	'printf "\n(D3.1 참조, 대장에 없는 GAP-97, [깨진](없는파일.md))\n" >> .claude/skills/karpathy-diff/SKILL.md'
 inject "결함 대장이 비어 읽히지 않음" docs/85-gaps.md \
 	'perl -pi -e "s/^\| GAP-/| XAP-/; s/^\| BUG-/| XUG-/" docs/85-gaps.md' \
 	'GAP-/BUG- 항목을 하나도 읽지 못했다'
@@ -374,6 +384,10 @@ inject "Phase 표시가 실제보다 뒤처짐" docs/80-roadmap.md \
 # 하지 않는다 — W2-01 이 끝나 Phase 2 가 ✅ 가 되자 그대로 일어났다. 대신
 # **✅ 인 Phase 에 미완료 작업을 하나 더한다**: 표시는 그대로 ✅ 인데 현실이
 # 🔄 가 되므로, 어느 Phase 가 어느 상태이든 「표시가 앞선다」가 성립한다.
+# **번호를 적어 두지 않는다.** 0~4 를 고정한 판은 Phase 5·6 을 대조하지 않았다 — 마지막 Phase 를 바꿔 본다.
+inject "Phase 6 표시도 대조한다" docs/80-roadmap.md \
+	'perl -pi -e "s/^(## Phase 6 — .*) ✅ 완료/\$1 ⏳ 대기/" docs/80-roadmap.md' \
+	'Phase 6 표시가 docs/81-work-breakdown.md 와 다르다'
 inject "Phase 표시가 실제보다 앞섬" docs/81-work-breakdown.md \
 	'printf "| W1-99 | 아직 안 한 작업 | — | — | 검증 가능한 기준 |\n" >> docs/81-work-breakdown.md' \
 	'Phase 1 표시가 docs/81-work-breakdown.md 와 다르다'
