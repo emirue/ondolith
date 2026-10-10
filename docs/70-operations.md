@@ -270,8 +270,7 @@ unzip -o ondolith-backup-*.zip 'uploads/*' -d /opt/ondolith   # 업로드 폴더
 
 **복원 테스트를 하지 않은 백업은 백업이 아니다.** 덤프 → 빈 DB 복원 → 같은 글이 보이는지를 `make test-backup`
 이 본다 — PATH 에 DB 서버와 같은 버전의 `pg_dump`·`pg_restore` 가 있어야 해서 `pgdump` 빌드 태그 뒤에 두고
-`make test-integration` 과 따로 돈다. CI 는 integration 잡에서 PGDG 저장소의 18 클라이언트를 깔고 돌린다
-([D85](85-gaps.md) GAP-28).
+`make test-integration` 과 따로 돈다. CI 는 integration 잡에서 PGDG 저장소의 18 클라이언트를 깔고 돌린다.
 
 ## 지도 키 (FR-716)
 
