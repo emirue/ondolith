@@ -62,6 +62,25 @@ func TestSanitizeRichTextKeepsEditorFormatting(t *testing.T) {
 	}
 }
 
+// **에디터로 넣은 유튜브가 글 화면에서 재생된다** (FR-513). 플레이어는 스크립트로 돈다 — sandbox 가
+// 비어 있으면(`sandbox=""`) 「자바스크립트를 실행할 수 없습니다」만 보인다. 에디터는 sandbox 없이 보내고,
+// 보낸 sandbox 값은 믿지 않는다. 저장된 글은 그릴 때 다시 정화하므로 그 경로도 본다.
+func TestYouTubeEmbedCanRunItsPlayer(t *testing.T) {
+	const want = `sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"`
+	src := `src="https://www.youtube.com/embed/dQw4w9WgXcQ"`
+	for name, in := range map[string]string{
+		"에디터가 보낸 모양":        `<iframe frameborder="0" allowfullscreen="" ` + src + ` width="100%"></iframe>`,
+		"빈 sandbox 로 저장된 글": `<iframe ` + src + ` sandbox=""></iframe>`,
+		"넓히려는 sandbox":      `<iframe ` + src + ` sandbox="allow-top-navigation allow-forms"></iframe>`,
+	} {
+		for path, got := range map[string]string{"정화": SanitizeRichText(in), "그리기": string(renderRich(in))} {
+			if !strings.Contains(got, want) || strings.Count(got, "sandbox=") != 1 {
+				t.Errorf("%s (%s): %s", name, path, got)
+			}
+		}
+	}
+}
+
 // **평문은 검색·요약·OG 설명이 쓴다.** 문단은 줄로 갈라지고, 엔티티는 글자로
 // 돌아오고, 한글은 그대로다 — 태그가 섞이면 「<p>시공」 이 검색어가 된다.
 func TestRichTextPlainText(t *testing.T) {
