@@ -66,8 +66,7 @@
 
 끝났다고 말하기 전에 `git diff` 와 `git status`(새 파일) 전체를 읽는다 — 「코드를 썼다」는 완료가 아니다.
 
-- **범위·이유 없는 삭제·과설계·검증 누락**은 `karpathy-diff` 스킬로 본다(사용자 전역 스킬. 없으면 2·3절과
-  아래를 손으로 본다)
+- **범위·이유 없는 삭제·과설계·검증 누락**은 `karpathy-diff` 스킬로 본다 (`.claude/skills/` — 저장소에 들어 있다)
 - **로직을 바꿨으면** `/pr-review-toolkit:review-pr code errors tests` — 조용히 삼킨 오류·근거 없는 대체 동작·
   시험 공백을 본다
 - 이 저장소에서 더 보는 것:
@@ -77,6 +76,9 @@
   - 디버그 출력·임시 파일·자리표시 값(가짜 데이터, 비워 둔 분기)이 남았는가
   - 화면을 바꿨다면 — 내장 테마 CSS·관리자 `adm-*` 클래스·템플릿 조각을 썼는가, 요청에 없는 문구·장식을
     더하지 않았는가, `make ui` 를 돌렸는가
+
+**스킬의 출처.** `.claude/skills/karpathy-{audit,diff,refactor}` 는 MIT 사본이다(저작권 표시는 각 `LICENSE`).
+원본을 따라가는 장치가 없으므로 갱신은 손으로 한다. `karpathy-audit` 는 이 파일과 `CLAUDE.md` 를 점검할 때 쓴다.
 
 **이 저장소에서 막아 둔 도구** — 목록의 원본은 `.claude/settings.json` 의 `permissions.deny` 이고, 여기는 이유다:
 
