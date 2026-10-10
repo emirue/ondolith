@@ -181,7 +181,17 @@ var siteSettingKeys = []string{
 	"turnstile.site_key", "turnstile.secret_key",
 	// 방문 통계 GA4 측정 ID (FR-714). 공개 화면의 <script> 에 들어간다 — 형식은 ga4ID 가 본다.
 	"analytics.ga4_id",
+	// 지도 키 (FR-716) — mapKeyNames 와 같은 목록이다.
+	"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id",
 }
+
+// mapKeyNames are the map providers' browser keys (FR-716): 네이버 ncpKeyId, 카카오
+// JavaScript 키, 구글 API 키와 Map ID. **공개값이다** — 페이지에 실려 SDK 를 부르고, 각
+// 콘솔에 등록한 도메인에서만 동작한다. 그래서 봉인하지 않지만 `<script>` 의 속성이 되므로
+// mapKey 모양만 받는다.
+var mapKeyNames = []string{"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id"}
+
+var mapKey = regexp.MustCompile(`^[A-Za-z0-9_-]{0,100}$`)
 
 // ga4ID is a GA4 measurement ID: 「G- + 숫자·문자」 (Google 애널리틱스 도움말, 2026-10-08 확인).
 // 길이 상한은 문서에 없다 — 30자는 실제 ID(10자 안팎)보다 넉넉한 우리 상한이다.
@@ -238,6 +248,16 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
 				http.StatusUnprocessableEntity, "GA4 측정 ID 는 G- 로 시작하는 영문·숫자입니다 (예: G-PSW1MY7HB4).")
 			return
+		}
+	}
+	for _, k := range mapKeyNames {
+		if v, ok := kv[k]; ok {
+			kv[k] = strings.TrimSpace(v)
+			if !mapKey.MatchString(kv[k]) {
+				d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+					http.StatusUnprocessableEntity, "지도 키는 영문·숫자·-·_ 로 100자 이내입니다.")
+				return
+			}
 		}
 	}
 	for _, k := range []string{"turnstile.site_key", "turnstile.secret_key"} {
@@ -461,7 +481,7 @@ func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isCreate(id) {
-		d.Render(w, r, "admin/page-edit.html", http.StatusOK, nil)
+		d.renderPageEdit(w, r, http.StatusOK, map[string]any{})
 		return
 	}
 	p, err := d.Content.PageByID(r.Context(), id)
@@ -473,7 +493,16 @@ func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/page-edit.html", http.StatusOK, map[string]any{"Page": p})
+	d.renderPageEdit(w, r, http.StatusOK, map[string]any{"Page": p})
+}
+
+// renderPageEdit draws A-302 with the map keys the editor's 「지도 넣기」 needs (FR-716).
+// 지도 키를 못 읽으면 지도 단추만 빠진다 — 페이지 편집까지 막을 일이 아니다.
+func (d *Deps) renderPageEdit(w http.ResponseWriter, r *http.Request, code int, data map[string]any) {
+	if kv, err := d.Content.Settings(r.Context(), mapKeyNames...); err == nil {
+		data["Maps"] = kv
+	}
+	d.Render(w, r, "admin/page-edit.html", code, data)
 }
 
 // Dashboard is A-101. It shows nothing but the shell: FR-702 makes the panel
@@ -555,8 +584,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := strings.TrimSpace(r.PostFormValue("slug"))
 	if err := content.ValidateSlug(slug); err != nil {
-		d.Render(w, r, "admin/page-edit.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": err.Error()})
+		d.renderPageEdit(w, r, http.StatusUnprocessableEntity, map[string]any{"Error": err.Error()})
 		return
 	}
 	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
@@ -576,8 +604,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 		_, err = d.Content.CreatePage(r.Context(), p)
 	}
 	if errors.Is(err, content.ErrSlugTaken) {
-		d.Render(w, r, "admin/page-edit.html", http.StatusConflict,
-			map[string]any{"Error": "이미 사용 중인 슬러그입니다."})
+		d.renderPageEdit(w, r, http.StatusConflict, map[string]any{"Error": "이미 사용 중인 슬러그입니다."})
 		return
 	}
 	// **없는 페이지를 고치려 한 것은 404 다.** `d.fail` 이 그 판정을 갖고 있는데

@@ -218,13 +218,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		return kv["turnstile.site_key"], kv["turnstile.secret_key"]
 	}
 	site := func() theme.Site {
-		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type", "analytics.ga4_id")
+		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type", "analytics.ga4_id",
+			"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id")
 		s := theme.Site{
 			Name:            kv["site.name"],
 			MetaDescription: kv["site.meta_description"],
 			OGImage:         kv["site.og_image"],
 			Type:            kv["site.type"],
 			Analytics:       kv["analytics.ga4_id"],
+			Maps: theme.MapKeys{Naver: kv["map.naver_key"], Kakao: kv["map.kakao_key"],
+				Google: kv["map.google_key"], GoogleMapID: kv["map.google_map_id"]},
 		}
 		if s.Name == "" {
 			s.Name = cfg.SiteName

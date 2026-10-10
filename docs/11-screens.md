@@ -101,7 +101,7 @@
 | P-202 | 정적 페이지 | `/{slug}` | GET | 공개 | 없음 | SC-1 | FR-401, FR-402, FR-403, FR-511, FR-513 |
 | P-203 | 게시판 목록 | `/board/{slug}` | GET | 권한:post.read | 없음 | SC-1 | FR-501, FR-503, FR-507, FR-508, FR-515 |
 | P-204 | 글 보기 | `/board/{slug}/{id}` | GET | 권한:post.read | 없음 | SC-1 | FR-504, FR-505, FR-511, FR-512, FR-513 |
-| P-205 | 글 쓰기 | `/board/{slug}/write` | GET, POST | 권한:post.write | 있음 | SC-2 | FR-502, FR-503, FR-504, FR-506, FR-216, FR-513, FR-514 |
+| P-205 | 글 쓰기 | `/board/{slug}/write` | GET, POST | 권한:post.write | 있음 | SC-2 | FR-502, FR-503, FR-504, FR-506, FR-216, FR-513, FR-514, FR-716 |
 | P-206 | 글 수정 | `/board/{slug}/{id}/edit` | GET, POST | 본인 | 있음 | SC-3 | FR-502, FR-503, FR-504, FR-506, FR-513, FR-514 |
 | P-207 | 글 삭제 | `/board/{slug}/{id}/delete` | POST | 본인 | 있음 | SC-3 | FR-504 |
 | P-208 | 댓글 작성 | `/board/{slug}/{id}/comments` | POST | 권한:comment.write | 있음 | SC-2 | FR-505, FR-216 |
@@ -189,7 +189,7 @@
 
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
-| A-201 | 사이트 설정 | `/admin/settings` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-306, FR-511, FR-703, FR-710, FR-714 |
+| A-201 | 사이트 설정 | `/admin/settings` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-306, FR-511, FR-703, FR-710, FR-714, FR-716 |
 | A-202 | 테마 목록·활성화 | `/admin/themes` | GET, POST | 권한:theme.activate | 있음 | SC-5 | FR-302, FR-303, FR-308 |
 | A-203 | 테마 업로드 | `/admin/themes/upload` | GET, POST | 권한:theme.upload | 있음 | SC-7 | FR-307, NFR-206 |
 | A-204 | 메뉴 관리 | `/admin/menus` | GET, POST | 권한:menu.manage | 있음 | SC-5 | FR-405 |
@@ -204,7 +204,7 @@
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
 | A-301 | 페이지 목록 | `/admin/pages` | GET | 권한:page.view | 없음 | SC-4 | FR-401, FR-403 |
-| A-302 | 페이지 편집 | `/admin/pages/{id}` | GET, POST | 권한:page.update | 있음 | SC-5 | FR-401, FR-402, FR-404, FR-513, FR-514 |
+| A-302 | 페이지 편집 | `/admin/pages/{id}` | GET, POST | 권한:page.update | 있음 | SC-5 | FR-401, FR-402, FR-404, FR-513, FR-514, FR-716 |
 | A-303 | 페이지 발행 | `/admin/pages/{id}/publish` | POST | 권한:page.publish | 있음 | SC-5 | FR-403 |
 | A-304 | 게시판 목록 | `/admin/boards` | GET | 권한:board.view | 없음 | SC-4 | FR-501, FR-705 |
 | A-305 | 게시판 생성·설정 | `/admin/boards/{id}` | GET, POST | 권한:board.manage | 있음 | SC-5 | FR-501, FR-505, FR-506, FR-512, FR-705, FR-515 |

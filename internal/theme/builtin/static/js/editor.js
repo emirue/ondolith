@@ -48,18 +48,26 @@
       // 사진은 서버로 올린다. 주소가 없으면 에디터가 base64 로 본문에 박는다 —
       // 서버는 data: 주소를 받지 않는다(D60).
       image: { uploadUrl: ta.getAttribute('data-upload') },
-      // 지도: 「삽입」 에 구글 지도 「지도 퍼가기」 의 iframe 이나 그 src 를 넣는다. embed 플러그인의
-      // 기본 주소 목록(페이스북·인스타그램…)에 구글 지도가 없어 그대로는 거부된다. 서버 정화가
-      // 허용하는 것도 이 주소다(richtext.go embedSrc).
-      embed: {
-        embedQuery: {
-          googleMaps: { pattern: /^https:\/\/www\.google\.com\/maps\/embed\?/i, action: function (u) { return u; }, tag: 'iframe' },
-        },
-      },
+      // 지도 블록(FR-716)은 자리표시 <img> 다 — 에디터가 기본으로 지우는 data-* 를 이 다섯만 남긴다.
+      // 서버 정화(richtext.go)가 같은 다섯을 값 모양까지 본다.
+      attributeWhitelist: { img: 'data-map|data-lat|data-lng|data-zoom|data-label' },
     });
 
     // 브라우저 시험(scripts/editor-ime.mjs)이 인스턴스에 닿는 자리다. 쓰지 않으면 해가 없다.
     ta.sunEditor = editor;
+
+    // 「지도 넣기」 (FR-716). A-201 에 지도 키가 있어 maps.js 가 실렸을 때만 생긴다.
+    if (window.OndolithMaps && OndolithMaps.providers().length) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = ta.getAttribute('data-map-button') || '';
+      btn.textContent = '지도 넣기';
+      btn.addEventListener('click', function () {
+        OndolithMaps.pick(function (b) { editor.$.html.insert(OndolithMaps.html(b)); });
+      });
+      // 에디터는 textarea 바로 뒤에 자기 상자를 붙인다 — 단추는 그 아래다.
+      (ta.nextElementSibling || ta).insertAdjacentElement('afterend', btn);
+    }
 
     form.addEventListener('submit', function () {
       var html = editor.$.html.get();

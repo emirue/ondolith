@@ -27,6 +27,11 @@ func TestSanitizeRichTextRemovesScriptVectors(t *testing.T) {
 		{"base", `<base href="https://evil.example/">`, "<base"},
 		{"style 요소", `<style>body{display:none}</style>`, "<style"},
 		{"class 로 화면 흉내", `<p class="adm-alert">관리자 공지</p>`, "class="},
+		// 지도는 키 방식 지도 블록으로 통일했다(FR-716) — 키 없는 구글 iframe 은 남지 않는다.
+		{"구글 지도 iframe", `<iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12"></iframe>`, "<iframe"},
+		{"모르는 지도사", `<img src="/static/img/map.svg" data-map="evil" data-lat="1" data-lng="2">`, `data-map="evil"`},
+		{"좌표 자리의 글", `<img src="/static/img/map.svg" data-map="kakao" data-lat="javascript:alert(1)">`, "javascript"},
+		{"이미지 밖의 지도 속성", `<p data-map="kakao" data-lat="37.5">글</p>`, "data-map"},
 	} {
 		got := SanitizeRichText(tc.in)
 		if strings.Contains(strings.ToLower(got), strings.ToLower(tc.mustNot)) {
@@ -48,7 +53,8 @@ func TestSanitizeRichTextKeepsEditorFormatting(t *testing.T) {
 		{"우리 사진", `<img src="/media/0b6f3c3e-0000-4000-8000-000000000000" alt="거실">`, `src="/media/0b6f3c3e-0000-4000-8000-000000000000"`},
 		{"외부 링크는 새 창·nofollow", `<a href="https://example.com/">링크</a>`, `rel="nofollow`},
 		{"유튜브", `<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ" allowfullscreen></iframe>`, `src="https://www.youtube.com/embed/dQw4w9WgXcQ"`},
-		{"구글 지도", `<iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12"></iframe>`, `src="https://www.google.com/maps/embed?pb=!1m18!1m12"`},
+		{"지도 블록 (FR-716)", `<img src="/static/img/map.svg" alt="지도: 서울시청" data-map="kakao" data-lat="37.5665" data-lng="126.978" data-zoom="3" data-label="서울시청">`,
+			`data-map="kakao" data-lat="37.5665" data-lng="126.978" data-zoom="3" data-label="서울시청"`},
 	} {
 		if got := SanitizeRichText(tc.in); !strings.Contains(got, tc.must) {
 			t.Errorf("%s: %q 가 없다 → %s", tc.name, tc.must, got)

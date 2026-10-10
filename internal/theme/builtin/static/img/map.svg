@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-label="지도">
+  <!-- 지도 블록의 자리표시 (FR-716). 키가 있으면 maps.js 가 이 그림을 그 지도사 지도로 바꾼다. -->
+  <rect width="640" height="360" fill="#eef2f0"/>
+  <path d="M0 250 L180 200 L330 240 L640 170" stroke="#cfd8d3" stroke-width="18" fill="none"/>
+  <path d="M220 0 L260 360" stroke="#dde4e0" stroke-width="12" fill="none"/>
+  <path d="M320 112c-26 0-46 20-46 45 0 33 46 83 46 83s46-50 46-83c0-25-20-45-46-45z" fill="#d9534f"/>
+  <circle cx="320" cy="157" r="16" fill="#fff"/>
+  <text x="320" y="300" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#55605a">지도</text>
+</svg>

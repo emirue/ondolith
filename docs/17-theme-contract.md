@@ -38,8 +38,13 @@ DELETE 를 보낼 수 없어서 장바구니(`/cart/items/…`)의 수량 변경
 `<input type="hidden" name="body_html" value="{{.Post.BodyHTML}}">` 을 두고, 내장 자산
 `vendor/suneditor/suneditor.min.css`·`suneditor.min.js`·`ko.js` 와 `js/editor.js` 를 `{{asset …}}` 으로 건다
 (내장 테마가 본보기다 — 사용자 테마에 그 파일이 없으면 내장 것이 나간다). 셋 중 하나라도 빠지면 그 테마는
-**평문 칸으로 동작한다** — 깨지지 않는다. 지도는 에디터의 「삽입」 에 구글 지도 「지도 퍼가기」 iframe 을 넣는다 —
-`editor.js` 가 embed 플러그인의 주소 목록에 `https://www.google.com/maps/embed?` 를 더한다(기본 목록에 없다).
+**평문 칸으로 동작한다** — 깨지지 않는다.
+
+**지도 블록(FR-716).** 본문의 지도는 `<img src="/static/img/map.svg" data-map="kakao|naver|google" data-lat data-lng
+data-zoom data-label>` 자리표시다. 내장 `partials/head.html` 이 A-201 의 지도 키가 있을 때 `js/maps.js` 를 키와 함께
+싣고(`<script … data-naver data-kakao data-google data-google-map-id>`), 그 스크립트가 블록을 그 지도사 SDK 의 지도로
+바꾸며 에디터에 「지도 넣기」 를 붙인다(`editor.js` 보다 먼저 와야 한다). `<head>` 를 덮어쓴 테마는 그 블록을 옮겨
+적어야 지도가 그려진다 — 빠뜨려도 깨지지 않고 자리표시 그림이 남는다.
 
 **스팸 방지(FR-216).** 가입(`auth/signup.html`)·재설정 요청(`auth/password-reset-request.html`)·새 글
 (`board/form.html`)·새 댓글(`partials/comment-form.html`) 폼 안에 `{{template "partials/spam.html" .Site.Turnstile}}`

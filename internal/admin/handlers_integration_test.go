@@ -290,6 +290,60 @@ func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
 	}
 }
 
+// **지도 키는 A-201 에서 넣는다** (FR-716). 네이버 ncpKeyId·카카오 JavaScript 키·구글 API
+// 키·Map ID 는 페이지에 실려 나가는 공개값이라 봉인하지 않지만, `<script>` 의 속성이 되므로
+// 영문·숫자·`-`·`_` 만 받는다. 붙여넣은 앞뒤 공백은 떼고, 빈 값은 그 지도를 끈다.
+func TestMapKeysOnSiteSettings(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	ctx := context.Background()
+	keys := []string{"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id"}
+	saved := func() map[string]string {
+		kv, err := d.Content.Settings(ctx, keys...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kv
+	}
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+		"map.naver_key": {" abc123naver "}, "map.kakao_key": {"0123456789abcdef0123456789abcdef"},
+		"map.google_key": {"AIzaSyA-test_key"}, "map.google_map_id": {"8e0a97af9386fef"},
+	}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("지도 키 저장 = HTTP %d", rec.Code)
+	}
+	if kv := saved(); kv["map.naver_key"] != "abc123naver" || kv["map.kakao_key"] != "0123456789abcdef0123456789abcdef" ||
+		kv["map.google_key"] != "AIzaSyA-test_key" || kv["map.google_map_id"] != "8e0a97af9386fef" {
+		t.Errorf("저장된 지도 키 = %v", kv)
+	}
+	for _, bad := range []url.Values{
+		{"map.kakao_key": {`abc" onload="alert(1)`}},
+		{"map.naver_key": {"abc def"}},
+		{"map.google_key": {strings.Repeat("k", 101)}},
+		{"map.google_map_id": {"<script>"}},
+	} {
+		if rec := post(d.SettingsSave, "/admin/settings", bad); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%v = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	if kv := saved(); kv["map.kakao_key"] != "0123456789abcdef0123456789abcdef" {
+		t.Errorf("거부한 값이 저장됐다: %v", kv)
+	}
+	post(d.SettingsSave, "/admin/settings", url.Values{"map.kakao_key": {""}})
+	if kv := saved(); kv["map.kakao_key"] != "" {
+		t.Errorf("빈 값으로 끌 수 없다: %v", kv)
+	}
+}
+
+// 관리자 페이지 편집(A-302)도 에디터의 「지도 넣기」 가 쓸 키를 받는다 (FR-716).
+func TestPageFormCarriesMapKeys(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"page.create": true, "page.update": true}})
+	if err := d.Content.PutSettings(context.Background(), map[string]string{"map.kakao_key": "kakaokey123"}); err != nil {
+		t.Fatal(err)
+	}
+	if body := get(d.PageForm, "/admin/pages/new").Body.String(); !strings.Contains(body, "map.kakao_key=kakaokey123") {
+		t.Errorf("페이지 편집에 지도 키가 없다: %s", body)
+	}
+}
+
 // An empty secret box means "leave it alone": the form cannot show the current
 // value, so empty is the normal state of a screen opened to change something
 // else. Treating it as "erase" silently breaks mail on the next save.

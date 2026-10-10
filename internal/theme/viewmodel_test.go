@@ -106,6 +106,8 @@ func TestSiteCarriesOnlyRenderableFields(t *testing.T) {
 		"Turnstile": true,
 		// GA4 측정 ID — 페이지의 측정 스크립트에 들어가는 공개값이다 (FR-714).
 		"Analytics": true,
+		// 지도 키 — 지도 SDK 를 부르는 공개값이다 (FR-716).
+		"Maps": true,
 	}
 	for i := 0; i < ty.NumField(); i++ {
 		if f := ty.Field(i); !allowed[f.Name] {

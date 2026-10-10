@@ -95,7 +95,7 @@ func TestPageSaveStoresSanitizedEditorHTML(t *testing.T) {
 	rec := postAs(d, "/admin/pages/new", "new", url.Values{
 		"slug": {"location"}, "title": {"오시는 길"}, "body": {"평문 사본"},
 		"body_html": {`<p>서울 <a href="javascript:alert(1)">지도</a></p>` +
-			`<iframe src="https://www.google.com/maps/embed?pb=!1m18"></iframe>`},
+			`<img src="/static/img/map.svg" alt="지도 서울시청" data-map="kakao" data-lat="37.5665" data-lng="126.978" data-zoom="3" data-label="서울시청">`},
 	})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d (%q)", rec.Code, rec.Body.String())
@@ -105,7 +105,8 @@ func TestPageSaveStoresSanitizedEditorHTML(t *testing.T) {
 		`SELECT body, body_html FROM pages WHERE slug = 'location'`).Scan(&body, &html); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(html, "javascript:") || !strings.Contains(html, "google.com/maps/embed") {
+	// 지도는 지도 블록으로 남는다 (FR-716) — 키 없는 구글 iframe 은 지도를 키 방식으로 통일하며 뺐다.
+	if strings.Contains(html, "javascript:") || !strings.Contains(html, `data-map="kakao" data-lat="37.5665"`) {
 		t.Errorf("정화 결과가 틀렸다: %s", html)
 	}
 	if body != "서울 지도" {

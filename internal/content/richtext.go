@@ -19,8 +19,11 @@ import (
 //     `url(`·`expression(` 이 들어갈 자리가 없다
 //   - `class` 는 없다(UGC 기본). 사이트의 클래스(`adm-alert` 등)를 빌려 화면을
 //     흉내 내는 길이다
-//   - iframe 은 **유튜브·구글 지도의 embed 주소일 때만** 남는다. src 가 허용 밖이면
-//     남는 속성이 없어 요소째 빠진다
+//   - iframe 은 **유튜브 embed 주소일 때만** 남는다. src 가 허용 밖이면 남는 속성이
+//     없어 요소째 빠진다
+//   - 지도는 **지도 블록**이다(FR-716): `<img data-map=… data-lat=… data-lng=…>` 자리표시를
+//     테마의 maps.js 가 관리자가 넣은 키로 그 지도사 SDK 를 불러 바꾼다. 본문에 스크립트가
+//     들어갈 자리는 없고, 지도사·좌표·확대·이름은 값 모양까지 본다
 //   - 이미지는 http(s)·상대 주소만. `data:` 는 받지 않는다 — 사진은 업로드로 온다(FR-514)
 var richPolicy = func() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
@@ -37,6 +40,11 @@ var richPolicy = func() *bluemonday.Policy {
 	p.AllowAttrs("width", "height").Matching(size).OnElements("img", "iframe")
 
 	p.AllowElements("u", "s", "figcaption")
+	p.AllowAttrs("data-map").Matching(regexp.MustCompile(`^(naver|kakao|google)$`)).OnElements("img")
+	p.AllowAttrs("data-lat").Matching(regexp.MustCompile(`^-?\d{1,2}(\.\d{1,12})?$`)).OnElements("img")
+	p.AllowAttrs("data-lng").Matching(regexp.MustCompile(`^-?\d{1,3}(\.\d{1,12})?$`)).OnElements("img")
+	p.AllowAttrs("data-zoom").Matching(regexp.MustCompile(`^\d{1,2}$`)).OnElements("img")
+	p.AllowAttrs("data-label").Matching(regexp.MustCompile(`^[^<>"]{1,100}$`)).OnElements("img")
 	p.AllowAttrs("src").Matching(embedSrc).OnElements("iframe")
 	p.AllowAttrs("allowfullscreen").Matching(regexp.MustCompile(`^(|allowfullscreen|true)$`)).OnElements("iframe")
 	p.AllowAttrs("frameborder").Matching(regexp.MustCompile(`^0$`)).OnElements("iframe")
@@ -47,10 +55,9 @@ var richPolicy = func() *bluemonday.Policy {
 	return p
 }()
 
-// embedSrc is the iframe allow-list: YouTube embeds and Google Maps embeds.
-// 지도는 「오시는 길」(FR-714 와 함께 적은 요구) 때문이고, 둘 다 공유 메뉴의
-// 「퍼가기」가 주는 주소 그대로다.
-var embedSrc = regexp.MustCompile(`^https://(www\.youtube(-nocookie)?\.com/embed/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&;.%-]*)?|www\.google\.com/maps/embed\?pb=[A-Za-z0-9!._%:-]+)$`)
+// embedSrc is the iframe allow-list: YouTube embeds — 공유 메뉴의 「퍼가기」가 주는
+// 주소 그대로다. 지도는 iframe 이 아니라 지도 블록이다(FR-716).
+var embedSrc = regexp.MustCompile(`^https://www\.youtube(-nocookie)?\.com/embed/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&;.%-]*)?$`)
 
 // SanitizeRichText returns body HTML with only what richPolicy allows.
 func SanitizeRichText(raw string) string {
