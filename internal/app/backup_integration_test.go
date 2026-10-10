@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/emirue/ondolith/internal/backup"
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
 )
@@ -39,10 +40,10 @@ func TestBackupRestoresIntoAnEmptyDatabase(t *testing.T) {
 
 	dsn := os.Getenv(dsnEnv)
 	var dump bytes.Buffer
-	if err := pgDump(dsn)(ctx, &dump); err != nil {
+	if err := backup.Dump(dsn)(ctx, &dump); err != nil {
 		t.Fatalf("pg_dump: %v", err)
 	}
-	_, pw := pgDumpTarget(dsn)
+	_, pw := backup.Target(dsn)
 	restore := func(stdin io.Reader, args ...string) string {
 		t.Helper()
 		cmd := exec.Command("pg_restore", args...)
@@ -70,7 +71,7 @@ func TestBackupRestoresIntoAnEmptyDatabase(t *testing.T) {
 	u.Path = "/" + name
 	restored := u.String()
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`) })
-	db, _ := pgDumpTarget(restored)
+	db, _ := backup.Target(restored)
 	restore(bytes.NewReader(dump.Bytes()), "--no-owner", "--exit-on-error", "--dbname="+db)
 
 	h, cleanup, err := New(ctx, &config.Config{DatabaseURL: restored, SiteName: "복원", UploadDir: t.TempDir()},

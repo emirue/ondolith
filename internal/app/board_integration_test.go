@@ -37,6 +37,14 @@ func mkUser(t *testing.T, pool *pgxpool.Pool, email string) string {
 	return id
 }
 
+// grantSuperuser 는 시드된 superuser 역할을 붙인다.
+func grantSuperuser(t *testing.T, store *auth.Store, userID string) {
+	t.Helper()
+	if err := store.AssignRole(context.Background(), userID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func login(t *testing.T, srv, email string, c *http.Client) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, srv+"/login", strings.NewReader(

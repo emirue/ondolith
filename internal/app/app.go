@@ -24,6 +24,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
+	"github.com/emirue/ondolith/internal/backup"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
@@ -187,6 +188,11 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 설치 한 번이 아니라 **뜰 때마다** 확인해야 한다.
 	if err := os.MkdirAll(cfg.Uploads(), 0o755); err != nil {
 		return fail(fmt.Errorf("업로드 디렉터리를 만들 수 없다 (%s): %w", cfg.Uploads(), err))
+	}
+	// 업로드 폴더는 백업에 통째로 들어간다 — 그 안에 백업 폴더가 있으면 다음 백업이 이전
+	// 백업을 싣고 하루마다 커진다 (FR-715). 설정을 고치기 전에는 뜨지 않는다.
+	if cfg.BackupsInsideUploads() {
+		return fail(fmt.Errorf("backup_dir(%s) 가 upload_dir(%s) 안에 있다 — 밖으로 옮기세요", cfg.Backups(), cfg.Uploads()))
 	}
 
 	// Settings are read per request, not cached: A-201 changes them from the
@@ -367,8 +373,9 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Attachments: contentStore.AttachmentsIn(cfg.Uploads()),
 		Media:       contentStore.MediaIn(cfg.Uploads()),
 		Images:      commerceStore.ImagesIn(cfg.Uploads()),
-		DumpDB:      pgDump(cfg.DatabaseURL),
+		DumpDB:      backup.Dump(cfg.DatabaseURL),
 		UploadDir:   cfg.Uploads(),
+		BackupDir:   cfg.Backups(),
 		OpLog:       contentStore.OpLog(),
 		Logger:      log,
 		BaseURL:     baseURL,
@@ -550,7 +557,43 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}()
 	}
 
+	// 자동 백업 (FR-715). 1분마다 A-604 의 설정을 보고, 정한 시각이면 백업 폴더에 하나
+	// 만들고 오래된 것을 지운다. 하루 한 번, 수동 백업과 겹치면 양보한다(backup.Scheduler).
+	sched := &backup.Scheduler{
+		Settings: func() backup.Schedule {
+			return backupSchedule(setting("backup.auto", "backup.hour", "backup.keep"))
+		},
+		Dump: backup.Dump(cfg.DatabaseURL), Uploads: cfg.Uploads(), Dir: cfg.Backups(),
+		Record: func(summary string, err error) {
+			if err != nil {
+				log.Error("자동 백업 실패", "err", err)
+				summary += " — " + truncate(err.Error(), 300)
+			} else {
+				log.Info(summary)
+			}
+			// 사람이 아니라 서버가 한 일이다 — 주체는 system.
+			if err := contentStore.OpLog().Record(settingCtx, content.Entry{ActorEmail: "system",
+				Action: "backup.auto", TargetType: "system", TargetID: "backup", Summary: summary}); err != nil {
+				log.Error("작업 로그 기록 실패", "action", "backup.auto", "err", err)
+			}
+		},
+	}
+	stopBackup := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopBackup:
+				return
+			case now := <-t.C:
+				sched.Tick(settingCtx, now)
+			}
+		}
+	}()
+
 	cleanup := func() {
+		close(stopBackup)
 		close(stopExpire)
 		sessionStore.StopCleanup()
 		_ = db.Close()
@@ -569,6 +612,20 @@ func themePath(cfg *config.Config, name string) string {
 		return ""
 	}
 	return filepath.Join(cfg.Themes(), filepath.Base(name))
+}
+
+// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐·새벽 3시·7개다 —
+// A-604 화면이 보이는 기본값과 같아야 한다(admin.renderBackup).
+func backupSchedule(kv map[string]string) backup.Schedule {
+	return backup.Schedule{Enabled: kv["backup.auto"] != "",
+		Hour: atoiOr(kv["backup.hour"], 3), Keep: atoiOr(kv["backup.keep"], 7)}
+}
+
+func truncate(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // atoiOr parses a setting that must be a number, falling back when it is not.

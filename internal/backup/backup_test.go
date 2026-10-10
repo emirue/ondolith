@@ -1,4 +1,4 @@
-package app
+package backup
 
 import "testing"
 
@@ -13,7 +13,7 @@ func TestPgDumpTargetKeepsThePasswordOutOfArgv(t *testing.T) {
 		{"비밀번호 없음", "postgres://u@h/site", "postgres://u@h/site", ""},
 		{"key=value 는 그대로", "host=h user=u dbname=site", "host=h user=u dbname=site", ""},
 	} {
-		db, pw := pgDumpTarget(tc.dsn)
+		db, pw := Target(tc.dsn)
 		if db != tc.db || pw != tc.pw {
 			t.Errorf("%s: (%q, %q), want (%q, %q)", tc.name, db, pw, tc.db, tc.pw)
 		}

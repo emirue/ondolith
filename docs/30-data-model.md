@@ -464,6 +464,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `auth.email_verification_required` | bool | A-201 | 1 |
 | `turnstile.site_key` · `turnstile.secret_key` | text / **자격증명** | A-201 | 6 |
 | `analytics.ga4_id` | text (`G-…`) | A-201 | 6 |
+| `backup.auto` · `backup.hour` · `backup.keep` | bool / int 0~23 (기본 3) / int 1~30 (기본 7) | A-604 | 6 |
 | `mail.smtp_host` · `smtp_port` · `smtp_user` · `smtp_password` · `tls_mode` · `from_address` · `from_name` | text / int / text / **자격증명** / `none`\|`starttls`\|`tls` / text / text | A-205 | 1 |
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
 | `business.*` | text | A-208 | 3 |

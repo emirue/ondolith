@@ -204,12 +204,3 @@ func TestResendIsPostOnly(t *testing.T) {
 		t.Error("GET 이 재발송 화면을 그렸다 — 라우트가 GET 을 받고 있다")
 	}
 }
-
-// grantSuperuser 는 시드된 superuser 역할을 붙인다. 이 파일에서만 쓰므로
-// 여기 둔다 — 나중에 두 번째 호출자가 생기면 그때 공용으로 옮긴다.
-func grantSuperuser(t *testing.T, store *auth.Store, userID string) {
-	t.Helper()
-	if err := store.AssignRole(context.Background(), userID, "admin"); err != nil {
-		t.Fatal(err)
-	}
-}

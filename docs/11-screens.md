@@ -258,7 +258,7 @@
 | A-601 | 작업 로그 | `/admin/oplog` | GET | 권한:log.view | 없음 | SC-4 | FR-707, FR-712 |
 | A-602 | 시스템 정보 | `/admin/system` | GET | 권한:settings.view | 없음 | SC-4 | NFR-302, NFR-303, NFR-305 |
 | A-603 | 웹훅 수신 이력 | `/admin/webhooks` | GET | 권한:payment.view | 없음 | SC-4 | FR-610, FR-712 |
-| A-604 | 백업 내려받기 | `/admin/backup` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-713 |
+| A-604 | 백업 내려받기 | `/admin/backup` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-713, FR-715 |
 
 ---
 

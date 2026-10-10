@@ -108,6 +108,8 @@ type Deps struct {
 	// the upload folder — together they are A-604's backup (FR-713).
 	DumpDB    func(ctx context.Context, w io.Writer) error
 	UploadDir string
+	// BackupDir holds the automatic backups A-604 lists and hands out (FR-715).
+	BackupDir string
 }
 
 // require is the per-handler permission check.

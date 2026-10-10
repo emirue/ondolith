@@ -166,3 +166,28 @@ func TestDirectoriesAreConfigurableAndResolveBesideTheConfig(t *testing.T) {
 		t.Errorf("절대 테마 경로 = %q", got)
 	}
 }
+
+// **자동 백업 폴더도 설정 파일 옆이고, 업로드 폴더 안이면 안 된다** (FR-715). 업로드
+// 폴더는 백업에 통째로 들어가므로, 그 안에 두면 다음 백업이 이전 백업을 싣고 커진다.
+func TestBackupDirResolvesBesideTheConfigAndStaysOutOfUploads(t *testing.T) {
+	c := &Config{Path: "/opt/ondolith/ondolith.json"}
+	if got := c.Backups(); got != "/opt/ondolith/backups" {
+		t.Errorf("기본 백업 경로 = %q", got)
+	}
+	for _, tc := range []struct {
+		upload, backup string
+		inside         bool
+	}{
+		{"", "", false},
+		{"/mnt/uploads", "/mnt/backups", false},
+		{"/mnt/uploads", "/mnt/uploads/backups", true},
+		{"/mnt/uploads", "/mnt/uploads", true},
+		{"data", "data/bk", true},
+		{"/mnt/uploads", "/mnt/uploads-old", false},
+	} {
+		c := &Config{Path: "/opt/ondolith/ondolith.json", UploadDir: tc.upload, BackupDir: tc.backup}
+		if got := c.BackupsInsideUploads(); got != tc.inside {
+			t.Errorf("upload=%q backup=%q: 안에 있나 %v, want %v", tc.upload, tc.backup, got, tc.inside)
+		}
+	}
+}
