@@ -141,6 +141,7 @@ var adminScreenTitles = map[string]string{
 	"admin/roles.html":            "역할·권한",
 	"admin/themes.html":           "테마",
 	"admin/system.html":           "시스템 정보",
+	"admin/backup.html":           "백업",
 	"admin/boards.html":           "게시판",
 	"admin/board-edit.html":       "게시판 설정",
 	"admin/board-fields.html":     "커스텀 필드",

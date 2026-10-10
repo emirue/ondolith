@@ -169,7 +169,7 @@ func TestAllMigrationsApply(t *testing.T) {
 	want := []string{
 		"attachments", "board_fields", "boards", "cart_items", "carts",
 		"categories", "comments", "email_verification_tokens", "goose_db_version",
-		"menus", "operation_logs", "order_agreements", "order_items", "orders",
+		"media", "menus", "operation_logs", "order_agreements", "order_items", "orders",
 		"pages", "password_reset_tokens", "payments", "permissions", "posts",
 		"product_categories", "product_images", "product_options", "product_variants", "products",
 		"refund_items", "refunds", "return_items", "returns", "role_permissions",

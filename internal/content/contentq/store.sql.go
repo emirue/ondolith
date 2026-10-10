@@ -34,14 +34,15 @@ func (q *Queries) CreateMenuItem(ctx context.Context, arg CreateMenuItemParams) 
 }
 
 const createPage = `-- name: CreatePage :one
-INSERT INTO pages (slug, title, body, template)
-VALUES ($1, $2, $3, $4) RETURNING id
+INSERT INTO pages (slug, title, body, body_html, template)
+VALUES ($1, $2, $3, $4, $5) RETURNING id
 `
 
 type CreatePageParams struct {
 	Slug     string
 	Title    string
 	Body     string
+	BodyHtml string
 	Template string
 }
 
@@ -50,6 +51,7 @@ func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (string,
 		arg.Slug,
 		arg.Title,
 		arg.Body,
+		arg.BodyHtml,
 		arg.Template,
 	)
 	var id string
@@ -153,7 +155,7 @@ func (q *Queries) MenuItems(ctx context.Context) ([]MenuItemsRow, error) {
 }
 
 const pageByID = `-- name: PageByID :one
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE id = $1
 `
 
@@ -169,12 +171,13 @@ func (q *Queries) PageByID(ctx context.Context, id string) (Page, error) {
 		&i.Template,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BodyHtml,
 	)
 	return i, err
 }
 
 const pageBySlug = `-- name: PageBySlug :one
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE slug = $1
 `
 
@@ -190,6 +193,7 @@ func (q *Queries) PageBySlug(ctx context.Context, slug string) (Page, error) {
 		&i.Template,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BodyHtml,
 	)
 	return i, err
 }
@@ -206,7 +210,7 @@ func (q *Queries) PageStatus(ctx context.Context, id string) (string, error) {
 }
 
 const pages = `-- name: Pages :many
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages ORDER BY updated_at DESC, id
 `
 
@@ -228,6 +232,7 @@ func (q *Queries) Pages(ctx context.Context) ([]Page, error) {
 			&i.Template,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BodyHtml,
 		); err != nil {
 			return nil, err
 		}
@@ -240,7 +245,7 @@ func (q *Queries) Pages(ctx context.Context) ([]Page, error) {
 }
 
 const publishedPageBySlug = `-- name: PublishedPageBySlug :one
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE slug = $1 AND status = 'published'
 `
 
@@ -256,12 +261,13 @@ func (q *Queries) PublishedPageBySlug(ctx context.Context, slug string) (Page, e
 		&i.Template,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BodyHtml,
 	)
 	return i, err
 }
 
 const publishedPages = `-- name: PublishedPages :many
-SELECT id, slug, title, body, status, template, created_at, updated_at
+SELECT id, slug, title, body, status, template, created_at, updated_at, body_html
 FROM pages WHERE status = 'published' ORDER BY slug
 `
 
@@ -283,6 +289,7 @@ func (q *Queries) PublishedPages(ctx context.Context) ([]Page, error) {
 			&i.Template,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BodyHtml,
 		); err != nil {
 			return nil, err
 		}
@@ -386,7 +393,7 @@ func (q *Queries) UpdateMenuItem(ctx context.Context, arg UpdateMenuItemParams) 
 }
 
 const updatePage = `-- name: UpdatePage :execrows
-UPDATE pages SET slug = $2, title = $3, body = $4, template = $5, updated_at = now()
+UPDATE pages SET slug = $2, title = $3, body = $4, body_html = $5, template = $6, updated_at = now()
 WHERE id = $1
 `
 
@@ -395,6 +402,7 @@ type UpdatePageParams struct {
 	Slug     string
 	Title    string
 	Body     string
+	BodyHtml string
 	Template string
 }
 
@@ -404,6 +412,7 @@ func (q *Queries) UpdatePage(ctx context.Context, arg UpdatePageParams) (int64, 
 		arg.Slug,
 		arg.Title,
 		arg.Body,
+		arg.BodyHtml,
 		arg.Template,
 	)
 	if err != nil {

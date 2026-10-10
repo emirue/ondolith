@@ -4,5 +4,6 @@
   "installed_at": "2026-01-01T00:00:00Z",
   "secure_cookies": true,
   "upload_dir": "uploads",
-  "theme_dir": "themes"
+  "theme_dir": "themes",
+  "backup_dir": "backups"
 }

@@ -50,6 +50,29 @@ type Site struct {
 	Type string
 	// Business is the trader information rendered in the footer (FR-711).
 	Business map[string]string
+	// Turnstile is the Cloudflare Turnstile **site** key (공개값) when A-201 turned
+	// the check on, else empty (FR-216). 비밀키는 여기 오지 않는다.
+	Turnstile string
+	// Analytics is the GA4 measurement ID (`G-…`, A-201 이 형식을 본다) or empty (FR-714).
+	Analytics string
+	// Maps are the map providers' browser keys for the map blocks (FR-716).
+	Maps MapKeys
+}
+
+// MapKeys are A-201's map keys (FR-716): 네이버 ncpKeyId, 카카오 JavaScript 키, 구글 API
+// 키와 Map ID. **공개값이다** — 페이지에 실려 그 지도사 SDK 를 부르고, 각 콘솔에 등록한
+// 도메인에서만 동작한다. 형식은 A-201 이 본다(영문·숫자·-·_).
+type MapKeys struct {
+	Naver       string
+	Kakao       string
+	Google      string
+	GoogleMapID string
+}
+
+// Any reports whether at least one provider can draw. 구글은 키와 Map ID 가 다 있어야
+// 그린다 — 핀(AdvancedMarkerElement)이 Map ID 를 요구한다(Google 문서).
+func (m MapKeys) Any() bool {
+	return m.Naver != "" || m.Kakao != "" || (m.Google != "" && m.GoogleMapID != "")
 }
 
 // ViewUser is the logged-in caller as a template sees them: enough to greet

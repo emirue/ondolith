@@ -252,3 +252,26 @@ func TestDeletingAFieldKeepsStoredValues(t *testing.T) {
 		t.Errorf("필드를 지웠더니 글의 값도 사라졌다: %q", v)
 	}
 }
+
+// 목록 모양은 「목록」·「갤러리」 둘뿐이다 (FR-515). 폼 값을 그대로 넣으면 DB CHECK 가
+// 500 으로 막는다 — 모르는 값은 기본값 「목록」 으로 저장한다.
+func TestBoardListStyleIsListOrGallery(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	b := newBoard("works", "시공 사례")
+	b.ListStyle = "gallery"
+	id, err := s.CreateBoard(ctx, b, PresetPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.BoardByID(ctx, id); got == nil || got.ListStyle != "gallery" {
+		t.Fatalf("만든 게시판 = %+v, want 갤러리", got)
+	}
+	b.ListStyle = "masonry"
+	if err := s.UpdateBoard(ctx, id, b); err != nil {
+		t.Fatalf("모르는 목록 모양 = %v, want 「목록」 으로 저장", err)
+	}
+	if got, _ := s.BoardByID(ctx, id); got == nil || got.ListStyle != "list" {
+		t.Errorf("고친 게시판 = %+v, want 목록", got)
+	}
+}

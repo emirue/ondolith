@@ -23,9 +23,9 @@ func urlFor(kind string, args ...string) string {
 	case kind == "post" && len(esc) == 2:
 		return "/board/" + esc[0] + "/" + esc[1]
 	case kind == "product" && len(esc) == 1:
-		return "/product/" + esc[0]
+		return "/shop/p/" + esc[0] // P-303
 	case kind == "order" && len(esc) == 1:
-		return "/order/" + esc[0]
+		return "/orders/" + esc[0] // P-502
 	}
 	return ""
 }

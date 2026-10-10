@@ -4,11 +4,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/alexedwards/scs/v2"
 
+	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
@@ -89,18 +91,21 @@ func (d *shopDeps) productSearch(w http.ResponseWriter, r *http.Request) {
 			d.shopView(r, "상품 검색", map[string]any{"Query": ""}))
 		return
 	}
-	products, err := d.store.SearchProducts(r.Context(), q, pageOf(r))
+	page := pageOf(r)
+	products, more, err := d.store.SearchProducts(r.Context(), q, page)
 	if err != nil {
 		d.serverError(w, r, err)
 		return
 	}
 	d.renderPage(w, r, "shop/search.html", http.StatusOK,
-		d.shopView(r, "상품 검색", map[string]any{"Query": q, "Products": products}))
+		d.shopView(r, "상품 검색", map[string]any{"Query": q, "Products": products,
+			"Pager": listPager("/shop/search", url.Values{"q": {q}}, page, more)}))
 }
 
 func (d *shopDeps) renderList(w http.ResponseWriter, r *http.Request, categoryID, sort, title string) {
-	products, err := d.store.ListProducts(r.Context(), commerce.ProductQuery{
-		VisibleOnly: true, CategoryID: categoryID, Sort: sort, Page: pageOf(r),
+	page := pageOf(r)
+	products, more, err := d.store.ListProductsMore(r.Context(), commerce.ProductQuery{
+		VisibleOnly: true, CategoryID: categoryID, Sort: sort, Page: page,
 	})
 	if errors.Is(err, commerce.ErrUnknownSort) {
 		// 정렬 값이 허용 목록에 없다. 400 이지 500 이 아니다 — 사용자가 URL 을
@@ -121,7 +126,8 @@ func (d *shopDeps) renderList(w http.ResponseWriter, r *http.Request, categoryID
 		return
 	}
 	d.renderPage(w, r, "shop/list.html", http.StatusOK, d.shopView(r, title, map[string]any{
-		"Products": products, "Categories": cats, "Sort": sort, "Page": pageOf(r),
+		"Products": products, "Categories": cats, "Sort": sort, "Page": page,
+		"Pager": listPager(r.URL.Path, url.Values{"sort": {sort}}, page, more),
 	}))
 }
 
@@ -180,6 +186,12 @@ func (d *shopDeps) productImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		// id 는 올릴 때마다 새로 생겨 내용이 바뀌지 않는다 — 목록을 열 때마다
+		// 이미지마다 묻지 않게 하루 캐시한다. **private 이다:** 공유 캐시(CDN)가
+		// 들고 있으면 상품을 숨긴 뒤에도 남에게 나간다 (위의 노출 재확인, D15 SC-7).
+		// 헤더가 없으면 공유 캐시가 Last-Modified 로 추정 캐시할 수 있었다.
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 	}
 	f, err := d.images.Open(img)
 	if err != nil {
@@ -351,12 +363,28 @@ func (d *shopDeps) shopView(r *http.Request, title string, data map[string]any) 
 	return v
 }
 
+// pageOf reads a public list's page number: 1 이상, content.MaxPage 이하. 상한은
+// 게시판과 같다 (D30) — 세 자리 쪽 번호는 독자가 아니라 크롤러다. 상한이 없던
+// 판은 OFFSET 이 int32 를 넘겨 음수가 되어 주소 한 줄로 500 이 났다.
 func pageOf(r *http.Request) int {
 	n, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if n < 1 {
-		return 1
+	return min(max(n, 1), content.MaxPage)
+}
+
+// listPager is partials/pager.html's data for a list that reads one extra row
+// to know whether a next page exists (상품 목록·상품 검색·주문 내역). 주소는
+// 통째로 만든다 — 정렬·검색어를 템플릿에서 이으면 화면마다 빠뜨릴 자리가 생긴다.
+// 상한 쪽에서는 「다음」을 그리지 않는다: 그 뒤는 pageOf 가 상한으로 접어 같은
+// 쪽이 끝없이 이어진다.
+func listPager(path string, keep url.Values, page int, more bool) map[string]any {
+	p := map[string]any{"PageNo": page, "PrevURL": "", "NextURL": ""}
+	if page > 1 {
+		p["PrevURL"] = admin.ListURL(path, keep, page-1)
 	}
-	return n
+	if more && page < content.MaxPage {
+		p["NextURL"] = admin.ListURL(path, keep, page+1)
+	}
+	return p
 }
 
 // paymentsAvailable reports whether A-209 configured a payment provider.

@@ -42,6 +42,17 @@ const AuthWindow = 10 * time.Minute
 // 불명은 ErrPaymentUnknown 으로 조회 경로를 탄다 (D50).
 const GatewayTimeout = 30 * time.Second
 
+// moneyCtx is the context for a path that calls the PG and then records what it
+// said: ConfirmPayment, ExecuteRefund, ConfirmExchangeDiff.
+//
+// **요청 취소에서 떼어 낸다.** net/http 는 클라이언트 연결이 끊기면 요청 컨텍스트를
+// 취소한다. 그 컨텍스트로 PG 를 부르고 기록하면, PG 는 승인·취소를 끝냈는데 직후의
+// DB 기록이 실패해 「PG 는 승인, 우리는 대기」가 남는다 — 탭을 닫는 것만으로.
+// 상한은 남긴다: PG 호출 하나와 기록 몇 번이 들어갈 시간이다.
+func moneyCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), GatewayTimeout+30*time.Second)
+}
+
 // ConfirmPayment is P-408's body.
 //
 // 순서가 방어다. D50 결제 흐름의 ★ 표시 두 개가 **승인 API 호출보다 앞**에
@@ -57,6 +68,8 @@ const GatewayTimeout = 30 * time.Second
 //  6. 결과 기록 + 상태 전이 (상태머신을 거친다).
 func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 	orderNo, paymentKey string, callbackAmount int, now time.Time) (*Payment, error) {
+	ctx, cancel := moneyCtx(ctx)
+	defer cancel()
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -128,12 +141,20 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 		// 돌려준다 — 새로 만들면 재시도가 두 번째 승인이 된다.
 		IdempotencyKey: paymentID,
 	})
-	if err != nil {
-		// 결과 불명(타임아웃·5xx)은 '대기' 로 남긴다. 그것이 A-508 대사 대상이고,
-		// 재승인 대신 조회 API 로 확인한다 (D50).
-		if errors.Is(err, ErrPaymentUnknown) {
+	if err != nil && errors.Is(err, ErrPaymentUnknown) {
+		// 결과 불명(타임아웃·5xx)이면 재승인 대신 조회 API 로 한 번 묻는다 (D50).
+		// 승인·실패만 답으로 받는다 — 조회의 '대기' 는 READY·IN_PROGRESS 와
+		// 가상계좌 WAITING_FOR_DEPOSIT 를 가르지 못한다. 그 밖은 '대기' 로
+		// 남기고 A-508 이 닫는다. paymentKey 는 브라우저가 준 값이라 주문번호도
+		// 대조한다 — 승인 API 와 달리 조회는 주문을 묶어 검사하지 않는다.
+		if got, gerr := gw.Get(ctx, paymentKey); gerr == nil && got != nil && got.OrderNo == orderNo &&
+			(got.Status == PaymentApproved || got.Status == PaymentFailed) {
+			res, err = got, nil
+		} else {
 			return nil, err
 		}
+	}
+	if err != nil {
 		// 확정된 실패만 '실패' 로 내린다. 부분 유니크의 `status <> '실패'` 가
 		// 재결제 경로를 열어 준다.
 		if uerr := s.q.FailPaymentByID(ctx, paymentID); uerr != nil {
@@ -296,19 +317,4 @@ func lower(s string) string {
 		}
 	}
 	return string(b)
-}
-
-// FailPayment records a confirmed failure without transitioning the order.
-//
-// D14 5-1: P-409 는 결제 시도만 기록한다. 주문은 결제대기에 머문다 — 재시도
-// 경로를 남기기 위해서이고, 역전이 금지 규칙과도 맞는다.
-func (s *Store) FailPayment(ctx context.Context, orderNo, reason string) error {
-	n, err := s.q.FailPendingPayment(ctx, orderNo)
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrNotFound, orderNo)
-	}
-	return nil
 }

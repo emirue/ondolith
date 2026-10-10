@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -74,6 +75,8 @@ type Deps struct {
 	// 것이고 (FR-710), 그 라우트는 애초에 트리에 없다.
 	Commerce    *commerce.Store
 	Attachments *content.Attachments
+	// Media 는 에디터로 올린 본문 사진이다 (A-310, FR-514).
+	Media *content.MediaStore
 	// Images 는 A-502 의 상품 이미지 저장소다. Attachments 와 같은 이유로
 	// 주입한다 — 업로드 디렉터리는 설정이다 (NFR-304).
 	Images *commerce.Images
@@ -101,6 +104,12 @@ type Deps struct {
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.
 	SendReset func(email, token string)
+	// DumpDB writes `pg_dump --format=custom` of the site database, and UploadDir is
+	// the upload folder — together they are A-604's backup (FR-713).
+	DumpDB    func(ctx context.Context, w io.Writer) error
+	UploadDir string
+	// BackupDir holds the automatic backups A-604 lists and hands out (FR-715).
+	BackupDir string
 }
 
 // require is the per-handler permission check.
@@ -168,7 +177,25 @@ var siteSettingKeys = []string{
 	// 관리자 콘솔 배색. **부팅 때 읽던 값인데 그것을 저장하는 화면이 없었다** —
 	// 다섯 방향이 스타일시트에 있는데 고를 방법이 없었다.
 	"admin.theme",
+	// 공개 폼 스팸 방지 (FR-216). 둘 다 있어야 켜진다. 비밀키는 봉인되고 다시 보이지 않는다.
+	"turnstile.site_key", "turnstile.secret_key",
+	// 방문 통계 GA4 측정 ID (FR-714). 공개 화면의 <script> 에 들어간다 — 형식은 ga4ID 가 본다.
+	"analytics.ga4_id",
+	// 지도 키 (FR-716) — mapKeyNames 와 같은 목록이다.
+	"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id",
 }
+
+// mapKeyNames are the map providers' browser keys (FR-716): 네이버 ncpKeyId, 카카오
+// JavaScript 키, 구글 API 키와 Map ID. **공개값이다** — 페이지에 실려 SDK 를 부르고, 각
+// 콘솔에 등록한 도메인에서만 동작한다. 그래서 봉인하지 않지만 `<script>` 의 속성이 되므로
+// mapKey 모양만 받는다.
+var mapKeyNames = []string{"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id"}
+
+var mapKey = regexp.MustCompile(`^[A-Za-z0-9_-]{0,100}$`)
+
+// ga4ID is a GA4 measurement ID: 「G- + 숫자·문자」 (Google 애널리틱스 도움말, 2026-10-08 확인).
+// 길이 상한은 문서에 없다 — 30자는 실제 ID(10자 안팎)보다 넉넉한 우리 상한이다.
+var ga4ID = regexp.MustCompile(`^G-[A-Z0-9]{1,30}$`)
 
 // adminThemes 는 admin.css 가 아는 배색이다 (`data-admin-theme="1a"` … `1e`).
 //
@@ -182,12 +209,8 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "settings.update"); !ok {
 		return
 	}
-	kv, err := d.Content.Settings(r.Context(), siteSettingKeys...)
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-		return
-	}
-	d.Render(w, r, "admin/settings.html", http.StatusOK, map[string]any{"Settings": kv})
+	// renderSettings 를 거친다 — Turnstile 비밀키는 「저장됐는지」 만 나간다.
+	d.renderSettings(w, r, "admin/settings.html", siteSettingKeys, http.StatusOK, "")
 }
 
 // assemblyKeys are read when the operating tree is built, not per request.
@@ -214,6 +237,36 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			kv[k] = v
 		}
 	}
+	// 비밀키 빈 칸은 「그대로 두라」다 (MailSettingsSave 와 같은 이유). 끄려면 사이트 키를 비운다.
+	if kv["turnstile.secret_key"] == "" {
+		delete(kv, "turnstile.secret_key")
+	}
+	// 붙여넣은 공백·소문자는 고쳐 받는다. 빈 값은 끄기다.
+	if v, ok := kv["analytics.ga4_id"]; ok {
+		kv["analytics.ga4_id"] = strings.ToUpper(strings.TrimSpace(v))
+		if v := kv["analytics.ga4_id"]; v != "" && !ga4ID.MatchString(v) {
+			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+				http.StatusUnprocessableEntity, "GA4 측정 ID 는 G- 로 시작하는 영문·숫자입니다 (예: G-PSW1MY7HB4).")
+			return
+		}
+	}
+	for _, k := range mapKeyNames {
+		if v, ok := kv[k]; ok {
+			kv[k] = strings.TrimSpace(v)
+			if !mapKey.MatchString(kv[k]) {
+				d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+					http.StatusUnprocessableEntity, "지도 키는 영문·숫자·-·_ 로 100자 이내입니다.")
+				return
+			}
+		}
+	}
+	for _, k := range []string{"turnstile.site_key", "turnstile.secret_key"} {
+		if len(kv[k]) > 200 {
+			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+				http.StatusUnprocessableEntity, "Turnstile 키가 너무 깁니다 (200자 이내).")
+			return
+		}
+	}
 	// FR-710: the site type is a closed vocabulary. An unknown value would
 	// leave the router assembling a tree nobody described.
 	if t, ok := kv["site.type"]; ok && t != "cms" && t != "shop" {
@@ -229,7 +282,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "관리자 배색은 1a~1e 중 하나여야 합니다.")
 		return
 	}
-	prev, err := d.Content.Settings(r.Context(), assemblyKeys...)
+	prev, err := d.Content.Settings(r.Context(), append([]string{"turnstile.site_key"}, assemblyKeys...)...)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
@@ -268,6 +321,10 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	if typeChanged {
 		d.log(r, c, "settings.update", "settings", "site.type",
 			"사이트 유형 "+prev["site.type"]+" → "+kv["site.type"])
+	}
+	// 자격증명 변경은 작업 로그 대상이다 (D15 7절). 값은 남기지 않는다.
+	if changed(kv, prev, "turnstile.site_key") || kv["turnstile.secret_key"] != "" {
+		d.log(r, c, "settings.update", "settings", "turnstile", "스팸 방지(Turnstile) 키 변경")
 	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
 	if !typeChanged && !changed(kv, prev, "admin.theme") {
@@ -344,8 +401,26 @@ func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
 	d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusOK, "")
 }
 
+// MailSettingsSave is A-205's write. **superuser 만 저장한다** (D15 5.1 R7).
+//
+// 비밀번호 재설정·인증 토큰은 이 SMTP 로 나간다. `settings.update` 만 가진
+// 운영자가 호스트를 자기 서버로 돌린 뒤 superuser 이메일로 재설정을 요청하면
+// 토큰을 받아 superuser 가 된다 — R6 이 막은 계정 조작을 메일 경로로 우회하는
+// 길이다. 보는 것(GET)은 settings.update 로 남긴다: 호스트 이름은 비밀이 아니다.
 func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "settings.update"); !ok {
+	c, ok := d.require(w, r, "settings.update")
+	if !ok {
+		return
+	}
+	if !c.IsSuperuser() {
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusForbidden,
+			"메일(SMTP) 설정은 최고 관리자만 바꿀 수 있습니다.")
+		return
+	}
+	// 메일 경로를 바꾸면 이후 모든 계정 복구 메일의 수신처가 바뀐다 (D15 5.3-1).
+	if !reauthOK(c, r) {
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusForbidden,
+			"비밀번호를 다시 입력하세요.")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -372,6 +447,8 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// 값은 남기지 않는다 — 비밀번호가 섞여 있고 로그는 지워지지 않는다 (D15 7절).
+	d.log(r, c, "settings.update", "settings", "mail", "메일(SMTP) 설정 변경")
 	http.Redirect(w, r, "/admin/settings/mail", http.StatusSeeOther)
 }
 
@@ -393,12 +470,18 @@ func (d *Deps) PageList(w http.ResponseWriter, r *http.Request) {
 // screen: D11 gives A-302 one path, and a separate /new route would be a screen
 // with no id in the inventory.
 func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "page.update"); !ok {
+	// 만들기 폼은 page.create 다 — PageSave 와 같고, 라우트(`/admin/pages/new`)가
+	// 적은 것도 그것이다 (D15 2.2).
+	id := r.PathValue("id")
+	perm := "page.update"
+	if isCreate(id) {
+		perm = "page.create"
+	}
+	if _, ok := d.require(w, r, perm); !ok {
 		return
 	}
-	id := r.PathValue("id")
 	if isCreate(id) {
-		d.Render(w, r, "admin/page-edit.html", http.StatusOK, nil)
+		d.renderPageEdit(w, r, http.StatusOK, map[string]any{})
 		return
 	}
 	p, err := d.Content.PageByID(r.Context(), id)
@@ -410,7 +493,16 @@ func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/page-edit.html", http.StatusOK, map[string]any{"Page": p})
+	d.renderPageEdit(w, r, http.StatusOK, map[string]any{"Page": p})
+}
+
+// renderPageEdit draws A-302 with the map keys the editor's 「지도 넣기」 needs (FR-716).
+// 지도 키를 못 읽으면 지도 단추만 빠진다 — 페이지 편집까지 막을 일이 아니다.
+func (d *Deps) renderPageEdit(w http.ResponseWriter, r *http.Request, code int, data map[string]any) {
+	if kv, err := d.Content.Settings(r.Context(), mapKeyNames...); err == nil {
+		data["Maps"] = kv
+	}
+	d.Render(w, r, "admin/page-edit.html", code, data)
 }
 
 // Dashboard is A-101. It shows nothing but the shell: FR-702 makes the panel
@@ -492,14 +584,15 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := strings.TrimSpace(r.PostFormValue("slug"))
 	if err := content.ValidateSlug(slug); err != nil {
-		d.Render(w, r, "admin/page-edit.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": err.Error()})
+		d.renderPageEdit(w, r, http.StatusUnprocessableEntity, map[string]any{"Error": err.Error()})
 		return
 	}
+	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
 	p := content.Page{
 		Slug:     slug,
 		Title:    r.PostFormValue("title"),
-		Body:     r.PostFormValue("body"),
+		Body:     body,
+		BodyHTML: bodyHTML,
 		Template: r.PostFormValue("template"),
 	}
 	// Status is absent on purpose: publishing is page.publish, and letting an
@@ -511,8 +604,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 		_, err = d.Content.CreatePage(r.Context(), p)
 	}
 	if errors.Is(err, content.ErrSlugTaken) {
-		d.Render(w, r, "admin/page-edit.html", http.StatusConflict,
-			map[string]any{"Error": "이미 사용 중인 슬러그입니다."})
+		d.renderPageEdit(w, r, http.StatusConflict, map[string]any{"Error": "이미 사용 중인 슬러그입니다."})
 		return
 	}
 	// **없는 페이지를 고치려 한 것은 404 다.** `d.fail` 이 그 판정을 갖고 있는데
@@ -566,7 +658,7 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	}
 	page := 0
 	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
-		page = n
+		page = min(n, adminMaxPage) // OFFSET 이 int32 를 넘지 않게
 	}
 	// **한 행 더 읽어 다음 쪽이 있는지 본다.** 앞 판은 「다음」을 조건 없이
 	// 그려서, 사용자가 한 명뿐인 사이트도 무한히 다음 쪽을 제시했다 — 링크를
@@ -855,7 +947,7 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 	}
 	page := 0
 	if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n > 0 {
-		page = n
+		page = min(n, adminMaxPage) // OFFSET 이 int32 를 넘지 않게
 	}
 	// 기간 조회 (D19 0.6): 기록 시각 기준. 기본은 기간 조건 없음.
 	q := r.URL.Query()
@@ -893,7 +985,7 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 		if n > 0 {
 			v.Set("page", strconv.Itoa(n))
 		}
-		return listURL("/admin/oplog", v, 0)
+		return ListURL("/admin/oplog", v, 0)
 	}
 	if page > 0 {
 		data["PrevURL"] = link(page - 1)

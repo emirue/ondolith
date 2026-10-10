@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -55,5 +57,75 @@ func TestStockRowFormsAreDrawnOnlyForManagers(t *testing.T) {
 		if !strings.Contains(manage, want) {
 			t.Errorf("product.manage 가 있는 화면에 %q 가 없다", want)
 		}
+	}
+}
+
+// **A-507 폼이 화면이 발급한 요청 키를 되돌려 보낸다** (D19 A-507).
+//
+// 키가 폼에 없으면 서버는 재전송을 알아보지 못한다 — 그래서 POST 는 키 없는
+// 요청을 422 로 거절하고, 이 필드가 빠지면 환불 화면 자체가 쓸 수 없게 된다.
+func TestRefundFormCarriesTheIssuedRequestKey(t *testing.T) {
+	order := &commerce.OrderDetail{OrderNo: "20261007-ABCDEFGHJK"}
+	// renderRefund 가 넘기는 값 전부다 — 빠지면 템플릿이 nil 을 그리다 실패한다.
+	view := renderAdmin(t, "admin/refund.html", map[string]any{
+		"Order": order, "Refunds": []commerce.Refund{}, "RequestKey": "Key_issued-by-the-server-0123456",
+		"Approved": 0, "Refunded": 0, "Remaining": 0, "NeedsReauth": false, "Error": ""})
+	if !strings.Contains(view, `<input type="hidden" name="request_key" value="Key_issued-by-the-server-0123456">`) {
+		t.Error("환불 폼에 발급된 요청 키가 실리지 않았다")
+	}
+}
+
+// A-507 의 환불 내역은 상태마다 할 수 있는 것만 그린다 (D19 A-507): '요청' 은 실행·거부,
+// '승인'(결과 불명)은 다시 보내기, 끝난 건은 아무것도.
+func TestRefundRowsOfferOnlyTheActionsTheirStateAllows(t *testing.T) {
+	view := renderAdmin(t, "admin/refund.html", map[string]any{
+		"Order": &commerce.OrderDetail{OrderNo: "20261007-ABCDEFGHJK"},
+		"Refunds": []commerce.Refund{
+			{ID: "r-req", Status: "요청"}, {ID: "r-unk", Status: "승인"}, {ID: "r-done", Status: "완료"}},
+		"RequestKey": "k", "Approved": 0, "Refunded": 0, "Remaining": 0, "NeedsReauth": true, "Error": ""})
+	forms := regexp.MustCompile(`(?s)<form method="post" class="adm-form">.*?</form>`).FindAllString(view, -1)
+	got := map[string][]string{}
+	for _, f := range forms {
+		id := regexp.MustCompile(`name="refund_id" value="([^"]+)"`).FindStringSubmatch(f)
+		act := regexp.MustCompile(`name="action" value="([^"]+)"`).FindStringSubmatch(f)
+		if id == nil || act == nil {
+			continue // 새 환불 접수 폼
+		}
+		got[id[1]] = append(got[id[1]], act[1])
+		if act[1] == "execute" && !strings.Contains(f, `name="password"`) {
+			t.Errorf("%s 실행 폼에 재인증 칸이 없다 — 돈이 나간다", id[1])
+		}
+	}
+	want := map[string][]string{"r-req": {"execute", "reject"}, "r-unk": {"execute"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("행별 동작 = %v, want %v", got, want)
+	}
+}
+
+// A-508 의 「PG 결과로 반영」은 '대기' 주문결제를 PG 가 승인·실패로 답한 줄에만,
+// order.update 가 있을 때만 그린다 (D19 A-508, D13).
+func TestReconcileOffersResolveOnlyWhereThePGAnswered(t *testing.T) {
+	rows := []commerce.ReconcileRow{
+		{PaymentID: "p-approved", Kind: "주문결제", OurStatus: "대기", TheirStatus: "승인"},
+		{PaymentID: "p-failed", Kind: "주문결제", OurStatus: "대기", TheirStatus: "실패"},
+		{PaymentID: "p-still", Kind: "주문결제", OurStatus: "대기", TheirStatus: "대기"},
+		{PaymentID: "p-done", Kind: "주문결제", OurStatus: "승인", TheirStatus: "승인"},
+		{PaymentID: "p-diff", Kind: "교환차액", OurStatus: "대기", TheirStatus: "승인"},
+	}
+	ids := func(can bool) []string {
+		view := renderAdmin(t, "admin/reconcile.html", map[string]any{
+			"Rows": rows, "Mismatched": 0, "From": "2026-10-01", "To": "2026-10-07",
+			"Quick": nil, "CanResolve": can})
+		var out []string
+		for _, m := range regexp.MustCompile(`name="payment_id" value="([^"]+)"`).FindAllStringSubmatch(view, -1) {
+			out = append(out, m[1])
+		}
+		return out
+	}
+	if got := ids(true); !reflect.DeepEqual(got, []string{"p-approved", "p-failed"}) {
+		t.Errorf("반영 버튼 = %v, want [p-approved p-failed]", got)
+	}
+	if got := ids(false); got != nil {
+		t.Errorf("order.update 없이 반영 버튼 = %v, want 없음", got)
 	}
 }

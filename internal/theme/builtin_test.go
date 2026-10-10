@@ -2,6 +2,9 @@ package theme
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
+	"html/template"
 	"io/fs"
 	"os"
 	"regexp"
@@ -124,9 +127,16 @@ func TestPageTemplateEscapesBody(t *testing.T) {
 }
 
 type pageLike struct {
-	Title string
-	Body  string
+	Title    string
+	Body     string
+	BodyHTML string
 }
+
+// Rendered mirrors content.Page.Rendered: 정화된 HTML 이거나 빈 값 (D17).
+func (p pageLike) Rendered() template.HTML { return template.HTML(p.BodyHTML) }
+
+// pagerLike is partials/pager.html's data with both links, so both branches render.
+var pagerLike = map[string]any{"PageNo": 2, "PrevURL": "/shop?sort=price", "NextURL": "/shop?page=3&sort=price"}
 
 // payloadFor returns the .Data a given screen is written against (D12/D13 pin
 // this down per screen).
@@ -143,11 +153,13 @@ func payloadFor(name string) any {
 			"Categories": []categoryLike{{ID: "c1", Slug: "top", Name: "상의"}},
 			"Sort":       "price",
 			"Page":       1,
+			"Pager":      pagerLike,
 		}
 	case "shop/search.html":
 		return map[string]any{
 			"Query":    "티",
 			"Products": []productLike{{ID: "p1", Slug: "tee", Name: "티셔츠", BasePrice: 12000}},
+			"Pager":    pagerLike,
 		}
 	case "shop/product.html":
 		return map[string]any{
@@ -189,7 +201,8 @@ func payloadFor(name string) any {
 		return map[string]any{
 			"Orders": []orderLike{{OrderNo: "20260805-ABCDEFGHJK", Status: "결제완료", Total: 29000,
 				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
-			"Page": 1,
+			"Page":  1,
+			"Pager": pagerLike,
 		}
 	case "order/view.html":
 		return map[string]any{
@@ -301,7 +314,8 @@ func payloadFor(name string) any {
 			// 첨부가 있는 글이다 — 목록이 비면 첨부 절이 통째로 안 그려져
 			// 그 조각은 렌더링 검사를 지나가지 않는다.
 			"Attachments": []attachmentLike{{ID: "a1", OriginalName: "설명서.pdf", ByteSize: 20480}},
-			"Post": postLike{ID: "p1", Title: "첫 글", Body: "본문\n둘째 줄",
+			// 에디터로 쓴 글이다 — 평문 갈래는 page.html 이 지난다.
+			"Post": postLike{ID: "p1", Title: "첫 글", Body: "본문\n둘째 줄", BodyHTML: "<p><strong>서식</strong> 본문</p>",
 				AuthorName: "홍길동", ViewCount: 12,
 				CustomFields: map[string]any{"color": "빨강"},
 				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)},
@@ -323,6 +337,11 @@ func payloadFor(name string) any {
 			"Boards": map[string]boardLike{"b1": {ID: "b1", Slug: "free", Name: "자유게시판"}},
 			"Results": []postLike{{ID: "p1", BoardID: "b1", Title: "찾은 글", Body: "본문",
 				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
+			"Pager": map[string]any{
+				"Base": "/search", "Query": struct{ Search string }{Search: "검색어"},
+				"Total": int64(1), "PageNo": 2, "PrevPage": 1, "NextPage": 3,
+				"HasPrev": true, "HasNext": true,
+			},
 		}
 	case "comment/form.html":
 		return map[string]any{
@@ -425,6 +444,8 @@ func TestHtmxVersionFileMatchesTheVendoredFile(t *testing.T) {
 // 움직인다. 필드 이름이 어긋나면 이 테스트가 렌더링에서 실패한다.
 type boardLike struct {
 	ID, Slug, Name, Skin string
+	// ListStyle 은 목록 모양이다 — "list"·"gallery" (FR-515).
+	ListStyle string
 	// AllowAttachments 는 글쓰기 폼이 파일 칸과 enctype 을 낼지 정한다
 	// (FR-506). 픽스처에 없던 동안 그 조건은 렌더링 검사를 통과하지 못했다.
 	AllowAttachments bool
@@ -432,8 +453,12 @@ type boardLike struct {
 	PerPage          int
 }
 
+// Rendered mirrors content.Post.Rendered.
+func (p postLike) Rendered() template.HTML { return template.HTML(p.BodyHTML) }
+
 type postLike struct {
 	ID, BoardID, Title, Body, AuthorName string
+	BodyHTML, CoverMediaID               string
 	CustomFields                         map[string]any
 	IsPinned, IsSecret                   bool
 	ViewCount, CommentCount              int64
@@ -755,5 +780,60 @@ func TestHeaderAdminLinkIsForAdminsAndClickable(t *testing.T) {
 	}
 	if strings.Contains(b.String(), `href="/admin/"`) || strings.Contains(b.String(), `class="who"`) {
 		t.Error("비로그인 화면에 계정 영역이 그려졌다")
+	}
+}
+
+// **내장한 에디터 파일이 기록한 해시와 같다** (DEC-2.2, FR-513). 버전 파일만 고치고 파일을
+// 안 바꾸거나 그 반대면 무엇이 들어 있는지 아무도 모른다 — 해시로 대조한다.
+func TestSunEditorVersionFileMatchesTheVendoredFiles(t *testing.T) {
+	ver, err := fs.ReadFile(Builtin(), "static/vendor/suneditor/SUNEDITOR.VERSION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, line := range strings.Split(string(ver), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 || f[0] != "sha256" {
+			continue
+		}
+		b, err := fs.ReadFile(Builtin(), "static/vendor/suneditor/"+f[2])
+		if err != nil {
+			t.Fatalf("%s: %v", f[2], err)
+		}
+		if got := fmt.Sprintf("%x", sha256.Sum256(b)); got != f[1] {
+			t.Errorf("%s 의 sha256 = %s, 기록은 %s", f[2], got, f[1])
+		}
+		checked++
+	}
+	if checked != 3 {
+		t.Errorf("해시를 대조한 파일 %d 개, want 3 (js·css·ko)", checked)
+	}
+}
+
+// **갤러리 목록은 카드마다 썸네일을 그리고, 비밀글은 사진을 내지 않는다** (FR-515).
+// 목록은 비밀글 제목을 누구에게나 보이므로 썸네일까지 그리면 본문 사진이 샌다.
+func TestGalleryListShowsCoversButNotSecretOnes(t *testing.T) {
+	l := newBuiltinLoader()
+	data := payloadFor("board/list.html").(map[string]any)
+	data["Board"] = boardLike{ID: "b1", Slug: "works", Name: "시공 사례", ListStyle: "gallery"}
+	data["Posts"] = []postLike{
+		{ID: "p1", Title: "거실 마루", CoverMediaID: "0b6f3c3e-0000-4000-8000-000000000001"},
+		{ID: "p2", Title: "비밀 현장", IsSecret: true, CoverMediaID: "0b6f3c3e-0000-4000-8000-000000000002"},
+	}
+	v := fullView()
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "board/list.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, `src="/media/0b6f3c3e-0000-4000-8000-000000000001/thumb"`) {
+		t.Error("갤러리 카드에 썸네일이 없다")
+	}
+	if strings.Contains(out, "0b6f3c3e-0000-4000-8000-000000000002") {
+		t.Error("비밀글의 사진이 갤러리에 나왔다")
+	}
+	if strings.Contains(out, `class="board-list"`) {
+		t.Error("갤러리 게시판이 표 목록까지 그렸다")
 	}
 }

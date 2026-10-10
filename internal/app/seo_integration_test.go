@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
 )
 
@@ -247,4 +248,24 @@ func urlValues(kv ...string) url.Values {
 		v.Set(kv[i], kv[i+1])
 	}
 	return v
+}
+
+// **사이트맵·robots 는 설정의 site_url 을 출처로 쓴다.** 요청으로 짐작하면 nginx 가
+// TLS 를 끝내는 배포(D72)에서는 r.TLS 가 비어 https 사이트의 사이트맵이 http 주소로
+// 채워진다 — 검색엔진은 그 주소를 따라가 리다이렉트를 한 번씩 더 겪는다.
+func TestSitemapUsesTheConfiguredSiteURL(t *testing.T) {
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.SiteURL = "https://shop.example.com/" })
+	freeID := mkBoard(t, pool, "free", content.PresetPublic)
+	if _, err := content.NewStore(pool).CreatePost(context.Background(), content.Post{
+		BoardID: freeID, Title: "글", Body: "본문"}); err != nil {
+		t.Fatal(err)
+	}
+	_, sitemap := mustGet(t, client(), srv.URL+"/sitemap.xml")
+	if !strings.Contains(sitemap, "<loc>https://shop.example.com/board/free") {
+		t.Errorf("사이트맵이 site_url 을 쓰지 않는다:\n%s", sitemap)
+	}
+	_, robots := mustGet(t, client(), srv.URL+"/robots.txt")
+	if !strings.Contains(robots, "Sitemap: https://shop.example.com/sitemap.xml\n") {
+		t.Errorf("robots 의 Sitemap 줄이 site_url 을 쓰지 않는다:\n%s", robots)
+	}
 }

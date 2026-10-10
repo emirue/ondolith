@@ -95,6 +95,33 @@ goose에는 `stdlib.OpenDBFromPool(pool)`로 `*sql.DB`를 만들어 넘긴다. �
 
 ---
 
+### DEC-2.3 에디터: SunEditor 3.3.3, **내장** (W6-03, FR-513)
+
+**고른 이유** (2026-10-08, npm 레지스트리·GitHub 이슈 조회):
+
+- **MIT, 의존성 없음, `dist/` 에 단일 파일**(`suneditor.min.js` 807KB·`.css` 126KB) — DEC-2.2 의
+  「CDN 없이 바이너리에 내장」이 빌드 단계 없이 된다. 한국어 언어팩(`src/langs/ko.js`)이 있다
+- **한글 IME**: 작성자가 한국인이고, 저장소의 한글·IME 이슈(iOS Enter 자음 새는 문제 2026-05 등)가 전부
+  닫혀 있다. 우리 브라우저 시험(`scripts/editor-ime.mjs`)이 문단 끝·굵은 글씨 안·문장 가운데 조합을 확인한다
+- 사진은 `image.uploadUrl` 로 서버에 올린다(응답 `{"result":[{url,name,size}]}`) — 주소가 없으면 base64 를
+  본문에 박으므로 반드시 둔다
+
+**배제한 것**
+
+| 후보 | 이유 |
+|---|---|
+| Toast UI Editor | 마지막 배포 3.2.2 가 2023-02-17 — 유지보수가 멈췄다 |
+| Quill 2 | 한글 조합 문제 이력, 마지막 배포 2024-11 |
+| TipTap(ProseMirror) | IME 는 좋지만 단일 파일 배포가 없다 — JS 빌드 단계가 새로 생긴다 |
+| TinyMCE·CKEditor 5 | 오픈소스판이 GPL 이다 |
+
+**주의 (실측):** dist 번들은 플러그인을 `SUNEDITOR.plugins` 로 내놓지만 **`plugins` 옵션으로 넘겨야
+켜진다** — 넘기지 않으면 툴바가 비고 에디터가 만들어지지 않는다. 쓰는 것만 넘긴다(`editor.js`).
+
+갱신은 `SUNEDITOR.VERSION`·D21·이 절을 같은 커밋에서 고치고, `make ui` 의 에디터 시험을 돌린다.
+
+---
+
 ## DEC-3. 명시적 금지 사항
 
 **아래는 이미 검토 후 배제된 것이다. "더 나은 대안"으로 제안하지 말 것.**

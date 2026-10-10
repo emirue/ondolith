@@ -218,6 +218,11 @@ function spawnChrome(bin, userDataDir) {
     '--no-default-browser-check',
     '--disable-gpu',
     '--hide-scrollbars',
+    // **macOS 키체인을 쓰지 않는다.** 없으면 Chrome 이 시작하면서 로그인 키체인에
+    // 저장소 키를 묻고, 그 허락 창이 뜬 채로 아무것도 출력하지 않아 위 30초 시한에
+    // 걸린다 — 2026-10-08 실측(이 플래그를 주면 2초에 뜬다). Playwright 도 기본으로
+    // 준다. 감사는 저장할 비밀이 없으니 메모리 키체인으로 충분하다.
+    '--use-mock-keychain',
     // **CI 러너에서는 샌드박스를 끈다.** Ubuntu 23.10+ 가 AppArmor 로 비특권
     // user namespace 를 막아 zygote 가 `No usable sandbox!` 로 즉시 죽는다 —
     // 개발 기계(macOS)에서는 이 조건이 없어 보이지 않았다.

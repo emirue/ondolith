@@ -85,6 +85,7 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 		AllowAttachments: r.PostFormValue("allow_attachments") != "",
 		AllowComments:    r.PostFormValue("allow_comments") != "",
 		AllowSecret:      r.PostFormValue("allow_secret") != "",
+		ListStyle:        r.PostFormValue("list_style"), // 허용목록은 저장소가 건다 (list·gallery)
 		PerPage:          20,
 	}
 	if n, err := strconv.Atoi(r.PostFormValue("per_page")); err == nil && n > 0 {

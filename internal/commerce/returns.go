@@ -814,6 +814,8 @@ func (s *Store) ExchangeDiffDue(ctx context.Context, orderNo, returnNo, userID s
 // 한다 (FR-608). 실패한 시도는 자리를 비우므로 다시 결제할 수 있다.
 func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, orderNo,
 	returnNo, userID, paymentKey string, amount int, now time.Time) (err error) {
+	ctx, cancel := moneyCtx(ctx) // PG 호출 뒤 기록까지 끝낸다 (payment.go)
+	defer cancel()
 
 	d, err := s.ExchangeDiffDue(ctx, orderNo, returnNo, userID)
 	if err != nil {
@@ -846,6 +848,11 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 	res, err := gw.Confirm(ctx, ConfirmRequest{
 		OrderNo: orderNo, PaymentKey: paymentKey, Amount: d.Amount, IdempotencyKey: paymentKey})
 	if err != nil {
+		// 결과 불명은 '대기' 로 남긴다 (ConfirmPayment 와 같다). '실패' 로 내리면
+		// 부분 유니크가 두 번째 차액 결제를 열어, 첫 결제가 승인됐을 때 이중 청구다.
+		if errors.Is(err, ErrPaymentUnknown) {
+			return err
+		}
 		if uerr := s.q.FailPaymentByID(ctx, paymentID); uerr != nil {
 			return errors.Join(err, uerr)
 		}

@@ -246,7 +246,44 @@ exit 0으로 내놓는다 — 메모리 한도를 넘겨 커널에 죽은 경우
 
 바이너리는 백업 대상이 아니다. 릴리즈에서 다시 받으면 된다.
 
-**복원 테스트를 하지 않은 백업은 백업이 아니다.**
+**관리자 화면에서 받기 (A-604, FR-713).** 최고 관리자가 비밀번호를 다시 넣으면 `ondolith.dump`(`pg_dump -Fc`)와
+`uploads/` 가 든 zip 이 내려온다. 서버에 **DB 서버와 같거나 높은 버전의 `pg_dump`** 가 있어야 한다 — 낮으면
+pg_dump 가 거부하고 화면이 그렇게 말한다. 로그인 세션은 빠지고, 설정 파일·사용자 테마는 들어 있지 않다.
+
+**자동 백업 (A-604, FR-715).** 같은 화면에서 켜고 시각(매일 0~23시, 기본 0시, **서버 시계** — 서버 시간대를
+`Asia/Seoul` 로 맞추지 않은 Lightsail 은 UTC 라 0시가 한국 오전 9시다, [D71](71-install-guide.md) 「시작하기 전에」)과 보관
+개수(1~30)를 정하면, 서버가 그 시각에 같은 zip 을 백업 폴더에 만들고 오래된 것을 지운다. 백업 폴더는 설정 파일의
+`backup_dir`(비우면 설정 파일 옆 `backups/`)이고 **업로드 폴더 안이면 서버가 뜨지 않는다.** 보관 개수 × (DB + 업로드
+폴더)만큼 디스크를 쓰고, 결과는 작업 로그(A-601, 주체 `system`)에 남는다. 이 백업은 서버 디스크에 있으므로 서버가
+망가지면 함께 사라진다 — 서버 스냅샷([D72](72-deploy-lightsail.md) 5절)이나 A-604 로 내려받은 사본을 밖에 둔다.
+
+**복원.** 덤프는 기본 `public` 스키마를 새로 만들지 않으므로 **새로 만든 빈 DB** 에 복원한다 — 표를 지운 기존 DB
+에 부으면 `schema "public" does not exist` 로 멈춘다(2026-10-08, PostgreSQL 18.4 로 확인).
+
+```bash
+createdb ondolith_restored
+pg_restore --no-owner --exit-on-error -d ondolith_restored ondolith.dump
+unzip -o ondolith-backup-*.zip 'uploads/*' -d /opt/ondolith   # 업로드 폴더
+```
+
+그다음 `ondolith.json` 의 `database_url` 을 새 DB 로 바꾸고 재시작한다. 복원한 사이트에서는 모두 다시 로그인한다.
+
+**복원 테스트를 하지 않은 백업은 백업이 아니다.** 덤프 → 빈 DB 복원 → 같은 글이 보이는지를 `make test-backup`
+이 본다 — PATH 에 DB 서버와 같은 버전의 `pg_dump`·`pg_restore` 가 있어야 해서 `pgdump` 빌드 태그 뒤에 두고
+`make test-integration` 과 따로 돈다. CI 는 integration 잡에서 PGDG 저장소의 18 클라이언트를 깔고 돌린다
+([D85](85-gaps.md) GAP-28).
+
+## 지도 키 (FR-716)
+
+에디터의 「지도 넣기」 와 글 화면의 지도는 A-201 의 지도 키로 그 지도사 SDK 를 부른다. 키는 페이지에 실리는
+**공개값**이고, 각 콘솔에 이 사이트의 도메인을 등록해야 동작한다 — 등록하지 않은 도메인에서는 지도사가 거부하고
+자리표시 그림이 남는다.
+
+| 지도사 | 넣는 값 | 확인한 것 (2026-10-10 공식 문서) |
+|---|---|---|
+| 카카오맵 | 카카오 디벨로퍼스 앱의 **JavaScript 키** | [앱] > [앱 설정] > [앱] > [플랫폼 키] 에 사이트 도메인을 등록해야 지도 API 가 동작한다. 장소 검색은 `services` 라이브러리 |
+| 네이버 지도 | 네이버 클라우드 플랫폼 Maps 의 **클라이언트 아이디(`ncpKeyId`)** | 파라미터 이름이 `ncpClientId` 에서 `ncpKeyId` 로 바뀌었다. 검색은 주소(Geocoder)만 — 상호명 검색은 서버용 검색 API 라 쓰지 않는다 |
+| 구글 지도 | **API 키**와 **Map ID** | 핀(`AdvancedMarkerElement`)이 Map ID 를 요구한다(`DEMO_MAP_ID` 는 시험용). 검색은 Geocoding API 를 같은 프로젝트에서 켜야 한다. 사용량 과금 계정이 필요하다 |
 
 ## 헬스체크 (P-907)
 

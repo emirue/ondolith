@@ -63,13 +63,15 @@ var (
 // compare against. This map IS the table, and the tests read it.
 var transitions = map[Status]map[Status][]Actor{
 	StatusPaymentPending: {
-		StatusPaid:           {"P-408"},
+		// A-508 은 승인 결과를 모른 채 남은 결제를 PG 조회가 승인이라 답할 때만
+		// 옮긴다 (D19 A-508). 그것이 없으면 「PG 는 승인, 우리는 대기」를 닫을 길이 없다.
+		StatusPaid:           {"P-408", "A-508"},
 		StatusPaymentFailed:  {ActorSystem}, // 10분 만료
 		StatusDepositPending: {ActorSystem}, // 가상계좌 발급
 	},
 	StatusDepositPending: {
-		StatusPaid:          {"P-905"},     // 웹훅 입금 확인
-		StatusPaymentFailed: {ActorSystem}, // 입금 기한 초과
+		StatusPaid:          {"P-905", "A-508"}, // 웹훅 입금 확인 · 대사 반영
+		StatusPaymentFailed: {ActorSystem},      // 입금 기한 초과
 	},
 	StatusPaid: {
 		StatusPreparing: {"A-506"},

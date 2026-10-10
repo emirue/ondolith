@@ -37,6 +37,12 @@
           <option value="">금지</option>
           <option value="1"{{if and .Board .Board.AllowSecret}} selected{{end}}>허용</option>
         </select></label>
+      {{/* 갤러리는 글마다 본문 첫 사진의 썸네일을 카드로 보인다 (FR-515) — 시공 사례처럼 사진이 주인 게시판. */}}
+      <label class="adm-field"><span>목록 모양</span>
+        <select name="list_style">
+          <option value="list">목록</option>
+          <option value="gallery"{{if and .Board (eq .Board.ListStyle "gallery")}} selected{{end}}>갤러리</option>
+        </select></label>
     </div>
 
     {{if not .Board}}

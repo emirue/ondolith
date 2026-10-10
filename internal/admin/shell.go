@@ -56,6 +56,7 @@ var nav = []NavItem{
 	{Screen: "A-206", Title: "소셜 로그인", Path: "/admin/settings/social", Group: "설정", Permission: "settings.update", Order: 65},
 	{Screen: "A-202", Title: "테마", Path: "/admin/themes", Group: "설정", Permission: "theme.view", Order: 80},
 	{Screen: "A-601", Title: "작업 로그", Path: "/admin/oplog", Group: "설정", Permission: "log.view", Order: 85},
+	{Screen: "A-604", Title: "백업", Path: "/admin/backup", Group: "설정", Permission: "settings.update", Order: 88},
 	// 커머스 항목. Shop=true 라 site.type=cms 에서는 메뉴에도 트리에도 없다
 	// (FR-710) — 등록되지 않은 경로를 가리키는 메뉴는 404 링크이고, 그것은
 	// 권한이 없어 안 열리는 링크와 똑같이 보인다.
@@ -108,20 +109,6 @@ func Nav(can func(string) bool, shop bool) []NavGroup {
 	for _, g := range order {
 		out = append(out, NavGroup{Title: g, Items: byGroup[g]})
 	}
-	return out
-}
-
-// NavScreens is the set of screen ids the menu points at, so a test can compare
-// it against the registered routes.
-func NavScreens(shop bool) []string {
-	out := make([]string, 0, len(nav))
-	for _, it := range nav {
-		if it.Shop && !shop {
-			continue
-		}
-		out = append(out, it.Screen)
-	}
-	sort.Strings(out)
 	return out
 }
 

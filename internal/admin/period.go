@@ -106,7 +106,7 @@ func quickLinks(path string, keep url.Values, today time.Time, quarter bool) []q
 	labels := []string{"1주일", "1개월", "3개월"}
 	var out []quickLink
 	for i, r := range quickRanges(today, quarter) {
-		out = append(out, quickLink{Label: labels[i], URL: listURL(path, withPeriod(keep, r), 1)})
+		out = append(out, quickLink{Label: labels[i], URL: ListURL(path, withPeriod(keep, r), 1)})
 	}
 	return out
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/commerce"
@@ -197,6 +198,17 @@ func (d *shopDeps) exchangePayConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 결제 키는 결제창이 채운다. 비어 오면 결제창을 거치지 않은 것이고, 그대로
+	// 넘기면 결제 행의 CHECK 에 걸려 500 이 된다 (BUG-01 — 이 화면에 결제창이 없다).
+	paymentKey := strings.TrimSpace(r.PostFormValue("paymentKey"))
+	if paymentKey == "" {
+		d.renderPage(w, r, "order/exchange-pay.html", http.StatusBadRequest,
+			d.shopView(r, "교환 차액 결제", map[string]any{
+				"Order": order, "Return": diff, "ClientKey": d.pgClientKey(),
+				"Error": "결제창에서 결제를 마친 뒤에만 승인할 수 있습니다."}))
+		return
+	}
+
 	// **금액은 폼에서 오지 않는다** (D19 P-514 받지 않는 필드). PG 콜백이
 	// 실어 보낸 값은 대조에만 쓰고, 청구하는 것은 확정된 차액이다.
 	userID := ""
@@ -204,7 +216,7 @@ func (d *shopDeps) exchangePayConfirm(w http.ResponseWriter, r *http.Request) {
 		userID = a.User.ID
 	}
 	err = d.store.ConfirmExchangeDiff(r.Context(), d.gateway(), d.pgName(),
-		order.OrderNo, diff.ReturnNo, userID, r.PostFormValue("paymentKey"),
+		order.OrderNo, diff.ReturnNo, userID, paymentKey,
 		diff.Amount, time.Now())
 	switch {
 	case err == nil:

@@ -114,6 +114,12 @@ req -o /dev/null -X POST "$BASE/board/notice/write" \
 POST=$(sql "select id from posts limit 1")
 req -o /dev/null -X POST "$BASE/board/notice/$POST/comments" --data-urlencode "body=댓글"
 COMMENT=$(sql "select id from comments limit 1")
+# **P-213 은 올린 사진이 있어야 열린다.** 에디터와 같은 경로(P-214)로 1×1 PNG 를 올린다 —
+# 저장소에 그림 파일을 두지 않으려고 base64 로 만든다. 올리기가 실패하면 id 가 비어 404 로 드러난다.
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' |
+	base64 --decode >"$WORK/dot.png"
+req -o /dev/null -F "file-0=@$WORK/dot.png;type=image/png" "$BASE/board/notice/media"
+MEDIA=$(sql "select id from media limit 1")
 
 # **A-509 는 이동 전용 화면이다** — 생성 폼이 없다. 카테고리를 만드는 화면이
 # D11 에 없는 것이 맞는지는 별개 문제이고(A-509 미결), 여기서는 P-302 를 그릴
@@ -170,6 +176,7 @@ id_for() {
 	case "$1" in
 	P-204 | P-206 | P-207 | P-208) echo "$POST" ;;
 	P-209 | P-210) echo "$COMMENT" ;;
+	P-213) echo "$MEDIA" ;;
 	A-302 | A-303) echo "$PAGE" ;;
 	A-305 | A-306) echo "$BOARD" ;;
 	A-402 | A-405) echo "$USER" ;;
@@ -267,6 +274,11 @@ while IFS="$(printf '\t')" read -r id name path methods; do
 		continue
 		;;
 	esac
+	# 본문 사진(P-213)은 그림 파일이다 — 크기 대신 올린 PNG 가 그림으로 돌아오는지 본다.
+	if [ "$id" = P-213 ]; then
+		case "$body" in *PNG*) ok "$id $name" ;; *) bad "$id $name — 그림이 아니다 ($p)" ;; esac
+		continue
+	fi
 
 	# **템플릿이 없는 키를 참조하면 그 자리만 비고 200 이 나간다.** 본문이
 	# 레이아웃만 남은 크기면 화면이 아무것도 그리지 못한 것이다.

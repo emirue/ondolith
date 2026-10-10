@@ -157,26 +157,6 @@ func TestForgetClearsBucket(t *testing.T) {
 	}
 }
 
-// Without a sweep the map grows once per distinct IP forever — a slow leak on
-// any public site.
-func TestSweepDropsIdleBuckets(t *testing.T) {
-	c := newClock()
-	l := NewLimiterAt(c.now)
-	lim := Limit{Burst: 2, Window: time.Minute}
-
-	l.Allow("old", lim)
-	c.advance(2 * time.Hour)
-	l.Allow("fresh", lim)
-
-	if n := l.Sweep(time.Hour); n != 1 {
-		t.Errorf("정리된 버킷 %d개, want 1", n)
-	}
-	// The fresh key keeps its state; the old one starts over.
-	if !l.Allow("fresh", lim) {
-		t.Error("최근 키가 정리됐다")
-	}
-}
-
 // D15 4.3-2 must be transcribed exactly: these are the numbers the document
 // justifies one by one, and a typo here is a security setting nobody re-reads.
 func TestDefaultLimitsMatchDoc(t *testing.T) {
@@ -221,13 +201,6 @@ func TestConcurrentAllowIsRaceFree(t *testing.T) {
 			}
 		}(i)
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for j := 0; j < 20; j++ {
-			l.Sweep(time.Hour)
-		}
-	}()
 	wg.Wait()
 }
 

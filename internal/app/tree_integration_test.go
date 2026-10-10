@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -49,7 +50,9 @@ func liveSiteWith(t *testing.T, tweak ...func(*config.Config)) (*httptest.Server
 		}
 	}
 
-	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트"}
+	// 업로드는 시험마다 임시 폴더다. 비우면 기본값 `uploads` 가 시험의 현재 폴더
+	// (internal/app) 아래로 잡혀 올린 파일이 저장소에 남는다 — 실제로 그렇게 커밋됐다.
+	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트", UploadDir: t.TempDir()}
 	for _, f := range tweak {
 		f(cfg)
 	}
@@ -353,7 +356,7 @@ func TestBootRefusesWhenARouteNamesAMissingPermission(t *testing.T) {
 		}
 	}
 
-	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트"}
+	cfg := &config.Config{DatabaseURL: dsn, SiteName: "테스트 사이트", UploadDir: t.TempDir()}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h, cleanup, err := New(ctx, cfg, "1.0.0", log, nil)
 	if cleanup != nil {
@@ -639,5 +642,43 @@ func TestAdminWithoutTrailingSlashRedirects(t *testing.T) {
 	defer res2.Body.Close()
 	if res2.StatusCode != http.StatusOK {
 		t.Errorf("/admin/ → HTTP %d", res2.StatusCode)
+	}
+}
+
+// **프록시 뒤에서도 로그인 제한은 방문자마다다** (D72, D86 1.12).
+//
+// 앞 판은 RemoteAddr 만 보아서, D72 처럼 nginx 뒤에 두면 모든 요청이 127.0.0.1 이었다.
+// 로그인은 IP 버킷이 비면 계정 확인 전에 429 를 내므로, 익명 한 명이 분당 10번
+// 틀리면 관리자를 포함한 **모든 사람의 로그인**이 막혔다. httptest 서버의 연결은
+// 루프백이라 그 구성을 그대로 재현한다.
+func TestLoginRateLimitIsPerVisitorBehindTheProxy(t *testing.T) {
+	srv, _ := liveSiteWith(t, func(c *config.Config) { c.ProxyIPHeader = "X-Real-IP" })
+	try := func(visitor string, n int) int {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/login", strings.NewReader(
+			url.Values{"email": {fmt.Sprintf("nobody%d@example.com", n)}, "password": {"guess"}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", srv.URL)
+		req.Header.Set("X-Real-IP", visitor)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	// 한 방문자가 한도(분당 10)를 넘긴다 — 계정은 매번 달리해 IP 버킷만 찬다.
+	// **「11번째」로 단언하지 않는다.** 버킷은 계속 채워진다(6초에 1개) — CI 에서 11번에 7.5초가
+	// 걸리자 그사이 1개가 다시 차 11번째가 통과했다. 429 가 나올 때까지 보내고, 한도의 세 배를
+	// 보내도 막히지 않으면 실패다.
+	limited := false
+	for i := 0; i < 30 && !limited; i++ {
+		limited = try("203.0.113.5", i) == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("한 방문자가 30번 연속 틀려도 429 가 나오지 않았다")
+	}
+	// 다른 방문자는 막히지 않는다.
+	if code := try("203.0.113.9", 99); code == http.StatusTooManyRequests {
+		t.Error("다른 방문자의 로그인이 429 다 — 프록시 뒤에서 IP 제한이 사이트 전체 제한이 됐다")
 	}
 }

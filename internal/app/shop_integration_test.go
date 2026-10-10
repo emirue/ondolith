@@ -151,7 +151,7 @@ func TestCommercePathsOpenInShopMode(t *testing.T) {
 // wrote.
 func restartOnSameSchema(t *testing.T) *httptest.Server {
 	t.Helper()
-	cfg := &config.Config{DatabaseURL: os.Getenv(dsnEnv), SiteName: "테스트 사이트"}
+	cfg := &config.Config{DatabaseURL: os.Getenv(dsnEnv), SiteName: "테스트 사이트", UploadDir: t.TempDir()}
 	h, cleanup, err := New(context.Background(), cfg, "1.0.0",
 		slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err != nil {

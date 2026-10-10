@@ -4,7 +4,6 @@ package app
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
+	"github.com/emirue/ondolith/internal/backup"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
@@ -34,28 +34,8 @@ import (
 	"github.com/emirue/ondolith/internal/theme"
 )
 
-//go:embed templates/*.html
-var templatesFS embed.FS
-
 // sessionLifetime is how long a session survives without activity.
 const sessionLifetime = 12 * time.Hour
-
-// siteView is everything a theme template may learn about the site.
-//
-// It exists so that config.Config never reaches a template. That struct holds
-// DatabaseURL — the DSN, password included — and themes are third-party files
-// swapped at runtime (FR-302, FR-303). A single `{{.DatabaseURL}}` added to a
-// theme for debugging would publish the database credential to every visitor.
-//
-// Widen this deliberately, one field at a time. docs/17-theme-contract.md
-// defines what belongs here.
-type siteView struct {
-	Name string
-}
-
-func newSiteView(cfg *config.Config) siteView {
-	return siteView{Name: cfg.SiteName}
-}
 
 // newSessionManager applies the session cookie hardening NFR-204 requires.
 //
@@ -209,6 +189,11 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	if err := os.MkdirAll(cfg.Uploads(), 0o755); err != nil {
 		return fail(fmt.Errorf("업로드 디렉터리를 만들 수 없다 (%s): %w", cfg.Uploads(), err))
 	}
+	// 업로드 폴더는 백업에 통째로 들어간다 — 그 안에 백업 폴더가 있으면 다음 백업이 이전
+	// 백업을 싣고 하루마다 커진다 (FR-715). 설정을 고치기 전에는 뜨지 않는다.
+	if cfg.BackupsInsideUploads() {
+		return fail(fmt.Errorf("backup_dir(%s) 가 upload_dir(%s) 안에 있다 — 밖으로 옮기세요", cfg.Backups(), cfg.Uploads()))
+	}
 
 	// Settings are read per request, not cached: A-201 changes them from the
 	// running server and FR-303 says the next request reflects it.
@@ -226,19 +211,32 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 		return kv
 	}
+	// A-201 의 Turnstile 키 (FR-216). 둘 다 있어야 켜진다 — spamGuard.check 와 위젯이
+	// 같은 조건을 봐야 「위젯은 없는데 토큰을 요구한다」가 생기지 않는다.
+	turnstileKeys := func() (string, string) {
+		kv := setting("turnstile.site_key", "turnstile.secret_key")
+		return kv["turnstile.site_key"], kv["turnstile.secret_key"]
+	}
 	site := func() theme.Site {
-		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type")
+		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type", "analytics.ga4_id",
+			"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id")
 		s := theme.Site{
 			Name:            kv["site.name"],
 			MetaDescription: kv["site.meta_description"],
 			OGImage:         kv["site.og_image"],
 			Type:            kv["site.type"],
+			Analytics:       kv["analytics.ga4_id"],
+			Maps: theme.MapKeys{Naver: kv["map.naver_key"], Kakao: kv["map.kakao_key"],
+				Google: kv["map.google_key"], GoogleMapID: kv["map.google_map_id"]},
 		}
 		if s.Name == "" {
 			s.Name = cfg.SiteName
 		}
 		if s.Type == "" {
 			s.Type = "cms"
+		}
+		if key, secret := turnstileKeys(); key != "" && secret != "" {
+			s.Turnstile = key
 		}
 		// 사업자 정보는 shop 모드에서만 푸터에 나간다 (FR-711). cms 사이트는
 		// 표시 의무가 없고, 비어 있는 여덟 줄을 그리면 그것이 곧 오류로 보인다.
@@ -329,8 +327,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	if cfg.SiteURL == "" {
 		log.Warn("site_url 이 비어 있어 메일의 링크에 주소가 없습니다 — ondolith.json 에 site_url 을 적으세요 (예: https://example.com)")
 	}
+	turnstile := auth.Turnstile{Client: &http.Client{Timeout: 10 * time.Second}, URL: auth.TurnstileVerifyURL}
+	spam := spamGuard{keys: turnstileKeys, verify: turnstile.Verify, log: log}
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
-		userFields: contentStore.UserFields, verifyRequired: verifyRequired}
+		userFields: contentStore.UserFields, verifyRequired: verifyRequired, spam: spam}
 
 	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
 	// five directions share one markup, so switching is a token swap.
@@ -374,7 +374,11 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		Render:      adminUI.Render,
 		Commerce:    commerceStore,
 		Attachments: contentStore.AttachmentsIn(cfg.Uploads()),
+		Media:       contentStore.MediaIn(cfg.Uploads()),
 		Images:      commerceStore.ImagesIn(cfg.Uploads()),
+		DumpDB:      backup.Dump(cfg.DatabaseURL),
+		UploadDir:   cfg.Uploads(),
+		BackupDir:   cfg.Backups(),
 		OpLog:       contentStore.OpLog(),
 		Logger:      log,
 		BaseURL:     baseURL,
@@ -400,7 +404,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
-		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore}
+		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore, siteURL: cfg.SiteURL,
+		media: contentStore.MediaIn(cfg.Uploads()), spam: spam}
 
 	// **이름과 어댑터를 한 곳에서 낸다.** 둘을 따로 읽으면 갈라진다 — 실제로
 	// 「사용 안 함」을 처음 넣었을 때 이름 쪽만 고쳐서, 웹훅 경로와
@@ -518,7 +523,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// — 기동 검사가 D11 과 대조하는 것이 그 표다.
 	staticOutside := httpsec.Headers(http.HandlerFunc(static))
 	main := h
-	h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h = withProxyClientIP(cfg.ProxyIPHeader)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/static/"):
 			staticOutside.ServeHTTP(w, r)
@@ -527,7 +532,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		default:
 			main.ServeHTTP(w, r)
 		}
-	})
+	}))
 
 	// 결제대기 만료 (D14: 결제대기 → 결제실패, 시스템). NFR-103 대로 고루틴이다.
 	// AuthWindow 가 지난 주문은 P-408 이 승인을 거부하므로 결제될 길이 없는데,
@@ -555,7 +560,43 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}()
 	}
 
+	// 자동 백업 (FR-715). 1분마다 A-604 의 설정을 보고, 정한 시각이면 백업 폴더에 하나
+	// 만들고 오래된 것을 지운다. 하루 한 번, 수동 백업과 겹치면 양보한다(backup.Scheduler).
+	sched := &backup.Scheduler{
+		Settings: func() backup.Schedule {
+			return backupSchedule(setting("backup.auto", "backup.hour", "backup.keep"))
+		},
+		Dump: backup.Dump(cfg.DatabaseURL), Uploads: cfg.Uploads(), Dir: cfg.Backups(),
+		Record: func(summary string, err error) {
+			if err != nil {
+				log.Error("자동 백업 실패", "err", err)
+				summary += " — " + truncate(err.Error(), 300)
+			} else {
+				log.Info(summary)
+			}
+			// 사람이 아니라 서버가 한 일이다 — 주체는 system.
+			if err := contentStore.OpLog().Record(settingCtx, content.Entry{ActorEmail: "system",
+				Action: "backup.auto", TargetType: "system", TargetID: "backup", Summary: summary}); err != nil {
+				log.Error("작업 로그 기록 실패", "action", "backup.auto", "err", err)
+			}
+		},
+	}
+	stopBackup := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopBackup:
+				return
+			case now := <-t.C:
+				sched.Tick(settingCtx, now)
+			}
+		}
+	}()
+
 	cleanup := func() {
+		close(stopBackup)
 		close(stopExpire)
 		sessionStore.StopCleanup()
 		_ = db.Close()
@@ -574,6 +615,20 @@ func themePath(cfg *config.Config, name string) string {
 		return ""
 	}
 	return filepath.Join(cfg.Themes(), filepath.Base(name))
+}
+
+// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐·0시(사용이 가장 적은
+// 자정)·7개다 — A-604 화면이 보이는 기본값과 같아야 한다(admin.renderBackup).
+func backupSchedule(kv map[string]string) backup.Schedule {
+	return backup.Schedule{Enabled: kv["backup.auto"] != "",
+		Hour: atoiOr(kv["backup.hour"], 0), Keep: atoiOr(kv["backup.keep"], 7)}
+}
+
+func truncate(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // atoiOr parses a setting that must be a number, falling back when it is not.

@@ -89,6 +89,12 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if code, msg := d.spam.check(r); code != 0 {
+		v := d.view(r, "댓글을 저장하지 않았습니다", "")
+		v.Data = map[string]string{"Detail": msg}
+		d.renderPage(w, r, "error.html", code, v)
+		return
+	}
 	if _, err := d.content.CreateComment(ctx, content.Comment{
 		PostID: p.ID, ParentID: parent, AuthorID: a.User.ID, Body: body,
 	}); err != nil {

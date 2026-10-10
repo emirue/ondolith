@@ -142,6 +142,7 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `pages.slug` | 100 | `/{slug}`가 전체 경로다 |
 | `pages.title` | 200 | `<title>`·OG 제목이 된다 (FR-511) |
 | `pages.body` | 100,000 | 본문 계열. 한 요청이 버퍼링해도 되는 크기 |
+| `posts.body_html` · `pages.body_html` | 200,000 | 정화된 본문 HTML (FR-513, `00026`). 태그·속성이 글자보다 길어 평문 상한의 몇 배다 |
 | `settings.key` | 80 | 3 세그먼트 + 프로바이더 이름 최악값 |
 | `settings.value` | 4,000 | **짧은 스칼라만 담는다.** 긴 본문은 전용 표의 몫. 최장 후보가 OG 이미지 URL(2,048) |
 | `menus.title` · `menus.url` | 50 / 500 | 내비게이션 한 항목 / 외부 URL 포함 |
@@ -436,7 +437,8 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `id` | uuid | PK |
 | `slug` | text | NOT NULL UNIQUE |
 | `title` | text | NOT NULL |
-| `body` | text | NOT NULL |
+| `body` | text | NOT NULL. 에디터로 쓴 페이지면 `body_html` 의 평문 |
+| `body_html` | text | NOT NULL DEFAULT '', `CHECK (length(body_html) <= 200000)` — 정화된 본문 HTML (FR-513, `00026`). 빈 값이 평문 페이지다 |
 | `status` | text | NOT NULL DEFAULT 'draft', `CHECK (status IN ('draft','published'))` |
 | `template` | text | NOT NULL DEFAULT '' |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
@@ -460,6 +462,10 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 |---|---|---|---|
 | `site.name` · `site.meta_description` · `site.og_image` · `site.dev_mode` · `site.type` | text / text / text / bool / `cms`\|`shop` | A-201 | 1 |
 | `auth.email_verification_required` | bool | A-201 | 1 |
+| `turnstile.site_key` · `turnstile.secret_key` | text / **자격증명** | A-201 | 6 |
+| `analytics.ga4_id` | text (`G-…`) | A-201 | 6 |
+| `map.naver_key` · `map.kakao_key` · `map.google_key` · `map.google_map_id` | text — 공개값 (FR-716) | A-201 | 6 |
+| `backup.auto` · `backup.hour` · `backup.keep` | bool / int 0~23 (기본 0) / int 1~30 (기본 7) | A-604 | 6 |
 | `mail.smtp_host` · `smtp_port` · `smtp_user` · `smtp_password` · `tls_mode` · `from_address` · `from_name` | text / int / text / **자격증명** / `none`\|`starttls`\|`tls` / text / text | A-205 | 1 |
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
 | `business.*` | text | A-208 | 3 |
@@ -558,6 +564,7 @@ ALTER TABLE social_accounts ADD CONSTRAINT social_accounts_user_provider_uniq UN
 | `allow_comments` | boolean | NOT NULL DEFAULT true |
 | `allow_secret` | boolean | NOT NULL DEFAULT false |
 | `per_page` | integer | NOT NULL DEFAULT 20, `CHECK (per_page BETWEEN 1 AND 100)` |
+| `list_style` | text | NOT NULL DEFAULT 'list', `CHECK (list_style IN ('list','gallery'))` — 목록 모양 (FR-515, `00028`). 모르는 폼 값은 저장소가 `list` 로 바꾼다 |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 권한 컬럼을 두지 않는다 — 스코프는 `role_permissions.board_id`가 표현한다(D15 2.4).
@@ -600,7 +607,9 @@ ALTER TABLE board_fields ADD CONSTRAINT board_fields_options_when
 | `id` | uuid | PK |
 | `board_id` | uuid | NOT NULL REFERENCES `boards(id)` |
 | `author_id` | uuid | **NULL 허용** REFERENCES `users(id)` — 3-1이 SET NULL이다 |
-| `title` · `body` | text | NOT NULL |
+| `title` · `body` | text | NOT NULL. 에디터로 쓴 글이면 `body` 는 `body_html` 의 평문이다 — 검색·요약·OG 가 이것을 쓴다 |
+| `body_html` | text | NOT NULL DEFAULT '', `CHECK (length(body_html) <= 200000)` — **정화를 지난** 본문 HTML(FR-513, `00026`). 빈 값이 평문 글이다 |
+| `cover_media_id` | uuid | **NULL 허용** REFERENCES `media(id)` ON DELETE SET NULL — 갤러리 카드 사진 (FR-515, `00028`). 저장할 때 `body_html` 의 첫 `/media/{id}` 이고, 그 `media` 행이 없으면 NULL 이다(본문은 브라우저가 보낸 것이라 없는 id 를 실을 수 있다) |
 | `custom_fields` | jsonb | NOT NULL DEFAULT '{}' |
 | `status` | text | NOT NULL DEFAULT 'published', `CHECK (status IN ('published','hidden'))` |
 | `is_pinned` · `is_secret` | boolean | NOT NULL DEFAULT false |
@@ -690,6 +699,24 @@ CREATE INDEX comments_author_id_idx ON comments (author_id);
 **순환 방지 락이 필요 없다.** 3절의 자기 참조 트리 규칙은 `menus`·`categories`를 지목한다.
 `comments.parent_id`는 **삽입 시점에 확정되고 이후 어떤 화면도 받지 않으므로**(P-209) 순환이
 구조적으로 만들어지지 않는다.
+
+**`media`** — 에디터로 올린 본문 사진 (FR-514, `00027`)
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `uploader_id` | uuid | **NULL 허용** REFERENCES `users(id)` ON DELETE SET NULL — 올린 사람이 사라져도 글 속 사진은 남는다 |
+| `stored_path` | text | NOT NULL UNIQUE, `CHECK (stored_path ~ '^media/[0-9]{4}/[0-9]{2}/[0-9a-f-]{36}$')`. 썸네일은 그 옆의 `-thumb` |
+| `mime_type` | text | NOT NULL, `CHECK (mime_type IN ('image/jpeg','image/png','image/gif'))` — **다시 인코딩한 결과의 타입**(webp 는 jpeg 가 된다) |
+| `thumb_mime` | text | NOT NULL, `CHECK (thumb_mime IN ('image/jpeg','image/png'))` |
+| `width` · `height` | integer | NOT NULL, `CHECK (> 0)` |
+| `byte_size` | bigint | NOT NULL, `CHECK (byte_size > 0)` |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() |
+
+**`post_id` 가 없다.** 사진은 글을 저장하기 전에 에디터에서 올라오므로 부모가 아직 없다 — 글이 본문 HTML 로
+사진(`/media/{id}`)을 가리킨다. 그래서 첨부처럼 글의 읽기 권한을 다시 볼 수 없고, uuid 주소를 아는 사람만
+닿는다 ([D12](12-screens-public.md) P-213). 원본은 저장하지 않는다(EXIF 가 디스크에도 없다). 저장하지 않고
+떠난 글의 사진은 남는다 — 지우는 경로는 디스크가 문제가 될 때 둔다.
 
 **`attachments`**
 

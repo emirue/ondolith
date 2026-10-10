@@ -357,22 +357,26 @@ func (s *Store) withItems(ctx context.Context, o OrderDetail) (*OrderDetail, err
 }
 
 // MyOrders is P-501.
-func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderDetail, error) {
+func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderDetail, bool, error) {
 	if userID == "" {
-		return nil, ErrNotFound
+		return nil, false, ErrNotFound
 	}
 	limit, offset := ProductQuery{Page: page}.clamp()
 	rows, err := s.q.MyOrders(ctx, commerceq.MyOrdersParams{
-		UserID: &userID, Limit: int32(limit), Offset: int32(offset)})
+		UserID: &userID, Limit: int32(limit + 1), Offset: int32(offset)})
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	more := len(rows) > limit // 한 행 더 읽어 다음 쪽을 안다
+	if more {
+		rows = rows[:limit]
 	}
 	var out []OrderDetail
 	for _, r := range rows {
 		out = append(out, OrderDetail{OrderNo: r.OrderNo, Status: Status(r.Status),
 			Total: int(r.TotalAmount), CreatedAt: r.CreatedAt})
 	}
-	return out, nil
+	return out, more, nil
 }
 
 // OrderByNoUnscoped reads an order without an ownership predicate.

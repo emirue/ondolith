@@ -31,6 +31,7 @@ func TestSecretSettingsAreSealedAtRest(t *testing.T) {
 	if err := s.PutSettings(ctx, map[string]string{
 		"pg.secret_key": "test_sk_abc123", "pg.client_key": "test_ck_xyz", "site.name": "온돌",
 		"social.google.client_secret": "goog-secret", "mail.smtp_password": "",
+		"turnstile.secret_key": "ts-secret", "turnstile.site_key": "ts-site",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +47,13 @@ func TestSecretSettingsAreSealedAtRest(t *testing.T) {
 	}
 	if !secretbox.IsSealed(raw) {
 		t.Errorf("소셜 client_secret 이 봉인되지 않았다: %q", raw)
+	}
+	// Turnstile 비밀키도 자격증명이다 (FR-216). 사이트 키는 공개값이라 평문이다.
+	if err := pool.QueryRow(ctx, `SELECT value FROM settings WHERE key = 'turnstile.secret_key'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !secretbox.IsSealed(raw) {
+		t.Errorf("Turnstile 비밀키가 봉인되지 않았다: %q", raw)
 	}
 	if err := pool.QueryRow(ctx, `SELECT value FROM settings WHERE key = 'pg.client_key'`).Scan(&raw); err != nil {
 		t.Fatal(err)

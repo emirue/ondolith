@@ -225,7 +225,7 @@ func (q *Queries) LockOrderItems(ctx context.Context, orderID string) ([]string,
 }
 
 const lockRefundForExecute = `-- name: LockRefundForExecute :one
-SELECT r.status, r.reason, r.request_key, r.amount, p.payment_key
+SELECT r.status, r.reason, r.request_key, r.amount, r.created_at, p.payment_key
 FROM refunds r JOIN payments p ON p.id = r.payment_id
 WHERE r.id = $1 FOR UPDATE
 `
@@ -235,6 +235,7 @@ type LockRefundForExecuteRow struct {
 	Reason     string
 	RequestKey string
 	Amount     int32
+	CreatedAt  time.Time
 	PaymentKey string
 }
 
@@ -246,6 +247,7 @@ func (q *Queries) LockRefundForExecute(ctx context.Context, id string) (LockRefu
 		&i.Reason,
 		&i.RequestKey,
 		&i.Amount,
+		&i.CreatedAt,
 		&i.PaymentKey,
 	)
 	return i, err

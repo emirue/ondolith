@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -59,6 +60,20 @@ type Config struct {
 	// ThemeDir is where disk themes live, for the same reason.
 	ThemeDir string `json:"theme_dir"`
 
+	// BackupDir holds the automatic backups (FR-715). Empty means "backups/"
+	// beside the config file. 업로드 폴더 안이면 안 된다 — BackupsInsideUploads.
+	BackupDir string `json:"backup_dir"`
+
+	// ProxyIPHeader names the header a reverse proxy on THIS machine sets to the
+	// client's address (nginx: `proxy_set_header X-Real-IP $remote_addr;`). Empty
+	// means none: the client is RemoteAddr.
+	//
+	// It is read only when the connection comes from loopback — i.e. from that
+	// proxy. A client reaching the app directly cannot choose its rate-limit
+	// bucket by sending the header. Without it, behind the proxy every visitor
+	// is 127.0.0.1 and each per-IP limit becomes one site-wide limit (D72).
+	ProxyIPHeader string `json:"proxy_ip_header,omitempty"`
+
 	// Path is where this config was read from. It is not serialised — it is
 	// where the file IS, not something the file says — and it is what relative
 	// UploadDir/ThemeDir resolve against.
@@ -75,6 +90,19 @@ func (c *Config) Uploads() string {
 // Themes resolves the theme directory the same way.
 func (c *Config) Themes() string {
 	return resolveDir(c.Path, c.ThemeDir, "themes")
+}
+
+// Backups resolves the automatic-backup directory the same way.
+func (c *Config) Backups() string {
+	return resolveDir(c.Path, c.BackupDir, "backups")
+}
+
+// BackupsInsideUploads reports whether the backup directory is the upload
+// directory or under it. 업로드 폴더는 백업에 통째로 들어가므로 그 안의 백업 폴더는
+// 다음 백업이 이전 백업을 싣게 만든다 — 부팅이 거부한다.
+func (c *Config) BackupsInsideUploads() bool {
+	rel, err := filepath.Rel(c.Uploads(), c.Backups())
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func resolveDir(configPath, set, fallback string) string {

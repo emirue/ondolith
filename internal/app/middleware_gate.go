@@ -77,15 +77,50 @@ func withAdminRateLimit(l *auth.Limiter, lim auth.Limit) func(http.Handler) http
 
 // clientIP is the remote address, port stripped.
 //
-// X-Forwarded-For is NOT consulted. Anyone can send that header, so trusting it
-// lets a caller pick their own rate-limit bucket and the limit stops existing.
-// Behind a proxy the operator terminates TLS and forwards, and the proxy's own
-// limits apply; wiring a trusted-proxy list is a separate decision with its own
-// failure mode.
+// X-Forwarded-For is NOT consulted here. Anyone can send that header, so trusting
+// it lets a caller pick their own rate-limit bucket and the limit stops existing.
+// Behind a proxy on the same machine, withProxyClientIP has already replaced
+// RemoteAddr with the address that proxy vouched for — and only for connections
+// that came from it (config.ProxyIPHeader, D72).
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// withProxyClientIP puts the client's address in RemoteAddr when a reverse proxy
+// on this machine forwarded the request (config.ProxyIPHeader, D72).
+//
+// **루프백에서 온 연결에서만 헤더를 읽는다.** 그 연결은 같은 서버의 프록시뿐이고,
+// 프록시는 헤더를 덮어써 넘긴다(nginx `proxy_set_header X-Real-IP $remote_addr`).
+// 밖에서 곧장 들어온 요청이 같은 헤더를 보내면 무시한다 — 믿으면 요청자가 자기
+// 속도 제한 버킷을 고른다. 값이 IP 하나가 아니면(목록 등) 역시 무시한다.
+//
+// RemoteAddr 를 고치므로 clientIP·작업 로그·웹훅 로그가 모두 같은 값을 본다.
+func withProxyClientIP(header string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if header == "" {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ip := proxiedIP(r, header); ip != nil {
+				r = r.WithContext(r.Context()) // 얕은 복사 — 호출자의 요청을 바꾸지 않는다
+				r.RemoteAddr = net.JoinHostPort(ip.String(), "0")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func proxiedIP(r *http.Request, header string) net.IP {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return nil
+	}
+	if peer := net.ParseIP(host); peer == nil || !peer.IsLoopback() {
+		return nil
+	}
+	return net.ParseIP(strings.TrimSpace(r.Header.Get(header)))
 }

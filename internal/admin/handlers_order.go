@@ -327,13 +327,18 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
 }
 
-// pageOf reads the page number, clamped to 1.
+// adminMaxPage 는 관리자 목록의 쪽 번호 상한이다. 공개 목록(100쪽)과 달리 오래된
+// 주문까지 닿아야 해서 사실상 열어 두되, 가장 큰 쪽 크기(100)를 곱해도 OFFSET 이
+// int32 를 넘지 않게 한다 — 상한이 없던 판은 쪽 번호 하나로 음수 OFFSET 500 이 났다.
+const adminMaxPage = 1_000_000
+
+// pageOf reads the page number, clamped to 1..adminMaxPage.
 func pageOf(r *http.Request) int {
 	n, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil || n < 1 {
 		return 1
 	}
-	return n
+	return min(n, adminMaxPage)
 }
 
 // pager fills the previous/next links of a 1-based list (A-501, A-504, FR-706).
@@ -344,15 +349,15 @@ func pageOf(r *http.Request) int {
 func pager(data map[string]any, path string, q url.Values, page int, more bool) {
 	data["PageNo"] = page
 	if page > 1 {
-		data["PrevURL"] = listURL(path, q, page-1)
+		data["PrevURL"] = ListURL(path, q, page-1)
 	}
 	if more {
-		data["NextURL"] = listURL(path, q, page+1)
+		data["NextURL"] = ListURL(path, q, page+1)
 	}
 }
 
-// listURL is one list address: 빈 조건과 1쪽은 싣지 않는다.
-func listURL(path string, q url.Values, page int) string {
+// ListURL is one list address: 빈 조건과 1쪽은 싣지 않는다. 공개 목록(app)도 쓴다.
+func ListURL(path string, q url.Values, page int) string {
 	v := url.Values{}
 	for k, vals := range q {
 		if len(vals) > 0 && vals[0] != "" {
@@ -394,8 +399,15 @@ func (d *Deps) renderRefund(w http.ResponseWriter, r *http.Request, c Caller,
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// 요청 키는 화면을 그릴 때 발급하고 폼이 되돌려 준다 (D19 A-507). POST 마다
+	// 만들면 같은 폼의 재전송이 매번 새 키라 UNIQUE 가 아무것도 막지 못한다.
+	key, err := commerce.NewRequestKey()
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
 	d.Render(w, r, "admin/refund.html", code, map[string]any{
-		"Order": order, "Refunds": refunds,
+		"Order": order, "Refunds": refunds, "RequestKey": key,
 		"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
 		// D15 5.3-1: 최근 15분 내 확인이 있으면 비밀번호 필드를 그리지 않는다.
 		// 매 클릭마다 물으면 관리자가 비밀번호를 브라우저에 저장하게 된다.
@@ -421,6 +433,62 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 	if d.fail(w, r, err) {
 		return
 	}
+
+	// 접수된 건의 「실행」·「거부」 (D19 A-507). 대상은 구매자가 P-507 로 낸 요청,
+	// PG 가 거절해 '요청' 으로 돌아온 건, 결과를 모른 채 '승인' 에 멈춘 건이다 —
+	// 이것이 없으면 그 행들은 한도를 잡은 채 나갈 길이 없다. 동작이 없으면 새 접수다.
+	switch r.PostFormValue("action") {
+	case "reject":
+		target, ok := d.refundInOrder(w, r, order)
+		if !ok {
+			return
+		}
+		// 돈이 나가지 않으므로 재인증을 묻지 않는다 (A-511 의 거부와 같다). 사유는
+		// 받는다 — 구매자가 P-508 에서 읽고, 요청 때의 사유를 덮어쓴다.
+		reason := strings.TrimSpace(r.PostFormValue("reason"))
+		if reason == "" {
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "거부 사유를 적으세요.")
+			return
+		}
+		err := d.Commerce.RejectRefund(r.Context(), target.ID, reason)
+		if errors.Is(err, commerce.ErrNotFound) { // '요청' 이 아니다
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "거부할 수 있는 상태가 아닙니다.")
+			return
+		}
+		if err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		d.log(r, c, "order.refund", "order", order.OrderNo,
+			"환불 "+itoa(target.Amount)+"원 요청 거부 — 한도 해제, 환불 건 "+target.ID)
+		http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+		return
+	case "execute":
+		target, ok := d.refundInOrder(w, r, order)
+		if !ok {
+			return
+		}
+		if target.Status != "요청" && target.Status != "승인" {
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "실행할 수 있는 상태가 아닙니다.")
+			return
+		}
+		// **돈이 나간다** — 새 접수와 같은 재인증 (D15 5.3-1).
+		if !reauthOK(c, r) {
+			d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+			return
+		}
+		err := d.Commerce.RetryRefund(r.Context(), d.pgGateway(), target.ID, time.Now())
+		if errors.Is(err, commerce.ErrRefundRetryExpired) {
+			d.log(r, c, "order.refund", "order", order.OrderNo,
+				"환불 "+itoa(target.Amount)+"원 재실행 거부 — 멱등키 기간 경과, 환불 건 "+target.ID)
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity,
+				"결과를 모르는 채 14일이 지나 다시 보낼 수 없습니다. 결제사 관리자 화면에서 취소 여부를 확인하세요.")
+			return
+		}
+		d.finishRefund(w, r, c, order, target.ID, target.Amount, err)
+		return
+	}
+
 	if !reauthOK(c, r) {
 		d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
@@ -434,15 +502,21 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 			"환불할 품목과 수량을 고르세요.")
 		return
 	}
-	key, err := commerce.NewRequestKey()
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+	formKey := r.PostFormValue("request_key")
+	if !commerce.ValidRequestKey(formKey) {
+		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity,
+			"요청이 올바르지 않습니다. 화면을 새로 고친 뒤 다시 시도하세요.")
 		return
 	}
 
 	refundID, amount, err := d.Commerce.RequestRefund(r.Context(), order.OrderNo, lines,
-		"관리자", r.PostFormValue("reason"), key)
+		"관리자", r.PostFormValue("reason"), commerce.AdminRefundKey(order.ID, formKey))
 	switch {
+	case errors.Is(err, commerce.ErrRefundDuplicate):
+		// 같은 폼의 재전송이다. 첫 요청이 이미 접수했다 — 두 번째 환불을 만들지
+		// 않고 지금 상태를 보여 준다. 로그는 남기지 않는다 (D19 A-507 오류 표).
+		d.renderRefund(w, r, c, order, http.StatusOK, "이미 처리된 요청입니다.")
+		return
 	case errors.Is(err, commerce.ErrNoPayment):
 		d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "환불할 결제가 없습니다.")
 		return
@@ -466,13 +540,47 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		"환불 "+itoa(amount)+"원 접수 ("+itoa(len(lines))+"개 품목)")
 
 	// 순서는 DB 한도 선점 → PG 호출 → 확정이다 (D13, D19 A-507). 선점은 위에서
-	// 끝났고 여기서 돈이 나간다. 실패는 502 — 선점은 유지되고, 작업 로그에
-	// 그 사실을 남긴다 (「선점 해제 여부까지 기록」).
-	var gw commerce.Gateway
-	if d.Gateway != nil {
-		gw = d.Gateway()
+	// 끝났고 여기서 돈이 나간다.
+	d.finishRefund(w, r, c, order, refundID, amount,
+		d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID))
+}
+
+// refundInOrder 는 폼의 refund_id 가 경로의 주문의 건일 때만 돌려준다. 번호만
+// 믿으면 아무 주문 화면에서 남의 환불을 실행할 수 있다. 아니면 응답을 쓰고 false.
+func (d *Deps) refundInOrder(w http.ResponseWriter, r *http.Request,
+	order *commerce.OrderDetail) (*commerce.Refund, bool) {
+
+	refunds, err := d.Commerce.Refunds(r.Context(), order.ID)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return nil, false
 	}
-	if err := d.Commerce.ExecuteRefund(r.Context(), gw, refundID); err != nil {
+	id := r.PostFormValue("refund_id")
+	for i := range refunds {
+		if refunds[i].ID == id {
+			return &refunds[i], true
+		}
+	}
+	http.NotFound(w, r)
+	return nil, false
+}
+
+// pgGateway 는 지금 설정된 PG 다. 클로저가 nil 인 경우(배선 전)와 반환값이 nil 인
+// 경우(PG 「사용 안 함」)를 한 경로로 모은다 — 스토어가 nil 을 받아 답한다.
+func (d *Deps) pgGateway() commerce.Gateway {
+	if d.Gateway == nil {
+		return nil
+	}
+	return d.Gateway()
+}
+
+// finishRefund 는 PG 로 보낸 결과를 기록하고 화면을 정한다. 새 접수와 「실행」이
+// 같은 길을 지난다. 실패는 502 — 선점은 유지되고, 작업 로그에 그 사실을
+// 남긴다 (D19 A-507 「선점 해제 여부까지 기록」).
+func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
+	order *commerce.OrderDetail, refundID string, amount int, err error) {
+
+	if err != nil {
 		d.Logger.Error("환불 실행", "order", order.OrderNo, "refund", refundID, "err", err)
 		d.log(r, c, "order.refund", "order", order.OrderNo,
 			"환불 "+itoa(amount)+"원 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)

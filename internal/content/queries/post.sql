@@ -3,8 +3,12 @@ SELECT count(*) FROM posts p
 WHERE p.board_id = $1 AND p.status = 'published';
 
 -- name: CountPostsSearch :one
+-- **읽을 수 없는 비밀글은 검색에서 빠진다.** 목록은 비밀글 제목을 누구에게나
+-- 보이므로, 검색이 본문을 보고 비밀글을 남기면 「이 낱말로 그 글이 걸렸다」가
+-- 곧 본문 한 낱말이다. ListPostsSearch 와 같은 술어여야 합계가 쪽과 맞는다.
 SELECT count(*) FROM posts p
-WHERE p.board_id = $1 AND p.status = 'published'
+WHERE p.board_id = sqlc.arg('board_id') AND p.status = 'published'
+  AND (NOT p.is_secret OR sqlc.arg('can_secret')::bool OR p.author_id = sqlc.narg('viewer_id'))
   AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'));
 
 -- name: CountSearchPosts :one
@@ -28,13 +32,17 @@ CROSS JOIN LATERAL (
 ORDER BY p.board_id, p.is_pinned DESC, p.created_at DESC, p.id DESC;
 
 -- name: CreatePost :one
-INSERT INTO posts (board_id, author_id, title, body, custom_fields, is_secret)
-VALUES ($1, $2, $3, $4, $5, $6) RETURNING id;
+-- 카드 사진은 실제로 있는 사진일 때만 붙는다 — 본문 HTML 은 브라우저가 보낸 것이라 없는
+-- id 를 실을 수 있고, 그대로 넣으면 외래 키 위반이 500 이 된다.
+INSERT INTO posts (board_id, author_id, title, body, body_html, custom_fields, is_secret, cover_media_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT m.id FROM media m WHERE m.id = sqlc.narg('cover_media_id')))
+RETURNING id;
 
 -- name: UpdatePost :execrows
-UPDATE posts SET title = $2, body = $3, custom_fields = $4, is_secret = $5,
+UPDATE posts SET title = $2, body = $3, body_html = $4, custom_fields = $5, is_secret = $6,
+       cover_media_id = (SELECT m.id FROM media m WHERE m.id = sqlc.narg('cover_media_id')),
        updated_at = now()
-WHERE id = $1;
+WHERE posts.id = $1;
 
 -- name: SetPostFlags :execrows
 UPDATE posts SET is_pinned = $2, status = $3, updated_at = now() WHERE id = $1;
@@ -51,8 +59,12 @@ SELECT c.id, c.post_id, coalesce(c.parent_id::text, '')::text AS parent_id,
        c.body, coalesce(c.deleted_at, 'epoch'::timestamptz)::timestamptz AS deleted_at, c.created_at
 FROM comments c
 LEFT JOIN users u ON u.id = c.author_id
+-- 스레드는 그 첫 댓글의 시각 순이다. 묶는 열(coalesce(parent_id, id))만으로 정렬하면
+-- 무작위 uuid 순이 된다. 스레드 안에서는 첫 댓글, 그다음 답이 시각 순 (대댓글은 1단계).
+LEFT JOIN comments root ON root.id = c.parent_id
 WHERE c.post_id = $1
-ORDER BY coalesce(c.parent_id, c.id), c.created_at, c.id;
+ORDER BY coalesce(root.created_at, c.created_at), coalesce(c.parent_id, c.id),
+         c.parent_id IS NOT NULL, c.created_at, c.id;
 
 -- name: ModerateComments :many
 SELECT c.id, c.post_id, coalesce(c.parent_id::text, '')::text AS parent_id,
@@ -92,12 +104,12 @@ WHERE id = $1 AND deleted_at IS NULL;
 -- 조인이 순서를 지켜 준다는 보장은 없다 (post_shape_test.go 가 둘이 같은지 본다).
 -- name: ListPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = $1
@@ -126,16 +138,18 @@ ORDER BY p.is_pinned DESC,
 
 -- name: ListPostsSearch :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
-    WHERE p.board_id = $1
+    WHERE p.board_id = sqlc.arg('board_id')
       AND p.status = 'published'
+      -- CountPostsSearch 의 주석 참고. 검색에서만 거른다 — 검색어 없는 목록은 제목을 보인다.
+      AND (NOT p.is_secret OR sqlc.arg('can_secret')::bool OR p.author_id = sqlc.narg('viewer_id'))
       AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
     ORDER BY p.is_pinned DESC,
              CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
@@ -161,12 +175,12 @@ ORDER BY p.is_pinned DESC,
 
 -- name: SearchPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[])
@@ -197,7 +211,7 @@ ORDER BY p.is_pinned DESC,
 
 -- name: PostByID :one
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, p.body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -207,7 +221,7 @@ WHERE p.id = $1 AND (sqlc.arg('can_secret')::bool OR NOT p.is_secret OR p.author
 
 -- name: ModeratePosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -219,7 +233,7 @@ LIMIT $2;
 
 -- name: RecentPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment

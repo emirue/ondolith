@@ -39,7 +39,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "P-102", Method: "POST", Pattern: "/logout", Class: SC2, Handler: lg.logout})
 	r.Add(Route{Screen: "P-103", Method: "GET", Pattern: "/signup", Class: SC2, Handler: acc.signupForm})
 	r.Add(Route{Screen: "P-103", Method: "POST", Pattern: "/signup", Class: SC2, Handler: acc.signup})
-	r.Add(Route{Screen: "P-112", Method: "GET", Pattern: "/verify/{token}", Class: SC2, Handler: acc.verify})
+	r.Add(Route{Screen: "P-112", Method: "GET", Pattern: "/verify/{token}", Class: SC2,
+		UnsafeGETReason: "메일의 링크는 GET 이다. 무엇을 인증할지는 한 번 쓰면 버리는 토큰이 정하고, " +
+			"인증되는 것은 그 메일을 받은 주소뿐이다",
+		Handler: acc.verify})
 	r.Add(Route{Screen: "P-104", Method: "GET", Pattern: "/password/reset", Class: SC2,
 		Handler: acc.resetRequestForm})
 	r.Add(Route{Screen: "P-104", Method: "POST", Pattern: "/password/reset", Class: SC2,
@@ -117,6 +120,13 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	// 순으로 거슬러 올라가 post.read 를 **다시** 검사한다 (D15 8절 1번).
 	r.Add(Route{Screen: "P-211", Method: "GET", Pattern: "/attachments/{id}", Class: SC7,
 		Handler: bd.attachmentDownload})
+	// 에디터로 올린 본문 사진 (FR-514). 올리기는 글쓰기와 같은 권한, 받기는 누구나.
+	r.Add(Route{Screen: "P-213", Method: "GET", Pattern: "/media/{id}", Class: SC7,
+		Handler: bd.mediaServe(false)})
+	r.Add(Route{Screen: "P-213", Method: "GET", Pattern: "/media/{id}/thumb", Class: SC7,
+		Handler: bd.mediaServe(true)})
+	r.Add(Route{Screen: "P-214", Method: "POST", Pattern: "/board/{slug}/media", Class: SC7,
+		Handler: bd.mediaUpload})
 
 	r.Add(Route{Screen: "P-212", Method: "GET", Pattern: "/search", Class: SC1,
 		Handler: bd.search})
@@ -198,6 +208,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "page.create", Handler: ad.PageForm})
 	r.Add(Route{Screen: "A-302", Method: "POST", Pattern: "/admin/pages/new", Class: SC5,
 		Permission: "page.create", Handler: ad.PageSave})
+	// 페이지 편집기의 사진 올리기 (FR-514). 만들기·고치기 어느 쪽이든 — 핸들러가 둘 중
+	// 하나를 본다. 라우트는 고치기를 적는다.
+	r.Add(Route{Screen: "A-310", Method: "POST", Pattern: "/admin/pages/media", Class: SC7,
+		Permission: "page.update", Handler: ad.PageMediaUpload})
 	r.Add(Route{Screen: "A-302", Method: "GET", Pattern: "/admin/pages/{id}", Class: SC4,
 		Permission: "page.update", Handler: ad.PageForm})
 	r.Add(Route{Screen: "A-302", Method: "POST", Pattern: "/admin/pages/{id}", Class: SC5,
@@ -214,8 +228,6 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "A-402", Method: "GET", Pattern: "/admin/users/{id}", Class: SC4,
 		Permission: "user.update", Handler: ad.UserDetail})
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/new", Class: SC5,
-		Permission: "user.create", Handler: ad.UserCreate})
-	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}", Class: SC5,
 		Permission: "user.create", Handler: ad.UserCreate})
 	// The three destructive account operations enforce re-authentication in the
 	// handlers (D15 5.3-1), not here. A wrapper was written first and removed:
@@ -284,6 +296,12 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 
 	r.Add(Route{Screen: "A-602", Method: "GET", Pattern: "/admin/system", Class: SC4,
 		Permission: "settings.view", Handler: ad.System})
+	// A-604 백업 (FR-713). 선언은 settings.update 이고 **최고 관리자·재확인은 핸들러가 건다**
+	// (A-205 R7 과 같은 방식) — 덤프에는 모든 회원의 비밀번호 해시가 있다.
+	r.Add(Route{Screen: "A-604", Method: "GET", Pattern: "/admin/backup", Class: SC4,
+		Permission: "settings.update", Handler: ad.BackupForm})
+	r.Add(Route{Screen: "A-604", Method: "POST", Pattern: "/admin/backup", Class: SC5,
+		Permission: "settings.update", Handler: ad.BackupDownload})
 
 	// P-202 is last on purpose: `/{slug}` matches anything one segment long, and
 	// ServeMux prefers the more specific pattern regardless of registration
@@ -475,6 +493,10 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		// 조회와의 대조이고, 수신 이력은 "웹훅이 오긴 왔는가" 다 (D13 A-603).
 		r.Add(Route{Screen: "A-508", Method: "GET", Pattern: "/admin/reconcile", Class: SC4,
 			Permission: "payment.view", Handler: ad.Reconcile})
+		// 「PG 결과로 반영」. 화면 권한은 payment.view 이고 핸들러가 order.update 를
+		// 함께 본다 (D13 — 조회 권한만으로 주문을 바꾸면 대사가 우회 경로가 된다).
+		r.Add(Route{Screen: "A-508", Method: "POST", Pattern: "/admin/reconcile", Class: SC6,
+			Permission: "payment.view", Handler: ad.ReconcileResolve})
 		r.Add(Route{Screen: "A-603", Method: "GET", Pattern: "/admin/webhooks", Class: SC4,
 			Permission: "payment.view", Handler: ad.WebhookLog})
 

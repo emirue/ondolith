@@ -78,7 +78,7 @@ SELECT approved_amount, refunded_amount FROM payments
 WHERE order_id = $1 AND kind = '주문결제' AND status = '승인';
 
 -- name: LockRefundForExecute :one
-SELECT r.status, r.reason, r.request_key, r.amount, p.payment_key
+SELECT r.status, r.reason, r.request_key, r.amount, r.created_at, p.payment_key
 FROM refunds r JOIN payments p ON p.id = r.payment_id
 WHERE r.id = $1 FOR UPDATE;
 

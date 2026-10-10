@@ -26,6 +26,11 @@ type ListQuery struct {
 	Search string
 	// After is the keyset cursor. Empty means the first page.
 	After Cursor
+	// ViewerID·CanSecret 은 **검색에서** 읽을 수 없는 비밀글을 빼는 데 쓴다.
+	// URL 에서 오지 않는다 — 핸들러가 행위자로 채운다. 비워 두면 익명·권한 없음,
+	// 즉 남의 비밀글이 검색에 걸리지 않는 쪽이다(닫힌 기본값).
+	ViewerID  string
+	CanSecret bool
 }
 
 // Cursor is the keyset position D30 measured: (is_pinned, created_at, id), all

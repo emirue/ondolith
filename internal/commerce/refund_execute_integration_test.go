@@ -207,3 +207,51 @@ func TestExpirePendingOrdersRestoresStock(t *testing.T) {
 		t.Error("만료된 주문이 승인됐다")
 	}
 }
+
+// **결과 불명('승인') 환불은 같은 멱등키로 다시 부를 수 있다 — 키가 살아 있는
+// 동안만** (D50, 토스: 같은 키의 재요청은 15일 동안 첫 응답을 돌려준다).
+//
+// 앞 판은 '승인' 을 「사람이 조회로 확인한 뒤 손으로 닫는다」고 적었지만 닫는
+// 경로가 없었다. 키가 살아 있으면 다시 부르는 것이 곧 조회다 — 첫 호출이
+// 처리됐으면 그 결과가, 닿지 않았으면 이번 호출이 처리된다. 키가 죽은 뒤에는
+// 두 번째 환불이 될 수 있어 부르지 않는다.
+func TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _, _ := paidOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+	unknownRefund := func(key string) string {
+		id, _, err := s.RequestRefund(ctx, orderNo,
+			[]RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}, "관리자", "불량", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gw := okGateway()
+		gw.cancelErr = ErrPaymentUnknown
+		if err := s.ExecuteRefund(ctx, gw, id); !errors.Is(err, ErrPaymentUnknown) {
+			t.Fatalf("결과 불명 = %v", err)
+		}
+		return id
+	}
+
+	id := unknownRefund("rk-retry")
+	gw := okGateway()
+	if err := s.RetryRefund(ctx, gw, id, time.Now()); err != nil {
+		t.Fatalf("키가 살아 있는 결과 불명 재실행 = %v", err)
+	}
+	if got := refundStatus(t, s, id); got != "완료" {
+		t.Errorf("재실행 뒤 상태 %s, want 완료", got)
+	}
+	if len(gw.cancelReqs) != 1 || gw.cancelReqs[0].IdempotencyKey != "rk-retry" {
+		t.Errorf("재실행 취소 요청 = %+v, want 같은 키(rk-retry)로 한 번", gw.cancelReqs)
+	}
+
+	old := unknownRefund("rk-old")
+	late := okGateway()
+	if err := s.RetryRefund(ctx, late, old, time.Now().Add(RefundRetryWindow+time.Hour)); !errors.Is(err, ErrRefundRetryExpired) {
+		t.Errorf("키가 죽은 뒤 재실행 = %v, want ErrRefundRetryExpired", err)
+	}
+	if len(late.cancelReqs) != 0 || refundStatus(t, s, old) != "승인" {
+		t.Errorf("키가 죽은 뒤 취소 %d번·상태 %s, want 0번·승인", len(late.cancelReqs), refundStatus(t, s, old))
+	}
+}

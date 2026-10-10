@@ -3,7 +3,7 @@
   {{/* **금액 입력 칸이 없다** (D19 A-508 받지 않는 필드). 근거는 PG 조회
        결과이고, 폼에서 받으면 대사가 아니라 수기 조작이 된다. 그리고 이 화면은
        **자동으로 고치지 않는다** — 조회 응답 하나가 우리 장부를 바꾸면 안 된다.
-       옮기는 것은 A-506 이다. */}}
+       사람이 그 줄의 「PG 결과로 반영」을 누른다 (D19 A-508). */}}
   {{/* 기간은 날짜로 고른다 (D19 0.6). 3개월 버튼이 없다 — 상한이 31일이다. */}}
   <form method="get" class="adm-filterbar">
     {{template "period-fields" .}}
@@ -16,7 +16,7 @@
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr>
-        <th>주문</th><th>PG</th><th>유형</th><th>우리 기록</th><th>PG 응답</th><th>차이</th>
+        <th>주문</th><th>PG</th><th>유형</th><th>우리 기록</th><th>PG 응답</th><th>차이</th><th>처리</th>
       </tr></thead>
       <tbody>
       {{range .Rows}}
@@ -26,9 +26,21 @@
           <td>{{.OurStatus}} · {{money .OurAmount}}</td>
           <td>{{if .TheirStatus}}{{.TheirStatus}} · {{money .TheirAmount}}{{else}}—{{end}}</td>
           <td>{{with .Diff}}<strong>{{.}}</strong>{{end}}</td>
+          <td>
+          {{/* 승인 결과를 모른 채 남은 주문결제를 PG 가 승인·실패로 답했을 때만.
+               폼은 결제 id 만 보낸다 — 근거는 서버가 다시 묻는 조회 결과다. */}}
+          {{if and $.CanResolve (eq .OurStatus "대기") (eq .Kind "주문결제") (or (eq .TheirStatus "승인") (eq .TheirStatus "실패"))}}
+          <form method="post" class="adm-form">
+            <input type="hidden" name="payment_id" value="{{.PaymentID}}">
+            <input type="hidden" name="from" value="{{$.From}}">
+            <input type="hidden" name="to" value="{{$.To}}">
+            <button type="submit">PG 결과로 반영</button>
+          </form>
+          {{end}}
+          </td>
         </tr>
       {{else}}
-        <tr><td colspan="6" class="adm-empty">해당 기간의 결제가 없습니다.</td></tr>
+        <tr><td colspan="7" class="adm-empty">해당 기간의 결제가 없습니다.</td></tr>
       {{end}}
       </tbody>
     </table>
@@ -36,6 +48,7 @@
 </div>
 <p class="adm-hint">
     「PG 는 승인, 우리는 대기」가 가장 위험한 줄입니다 — 돈은 나갔는데 주문에
-    반영되지 않은 상태입니다. 상태를 옮기는 것은 주문 상세(A-506)에서 합니다.
+    반영되지 않은 상태입니다. 그 줄의 「PG 결과로 반영」이 결제사에 다시 물어 주문을
+    결제완료로 옮깁니다(주문 변경 권한 필요).
   </p>
 {{end}}

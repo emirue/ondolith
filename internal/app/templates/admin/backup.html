@@ -1,0 +1,74 @@
+{{define "content"}}
+<div class="adm-card">
+  <h2>지금 내려받기</h2>
+  {{/* A-604 (FR-713). 받는 것은 zip 하나 — DB 덤프(pg_dump custom 형식)와 업로드 폴더. */}}
+  <p class="adm-hint">DB 덤프(<code>ondolith.dump</code>)와 업로드 파일(<code>uploads/</code>)을 zip 하나로 내려받습니다.
+    회원 정보와 비밀번호 해시가 들어 있으니 안전한 곳에 보관하세요. 로그인 세션은 들어 있지 않습니다.</p>
+  <p class="adm-hint"><strong>설정 파일(ondolith.json)과 사용자 테마는 들어 있지 않습니다.</strong> 결제·메일 키는 설정 파일의
+    <code>secret_key</code> 로 봉인돼 있어, 설정 파일 없이 복원하면 관리자 화면에서 키를 다시 넣어야 합니다.</p>
+  <p class="adm-hint">복원: 빈 DB 를 새로 만들고 <code>pg_restore --no-owner --exit-on-error -d &lt;DB&gt; ondolith.dump</code>,
+    <code>uploads/</code> 는 업로드 폴더에 그대로 풉니다.</p>
+  <form method="post" action="/admin/backup">
+    {{/* 최고 관리자만, 비밀번호를 다시 넣고 받는다. 받은 사실은 작업 로그에 남는다. */}}
+    {{template "reauth-field" .}}
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn adm-btn--primary">백업 내려받기</button>
+    </div>
+  </form>
+</div>
+
+<div class="adm-card">
+  <h2>자동 백업</h2>
+  {{/* FR-715. 서버가 매일 정한 시각에 백업 폴더(backup_dir)에 같은 zip 을 만들고 오래된 것을 지운다. */}}
+  <form method="post" action="/admin/backup">
+    <input type="hidden" name="action" value="settings">
+    <label class="adm-field adm-field--check">
+      <input type="checkbox" name="backup.auto" value="1" {{if index .Settings "backup.auto"}}checked{{end}}>
+      <span>매일 자동으로 백업</span>
+    </label>
+    <div class="adm-field-row">
+      <label class="adm-field">
+        <span>시각 (0~23시, 서버 시계 {{.Zone}})</span>
+        <input type="number" name="backup.hour" min="0" max="23" value="{{index .Settings "backup.hour"}}">
+      </label>
+      <label class="adm-field">
+        <span>보관 개수 (1~30)</span>
+        <input type="number" name="backup.keep" min="1" max="30" value="{{index .Settings "backup.keep"}}">
+      </label>
+    </div>
+    <p class="adm-hint">백업 하나가 DB 와 업로드 폴더 전체라 보관 개수만큼 디스크를 씁니다. 백업은 이 서버의 디스크에 있으므로,
+      서버가 망가지면 함께 사라집니다 — 서버 스냅샷(Lightsail 자동 스냅샷)도 켜 두세요.</p>
+    {{template "reauth-field" .}}
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+
+  {{if .Files}}
+  <form method="post" action="/admin/backup">
+    <input type="hidden" name="action" value="file">
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead><tr><th>선택</th><th>파일</th><th>크기</th><th>만든 시각</th></tr></thead>
+        <tbody>
+        {{range $i, $f := .Files}}
+          <tr>
+            <td><input type="radio" name="name" value="{{$f.Name}}" aria-label="{{$f.Name}} 선택"{{if eq $i 0}} checked{{end}}></td>
+            <td>{{$f.Name}}</td>
+            <td class="muted">{{$f.MB}}</td>
+            <td class="muted">{{$f.Time.Format "2006-01-02 15:04"}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{template "reauth-field" .}}
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn">선택한 백업 내려받기</button>
+    </div>
+  </form>
+  {{else}}
+  <p class="adm-hint">저장된 자동 백업이 없습니다.</p>
+  {{end}}
+</div>
+{{end}}

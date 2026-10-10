@@ -19,35 +19,49 @@ type boardDeps struct {
 	attachments *content.Attachments
 	authStore   *auth.Store
 	log         *slog.Logger
+	// siteURL is config.SiteURL — 운영자가 정한 출처. 사이트맵·robots 가 쓴다.
+	siteURL string
+	// media 는 에디터로 올린 본문 사진이다 (P-213·P-214, FR-514).
+	media *content.MediaStore
+	spam  spamGuard
 }
 
-// countView bumps the counter once per session per post.
+// countView bumps the counter once per browser session per post.
 //
 // SC-1 3항 allows a write on a GET here because it decides nothing — but a
-// refresh must not inflate it, so the session remembers. The list is capped:
-// an unbounded set in the session grows with every post a crawler opens, and
-// the session row is written back on every request.
-const viewedKey = "viewed_posts"
+// refresh must not inflate it, so the browser remembers what it has seen.
+//
+// **세션이 아니라 쿠키 하나에 적는다.** 앞 판은 세션에 적어서, 쿠키 없는
+// 크롤러가 글 하나를 열 때마다 sessions 에 행이 하나씩 쌓였고 로그인한 사람은
+// 글을 열 때마다 세션 행을 다시 썼다. 이 값은 조회수 중복을 거르는 데만 쓰이고
+// 아무것도 허락하지 않으므로, 고쳐 보내도 자기 조회수가 한 번 더 셀 뿐이다.
+// 브라우저를 닫으면 사라지는 쿠키라 「세션당 한 번」은 그대로다.
+const viewedCookie = "ondolith_viewed"
 
-const maxViewedRemembered = 200
+// maxViewedRemembered 는 쿠키에 남기는 글 수다. 50개 × 37자 ≈ 1.9KB 로 쿠키 한
+// 개의 상한(4KB) 안이다. 넘치면 오래된 것부터 잊는다.
+const maxViewedRemembered = 50
 
-func (d *boardDeps) countView(r *http.Request, postID string) {
-	ctx := r.Context()
-	seen, _ := d.sm.Get(ctx, viewedKey).(string)
-	for _, id := range strings.Split(seen, ",") {
+func (d *boardDeps) countView(w http.ResponseWriter, r *http.Request, postID string) {
+	var seen string
+	if c, err := r.Cookie(viewedCookie); err == nil {
+		seen = c.Value
+	}
+	for _, id := range strings.Split(seen, ".") {
 		if id == postID {
 			return
 		}
 	}
-	if err := d.content.BumpViewCount(ctx, postID); err != nil {
+	if err := d.content.BumpViewCount(r.Context(), postID); err != nil {
 		d.log.Warn("조회수 증가", "post", postID, "err", err)
 		return
 	}
-	ids := strings.Split(strings.TrimPrefix(seen+","+postID, ","), ",")
+	ids := strings.Split(strings.TrimPrefix(seen+"."+postID, "."), ".")
 	if len(ids) > maxViewedRemembered {
 		ids = ids[len(ids)-maxViewedRemembered:]
 	}
-	d.sm.Put(ctx, viewedKey, strings.Join(ids, ","))
+	http.SetCookie(w, &http.Cookie{Name: viewedCookie, Value: strings.Join(ids, "."),
+		Path: "/board/", HttpOnly: true, Secure: d.sm.Cookie.Secure, SameSite: http.SameSiteLaxMode})
 }
 
 // board loads the board named in the path and checks the caller may read it.
@@ -81,6 +95,8 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	q := content.ParseListQuery(r.URL.Query(), b.PerPage)
+	// 검색이 비밀글 본문의 신탁이 되지 않도록 (post.sql CountPostsSearch).
+	q.ViewerID, q.CanSecret = actorID(a), a.CanOn("post.read_secret", auth.BoardID(b.ID))
 
 	// 비밀글도 목록에는 나온다 (FR-512). 본문은 P-204 가 지킨다.
 	// 총수는 화면 요소다 — 내장 테마의 페이저가 「전체 N건」을 그린다
@@ -158,14 +174,15 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	// SC-1 3항 allows this write on a GET because it carries no permission
 	// decision. The session remembers what it has counted so a refresh does not
 	// inflate the number.
-	d.countView(r, p.ID)
+	d.countView(w, r, p.ID)
 
 	v := d.view(r, p.Title, firstLine(p.Body))
 	v.Data = map[string]any{
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
 		"Attachments": files,
 		"CanComment":  b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID)),
-		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments"},
+		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
+			"Turnstile": v.Site.Turnstile},
 		"CanEdit":     p.AuthorID != "" && p.AuthorID == actorID(a),
 		"CanModerate": a.CanOn("post.moderate", auth.BoardID(b.ID)),
 	}
@@ -215,7 +232,7 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 
 	custom, err := content.ValidateCustomFields(fields, customValues(r), nil)
 	if err != nil {
-		d.renderFormError(w, r, b, fields, form, err)
+		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, err)
 		return
 	}
 	// board_id and author_id are NOT read from the form (SC-2 5항). The board
@@ -224,6 +241,11 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 	form.BoardID = b.ID
 	form.AuthorID = a.User.ID
 	form.CustomFields = custom
+	// 다른 검증을 다 지난 뒤에 본다 — Turnstile 은 바깥 호출이고 토큰은 한 번만 쓴다.
+	if code, msg := d.spam.check(r); code != 0 {
+		d.renderFormError(w, r, b, fields, form, code, errors.New(msg))
+		return
+	}
 
 	id, err := d.content.CreatePost(ctx, form)
 	if err != nil {
@@ -323,7 +345,7 @@ func (d *boardDeps) postUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	custom, err := content.ValidateCustomFields(fields, customValues(r), p.CustomFields)
 	if err != nil {
-		d.renderFormError(w, r, b, fields, form, err)
+		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, err)
 		return
 	}
 	form.CustomFields = custom
@@ -387,29 +409,31 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 		d.serverError(w, r, err)
 		return content.Post{}, nil, false
 	}
+	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
 	p := content.Post{
-		Title: strings.TrimSpace(r.PostFormValue("title")),
-		Body:  r.PostFormValue("body"),
+		Title:    strings.TrimSpace(r.PostFormValue("title")),
+		Body:     body,
+		BodyHTML: bodyHTML,
 		// A board with secret posts turned off cannot have one, whatever the
 		// form says — the checkbox is absent from the page, and a posted value
 		// is somebody trying it anyway.
 		IsSecret: b.AllowSecret && r.PostFormValue("is_secret") != "",
 	}
 	if p.Title == "" {
-		d.renderFormError(w, r, b, fields, p, errors.New("제목을 입력하세요."))
+		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, errors.New("제목을 입력하세요."))
 		return content.Post{}, nil, false
 	}
 	return p, fields, true
 }
 
 func (d *boardDeps) renderFormError(w http.ResponseWriter, r *http.Request,
-	b *content.Board, fields []content.FieldSchema, p content.Post, err error,
+	b *content.Board, fields []content.FieldSchema, p content.Post, code int, err error,
 ) {
 	v := d.view(r, b.Name+" 글쓰기", "")
 	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": &p,
 		"Inputs":    content.FieldInputs(fields, p.CustomFields),
 		"CanSecret": b.AllowSecret, "Error": err.Error()}
-	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), http.StatusUnprocessableEntity, v)
+	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), code, v)
 }
 
 // renderUploadError draws the edit form of a post that saved but whose
@@ -443,7 +467,8 @@ func customValues(r *http.Request) map[string][]string {
 	out := map[string][]string{}
 	for k, v := range r.PostForm {
 		switch k {
-		case "title", "body", "is_secret", "attachments":
+		case "title", "body", "body_html", "is_secret", "attachments",
+			honeypotField, auth.TurnstileField:
 			continue
 		}
 		out[k] = v
@@ -495,6 +520,8 @@ func pagerFor(base string, q content.ListQuery, total int64) map[string]any {
 		"PrevPage": prev,
 		"NextPage": q.Page + 2,
 		"HasPrev":  q.Page > 0,
-		"HasNext":  int64((q.Page+1)*q.PerPage) < total,
+		// 상한 쪽(content.MaxPage)에서는 다음이 없다 — 그 뒤는 상한으로 접혀
+		// 같은 쪽이 끝없이 이어진다.
+		"HasNext": int64((q.Page+1)*q.PerPage) < total && q.Page+1 < content.MaxPage,
 	}
 }

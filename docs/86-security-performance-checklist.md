@@ -40,7 +40,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 1.9 | OAuth `state` 32바이트·세션 보관·**상수 시간 비교**·1회용, 콜백 프로바이더 허용목록 | `handler_social.go` | 코드 읽기 | ✓ `subtle.ConstantTimeCompare` |
 | 1.10 | 소셜 계정은 **기존 계정에만 연결**(이메일 일치로 자동 연결 없음) | `internal/auth/social.go` | 코드 읽기 | ✓ `(provider, uid)` 로만 찾는다 |
 | 1.11 | 속도 제한: 로그인 IP 10/분·계정 5/분, 재설정 3/시간, 가입 5/시간, 재인증 5/분 | `internal/auth/ratelimit.go` `DefaultLimits` | 단위 테스트가 D15 4.3-2 와 대조 | ✓ |
-| 1.12 | **프록시 뒤에서 IP 별 제한이 사이트 전체 제한이 된다** | `middleware_gate.go` `clientIP` — `RemoteAddr` 만 | [D72](72-deploy-lightsail.md) 「프록시 뒤의 속도 제한」 | — 코드로는 안 고친다(`X-Forwarded-For` 신뢰는 CloudFront 구성에서 오히려 틀린다). 프록시의 `limit_req` 가 맡는다 |
+| 1.12 | **프록시 뒤에서 IP 별 제한이 사이트 전체 제한이 된다** | `middleware_gate.go` `withProxyClientIP`·`clientIP`, 설정 `proxy_ip_header` | `TestLoginRateLimitIsPerVisitorBehindTheProxy`·`TestProxyClientIPIsTrustedOnlyFromLoopback` | ✓ 2026-10-07 고침. 앞의 「— 프록시의 limit_req 가 맡는다」는 틀렸다 — 앱 안의 전역 버킷이 남아 익명 한 명이 모든 로그인을 막을 수 있었다. 이제 루프백에서 온 연결에 한해 설정한 헤더(`X-Real-IP`)를 클라이언트로 본다. 로그인 성공이 IP 버킷을 지우던 것도 함께 고침 |
 | 1.13 | 재인증 창 15분, 위험 작업(테마 업로드·환불·계정 조작·결제 설정)에 요구 | `internal/app/reauth.go`·각 핸들러 | 코드 읽기 | ✓ |
 | 1.14 | FR-214: 켜져 있으면 미인증 계정은 글·댓글·주문 불가 | `handler_board.go`·`handler_comment.go`·`handler_checkout.go` | `TestUnverifiedAccountCannotWriteWhenRequired` | ✓ 2026-09-13 에 고침 |
 | 1.15 | OAuth 외부 요청 시한 | `auth/social_provider.go` | `TestSocialProvidersBoundOutboundRequests` | ✓ 2026-09-30: 세 프로바이더의 코드 교환·프로필 조회에 요청당 15초 |
@@ -53,6 +53,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 2.2 | 게시판 범위 권한이 **범위째 저장**된다 | `internal/auth/store.go` `GrantPermission` | `TestGrantPermissionKeepsBoardScope` | ✓ 2026-09-13 에 고침(전역 저장이었다) |
 | 2.3 | 권한 상승 사다리 R1~R6, superuser 유일·편집 불가, 마지막 superuser 보호 | `internal/auth/escalation.go`·`roles_one_superuser_idx`·`withLastSuperuserGuard` | 단위·통합 테스트 | ✓ |
 | 2.4 | A-404·A-405 폼이 **실제 라우트에 닿는다** | `tree.go` `/admin/roles/permissions`·`/admin/users/roles` | `TestRoleFormsReachTheirHandlers` | ✓ 2026-09-13 에 고침(`guardID` 에 막혀 아무도 관리자가 될 수 없었다) |
+| 2.4a | A-404·A-405 가 재인증(D15 5.3-1)을 거치고, 성공·R 규칙 위반을 작업 로그에 남긴다 | `admin/handlers_rbac.go` | `TestRoleChangesAreReauthedAndLogged` | ✓ 2026-10-07 에 고침(둘 다 없었다) |
 | 2.5 | 대량 할당: 폼은 고정 구조체, 예약 키(`is_admin`·`is_active`·`email`…) 거부 | `content/customfield.go`·`handler_account.go` | 코드 읽기 | ✓ |
 | 2.6 | 소유권은 **SQL 술어**로: 주문·환불·반품·댓글·글·첨부 | `commerce/order.go`·`returns.go`·`handler_board.go`·`handler_comment.go` | 통합 테스트(`TestOrderDetailNeedsAGrantOrOwnership` 등) | ✓ |
 | 2.7 | `{id}` 경로는 uuid 만(`guardID`), 형식 불량은 404 | `internal/app/routes.go` | 통합 테스트 | ✓ |
@@ -71,7 +72,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 3.6 | 본문 렌더링 파이프라인(마크다운·리치텍스트) | 없음 — 글·페이지 본문은 `nl2br` 뿐 | 코드 읽기 | ✓ 살균기가 필요 없다 |
 | 3.7 | 보안 헤더: `X-Frame-Options: DENY`·`nosniff`·`Referrer-Policy`·CSP | `internal/httpsec/headers.go` | 단위 테스트 | ✓ 정적 자산·첨부에도 (트리 밖으로 옮기며 유지) |
 | 3.8 | CSP 에 `script-src`/`default-src` 없음 (인라인 스크립트 허용) | `headers.go` | — | — 의도적. XSS 방어는 3.3~3.5 에 있다. 테마가 인라인을 쓴다 |
-| 3.9 | `Host`·`X-Forwarded-Host` 신뢰 | `handler_seo.go`(사이트맵 origin)·`app.go`(OAuth `redirect_uri`) | `grep X-Forwarded-Host` | ✓ `X-Forwarded-Host` 0건. 메일 링크는 요청이 아니라 `site_url`(4.6) |
+| 3.9 | `Host`·`X-Forwarded-Host` 신뢰 | `handler_seo.go`(사이트맵 origin)·`app.go`(OAuth `redirect_uri`) | `grep X-Forwarded-Host` | ✓ `X-Forwarded-Host` 0건. 메일 링크와 사이트맵·robots 는 요청이 아니라 `site_url`(4.6, 사이트맵은 2026-10-07 부터) |
 | 3.10 | 오류 페이지가 내부를 말하지 않는다 | `handler_public.go` `serverError` | 코드 읽기 | ✓ 원문은 **개발 빌드**에서만 (2026-09-13 에 고침 — DB 설정 하나로 켜졌었다) |
 | 3.11 | HSTS | 앱은 TLS 를 모른다 — [D72](72-deploy-lightsail.md) 3절 nginx 블록의 `Strict-Transport-Security` | 프록시 응답 헤더 확인 | ✓ 2026-09-14 에 문서에 넣음. **실기로 확인한 적은 없다** |
 
@@ -86,7 +87,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 4.5 | 첨부: 확장자 허용목록(`.jpg .jpeg .png .gif .webp .pdf .zip .txt .csv`), **매직바이트 대조**, `YYYY/MM/<uuid>` 저장, `os.Root`, 내려줄 때 `Content-Disposition: attachment`·`nosniff`·부모 글 권한 재확인 | `content/upload.go`·`content/attachment.go`·`handler_attachment.go` | 코드 읽기 | ✓ `.svg`·`.html` 없음. 운영자는 목록을 **줄일 수만** 있다 |
 | 4.6 | 설정 파일 0600·원자적 쓰기, `site_url` 은 설치 요청에서, `secure_cookies` 설치 시 감지 | `internal/config/config.go`·`install.go` | `TestSaveUsesOwnerOnlyPermissions`·`TestRequestOriginFollowsTheInstallRequest` | ✓ `site_url` 은 2026-09-13 추가 |
 | 4.7 | 설치 창: 설정이 써진 순간 닫힘, 채워진 DB 거부 | `install.go` | `TestInstallStaysClosedWhenSwitchFails` | ✓ 2026-09-13 에 고침 |
-| 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·테마 24 MiB·웹훅 1 MiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
+| 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·상품 이미지 64 MiB·테마 24 MiB·nginx `client_max_body_size 65m`(D72, 2026-10-07 에 24m 에서 맞춤)·웹훅 64 KiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
 | 4.9 | 테마 파일: 템플릿·다운로드·해시가 같은 파일 경계를 사용, 자산은 `static/` 아래만 | `theme/loader.go` `openThemeFile`·`static.go`·`funcs.go` | 경로·심볼릭 링크·해시 단위 테스트 | ✓ 2026-09-30: `os.OpenInRoot`가 파일을 여는 순간의 탈출을 막는다. 해시의 바깥 파일 읽기를 재현하고 수정 |
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
 | 4.12 | 저장된 자격증명(PG 시크릿·SMTP 비밀번호·소셜 client_secret)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |
@@ -104,7 +105,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 5.5 | 주문 상태 전이는 표(`state.go`)를 거치고 **비교-교환** | `payment.go` `moveOrder`·`returns.go` | 통합 테스트 | ✓ 교환 차액도 2026-09-13 부터 |
 | 5.6 | 환불 누적 ≤ 승인액은 **DB CHECK** | `payments_refund_within_approved` | `TestConcurrentRefundsCannotOvershoot` | ✓ |
 | 5.7 | 재고: `FOR UPDATE` 정렬 잠금 + `CHECK (stock >= 0)` | `commerce/stock.go`·`00011` | `TestStockVersionMismatchIsRefused` 등 | ✓ 초과 판매 경로 없음 |
-| 5.8 | 웹훅: `(pg, event_id)` 유니크로 멱등, 본문 1 MiB, secret **상수 시간** 비교, 본문을 진실로 쓰지 않음 | `webhook.go`·`handler_webhook.go` | `TestWebhookSecretMismatchIsRefused` | ✓ |
+| 5.8 | 웹훅: `(pg, event_id)` 유니크로 멱등, 본문 64 KiB(A-603 은 원문 앞 4,096자만 읽는다), secret **상수 시간** 비교, 본문을 진실로 쓰지 않음 | `webhook.go`·`handler_webhook.go` | `TestWebhookSecretMismatchIsRefused` | ✓ |
 | 5.9 | 교환 대상 조합은 노출 중인 것만 | `returns.go` `OpenReturn` | `TestExchangeRefusesHiddenVariant` | ✓ 2026-09-13 |
 | 5.10 | 시크릿·카드 정보가 로그·화면·원문 보관에 없다 | `Toss.String`(가림)·`MaskCardFields`·`oplog.go`(비밀 필드 없음)·A-602 | `grep` + `make verify-upgrade` ⑤ 실기동 로그 | ✓ |
 | 5.11 | 작업 로그 append-only(D15 7절): DELETE 거부, UPDATE 는 `SET NULL` 한 경우만 | `00010`·`00021` | `TestOperationLogCannotBeRewrittenUnderCoverOfActorNull` | ✓ 2026-09-13 에 구멍을 막음 |
@@ -112,7 +113,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 5.13 | `결제대기` 만료: 재고 복원 전 진행 중인 결제를 주문 잠금 안에서 다시 확인. 결제 선점도 같은 주문을 잠그고 상태 검사 | `commerce/order.go`·`payment.go` | 기존 만료 테스트 + `TestConfirmRefusesOrderChangedAfterCheckout`·`TestExpiryRechecksPaymentReservedAfterSelection` | △ 2026-09-30: 경쟁 상황 수정 후 PostgreSQL 실행 검증이 남음 ([GAP-09](85-gaps.md)) |
 | 5.14 | `payments_pg_key_idx` 가 부분 인덱스가 아님 | `00013` | 코드 읽기 | — 그대로 둔다. 토스 `paymentKey` 는 결제 시도마다 새 값이라 실패 행이 키를 점유해도 정상 재결제는 막히지 않고, 다른 주문에서 같은 키가 오는 것(`ErrPaymentKeyReused`)을 잡는 쪽이 더 값지다 |
 | 5.15 | 웹훅 서명 실패 응답 400 | `handler_webhook.go`·[D19](19-screen-io.md) P-905 | 토스 웹훅 가이드(200 만 성공, 최대 7회 재전송) | ✓ 2026-09-14 확정 |
-| 5.16 | 구매자 부분 환불 요청(P-507)의 승인·거부 | A-507 | — | △ 화면이 없다 — [GAP-08](85-gaps.md) |
+| 5.16 | 접수된 환불 건(P-507 구매자 요청·PG 거절로 돌아온 건·결과 불명 건)의 실행·거부 | A-507 `action=execute\|reject` · `commerce/refund.go` `RetryRefund` | `TestAdminExecutesOrRejectsAPendingRefund`·`TestAdminPendingRefundActionsAreReauthedAndScoped`·`TestAdminResendsAnUnknownRefundOnlyWhileTheKeyLives`·`TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives` | ✓ 2026-10-07. 결과 불명(`승인`)은 같은 멱등키로 접수 14일 안에서만 다시 보낸다(토스 키 15일) |
 
 ## 6. 운영 환경
 
@@ -159,7 +160,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 8.6 | 속도 제한기 지도 정리 비용 | `auth/ratelimit.go` | `TestAllowSweepsIdleBucketsOnceLarge`·`BenchmarkLimiterNewKeyWithActiveBuckets` | ✓ 2026-09-30: 4,096개부터 최대 1분에 한 번 정리. M4 Pro에서 활성 버킷 4,096개 + 새 키 허용·삭제 벤치마크 27.4μs → 66.5ns. 전체 사이트 성능 수치는 아님 |
 | 8.7 | 사이트맵: 질의 하나 + `Cache-Control` 1시간 | `handler_seo.go`·`content.SitemapPosts` | 코드 읽기 | ✓ 2026-09-13 |
 | 8.8 | bcrypt 비용 10 = 1 vCPU 에서 시도당 수십~백 ms | `auth/login.go` | — | — 의도적. IP·계정 제한이 앞에 있다 |
-| 8.9 | A-508 대사: 조회 하나 5초, 요청 전체 40초 예산, 넘긴 행은 「조회하지 않았다」 | `commerce/webhook.go` `Reconcile` | 코드 읽기 | ✓ 2026-09-14 |
+| 8.9 | A-508 대사: 조회 하나 5초, 요청 전체 20초 예산(합이 CloudFront 기본 응답 시한 30초 안 — `TestReconcileFitsInsideCloudFrontsDefaultResponseTimeout`, 2026-10-07 에 40초에서 줄임), 넘긴 행은 「조회하지 않았다」 | `commerce/webhook.go` `Reconcile` | 코드 읽기 | ✓ 2026-09-14 |
 | 8.10 | 1 vCPU/512MB 실측 | `make measure` | 실기 | ✓ 2026-09-02 Lightsail: 앱 RSS 15.6 MB, PG 125 MB, 가용 165 MB |
 | 8.11 | 응답 압축(gzip/br) 없음 | `net/http` 에 내장 없음 | — | — 프록시(nginx `gzip on`, CloudFront)가 한다. 앱은 정적 자산에 `immutable` 캐시(8.3)로 재요청 자체를 줄인다 |
 

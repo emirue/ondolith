@@ -19,7 +19,7 @@
           <td><code>{{.EventID}}</code></td>
           <td>{{with .OrderNo}}<a href="/admin/orders/{{.}}">{{.}}</a>{{else}}—{{end}}</td>
           <td>{{.Status}}{{with .Error}} · {{.}}{{end}}</td>
-          <td><details><summary>보기</summary><pre>{{.Payload}}</pre></details></td>
+          <td><details><summary>보기</summary><pre>{{.Payload}}</pre>{{if .PayloadCut}}<p class="adm-hint">앞 4,096자만 표시합니다.</p>{{end}}</details></td>
         </tr>
       {{else}}
         <tr><td colspan="6" class="adm-empty">수신한 웹훅이 없습니다.</td></tr>

@@ -105,6 +105,7 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		// 그 사실이 테스트에서는 보이지 않는다.
 		Attachments: store.AttachmentsIn(uploads),
 		Images:      shop.ImagesIn(uploads),
+		Media:       store.MediaIn(uploads),
 		// **작업 로그도 운영과 같이 붙인다.** 비워 두면 d.log 가 조용히
 		// 아무것도 안 하고, "로그에 남는다" 를 확인하는 검사가 전부 무의미해진다
 		// (D15 7절이 요구하는 것이 바로 그 기록이다).
@@ -194,7 +195,7 @@ func TestEachHandlerChecksItsOwnPermission(t *testing.T) {
 // FR-708: the secret is written once and never travels back. "Masked in the UI"
 // is not the same as "never sent" — the value would be in the HTML source.
 func TestSecretsAreNeverRedisplayed(t *testing.T) {
-	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	d, _ := fixture(t, &fakeCaller{superuser: true}) // SMTP 저장은 superuser 만 (R7)
 
 	post(d.MailSettingsSave, "/admin/settings/mail", url.Values{
 		"mail.smtp_host":     {"smtp.example.com"},
@@ -213,11 +214,141 @@ func TestSecretsAreNeverRedisplayed(t *testing.T) {
 	}
 }
 
+// **Turnstile 키는 A-201 에서 넣는다** (FR-216). 비밀키는 다시 보이지 않고, 빈 칸은
+// 「그대로 두라」이고, 바꾸면 작업 로그에 남되 값은 남지 않는다. 길이는 서버가 막는다.
+func TestTurnstileKeysOnSiteSettings(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"})
+	ctx := context.Background()
+
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+		"turnstile.site_key": {"0x4AAAAAAAsitekey"}, "turnstile.secret_key": {"0x4AAAAAAA-SUPERSECRET"},
+	}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("저장 = HTTP %d (%s)", rec.Code, rec.Body.String())
+	}
+	body := get(d.SettingsForm, "/admin/settings").Body.String()
+	if strings.Contains(body, "SUPERSECRET") {
+		t.Errorf("Turnstile 비밀키가 화면에 다시 표시됐다")
+	}
+	if !strings.Contains(body, "0x4AAAAAAAsitekey") {
+		t.Errorf("사이트 키가 보이지 않는다: %s", body)
+	}
+
+	post(d.SettingsSave, "/admin/settings", url.Values{
+		"turnstile.site_key": {"0x4AAAAAAAsitekey"}, "turnstile.secret_key": {""}, "site.name": {"온돌"}})
+	kv, err := d.Content.Settings(ctx, "turnstile.secret_key")
+	if err != nil || kv["turnstile.secret_key"] != "0x4AAAAAAA-SUPERSECRET" {
+		t.Errorf("빈 칸이 저장된 비밀키를 지웠다: %q (%v)", kv["turnstile.secret_key"], err)
+	}
+
+	var n int
+	var leaked bool
+	if err := pool.QueryRow(ctx, `SELECT count(*), coalesce(bool_or(summary LIKE '%SUPERSECRET%'), false)
+		FROM operation_logs WHERE target_id = 'turnstile'`).Scan(&n, &leaked); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || leaked {
+		t.Errorf("Turnstile 변경 작업 로그 %d건(want 1), 키가 남았나 %v", n, leaked)
+	}
+
+	for _, k := range []string{"turnstile.site_key", "turnstile.secret_key"} {
+		if rec := post(d.SettingsSave, "/admin/settings", url.Values{k: {strings.Repeat("k", 201)}}); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s 201자 = HTTP %d, want 422", k, rec.Code)
+		}
+	}
+}
+
+// **GA4 측정 ID 는 형식이 맞을 때만 저장한다** (FR-714). 이 값은 공개 화면의 `<script>` 에
+// 들어간다 — 「G- + 영숫자」(Google 문서) 밖의 값을 받으면 오타는 조용히 측정을 끄고, 이상한
+// 값은 스크립트 주소를 바꾼다. 붙여넣은 공백·소문자는 고쳐 저장하고, 빈 값은 끄기다.
+func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	ctx := context.Background()
+	saved := func() string {
+		kv, err := d.Content.Settings(ctx, "analytics.ga4_id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kv["analytics.ga4_id"]
+	}
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {" g-psw1my7hb4 "}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("맞는 ID = HTTP %d", rec.Code)
+	}
+	if got := saved(); got != "G-PSW1MY7HB4" {
+		t.Errorf("저장된 ID = %q, want G-PSW1MY7HB4", got)
+	}
+	for _, bad := range []string{"UA-12345-1", "G-", "G-PSW1\"><script>", "PSW1MY7HB4", "G-" + strings.Repeat("A", 40)} {
+		if rec := post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {bad}}); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%q = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	if got := saved(); got != "G-PSW1MY7HB4" {
+		t.Errorf("거부한 값이 저장됐다: %q", got)
+	}
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {""}})
+	if got := saved(); got != "" {
+		t.Errorf("빈 값으로 끌 수 없다: %q", got)
+	}
+}
+
+// **지도 키는 A-201 에서 넣는다** (FR-716). 네이버 ncpKeyId·카카오 JavaScript 키·구글 API
+// 키·Map ID 는 페이지에 실려 나가는 공개값이라 봉인하지 않지만, `<script>` 의 속성이 되므로
+// 영문·숫자·`-`·`_` 만 받는다. 붙여넣은 앞뒤 공백은 떼고, 빈 값은 그 지도를 끈다.
+func TestMapKeysOnSiteSettings(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	ctx := context.Background()
+	keys := []string{"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id"}
+	saved := func() map[string]string {
+		kv, err := d.Content.Settings(ctx, keys...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kv
+	}
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+		"map.naver_key": {" abc123naver "}, "map.kakao_key": {"0123456789abcdef0123456789abcdef"},
+		"map.google_key": {"AIzaSyA-test_key"}, "map.google_map_id": {"8e0a97af9386fef"},
+	}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("지도 키 저장 = HTTP %d", rec.Code)
+	}
+	if kv := saved(); kv["map.naver_key"] != "abc123naver" || kv["map.kakao_key"] != "0123456789abcdef0123456789abcdef" ||
+		kv["map.google_key"] != "AIzaSyA-test_key" || kv["map.google_map_id"] != "8e0a97af9386fef" {
+		t.Errorf("저장된 지도 키 = %v", kv)
+	}
+	for _, bad := range []url.Values{
+		{"map.kakao_key": {`abc" onload="alert(1)`}},
+		{"map.naver_key": {"abc def"}},
+		{"map.google_key": {strings.Repeat("k", 101)}},
+		{"map.google_map_id": {"<script>"}},
+	} {
+		if rec := post(d.SettingsSave, "/admin/settings", bad); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%v = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	if kv := saved(); kv["map.kakao_key"] != "0123456789abcdef0123456789abcdef" {
+		t.Errorf("거부한 값이 저장됐다: %v", kv)
+	}
+	post(d.SettingsSave, "/admin/settings", url.Values{"map.kakao_key": {""}})
+	if kv := saved(); kv["map.kakao_key"] != "" {
+		t.Errorf("빈 값으로 끌 수 없다: %v", kv)
+	}
+}
+
+// 관리자 페이지 편집(A-302)도 에디터의 「지도 넣기」 가 쓸 키를 받는다 (FR-716).
+func TestPageFormCarriesMapKeys(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"page.create": true, "page.update": true}})
+	if err := d.Content.PutSettings(context.Background(), map[string]string{"map.kakao_key": "kakaokey123"}); err != nil {
+		t.Fatal(err)
+	}
+	if body := get(d.PageForm, "/admin/pages/new").Body.String(); !strings.Contains(body, "map.kakao_key=kakaokey123") {
+		t.Errorf("페이지 편집에 지도 키가 없다: %s", body)
+	}
+}
+
 // An empty secret box means "leave it alone": the form cannot show the current
 // value, so empty is the normal state of a screen opened to change something
 // else. Treating it as "erase" silently breaks mail on the next save.
 func TestEmptySecretDoesNotEraseTheStoredOne(t *testing.T) {
-	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	d, pool := fixture(t, &fakeCaller{superuser: true}) // SMTP 저장은 superuser 만 (R7)
 	ctx := context.Background()
 
 	post(d.MailSettingsSave, "/admin/settings/mail", url.Values{
@@ -1249,6 +1380,51 @@ func TestPaymentSettingsRequireReauth(t *testing.T) {
 		"password": {"correct horse battery"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+}
+
+// **SMTP 설정은 superuser 만 바꾼다** (D15 5.1 R7).
+//
+// 비밀번호 재설정 토큰은 이 SMTP 로 나간다. `settings.update` 만 가진 운영자가
+// 호스트를 자기 서버로 돌리고 superuser 이메일로 재설정을 요청하면 토큰을 받아
+// superuser 가 된다 — R6 이 막은 「계정 조작은 superuser 만」을 메일 경로로
+// 우회하는 길이었다. 재인증·작업 로그도 없어서 되돌려 놓으면 흔적이 남지 않았다.
+func TestMailSettingsAreSuperuserOnlyReauthedAndLogged(t *testing.T) {
+	op := &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"}
+	d, pool := fixture(t, op)
+	ctx := context.Background()
+
+	rec := postAdmin(t, d.MailSettingsSave, "/admin/settings/mail", nil, url.Values{
+		"mail.smtp_host": {"attacker.example"}, "mail.tls_mode": {"none"}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("settings.update 만 있는 운영자의 SMTP 저장 = HTTP %d, want 403", rec.Code)
+	}
+	if kv, _ := d.Content.Settings(ctx, "mail.smtp_host"); kv["mail.smtp_host"] != "" {
+		t.Fatalf("운영자가 SMTP 호스트를 바꿨다: %q", kv["mail.smtp_host"])
+	}
+
+	// superuser 도 재인증 창이 지났으면 비밀번호를 다시 넣어야 한다.
+	su := &fakeCaller{superuser: true, reauth: true, email: "su@example.com",
+		password: "correct horse battery"}
+	d.Caller = func(*http.Request) Caller { return su }
+	rec = postAdmin(t, d.MailSettingsSave, "/admin/settings/mail", nil, url.Values{
+		"mail.smtp_host": {"smtp.example.com"}, "mail.tls_mode": {"starttls"}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("재인증 없이 = HTTP %d, want 403", rec.Code)
+	}
+	rec = postAdmin(t, d.MailSettingsSave, "/admin/settings/mail", nil, url.Values{
+		"mail.smtp_host": {"smtp.example.com"}, "mail.tls_mode": {"starttls"},
+		"password": {"correct horse battery"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs
+		WHERE action = 'settings.update' AND target_id = 'mail'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("SMTP 변경 작업 로그 %d건, want 1", n)
 	}
 }
 

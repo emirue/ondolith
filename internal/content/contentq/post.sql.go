@@ -56,8 +56,10 @@ SELECT c.id, c.post_id, coalesce(c.parent_id::text, '')::text AS parent_id,
        c.body, coalesce(c.deleted_at, 'epoch'::timestamptz)::timestamptz AS deleted_at, c.created_at
 FROM comments c
 LEFT JOIN users u ON u.id = c.author_id
+LEFT JOIN comments root ON root.id = c.parent_id
 WHERE c.post_id = $1
-ORDER BY coalesce(c.parent_id, c.id), c.created_at, c.id
+ORDER BY coalesce(root.created_at, c.created_at), coalesce(c.parent_id, c.id),
+         c.parent_id IS NOT NULL, c.created_at, c.id
 `
 
 type CommentsRow struct {
@@ -71,6 +73,8 @@ type CommentsRow struct {
 	CreatedAt  time.Time
 }
 
+// 스레드는 그 첫 댓글의 시각 순이다. 묶는 열(coalesce(parent_id, id))만으로 정렬하면
+// 무작위 uuid 순이 된다. 스레드 안에서는 첫 댓글, 그다음 답이 시각 순 (대댓글은 1단계).
 func (q *Queries) Comments(ctx context.Context, postID string) ([]CommentsRow, error) {
 	rows, err := q.db.Query(ctx, comments, postID)
 	if err != nil {
@@ -115,16 +119,27 @@ func (q *Queries) CountPosts(ctx context.Context, boardID string) (int64, error)
 const countPostsSearch = `-- name: CountPostsSearch :one
 SELECT count(*) FROM posts p
 WHERE p.board_id = $1 AND p.status = 'published'
-  AND p.search_vector @@ to_tsquery('simple', $2)
+  AND (NOT p.is_secret OR $2::bool OR p.author_id = $3)
+  AND p.search_vector @@ to_tsquery('simple', $4)
 `
 
 type CountPostsSearchParams struct {
-	BoardID string
-	Search  string
+	BoardID   string
+	CanSecret bool
+	ViewerID  *string
+	Search    string
 }
 
+// **읽을 수 없는 비밀글은 검색에서 빠진다.** 목록은 비밀글 제목을 누구에게나
+// 보이므로, 검색이 본문을 보고 비밀글을 남기면 「이 낱말로 그 글이 걸렸다」가
+// 곧 본문 한 낱말이다. ListPostsSearch 와 같은 술어여야 합계가 쪽과 맞는다.
 func (q *Queries) CountPostsSearch(ctx context.Context, arg CountPostsSearchParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPostsSearch, arg.BoardID, arg.Search)
+	row := q.db.QueryRow(ctx, countPostsSearch,
+		arg.BoardID,
+		arg.CanSecret,
+		arg.ViewerID,
+		arg.Search,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -181,8 +196,9 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (s
 }
 
 const createPost = `-- name: CreatePost :one
-INSERT INTO posts (board_id, author_id, title, body, custom_fields, is_secret)
-VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+INSERT INTO posts (board_id, author_id, title, body, body_html, custom_fields, is_secret, cover_media_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT m.id FROM media m WHERE m.id = $8))
+RETURNING id
 `
 
 type CreatePostParams struct {
@@ -190,18 +206,24 @@ type CreatePostParams struct {
 	AuthorID     *string
 	Title        string
 	Body         string
+	BodyHtml     string
 	CustomFields []byte
 	IsSecret     bool
+	CoverMediaID *string
 }
 
+// 카드 사진은 실제로 있는 사진일 때만 붙는다 — 본문 HTML 은 브라우저가 보낸 것이라 없는
+// id 를 실을 수 있고, 그대로 넣으면 외래 키 위반이 500 이 된다.
 func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (string, error) {
 	row := q.db.QueryRow(ctx, createPost,
 		arg.BoardID,
 		arg.AuthorID,
 		arg.Title,
 		arg.Body,
+		arg.BodyHtml,
 		arg.CustomFields,
 		arg.IsSecret,
+		arg.CoverMediaID,
 	)
 	var id string
 	err := row.Scan(&id)
@@ -234,12 +256,12 @@ func (q *Queries) DeletePost(ctx context.Context, id string) (int64, error) {
 
 const listPosts = `-- name: ListPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = $1
@@ -282,6 +304,8 @@ type ListPostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -320,6 +344,8 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPos
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -342,47 +368,51 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPos
 
 const listPostsSearch = `-- name: ListPostsSearch :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = $1
       AND p.status = 'published'
-      AND p.search_vector @@ to_tsquery('simple', $2)
+      -- CountPostsSearch 의 주석 참고. 검색에서만 거른다 — 검색어 없는 목록은 제목을 보인다.
+      AND (NOT p.is_secret OR $2::bool OR p.author_id = $3)
+      AND p.search_vector @@ to_tsquery('simple', $4)
     ORDER BY p.is_pinned DESC,
-             CASE WHEN $3::text = 'created' AND $4::bool THEN p.created_at END DESC,
-             CASE WHEN $3::text = 'created' AND NOT $4::bool THEN p.created_at END ASC,
-             CASE WHEN $3::text = 'views' AND $4::bool THEN p.view_count END DESC,
-             CASE WHEN $3::text = 'views' AND NOT $4::bool THEN p.view_count END ASC,
-             CASE WHEN $3::text = 'title' AND $4::bool THEN p.title END DESC,
-             CASE WHEN $3::text = 'title' AND NOT $4::bool THEN p.title END ASC,
-             CASE WHEN $4::bool THEN p.id END DESC,
-             CASE WHEN NOT $4::bool THEN p.id END ASC
-    LIMIT $6::int OFFSET $5::int
+             CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
+             CASE WHEN $5::text = 'created' AND NOT $6::bool THEN p.created_at END ASC,
+             CASE WHEN $5::text = 'views' AND $6::bool THEN p.view_count END DESC,
+             CASE WHEN $5::text = 'views' AND NOT $6::bool THEN p.view_count END ASC,
+             CASE WHEN $5::text = 'title' AND $6::bool THEN p.title END DESC,
+             CASE WHEN $5::text = 'title' AND NOT $6::bool THEN p.title END ASC,
+             CASE WHEN $6::bool THEN p.id END DESC,
+             CASE WHEN NOT $6::bool THEN p.id END ASC
+    LIMIT $8::int OFFSET $7::int
 ) p
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
-         CASE WHEN $3::text = 'created' AND $4::bool THEN p.created_at END DESC,
-         CASE WHEN $3::text = 'created' AND NOT $4::bool THEN p.created_at END ASC,
-         CASE WHEN $3::text = 'views' AND $4::bool THEN p.view_count END DESC,
-         CASE WHEN $3::text = 'views' AND NOT $4::bool THEN p.view_count END ASC,
-         CASE WHEN $3::text = 'title' AND $4::bool THEN p.title END DESC,
-         CASE WHEN $3::text = 'title' AND NOT $4::bool THEN p.title END ASC,
-         CASE WHEN $4::bool THEN p.id END DESC,
-         CASE WHEN NOT $4::bool THEN p.id END ASC
+         CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
+         CASE WHEN $5::text = 'created' AND NOT $6::bool THEN p.created_at END ASC,
+         CASE WHEN $5::text = 'views' AND $6::bool THEN p.view_count END DESC,
+         CASE WHEN $5::text = 'views' AND NOT $6::bool THEN p.view_count END ASC,
+         CASE WHEN $5::text = 'title' AND $6::bool THEN p.title END DESC,
+         CASE WHEN $5::text = 'title' AND NOT $6::bool THEN p.title END ASC,
+         CASE WHEN $6::bool THEN p.id END DESC,
+         CASE WHEN NOT $6::bool THEN p.id END ASC
 `
 
 type ListPostsSearchParams struct {
-	BoardID string
-	Search  string
-	Sort    string
-	Desc    bool
-	Offset  int32
-	Limit   int32
+	BoardID   string
+	CanSecret bool
+	ViewerID  *string
+	Search    string
+	Sort      string
+	Desc      bool
+	Offset    int32
+	Limit     int32
 }
 
 type ListPostsSearchRow struct {
@@ -392,6 +422,8 @@ type ListPostsSearchRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -406,6 +438,8 @@ type ListPostsSearchRow struct {
 func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams) ([]ListPostsSearchRow, error) {
 	rows, err := q.db.Query(ctx, listPostsSearch,
 		arg.BoardID,
+		arg.CanSecret,
+		arg.ViewerID,
 		arg.Search,
 		arg.Sort,
 		arg.Desc,
@@ -426,6 +460,8 @@ func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -505,7 +541,7 @@ func (q *Queries) ModerateComments(ctx context.Context, arg ModerateCommentsPara
 
 const moderatePosts = `-- name: ModeratePosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -528,6 +564,8 @@ type ModeratePostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -555,6 +593,8 @@ func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -577,7 +617,7 @@ func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([
 
 const postByID = `-- name: PostByID :one
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, p.body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -599,6 +639,8 @@ type PostByIDRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -620,6 +662,8 @@ func (q *Queries) PostByID(ctx context.Context, arg PostByIDParams) (PostByIDRow
 		&i.AuthorName,
 		&i.Title,
 		&i.Body,
+		&i.BodyHtml,
+		&i.CoverMediaID,
 		&i.CustomFields,
 		&i.Status,
 		&i.IsPinned,
@@ -635,7 +679,7 @@ func (q *Queries) PostByID(ctx context.Context, arg PostByIDParams) (PostByIDRow
 
 const recentPosts = `-- name: RecentPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, ''::text AS body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
@@ -662,6 +706,8 @@ type RecentPostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -694,6 +740,8 @@ func (q *Queries) RecentPosts(ctx context.Context, arg RecentPostsParams) ([]Rec
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -716,12 +764,12 @@ func (q *Queries) RecentPosts(ctx context.Context, arg RecentPostsParams) ([]Rec
 
 const searchPosts = `-- name: SearchPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
-       p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.title, p.body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
        p.view_count, p.created_at, p.updated_at,
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
            p.view_count, p.created_at, p.updated_at
     FROM posts p
     WHERE p.board_id = ANY($1::uuid[])
@@ -769,6 +817,8 @@ type SearchPostsRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -805,6 +855,8 @@ func (q *Queries) SearchPosts(ctx context.Context, arg SearchPostsParams) ([]Sea
 			&i.AuthorName,
 			&i.Title,
 			&i.Body,
+			&i.BodyHtml,
+			&i.CoverMediaID,
 			&i.CustomFields,
 			&i.Status,
 			&i.IsPinned,
@@ -921,17 +973,20 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (i
 }
 
 const updatePost = `-- name: UpdatePost :execrows
-UPDATE posts SET title = $2, body = $3, custom_fields = $4, is_secret = $5,
+UPDATE posts SET title = $2, body = $3, body_html = $4, custom_fields = $5, is_secret = $6,
+       cover_media_id = (SELECT m.id FROM media m WHERE m.id = $7),
        updated_at = now()
-WHERE id = $1
+WHERE posts.id = $1
 `
 
 type UpdatePostParams struct {
 	ID           string
 	Title        string
 	Body         string
+	BodyHtml     string
 	CustomFields []byte
 	IsSecret     bool
+	CoverMediaID *string
 }
 
 func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (int64, error) {
@@ -939,8 +994,10 @@ func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (int64, 
 		arg.ID,
 		arg.Title,
 		arg.Body,
+		arg.BodyHtml,
 		arg.CustomFields,
 		arg.IsSecret,
+		arg.CoverMediaID,
 	)
 	if err != nil {
 		return 0, err

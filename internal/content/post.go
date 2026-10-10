@@ -14,12 +14,19 @@ import (
 
 // Post is one row of posts, plus the counts a list screen shows.
 type Post struct {
-	ID           string
-	BoardID      string
-	AuthorID     string // empty when the author is gone (SET NULL)
-	AuthorName   string
-	Title        string
-	Body         string
+	ID         string
+	BoardID    string
+	AuthorID   string // empty when the author is gone (SET NULL)
+	AuthorName string
+	Title      string
+	// Body 는 평문이다. 에디터로 쓴 글이면 BodyHTML 의 평문이고(검색·요약이 쓴다),
+	// 아니면 쓴 그대로다.
+	Body string
+	// BodyHTML 은 정화를 지난 본문 HTML 이고(FR-513), 평문 글이면 비어 있다.
+	// 편집 폼이 되돌려 싣는 값이다 — 화면에 그릴 때는 Rendered 를 쓴다.
+	BodyHTML string
+	// CoverMediaID 는 갤러리 카드의 사진이다 — 본문의 첫 업로드 사진(FR-515). 없으면 빈 값.
+	CoverMediaID string
 	CustomFields map[string]any
 	Status       string
 	IsPinned     bool
@@ -60,9 +67,9 @@ func (c Comment) IsTombstone() bool { return !c.DeletedAt.IsZero() }
 // that hid them entirely would be unusable for the case they exist for, a Q&A
 // board where you need to see your question is in the queue.
 //
-// So there is no viewer here and no canSecret: this query has no permission
-// decision left to make. Search is the one that keeps the filter, because its
-// results carry an excerpt of the body.
+// So the plain list has no permission decision left to make. **A search does**:
+// which secret posts survive a body-text match is itself the body, one word at a
+// time. ListPostsSearch therefore filters by q.ViewerID·q.CanSecret, as P-212 does.
 func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]Post, error) {
 	// The sort key comes from the allow list (listquery.go) and reaches SQL as
 	// a bind parameter that an ORDER BY CASE chain compares (D22 6절).
@@ -80,7 +87,8 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 	// A prefix query is what actually matches Korean text: the stored token
 	// carries the particle, so the exact term misses (D30 measured this).
 	return postsOf(s.q.ListPostsSearch(ctx, contentq.ListPostsSearchParams{
-		BoardID: boardID, Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+		BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
+		Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
 		Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
 }
 
@@ -92,7 +100,8 @@ func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (in
 		return s.q.CountPosts(ctx, boardID)
 	}
 	return s.q.CountPostsSearch(ctx, contentq.CountPostsSearchParams{
-		BoardID: boardID, Search: toPrefixQuery(q.Search)})
+		BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
+		Search: toPrefixQuery(q.Search)})
 }
 
 // PostPage is P-203's read: one page and the pager total.
@@ -162,7 +171,8 @@ func (s *Store) CreatePost(ctx context.Context, p Post) (string, error) {
 	}
 	return s.q.CreatePost(ctx, contentq.CreatePostParams{
 		BoardID: p.BoardID, AuthorID: strPtr(p.AuthorID), Title: p.Title, Body: p.Body,
-		CustomFields: fields, IsSecret: p.IsSecret})
+		BodyHtml: p.BodyHTML, CustomFields: fields, IsSecret: p.IsSecret,
+		CoverMediaID: strPtr(CoverOf(p.BodyHTML))})
 }
 
 // UpdatePost does not touch is_pinned or status: pinning and hiding are
@@ -174,7 +184,8 @@ func (s *Store) UpdatePost(ctx context.Context, id string, p Post) error {
 		return err
 	}
 	return affected(s.q.UpdatePost(ctx, contentq.UpdatePostParams{
-		ID: id, Title: p.Title, Body: p.Body, CustomFields: fields, IsSecret: p.IsSecret}))
+		ID: id, Title: p.Title, Body: p.Body, BodyHtml: p.BodyHTML, CustomFields: fields, IsSecret: p.IsSecret,
+		CoverMediaID: strPtr(CoverOf(p.BodyHTML))}))
 }
 
 // SetPostFlags is the moderator's edit (A-307).
@@ -409,6 +420,8 @@ type postRow struct {
 	AuthorName    string
 	Title         string
 	Body          string
+	BodyHtml      string
+	CoverMediaID  string
 	CustomFields  []byte
 	Status        string
 	IsPinned      bool
@@ -429,7 +442,7 @@ type postRows interface {
 // Post 를 만드는 곳이 둘이면 custom_fields 풀기 같은 규칙이 갈라진다.
 func postOf(r postRow) (Post, error) {
 	p := Post{ID: r.ID, BoardID: r.BoardID, AuthorID: r.AuthorID, AuthorName: r.AuthorName,
-		Title: r.Title, Body: r.Body, Status: r.Status, IsPinned: r.IsPinned, IsSecret: r.IsSecret,
+		Title: r.Title, Body: r.Body, BodyHTML: r.BodyHtml, CoverMediaID: r.CoverMediaID, Status: r.Status, IsPinned: r.IsPinned, IsSecret: r.IsSecret,
 		ViewCount: int64(r.ViewCount), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		CommentCount: r.CommentCount, HasAttachment: r.HasAttachment}
 	if len(r.CustomFields) > 0 {

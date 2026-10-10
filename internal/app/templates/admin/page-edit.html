@@ -19,8 +19,16 @@
 
     <label class="adm-field">
       <span>본문</span>
-      <textarea name="body">{{with .Page}}{{.Body}}{{end}}</textarea>
+      {{/* 에디터 (FR-513). 글쓰기와 같은 editor.js — 사진은 A-310 으로 올린다. */}}
+      <textarea name="body" data-editor data-upload="/admin/pages/media" data-map-button="adm-btn adm-btn--sm">{{with .Page}}{{.Body}}{{end}}</textarea>
     </label>
+    <input type="hidden" name="body_html" value="{{with .Page}}{{.BodyHTML}}{{end}}">
+    <link rel="stylesheet" href="/static/vendor/suneditor/suneditor.min.css">
+    <script src="/static/vendor/suneditor/suneditor.min.js" defer></script>
+    <script src="/static/vendor/suneditor/ko.js" defer></script>
+    {{/* 지도 블록 (FR-716) — A-201 의 지도 키가 있으면 에디터에 「지도 넣기」 가 생긴다. editor.js 보다 먼저. */}}
+    {{with .Maps}}<script src="/static/js/maps.js" defer data-naver="{{index . "map.naver_key"}}" data-kakao="{{index . "map.kakao_key"}}" data-google="{{index . "map.google_key"}}" data-google-map-id="{{index . "map.google_map_id"}}"></script>{{end}}
+    <script src="/static/js/editor.js" defer></script>
 
     <div class="adm-actions adm-actions--end">
       <a class="adm-btn" href="/admin/pages">취소</a>

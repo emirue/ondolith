@@ -14,7 +14,11 @@ import (
 // maxWebhookBody bounds the request before anything reads it. 서명 검증 전에
 // 파싱하지 않는다는 규칙(D19 P-905)은 크기 상한이 있어야 의미가 있다 — 없으면
 // 파싱 전에 이미 메모리를 다 쓴다.
-const maxWebhookBody = 1 << 20 // 1 MiB
+//
+// 64KiB 다. 이 주소는 인증이 없고(토스 웹훅에는 서명이 없다) 형태만 맞으면
+// 원문이 webhook_events 에 남으므로, 상한이 곧 요청 하나가 쌓을 수 있는 양이다.
+// 토스의 결제 객체는 그보다 한 자릿수 이상 작다.
+const maxWebhookBody = 64 << 10
 
 // webhookDeps is what P-905 needs. shopDeps 를 통째로 받지 않는다 — 이 경로는
 // 세션도 액터도 없고, 그 사실이 타입에 보여야 한다.

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -34,6 +35,20 @@ func TestPageCreateAndUpdateAreSeparatePermissions(t *testing.T) {
 	})
 	if rec2.Code == http.StatusForbidden {
 		t.Error("page.create 를 가졌는데 만들지 못했다")
+	}
+
+	// **만들기 폼(GET /admin/pages/new)도 같다.** 라우트는 page.create 를 적었는데
+	// 핸들러가 page.update 를 물어, 만들기만 가진 사람은 라우트를 지나 폼에서 403 이었다.
+	form := func(d *Deps) int {
+		rec := httptest.NewRecorder()
+		d.PageForm(rec, httptest.NewRequest(http.MethodGet, "/admin/pages/new", nil))
+		return rec.Code
+	}
+	if code := form(d2); code != http.StatusOK {
+		t.Errorf("page.create 로 만들기 폼 = HTTP %d, want 200", code)
+	}
+	if code := form(d); code != http.StatusForbidden {
+		t.Errorf("page.update 만으로 만들기 폼 = HTTP %d, want 403", code)
 	}
 }
 
@@ -71,4 +86,30 @@ func postAs(d *Deps, target, id string, form url.Values) *httptest.ResponseRecor
 	req.SetPathValue("no", "NOPE")
 	d.OrderTransition(rec, req)
 	return rec
+}
+
+// **페이지도 에디터 HTML 을 정화해 저장하고, 평문은 그 글자다** (FR-513, A-302).
+func TestPageSaveStoresSanitizedEditorHTML(t *testing.T) {
+	creator := &fakeCaller{perms: map[string]bool{"page.create": true}, email: "e@example.com"}
+	d, pool := fixture(t, creator)
+	rec := postAs(d, "/admin/pages/new", "new", url.Values{
+		"slug": {"location"}, "title": {"오시는 길"}, "body": {"평문 사본"},
+		"body_html": {`<p>서울 <a href="javascript:alert(1)">지도</a></p>` +
+			`<img src="/static/img/map.svg" alt="지도 서울시청" data-map="kakao" data-lat="37.5665" data-lng="126.978" data-zoom="3" data-label="서울시청">`},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	var body, html string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT body, body_html FROM pages WHERE slug = 'location'`).Scan(&body, &html); err != nil {
+		t.Fatal(err)
+	}
+	// 지도는 지도 블록으로 남는다 (FR-716) — 키 없는 구글 iframe 은 지도를 키 방식으로 통일하며 뺐다.
+	if strings.Contains(html, "javascript:") || !strings.Contains(html, `data-map="kakao" data-lat="37.5665"`) {
+		t.Errorf("정화 결과가 틀렸다: %s", html)
+	}
+	if body != "서울 지도" {
+		t.Errorf("평문 = %q, want %q", body, "서울 지도")
+	}
 }

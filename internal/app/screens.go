@@ -38,6 +38,8 @@ var screenInventory = map[string]SecurityClass{
 	"P-209": SC3, // 댓글 수정
 	"P-210": SC3, // 댓글 삭제
 	"P-211": SC7, // 첨부파일 다운로드
+	"P-213": SC7, // 본문 사진 (FR-514)
+	"P-214": SC7, // 본문 사진 올리기 (FR-514)
 	"P-212": SC1, // 검색 결과
 	"P-301": SC1, // 상품 목록
 	"P-302": SC1, // 카테고리별 목록
@@ -96,6 +98,7 @@ var screenInventory = map[string]SecurityClass{
 	"A-307": SC5, // 글 관리
 	"A-308": SC5, // 댓글 관리
 	"A-309": SC7, // 첨부파일 관리
+	"A-310": SC7, // 페이지 사진 올리기 (FR-514)
 	"A-401": SC4, // 사용자 목록
 	"A-402": SC5, // 사용자 상세·편집
 	"A-403": SC5, // 역할 목록·정의
@@ -121,6 +124,7 @@ var screenInventory = map[string]SecurityClass{
 	"A-517": SC4, // 재고
 	"A-601": SC4, // 작업 로그
 	"A-602": SC4, // 시스템 정보
+	"A-604": SC5, // 백업 내려받기 (FR-713)
 	"A-603": SC4, // 웹훅 수신 이력
 }
 
@@ -178,10 +182,6 @@ var handlerJudged = map[string]bool{
 	"post.moderate":    true,
 	"comment.write":    true,
 	"comment.moderate": true,
-
-	// 같은 경로가 두 동작을 받는다. A-302 의 POST 는 `id` 가 "new" 면 만들기,
-	// 아니면 고치기다 — 경로 패턴은 하나이므로 라우트가 가를 수 없다.
-	"page.create": true,
 
 	// A-506 의 POST 는 어느 상태로 보내는지가 폼 값에 있다. `취소` 로 가는
 	// 전이만 order.cancel 이고 나머지는 order.update 다 (D15 2.2).

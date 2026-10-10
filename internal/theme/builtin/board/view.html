@@ -23,7 +23,8 @@
   </dl>
   {{end}}
 
-  <div class="page-body">{{nl2br .Post.Body}}</div>
+  {{/* 에디터로 쓴 글은 정화된 HTML(Rendered), 그 이전의 글은 평문이다 (D17, FR-513). */}}
+  {{with .Post.Rendered}}<div class="page-body rich">{{.}}</div>{{else}}<div class="page-body">{{nl2br .Post.Body}}</div>{{end}}
 
   {{/* 첨부 목록. 이것이 없는 동안 목록의 📎 배지는 영영 켜지지 않았고,
        `/attachments/{id}` 는 어느 화면도 가리키지 않는 라우트였다. */}}

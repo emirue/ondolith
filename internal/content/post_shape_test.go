@@ -129,6 +129,8 @@ func postReadingQueries(t *testing.T) map[string]string {
 		if !strings.Contains(cols, "p.title") {
 			continue // count(*) 류
 		}
+		// body_html 을 먼저 돌린다 — 「''::text AS body」 는 그 앞부분이기도 하다.
+		cols = strings.Replace(cols, "''::text AS body_html", "p.body_html", 1)
 		out[name] = strings.Replace(cols, "''::text AS body", "p.body", 1)
 	}
 	return out

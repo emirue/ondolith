@@ -171,7 +171,9 @@ func (q *Queries) RecordWebhook(ctx context.Context, arg RecordWebhookParams) (s
 
 const webhookHistory = `-- name: WebhookHistory :many
 SELECT w.id, w.pg, w.event_id, COALESCE(o.order_no, '')::text AS order_no, w.status,
-       w.payload::text AS payload, COALESCE(w.error, '')::text AS error, w.created_at
+       left(w.payload::text, 4096)::text AS payload,
+       (char_length(w.payload::text) > 4096)::bool AS payload_cut,
+       COALESCE(w.error, '')::text AS error, w.created_at
 FROM webhook_events w LEFT JOIN orders o ON o.id = w.order_id
 WHERE ($1::timestamptz IS NULL OR w.created_at >= $1)
   AND ($2::timestamptz IS NULL OR w.created_at < $2)
@@ -187,16 +189,18 @@ type WebhookHistoryParams struct {
 }
 
 type WebhookHistoryRow struct {
-	ID        string
-	Pg        string
-	EventID   string
-	OrderNo   string
-	Status    string
-	Payload   string
-	Error     string
-	CreatedAt time.Time
+	ID         string
+	Pg         string
+	EventID    string
+	OrderNo    string
+	Status     string
+	Payload    string
+	PayloadCut bool
+	Error      string
+	CreatedAt  time.Time
 }
 
+// 원문은 앞 4,096자만 읽는다 (WebhookPayloadHead). 한 쪽이 100행이다.
 // 기간 조회 (D19 0.6): 수신 시각 기준.
 func (q *Queries) WebhookHistory(ctx context.Context, arg WebhookHistoryParams) ([]WebhookHistoryRow, error) {
 	rows, err := q.db.Query(ctx, webhookHistory,
@@ -219,6 +223,7 @@ func (q *Queries) WebhookHistory(ctx context.Context, arg WebhookHistoryParams) 
 			&i.OrderNo,
 			&i.Status,
 			&i.Payload,
+			&i.PayloadCut,
 			&i.Error,
 			&i.CreatedAt,
 		); err != nil {

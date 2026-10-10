@@ -209,6 +209,23 @@ main { max-width: var(--shell); margin: 0 auto; padding: 32px var(--pad) 64px; }
 
 .page h1 { margin: 0 0 20px; font-size: clamp(22px, 2.6vw, 28px); letter-spacing: -.02em; }
 .page-body { line-height: 1.8; }
+/* 에디터로 쓴 본문 (FR-513). 사진·표·영상이 화면 폭을 넘지 않는다 — 휴대폰에서
+   1920px 사진이 가로 스크롤을 만들지 않게. */
+.rich img, .rich iframe, .rich table { max-width: 100%; }
+.rich img { height: auto; }
+.rich iframe { width: 100%; aspect-ratio: 16 / 9; height: auto; border: 0; }
+.rich table { border-collapse: collapse; }
+.rich td, .rich th { border: 1px solid var(--line); padding: .4em .6em; }
+.rich figure { margin: 1em 0; }
+/* 갤러리 목록 (FR-515). 카드 한 칸이 썸네일(480px) 크기를 넘지 않는다. */
+.gallery { list-style: none; padding: 0; display: grid; gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+.gallery-card a { display: block; color: inherit; text-decoration: none; }
+.gallery-card img, .gallery-blank { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover;
+  border-radius: 6px; background: var(--line); }
+.gallery-title { display: block; margin-top: .4em; font-weight: 600; }
+/* 공개 폼의 Turnstile 위젯 (FR-216, partials/spam.html) — 위젯 자체는 Cloudflare 가 그린다. */
+.cf-turnstile { margin: .5rem 0; }
 
 /* ---- 폼 ----------------------------------------------------------------- */
 .form {

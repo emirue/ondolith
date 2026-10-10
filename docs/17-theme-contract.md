@@ -16,6 +16,42 @@
 > **폴백이 있으므로 테마를 점진적으로 만들 수 있다.** `base.html`과 `home.html`만 바꾼 테마도
 > 동작한다. 나머지는 내장 테마 모습으로 나온다.
 
+### 호환성
+
+**이 문서에 적힌 것이 계약이고, 코어는 그것을 깨지 않는 쪽으로만 바꾼다.** 화면에 새 데이터 키나
+새 선택 템플릿·조각을 더하는 것은 호환 변경이다 — 쓰지 않는 테마는 그대로 동작하고, 없는 조각은
+내장 테마의 것이 그린다(규칙 2). 2026-10-07 의 `partials/pager.html` 이 그 예다. 키·템플릿·함수의
+이름이나 뜻을 바꾸거나 지우는 것, 필수 파일을 늘리는 것은 **깨는 변경**이고 [CHANGELOG](../CHANGELOG.md)에
+`⚠️ 파괴적 변경`으로 적는다. 이 문서에 없는 키(핸들러가 우연히 넘기는 값)에 기대지 않는다 — 그것은
+예고 없이 바뀐다. 계약 버전 번호는 두지 않는다: 폴백이 있어 테마가 지금 코어를 모를 수는 있어도
+코어가 테마를 거부할 이유가 없다.
+
+### 폼
+
+필드 이름과 검증은 화면별로 [D19](19-screen-io.md)에 있다. 하나만 여기 적는다: **HTML 폼은 PATCH·
+DELETE 를 보낼 수 없어서 장바구니(`/cart/items/…`)의 수량 변경·삭제는 POST 에 `_method=PATCH`·
+`_method=DELETE` 를 실어 보낸다.** 서버는 그 경로의 POST 에서만 이 값을 읽는다 — 다른 경로에 실으면
+무시된다. 내장 테마의 `shop/cart.html` 이 본보기다.
+
+**글쓰기 에디터(FR-513).** 글쓰기·글수정 폼(`board/form.html`)이 에디터를 쓰려면 본문 칸을
+`<textarea name="body" data-editor data-upload="/board/{{.Board.Slug}}/media">` 로 두고, 같은 폼에
+`<input type="hidden" name="body_html" value="{{.Post.BodyHTML}}">` 을 두고, 내장 자산
+`vendor/suneditor/suneditor.min.css`·`suneditor.min.js`·`ko.js` 와 `js/editor.js` 를 `{{asset …}}` 으로 건다
+(내장 테마가 본보기다 — 사용자 테마에 그 파일이 없으면 내장 것이 나간다). 셋 중 하나라도 빠지면 그 테마는
+**평문 칸으로 동작한다** — 깨지지 않는다.
+
+**지도 블록(FR-716).** 본문의 지도는 `<img src="/static/img/map.svg" data-map="kakao|naver|google" data-lat data-lng
+data-zoom data-label>` 자리표시다. 내장 `partials/head.html` 이 A-201 의 지도 키가 있을 때 `js/maps.js` 를 키와 함께
+싣고(`<script … data-naver data-kakao data-google data-google-map-id>`), 그 스크립트가 블록을 그 지도사 SDK 의 지도로
+바꾸며 에디터에 「지도 넣기」 를 붙인다(`editor.js` 보다 먼저 와야 한다). `<head>` 를 덮어쓴 테마는 그 블록을 옮겨
+적어야 지도가 그려진다 — 빠뜨려도 깨지지 않고 자리표시 그림이 남는다.
+
+**스팸 방지(FR-216).** 가입(`auth/signup.html`)·재설정 요청(`auth/password-reset-request.html`)·새 글
+(`board/form.html`)·새 댓글(`partials/comment-form.html`) 폼 안에 `{{template "partials/spam.html" .Site.Turnstile}}`
+을 둔다. 숨은 칸(`website-url`)과, A-201 에 Turnstile 키가 있으면 위젯과 Cloudflare 스크립트를 그린다.
+**키가 켜졌는데 이 줄이 없는 테마는 그 폼의 제출이 전부 거부된다**(토큰이 오지 않는다) — 사용자 테마가 위 폼을
+덮어쓴다면 이 줄을 옮겨 적는다. 숨은 칸만 빠뜨린 테마는 거부되지 않는다(빈 칸과 같다).
+
 ## 디렉터리 구조
 
 ```
@@ -95,7 +131,8 @@ themes/{이름}/
 | `partials/head.html` | (전체) | 폴백 | `<head>` 내용. 메타·OG 태그 (FR-511) |
 | `partials/header.html` | (전체) | 폴백 | 상단. 메뉴(FR-405)와 로그인 상태 |
 | `partials/footer.html` | (전체) | 폴백 | 하단. 사업자 정보(FR-711)가 여기 들어간다 |
-| `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508) |
+| `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508). 전체 건수를 세는 게시판(P-203)·통합 검색(P-212) |
+| `partials/pager.html` | P-301, P-302, P-305, P-501 | 폴백 | 「이전·다음」. 건수를 세지 않고 한 행 더 읽는 목록. 데이터 `{PageNo, PrevURL, NextURL}` — 빈 주소는 링크 없음 |
 | `partials/flash.html` | (전체) | 폴백 | 성공·오류 메시지 |
 | `partials/field.html` | P-203, P-204, P-205 | 폴백 | **커스텀 필드 하나를 그린다** (FR-503). 타입별 분기가 여기 있다 |
 | `partials/variant.html` | P-303, P-304 | 폴백 | 고른 옵션 조합의 가격·재고·hidden `variant_id` (FR-602). **상품 화면이 처음 그릴 때와 htmx 가 갈아 끼울 때가 같은 조각을 쓴다** — 두 벌이면 「고르기 전」과 「고른 뒤」가 갈라진다 |
@@ -179,6 +216,7 @@ themes/{이름}/
 | P-107 | 리다이렉트만 한다 |
 | P-211 | 파일을 그대로 내보낸다 |
 | P-306 | 〃 — 상품 이미지 |
+| P-213 | 〃 — 에디터로 올린 본문 사진 |
 | P-906 | 정적 자산 자체다 |
 | P-907 | 두 글자 평문이다. 로드밸런서가 읽으므로 테마가 관여할 것이 없고, 테마가 그린다면 테마 오류가 곧 인스턴스 장애로 보고된다 |
 
@@ -198,8 +236,8 @@ themes/{이름}/
 | `url "page" .Slug` | 페이지 URL |
 | `url "board" .Slug` | 게시판 목록 URL |
 | `url "post" .BoardSlug .ID` | 글 URL |
-| `url "product" .Slug` | 상품 URL |
-| `url "order" .OrderNo` | 주문 URL |
+| `url "product" .Slug` | 상품 URL (`/shop/p/{slug}`, P-303) |
+| `url "order" .OrderNo` | 주문 URL (`/orders/{orderNo}`, P-502) |
 | `asset "css/style.css"` | 테마 정적 자산 URL. **파일 내용 해시**를 붙인다 → `/static/css/style.css?v=a1b2c3d4` |
 
 > **`isCurrent`·`can`을 함수로 두지 않는다.** 둘 다 요청마다 달라지는 값인데,
@@ -250,13 +288,41 @@ themes/{이름}/
 
 ---
 
+## 본문 그리기 (FR-513)
+
+글(`board/view.html` 의 `.Post`)과 페이지(`page.html` 의 `.Data`)는 **두 가지 본문**을 가진다.
+
+| 이름 | 내용 |
+|---|---|
+| `.Rendered` | 에디터로 쓴 본문의 HTML(코어가 정화한 것). 평문 글이면 빈 값 |
+| `.Body` | 평문. 에디터 이전의 글은 이것뿐이고, 에디터로 쓴 글이면 HTML 의 글자다 |
+
+```
+{{with .Post.Rendered}}<div class="page-body rich">{{.}}</div>{{else}}<div class="page-body">{{nl2br .Post.Body}}</div>{{end}}
+```
+
+`.Rendered` 를 쓰지 않는 테마도 깨지지 않는다 — 에디터로 쓴 글이 평문으로 보일 뿐이다.
+본문 사진은 원본 폭이 클 수 있으니 테마가 `img { max-width: 100% }` 를 준다(내장 테마의 `.rich`).
+
+## 갤러리 목록 (FR-515)
+
+`board/list.html` 은 게시판의 `.Board.ListStyle`(`list`·`gallery`)로 모양을 고른다. 글마다
+`.CoverMediaID` 가 본문 첫 사진의 id 이고(없으면 빈 값) 썸네일은 `/media/{id}/thumb` 다.
+
+```
+{{if and .CoverMediaID (not .IsSecret)}}<img src="/media/{{.CoverMediaID}}/thumb" alt="">{{end}}
+```
+
+**비밀글의 사진은 싣지 않는다.** 목록은 비밀글 제목을 누구에게나 보이지만 사진은 본문이다 —
+`(not .IsSecret)` 를 빠뜨리면 읽을 권한이 없는 사람에게 본문 사진이 나간다.
+
 ## 뷰 모델 규약
 
 모든 템플릿이 공통으로 받는 것.
 
 | 이름 | 내용 |
 |---|---|
-| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보 |
+| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다) |
 | `.Menu` | 메뉴 트리 (FR-405) |
 | `.User` | 로그인 사용자 (미로그인이면 nil). 이메일·표시이름만. **역할·권한 원본은 넘기지 않는다** |
 | `.Can` | 미리 계산된 권한 불리언 맵 ([D15](15-access-control.md) 4.3) |
