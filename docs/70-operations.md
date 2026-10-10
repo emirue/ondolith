@@ -268,10 +268,10 @@ unzip -o ondolith-backup-*.zip 'uploads/*' -d /opt/ondolith   # 업로드 폴더
 
 그다음 `ondolith.json` 의 `database_url` 을 새 DB 로 바꾸고 재시작한다. 복원한 사이트에서는 모두 다시 로그인한다.
 
-**복원 테스트를 하지 않은 백업은 백업이 아니다.** 덤프 → 빈 DB 복원 → 같은 글이 보이는지를
-`ONDOLITH_TEST_PGDUMP=1 go test ./internal/app -run TestBackupRestoresIntoAnEmptyDatabase` 가 본다(`ONDOLITH_TEST_DSN`
-과 PATH 의 `pg_dump`·`pg_restore` 필요). 기본으로 돌지 않는 이유는 CI 러너의 `pg_dump` 버전이 DB 서버보다
-낮을 수 있어서다 ([D85](85-gaps.md) GAP-28).
+**복원 테스트를 하지 않은 백업은 백업이 아니다.** 덤프 → 빈 DB 복원 → 같은 글이 보이는지를 `make test-backup`
+이 본다 — PATH 에 DB 서버와 같은 버전의 `pg_dump`·`pg_restore` 가 있어야 해서 `pgdump` 빌드 태그 뒤에 두고
+`make test-integration` 과 따로 돈다. CI 는 integration 잡에서 PGDG 저장소의 18 클라이언트를 깔고 돌린다
+([D85](85-gaps.md) GAP-28).
 
 ## 지도 키 (FR-716)
 

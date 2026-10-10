@@ -1,3 +1,11 @@
+//go:build pgdump
+
+// pgdump 빌드 태그 뒤에 둔다. 기본 빌드에 들어가면 `make test-integration` 이 DB 서버(18)와 같은
+// 버전의 pg_dump·pg_restore 를 요구하게 되고, 없는 환경에서는 SKIP 이 생긴다 — 그 SKIP 을 이
+// 저장소의 게이트가 거부한다 (scripts/check-testrun.sh). toss_live_test.go 와 같은 이유다.
+//
+// 실행: make test-backup (ONDOLITH_TEST_DSN, PATH 의 pg_dump·pg_restore)
+
 package app
 
 import (
@@ -23,11 +31,8 @@ import (
 // **백업 덤프로 빈 DB 에 복원한 사이트가 같은 글을 보인다** (FR-713, D80 Phase 6 완료 기준).
 //
 // 진짜 pg_dump·pg_restore 가 PATH 에 있어야 하고, 그 버전이 DB 서버보다 낮으면 실패한다 —
-// 그래서 기본으로 돌지 않고 ONDOLITH_TEST_PGDUMP=1 일 때만 돈다 (D70 「백업」, D85 GAP-28).
+// 그래서 pgdump 태그 뒤에 두고 make test-backup 으로 돈다 (D70 「백업」).
 func TestBackupRestoresIntoAnEmptyDatabase(t *testing.T) {
-	if os.Getenv("ONDOLITH_TEST_PGDUMP") == "" {
-		t.Skip("ONDOLITH_TEST_PGDUMP 미설정 — 실제 pg_dump 로 복원까지 보려면 1 로 켠다 (D70 「백업」)")
-	}
 	srv, pool := liveSite(t)
 	ctx := context.Background()
 	mkBoard(t, pool, "free", content.PresetPublic)
