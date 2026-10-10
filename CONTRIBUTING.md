@@ -30,6 +30,14 @@ export ONDOLITH_TEST_DSN='postgres://postgres:testpw@127.0.0.1:55432/ondolith?ss
 make test-integration
 ```
 
+Claude Code 로 작업한다면 프로젝트 플러그인을 처음 한 번 받습니다 (`.claude/settings.json` 이 켜 두지만
+내려받지는 않습니다):
+
+```bash
+claude plugin install andrej-karpathy-skills@karpathy-skills --scope project
+claude plugin install pr-review-toolkit@claude-plugins-official --scope project
+```
+
 문서를 고쳤다면 `make check`의 `docs` 단계가 규칙 위반을 잡습니다 —
 규칙은 [docs/90-conventions.md](docs/90-conventions.md)에 있습니다.
 

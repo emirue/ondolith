@@ -57,7 +57,6 @@
 | [.ai/CLAUDE.md](../.ai/CLAUDE.md) | 루트 `CLAUDE.md`로 가는 포인터 (규칙 본문 없음) |
 | [.ai/DECISIONS.md](../.ai/DECISIONS.md) | **확정 스택 + 배제된 선택지.** 되살리지 말 것 |
 | [.ai/ENGINEERING.md](../.ai/ENGINEERING.md) | **공통화·리팩터링·간결함.** 코드를 어떤 모습으로 남길지 |
-| [.ai/KARPATHY.md](../.ai/KARPATHY.md) | 코딩 행동 지침 (외부 원문) |
 | [.ai/PATTERNS.md](../.ai/PATTERNS.md) | 이 저장소의 코드 관례 |
 | [.ai/MISTAKES.md](../.ai/MISTAKES.md) | 반복된 실수 기록 |
 

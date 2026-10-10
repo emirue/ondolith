@@ -5,13 +5,18 @@ Go 단일 바이너리 CMS + 커머스. 브라우저에서 설치가 끝나고, 
 ## 작업 루프
 
 ```
-1. 읽기    무엇을 만드는지 → docs/10-requirements.md 에서 FR/NFR ID 확인
-           어떻게 만드는지 → 아래 "문서 지도"에서 해당 문서 1개
-2. 구현    요청받은 것만. 추측으로 넓히지 않는다
-3. 검증    make check   ← 통과 전에는 완료가 아니다
-4. 갱신    바뀐 결정 → .ai/DECISIONS.md / 새 문서 → docs/README.md 인덱스
+1. 읽기    무엇을 만드는지 → docs/10-requirements.md 에서 FR/NFR ID 확인 (없으면 D90 대로 먼저 추가)
+           어떻게 만드는지 → 아래 "문서 지도"에서 해당 문서 1개 + 같은 일을 하는 기존 코드
+2. 구현    요청받은 것만. 추측으로 넓히지 않는다 — 모호하면 묻는다. 성공 조건(테스트)을 먼저 정한다
+3. 검증    아래 "검증" — make check 통과 전에는 완료가 아니다
+4. 검토    git diff 전체 — karpathy-diff 스킬, 로직이면 /pr-review-toolkit:review-pr code errors tests
+           (.ai/ENGINEERING.md 6절). 걸리는 줄은 지우고 다시 검증한다
+5. 갱신    바뀐 결정 → .ai/DECISIONS.md / 새 문서 → docs/README.md 인덱스
            사용자에게 보이는 변경 → CHANGELOG.md
 ```
+
+여러 단계에 걸친 작업은 [D81](docs/81-work-breakdown.md) 의 W 행이 계획이자 진행 상태다 — 별도 상태
+파일을 만들지 않는다 ([D82](docs/82-execution-loop.md) L3).
 
 커밋 메시지에 요구사항 ID를 적는다. 예: `install: 관리자 계정 생성 (FR-104)`
 
@@ -31,8 +36,11 @@ Go 단일 바이너리 CMS + 커머스. 브라우저에서 설치가 끝나고, 
 | 다음에 뭘 할지 | [docs/80-roadmap.md](docs/80-roadmap.md) |
 | **작업을 실제로 돌릴 때** | [docs/82-execution-loop.md](docs/82-execution-loop.md) — `scripts/next-task.sh` |
 | **문서를 쓰거나 요구사항을 추가** | [docs/90-conventions.md](docs/90-conventions.md) |
-| **코드를 어떤 모습으로 남길지** | [.ai/ENGINEERING.md](.ai/ENGINEERING.md) — 공통화·리팩터링·간결함 |
-| 코딩 행동 지침 (원문) | [.ai/KARPATHY.md](.ai/KARPATHY.md) |
+| 패키지 경계·오류·로깅·SQL·테스트 관례 | [docs/22-dev-standards.md](docs/22-dev-standards.md) |
+| **코드를 어떤 모습으로 남길지** | [.ai/ENGINEERING.md](.ai/ENGINEERING.md) — 공통화·리팩터링·간결함·diff 검토 |
+| 코딩 행동 지침 (원문) | `karpathy-guidelines` 스킬 — 프로젝트 플러그인 `andrej-karpathy-skills`. 코드를 쓰거나 고칠 때 불러온다 |
+
+**도구**: 쓰는 플러그인·스킬과 이 저장소에서 막아 둔 것(`.claude/settings.json`)은 [.ai/ENGINEERING.md](.ai/ENGINEERING.md) 6절.
 
 **라이브러리·기술 선택을 제안하기 전에 반드시:** [.ai/DECISIONS.md](.ai/DECISIONS.md)
 — 이미 배제된 것을 되살리지 않기 위한 목록이다.
@@ -54,10 +62,16 @@ Go 단일 바이너리 CMS + 커머스. 브라우저에서 설치가 끝나고, 
 ## 검증
 
 ```bash
+# 빠른 검증 — 매 변경
 make check            # build + vet + gofmt + test(-race) + docs + selftest — 완료 선언 전 필수
-make test-integration # 실제 PostgreSQL 대상 설치 흐름 (ONDOLITH_TEST_DSN 필요)
+# 전체 검증 — 해당할 때. CI 와 같은 명령이다
+make test-integration # 스키마·쿼리·트랜잭션을 건드렸을 때 (ONDOLITH_TEST_DSN, 없으면 Docker 로 띄운다)
+make ui               # 템플릿·CSS·JS 를 바꿨을 때 — 전 화면 3폭 측정 + 에디터 브라우저 시험 (Chrome·Docker)
+make screens && make crawl && make e2e   # 라우트·화면 흐름을 바꿨을 때 (Docker)
 make run              # 로컬 실행 (개발)
 ```
+
+돌리지 못한 검증은 통과로 세지 않고 「못 돌렸다」와 이유를 적는다.
 
 - `docs` 단계가 [D90](docs/90-conventions.md)의 문서 규칙을 강제한다 — 깨진 링크,
   정의되지 않은 ID 인용, 인덱스 미등록 문서는 빌드를 깨뜨린다

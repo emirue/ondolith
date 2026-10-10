@@ -16,6 +16,16 @@
       "Bash(git log:*)",
       "Bash(git branch:*)",
       "Bash(git show:*)"
+    ],
+    "deny": [
+      "Agent(pr-review-toolkit:code-simplifier)",
+      "Skill(antislop)",
+      "Skill(antislop-code)",
+      "Skill(antislop-copywriting)",
+      "Skill(antislop-human)",
+      "Skill(antislop-layoutmobile)",
+      "Skill(antislop-ui)",
+      "Skill(karpathy-wiki)"
     ]
   },
   "hooks": {
@@ -30,5 +40,17 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "andrej-karpathy-skills@karpathy-skills": true,
+    "pr-review-toolkit@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "karpathy-skills": {
+      "source": {
+        "source": "github",
+        "repo": "multica-ai/andrej-karpathy-skills"
+      }
+    }
   }
 }
