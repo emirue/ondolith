@@ -667,12 +667,15 @@ func TestLoginRateLimitIsPerVisitorBehindTheProxy(t *testing.T) {
 		return resp.StatusCode
 	}
 	// 한 방문자가 한도(분당 10)를 넘긴다 — 계정은 매번 달리해 IP 버킷만 찬다.
-	last := 0
-	for i := 0; i < 11; i++ {
-		last = try("203.0.113.5", i)
+	// **「11번째」로 단언하지 않는다.** 버킷은 계속 채워진다(6초에 1개) — CI 에서 11번에 7.5초가
+	// 걸리자 그사이 1개가 다시 차 11번째가 통과했다. 429 가 나올 때까지 보내고, 한도의 세 배를
+	// 보내도 막히지 않으면 실패다.
+	limited := false
+	for i := 0; i < 30 && !limited; i++ {
+		limited = try("203.0.113.5", i) == http.StatusTooManyRequests
 	}
-	if last != http.StatusTooManyRequests {
-		t.Fatalf("한도를 넘긴 방문자의 11번째 = HTTP %d, want 429", last)
+	if !limited {
+		t.Fatal("한 방문자가 30번 연속 틀려도 429 가 나오지 않았다")
 	}
 	// 다른 방문자는 막히지 않는다.
 	if code := try("203.0.113.9", 99); code == http.StatusTooManyRequests {
