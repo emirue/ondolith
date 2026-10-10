@@ -174,6 +174,8 @@ func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 var siteSettingKeys = []string{
 	"site.name", "site.meta_description", "site.og_image", "site.dev_mode", "site.type",
 	"auth.email_verification_required",
+	// 회원가입을 닫는다 (FR-217). 빈 값이 「받음」이라 이 키가 없던 사이트는 지금처럼 열려 있다.
+	"auth.signup_closed",
 	// 관리자 콘솔 배색. **부팅 때 읽던 값인데 그것을 저장하는 화면이 없었다** —
 	// 다섯 방향이 스타일시트에 있는데 고를 방법이 없었다.
 	"admin.theme",

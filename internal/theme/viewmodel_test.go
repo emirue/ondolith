@@ -108,6 +108,8 @@ func TestSiteCarriesOnlyRenderableFields(t *testing.T) {
 		"Analytics": true,
 		// 지도 키 — 지도 SDK 를 부르는 공개값이다 (FR-716).
 		"Maps": true,
+		// 가입을 닫았는지 — 가입 링크를 감추는 데 쓴다 (FR-217).
+		"SignupClosed": true,
 	}
 	for i := 0; i < ty.NumField(); i++ {
 		if f := ty.Field(i); !allowed[f.Name] {

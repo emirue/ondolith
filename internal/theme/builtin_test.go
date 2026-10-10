@@ -837,3 +837,30 @@ func TestGalleryListShowsCoversButNotSecretOnes(t *testing.T) {
 		t.Error("갤러리 게시판이 표 목록까지 그렸다")
 	}
 }
+
+// **가입을 닫으면 가입으로 가는 길이 화면에서 사라진다** (FR-217). 머리글·로그인 화면의
+// 링크와 가입 폼이다 — 남겨 두면 누른 사람은 403 을 만난다. 막는 것은 서버이고 이것은 안내다.
+func TestClosedSignupHidesTheWayIn(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(name string, closed bool) string {
+		v := fullView()
+		v.User = nil
+		v.Site.SignupClosed = closed
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	for _, name := range []string{"page.html", "auth/login.html", "auth/signup.html"} {
+		if open := render(name, false); !strings.Contains(open, `"/signup"`) {
+			t.Errorf("%s: 가입이 열려 있는데 가입 링크·폼이 없다", name)
+		}
+		if closed := render(name, true); strings.Contains(closed, `"/signup"`) {
+			t.Errorf("%s: 가입을 닫았는데 가입 링크·폼이 남았다", name)
+		}
+	}
+	if !strings.Contains(render("auth/signup.html", true), "회원가입을 받지 않습니다") {
+		t.Error("닫힌 가입 화면이 이유를 말하지 않는다")
+	}
+}

@@ -333,6 +333,26 @@ func TestMapKeysOnSiteSettings(t *testing.T) {
 	}
 }
 
+// **회원가입은 A-201 에서 닫고 다시 연다** (FR-217). 빈 값이 「받음」이다.
+func TestSignupCloseOnSiteSettings(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	saved := func() string {
+		kv, err := d.Content.Settings(context.Background(), "auth.signup_closed")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kv["auth.signup_closed"]
+	}
+	for _, want := range []string{"1", ""} {
+		if rec := post(d.SettingsSave, "/admin/settings", url.Values{"auth.signup_closed": {want}}); rec.Code != http.StatusSeeOther {
+			t.Fatalf("auth.signup_closed=%q 저장 = HTTP %d", want, rec.Code)
+		}
+		if got := saved(); got != want {
+			t.Errorf("auth.signup_closed = %q, want %q", got, want)
+		}
+	}
+}
+
 // 관리자 페이지 편집(A-302)도 에디터의 「지도 넣기」 가 쓸 키를 받는다 (FR-716).
 func TestPageFormCarriesMapKeys(t *testing.T) {
 	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"page.create": true, "page.update": true}})

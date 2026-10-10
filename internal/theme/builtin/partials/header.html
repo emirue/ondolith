@@ -26,7 +26,7 @@
       <form method="post" action="/logout" class="inline"><button type="submit">로그아웃</button></form>
     {{else}}
       <a href="/login">로그인</a>
-      <a href="/signup">회원가입</a>
+      {{if not .Site.SignupClosed}}<a href="/signup">회원가입</a>{{end}}
     {{end}}
   </nav>
 </header>

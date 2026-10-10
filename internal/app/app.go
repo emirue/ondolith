@@ -219,7 +219,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 	site := func() theme.Site {
 		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type", "analytics.ga4_id",
-			"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id")
+			"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id", "auth.signup_closed")
 		s := theme.Site{
 			Name:            kv["site.name"],
 			MetaDescription: kv["site.meta_description"],
@@ -228,6 +228,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			Analytics:       kv["analytics.ga4_id"],
 			Maps: theme.MapKeys{Naver: kv["map.naver_key"], Kakao: kv["map.kakao_key"],
 				Google: kv["map.google_key"], GoogleMapID: kv["map.google_map_id"]},
+			SignupClosed: kv["auth.signup_closed"] != "",
 		}
 		if s.Name == "" {
 			s.Name = cfg.SiteName
@@ -281,6 +282,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	verifyRequired := func() bool {
 		return setting("auth.email_verification_required")["auth.email_verification_required"] != ""
 	}
+	// A-201 의 「회원가입 받지 않음」 (FR-217). 테마의 가입 링크(site().SignupClosed)와 같은 키다.
+	signupClosed := func() bool { return setting("auth.signup_closed")["auth.signup_closed"] != "" }
 	// 오류 원문은 **개발 빌드에서만** 보인다. `site.dev_mode` 는 DB 설정이라
 	// 관리자 폼 하나로 켜지고, 테마 작업(FR-306 재파싱)을 위해 켜 둔 채 잊으면
 	// 공개 500 페이지가 pgx 오류·파일 경로를 찍는다 — D60 이 원문을 허용한
@@ -330,7 +333,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	turnstile := auth.Turnstile{Client: &http.Client{Timeout: 10 * time.Second}, URL: auth.TurnstileVerifyURL}
 	spam := spamGuard{keys: turnstileKeys, verify: turnstile.Verify, log: log}
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
-		userFields: contentStore.UserFields, verifyRequired: verifyRequired, spam: spam}
+		userFields: contentStore.UserFields, verifyRequired: verifyRequired, signupClosed: signupClosed, spam: spam}
 
 	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
 	// five directions share one markup, so switching is a token swap.
