@@ -48,12 +48,15 @@ var richPolicy = func() *bluemonday.Policy {
 	p.AllowAttrs("src").Matching(embedSrc).OnElements("iframe")
 	p.AllowAttrs("allowfullscreen").Matching(regexp.MustCompile(`^(|allowfullscreen|true)$`)).OnElements("iframe")
 	p.AllowAttrs("frameborder").Matching(regexp.MustCompile(`^0$`)).OnElements("iframe")
-	// 유튜브·지도는 스크립트가 있어야 돈다. 출처가 우리와 다른 iframe 이라
-	// allow-same-origin 은 **그 서비스 자신의** 출처를 뜻한다 — 우리 쿠키에 닿지 않는다.
-	p.RequireSandboxOnIFrame(bluemonday.SandboxAllowScripts, bluemonday.SandboxAllowSameOrigin,
-		bluemonday.SandboxAllowPopups, bluemonday.SandboxAllowPresentation)
+	// 모든 iframe 에 sandbox 를 둔다. 값은 iframeSandbox 가 정한다 — 이 호출은 보낸 sandbox 를
+	// 버리고 `sandbox=""` 를 붙일 뿐이다(sandbox 를 허용 속성에 두지 않았으므로).
+	p.RequireSandboxOnIFrame()
 	return p
 }()
+
+// iframeSandbox is what a YouTube embed needs: 플레이어가 스크립트로 돈다. 출처가 우리와 다른
+// iframe 이라 allow-same-origin 은 **그 서비스 자신의** 출처를 뜻한다 — 우리 쿠키에 닿지 않는다.
+const iframeSandbox = `sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"`
 
 // embedSrc is the iframe allow-list: YouTube embeds — 공유 메뉴의 「퍼가기」가 주는
 // 주소 그대로다. 지도는 iframe 이 아니라 지도 블록이다(FR-716).
@@ -61,7 +64,10 @@ var embedSrc = regexp.MustCompile(`^https://www\.youtube(-nocookie)?\.com/embed/
 
 // SanitizeRichText returns body HTML with only what richPolicy allows.
 func SanitizeRichText(raw string) string {
-	return strings.TrimSpace(richPolicy.Sanitize(raw))
+	// bluemonday 의 RequireSandboxOnIFrame 은 **있는** sandbox 의 값을 거를 뿐, 없으면 전부 금지인
+	// `sandbox=""` 를 붙인다(v1.0.27 sanitize.go). 그대로 두면 모든 유튜브가 「자바스크립트를 실행할
+	// 수 없습니다」다. 정화 뒤의 `sandbox=""` 는 iframe 에만 있다 — 글자·다른 속성 값의 따옴표는 &#34; 로 나간다.
+	return strings.TrimSpace(strings.ReplaceAll(richPolicy.Sanitize(raw), `sandbox=""`, iframeSandbox))
 }
 
 // blockTags end a line in the plain-text form.

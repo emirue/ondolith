@@ -980,13 +980,19 @@ func TestUserCreateValidatesAndAssignsNoRole(t *testing.T) {
 	}); rec.Code != http.StatusConflict {
 		t.Errorf("중복 이메일이 HTTP %d 로 통과했다", rec.Code)
 	}
-	// 짧은 비밀번호·빈 이름은 거부.
-	for name, form := range map[string]url.Values{
-		"짧은 비밀번호": {"email": {"a@b.com"}, "password": {"짧다"}, "display_name": {"가"}},
-		"빈 이름":    {"email": {"c@d.com"}, "password": {"correct horse battery"}, "display_name": {"  "}},
+	// 짧은 비밀번호·빈 이름·이메일 형식은 거부. 문구는 사람이 읽는 말이다 — 가입(P-103)과 같은 문장이고,
+	// 내부 오류 문자열(`content: …`)이 아니다.
+	for name, tc := range map[string]struct {
+		form url.Values
+		want string
+	}{
+		"짧은 비밀번호": {url.Values{"email": {"a@b.com"}, "password": {"짧다"}, "display_name": {"가"}}, "비밀번호는 10자 이상이어야 합니다."},
+		"빈 이름":    {url.Values{"email": {"c@d.com"}, "password": {"correct horse battery"}, "display_name": {"  "}}, "표시 이름은 1~50자입니다."},
+		"이메일 형식":  {url.Values{"email": {"not-an-email"}, "password": {"correct horse battery"}, "display_name": {"가"}}, "이메일 형식이 올바르지 않습니다."},
 	} {
-		if rec := post(d.UserCreate, "/admin/users", form); rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("%s가 HTTP %d 로 통과했다", name, rec.Code)
+		rec := post(d.UserCreate, "/admin/users", tc.form)
+		if body := rec.Body.String(); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, "Error="+tc.want) {
+			t.Errorf("%s: HTTP %d %q, want 422 「%s」", name, rec.Code, body, tc.want)
 		}
 	}
 }

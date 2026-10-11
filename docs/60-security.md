@@ -178,7 +178,7 @@ NFR-101의 티어에서 무제한 본문 버퍼링은 그 자체가 DoS 표면�
 |---|---|
 | 문단·제목·목록·인용·표·굵게/기울임/밑줄/취소선·링크(http·https·mailto·tel, 외부 링크는 `rel="nofollow noopener"`·새 창) | `script`·`style`·`svg`·`object`·`form`·`meta`·`base`, 모든 `on*` 속성, `javascript:`·`data:` 주소 |
 | 인라인 스타일 중 색(`#hex`·`rgb()`)·정렬(4값)·글자 크기·크기(px·%) — **값까지** 검사 | 그 밖의 스타일(`url(`·`expression(` 이 들어갈 자리가 없다), `class`(사이트의 클래스로 화면을 흉내 낼 수 있다) |
-| `iframe` — `https://www.youtube(-nocookie).com/embed/…` 만, `sandbox` 를 붙여서 | 그 밖의 iframe 은 요소째 (키 없는 구글 지도 iframe 도 — 지도는 지도 블록이다) |
+| `iframe` — `https://www.youtube(-nocookie).com/embed/…` 만, `sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"` 을 붙여서(보낸 sandbox 는 버린다. 비운 `sandbox=""` 는 플레이어가 돌지 않는다) | 그 밖의 iframe 은 요소째 (키 없는 구글 지도 iframe 도 — 지도는 지도 블록이다) |
 | 지도 블록 `<img data-map data-lat data-lng data-zoom data-label>` (FR-716) — 지도사는 셋 중 하나, 좌표·확대는 숫자 모양, 이름은 `"<>` 없이 100자 | 이미지 밖의 `data-*`, 모양이 다른 값. **본문에 스크립트를 들이지 않는다** — 지도사 SDK 는 테마의 `maps.js` 가 관리자가 넣은 키로 부르고, 블록이 주는 것은 지도사·좌표·확대·이름뿐이다(이름은 `textContent` 로 쓴다) |
 
 평문(`body`)은 정화된 HTML 에서 글자만 뽑은 것이다 — 블록이 끝나면 줄을 바꾸고 엔티티를
