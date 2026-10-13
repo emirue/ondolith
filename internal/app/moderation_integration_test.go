@@ -245,6 +245,20 @@ func TestBoardCreationToPublicFormIsScreensOnly(t *testing.T) {
 		t.Fatalf("필드 추가 HTTP %d", resp.StatusCode)
 	}
 
+	// 선택지 없는 select 는 DB 의 board_fields_options_when 이 거부한다. 그 말이
+	// 제약 이름으로 화면에 나가지 않고, 다시 그린 폼이 같은 게시판으로 보낸다.
+	resp = post("/admin/boards/"+boardID+"/fields", url.Values{
+		"key": {"size"}, "label": {"크기"}, "field_type": {"select"},
+	})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("선택지 없는 select = HTTP %d, want 422", resp.StatusCode)
+	}
+	page := readAll(t, resp)
+	refusalShown(t, page, "select·multiselect 항목에는 선택지를 하나 이상 입력해 주세요.")
+	if !strings.Contains(page, `action="/admin/boards/`+boardID+`/fields"`) {
+		t.Error("다시 그린 폼이 이 게시판으로 보내지 않는다")
+	}
+
 	// 공개 쓰기 폼에 나타난다 — 코드 수정 없이.
 	mkUser(t, pool, "m@example.com")
 	visitor := client()
@@ -483,9 +497,16 @@ func TestThemeUploadInstallsAndRefusesZipSlip(t *testing.T) {
 		"base.html":       "<html></html>",
 		"../escaped.html": "탈출",
 	})
-	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("Zip Slip 이 HTTP %d 로 통과했다", resp.StatusCode)
+	}
+	refusalShown(t, readAll(t, resp),
+		"테마를 설치하지 못했습니다. 압축 파일에 허용되지 않는 항목(심볼릭 링크, 상위 폴더 경로 등)이 있습니다.")
+	// 공격 시도 신호라 작업 로그에 남는다 (D19 A-203).
+	var logged int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM operation_logs WHERE summary LIKE '테마 업로드 거부%'`).Scan(&logged); err != nil || logged != 1 {
+		t.Errorf("Zip Slip 작업 로그 %d건 (%v), want 1", logged, err)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(themeRoot), "escaped.html")); err == nil {
 		t.Error("테마 루트 밖에 파일이 생겼다")

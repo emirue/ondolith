@@ -10,6 +10,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/content"
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 // ---- A-204 메뉴 관리 ---------------------------------------------------------
@@ -111,7 +112,7 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := content.BuildMenu(probe, nil); err != nil {
 		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "메뉴 구조가 올바르지 않습니다: " + err.Error()})
+			map[string]any{"Error": d.refusal(r, menuMessage(err), err)})
 		return
 	}
 
@@ -332,7 +333,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 	warn, err := d.ValidateTheme(name)
 	if err != nil {
 		d.Render(w, r, "admin/themes.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "이 테마는 활성화할 수 없습니다: " + err.Error()})
+			map[string]any{"Error": d.themeRefusal(r, "테마를 활성화하지 못했습니다.", err)})
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), map[string]string{"theme.active": name}); err != nil {
@@ -428,8 +429,13 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := d.InstallTheme(name, ra, size, true); err != nil {
+		// 상위 경로·심볼릭 링크 항목은 공격 시도 신호다 — 작업 로그에 남긴다 (D19 A-203).
+		// 재인증한 관리자만 닿는 경로라 밖에서 이 기록을 불릴 수 없다.
+		if errors.Is(err, theme.ErrZipEntry) {
+			d.log(r, c, "theme.upload", "theme", name, "테마 업로드 거부 — 압축 파일에 허용되지 않는 항목")
+		}
 		d.Render(w, r, "admin/theme-upload.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "설치하지 못했습니다: " + err.Error()})
+			map[string]any{"Error": d.themeRefusal(r, "테마를 설치하지 못했습니다.", err)})
 		return
 	}
 	// D15 7절: 테마 변경은 사이트 전체에 영향을 준다.

@@ -112,7 +112,7 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 	custom, err := content.ValidateCustomFields(fields, accountCustomValues(r, fields), nil)
 	if err != nil {
 		d.render(w, r, "auth/signup.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": err.Error(), "Form": f,
+			map[string]any{"Error": fieldsMessage(err), "Form": f,
 				"Inputs": content.FieldInputs(fields, nil)})
 		return
 	}
@@ -440,7 +440,7 @@ func (d *accountDeps) updateProfile(w http.ResponseWriter, r *http.Request) {
 	// JSONB 에 넣으면 그것이 곧 대량 할당이다.
 	custom, err := content.ValidateCustomFields(fields, accountCustomValues(r, fields), prev)
 	if err != nil {
-		redraw(http.StatusUnprocessableEntity, err.Error())
+		redraw(http.StatusUnprocessableEntity, fieldsMessage(err))
 		return
 	}
 	// Ownership is the session's user id, never a form field: SC-3 says the

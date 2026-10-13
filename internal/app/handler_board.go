@@ -232,7 +232,7 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 
 	custom, err := content.ValidateCustomFields(fields, customValues(r), nil)
 	if err != nil {
-		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, err)
+		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, fieldsMessage(err))
 		return
 	}
 	// board_id and author_id are NOT read from the form (SC-2 5항). The board
@@ -243,7 +243,7 @@ func (d *boardDeps) postCreate(w http.ResponseWriter, r *http.Request) {
 	form.CustomFields = custom
 	// 다른 검증을 다 지난 뒤에 본다 — Turnstile 은 바깥 호출이고 토큰은 한 번만 쓴다.
 	if code, msg := d.spam.check(r); code != 0 {
-		d.renderFormError(w, r, b, fields, form, code, errors.New(msg))
+		d.renderFormError(w, r, b, fields, form, code, msg)
 		return
 	}
 
@@ -345,7 +345,7 @@ func (d *boardDeps) postUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	custom, err := content.ValidateCustomFields(fields, customValues(r), p.CustomFields)
 	if err != nil {
-		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, err)
+		d.renderFormError(w, r, b, fields, form, http.StatusUnprocessableEntity, fieldsMessage(err))
 		return
 	}
 	form.CustomFields = custom
@@ -420,19 +420,19 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 		IsSecret: b.AllowSecret && r.PostFormValue("is_secret") != "",
 	}
 	if p.Title == "" {
-		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, errors.New("제목을 입력하세요."))
+		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, "제목을 입력하세요.")
 		return content.Post{}, nil, false
 	}
 	return p, fields, true
 }
 
 func (d *boardDeps) renderFormError(w http.ResponseWriter, r *http.Request,
-	b *content.Board, fields []content.FieldSchema, p content.Post, code int, err error,
+	b *content.Board, fields []content.FieldSchema, p content.Post, code int, msg string,
 ) {
 	v := d.view(r, b.Name+" 글쓰기", "")
 	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": &p,
 		"Inputs":    content.FieldInputs(fields, p.CustomFields),
-		"CanSecret": b.AllowSecret, "Error": err.Error()}
+		"CanSecret": b.AllowSecret, "Error": msg}
 	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"), code, v)
 }
 
@@ -444,6 +444,20 @@ func (d *boardDeps) renderFormError(w http.ResponseWriter, r *http.Request,
 func (d *boardDeps) renderUploadError(w http.ResponseWriter, r *http.Request,
 	b *content.Board, postID string, err error,
 ) {
+	msg := uploadMessage(err)
+	switch {
+	case msg == "":
+		// 디스크·DB 고장이다. 원인은 경로와 SQL 을 담고 있어 화면에 내지 않는다.
+		d.log.Error("첨부 저장 실패", "post", postID, "err", err)
+		msg = "잠시 후 다시 시도해 주세요."
+	case errors.Is(err, content.ErrUploadSetting):
+		// 손님이 고칠 수 없는 운영자 설정이다 — 운영자가 알 길은 로그뿐이다.
+		d.log.Error("첨부 설정 오류", "post", postID, "err", err)
+	case errors.Is(err, content.ErrUploadExt), errors.Is(err, content.ErrUploadContent):
+		// 위장 파일·허용 밖 확장자는 공격 시도 신호다 (D19 P-205). 로그인한 회원이 글을
+		// 써야 닿는 경로라 밖에서 이 로그를 불릴 수 없다.
+		d.log.Warn("첨부 거부", "post", postID, "err", err)
+	}
 	ctx := r.Context()
 	p, perr := d.content.PostByID(ctx, postID, "", true)
 	fields, ferr := d.content.BoardFields(ctx, b.ID)
@@ -455,7 +469,7 @@ func (d *boardDeps) renderUploadError(w http.ResponseWriter, r *http.Request,
 	v.Data = map[string]any{"Board": b, "Fields": fields, "Post": p,
 		"Inputs":    content.FieldInputs(fields, p.CustomFields),
 		"CanSecret": b.AllowSecret,
-		"Error":     "글은 저장했지만 첨부를 받지 못했습니다: " + err.Error()}
+		"Error":     "글은 저장되었지만 파일을 첨부하지 못했습니다. " + msg}
 	d.renderPage(w, r, d.boardTemplate(b, "board/form.html"),
 		http.StatusUnprocessableEntity, v)
 }

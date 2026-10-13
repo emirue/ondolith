@@ -112,7 +112,7 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 
 		sell := Sellable{ProductVisible: r.ProductVisible, VariantVisible: r.VariantVisible, Stock: int(r.Stock)}
 		if err := sell.CheckAvailable(l.quantity); err != nil {
-			return nil, fmt.Errorf("%s: %w", l.name, err)
+			return nil, ItemError{Name: l.name, Err: err}
 		}
 		l.unitPrice = basePrice + priceDelta
 
@@ -124,9 +124,14 @@ func (s *Store) CreateOrder(ctx context.Context, o CartOwner, userID string,
 		return nil, ErrCartEmpty
 	}
 
-	// (2) 재고 차감. 잠금 순서가 정해져 있어 교착이 생기지 않는다.
+	// (2) 재고 차감. 잠금 순서가 정해져 있어 교착이 생기지 않는다. 여기서 모자라면
+	// 위 검사 뒤에 다른 주문이 마지막 재고를 가져간 것이다 — 그 품목의 이름을 붙인다.
 	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
-		return nil, err
+		names := make(map[string]string, len(lines))
+		for _, l := range lines {
+			names[l.variantID] = l.name
+		}
+		return nil, nameShortItem(err, names)
 	}
 
 	// (3) 금액은 서버가 계산한다. 폼에는 금액 필드가 없다 — 할인도 마찬가지다.
@@ -652,4 +657,16 @@ func (s *Store) OpenOrders(ctx context.Context) (int, error) {
 	}
 	n, err := s.q.OpenOrders(ctx, open)
 	return int(n), err
+}
+
+// nameShortItem puts the product's name on an AdjustStock shortfall. An order has
+// several lines, and 「품절된 상품입니다」 does not say which one (D19 P-406).
+func nameShortItem(err error, names map[string]string) error {
+	var se *StockError
+	if errors.As(err, &se) {
+		if name, ok := names[se.VariantID]; ok {
+			return ItemError{Name: name, Err: err}
+		}
+	}
+	return err
 }

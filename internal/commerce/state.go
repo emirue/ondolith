@@ -160,6 +160,23 @@ func Next(s Status, actor Actor) []Status {
 	return out
 }
 
+// TransitionError is a refused move with both ends, for the sentence D19 A-506
+// asks for (「{현재}에서 {목표}로 변경할 수 없습니다」). Err is
+// ErrTransitionNotAllowed, or ErrActorNotAllowed with Actor set.
+type TransitionError struct {
+	Err      error
+	From, To Status
+	Actor    Actor
+}
+
+func (e *TransitionError) Error() string {
+	if e.Actor != "" {
+		return fmt.Sprintf("%v: %s → %s (%s)", e.Err, e.From, e.To, e.Actor)
+	}
+	return fmt.Sprintf("%v: %s → %s", e.Err, e.From, e.To)
+}
+func (e *TransitionError) Unwrap() error { return e.Err }
+
 // CanTransition checks one move.
 //
 // Both the pair and the actor are checked. Checking only the pair would let
@@ -175,12 +192,12 @@ func CanTransition(from, to Status, actor Actor) error {
 	}
 	actors, ok := next[to]
 	if !ok {
-		return fmt.Errorf("%w: %s → %s", ErrTransitionNotAllowed, from, to)
+		return &TransitionError{Err: ErrTransitionNotAllowed, From: from, To: to}
 	}
 	for _, a := range actors {
 		if a == actor {
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: %s → %s (%s)", ErrActorNotAllowed, from, to, actor)
+	return &TransitionError{Err: ErrActorNotAllowed, From: from, To: to, Actor: actor}
 }

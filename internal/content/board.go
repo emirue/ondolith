@@ -209,11 +209,12 @@ func (s *Store) BoardFields(ctx context.Context, boardID string) ([]FieldSchema,
 
 // SaveBoardField inserts or updates one field definition.
 //
-// The reserved-key check runs here as well as in the handler: this is the last
-// place before the database, and the database deliberately does not hold the
-// list (D30 — it would grow with every column added).
+// The definition is checked here because this is the last place before the
+// database: the reserved keys are not in the database at all (D30 — the list
+// would grow with every column added), and what the CHECKs refuse would reach
+// the screen as a constraint name.
 func (s *Store) SaveBoardField(ctx context.Context, boardID string, f FieldSchema) error {
-	if err := ValidateFieldKey(f.Key); err != nil {
+	if err := ValidateBoardField(f); err != nil {
 		return err
 	}
 	opts, err := fieldOptions(f.Options)

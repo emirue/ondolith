@@ -228,7 +228,7 @@ func (s *Store) AdjustStock(ctx context.Context, tx pgx.Tx, deltas []StockDelta)
 			return err
 		}
 		if int(stock)+d.Delta < 0 {
-			return fmt.Errorf("%w: 재고 %d, 요청 %d", ErrOutOfStock, stock, -d.Delta)
+			return &StockError{Want: -d.Delta, Left: int(stock), VariantID: d.VariantID}
 		}
 		if err := q.AddVariantStock(ctx, commerceq.AddVariantStockParams{
 			ID: d.VariantID, Delta: int32(d.Delta)}); err != nil {

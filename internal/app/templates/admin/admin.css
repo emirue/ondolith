@@ -743,30 +743,6 @@ dl { margin: 0 0 var(--s20); }
 .adm-detail dt { opacity: .6; }
 .adm-detail dd { margin: 0; }
 
-/* ═══ 알림 ═════════════════════════════════════════════════════════════════ */
-.adm-alert {
-  display: flex;
-  align-items: center;
-  gap: var(--s10);
-  margin: 0 0 var(--s20);
-  padding: var(--s12) var(--s16);
-  border-radius: var(--chip-radius);
-  background: var(--toast-bg);
-  color: var(--toast-ink);
-  font-size: 13.5px;
-}
-
-.adm-alert::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 99px;
-  background: currentColor;
-  flex: none;
-}
-
-.adm-alert--error { background: var(--danger-bg); color: var(--danger); }
-
 /* ═══ 폼 · 패널 ════════════════════════════════════════════════════════════ */
 /* 칸이 화면 폭을 다 쓰면 「택배사」 한 단어를 치는 칸이 980px 가 된다. */
 .adm-form { display: grid; gap: var(--s14); margin: 0 0 var(--s20); max-width: 40rem; }

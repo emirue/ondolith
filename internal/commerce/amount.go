@@ -24,9 +24,9 @@ const MaxAmount = 2_000_000_000
 
 const maxAmount = MaxAmount
 
-// maxQuantity 는 한 품목당 상한이다. D19 P-405 의 폼 상한과 같은 값이어야
+// MaxQuantity 는 한 품목당 상한이다. D19 P-405 의 폼 상한과 같은 값이어야
 // 하는데, 폼 검증은 브라우저가 건너뛸 수 있으므로 계산 경로에도 둔다.
-const maxQuantity = 999
+const MaxQuantity = 999
 
 // Line is one order line's inputs. 가격은 상품·조합에서 읽은 값이고 클라이언트가
 // 보낸 값이 아니다 — 그 구분이 이 구조체에 `Price` 필드가 있는 이유이자,
@@ -55,8 +55,8 @@ func (l Line) UnitPrice() (int, error) {
 
 // Amount is the line total — order_items.line_amount 의 생성 컬럼과 같은 식이다.
 func (l Line) Amount() (int, error) {
-	if l.Quantity < 1 || l.Quantity > maxQuantity {
-		return 0, fmt.Errorf("%w: %d (1~%d)", ErrQuantityRange, l.Quantity, maxQuantity)
+	if l.Quantity < 1 || l.Quantity > MaxQuantity {
+		return 0, fmt.Errorf("%w: %d (1~%d)", ErrQuantityRange, l.Quantity, MaxQuantity)
 	}
 	unit, err := l.UnitPrice()
 	if err != nil {

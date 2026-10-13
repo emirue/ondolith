@@ -330,12 +330,26 @@ func TestAdminTransitionIsCheckedByTheServer(t *testing.T) {
 	order, _ := paidAdminOrder(t, d, pool)
 	ctx := context.Background()
 
+	// 다시 그린 화면의 데이터를 본다 — 픽스처의 렌더러는 문자열 값만 본문에 쓴다.
+	var drawn map[string]any
+	render := d.Render
+	d.Render = func(w http.ResponseWriter, r *http.Request, name string, code int, data any) {
+		drawn, _ = data.(map[string]any)
+		render(w, r, name, code, data)
+	}
+
 	// 결제완료 → 배송완료 는 표에 없다 (배송준비·배송중을 거쳐야 한다).
 	rec := postAdmin(t, d.OrderTransition, "/admin/orders/"+order.OrderNo+"/transition",
 		map[string]string{"no": order.OrderNo},
 		url.Values{"to": {string(commerce.StatusDelivered)}})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("표에 없는 전이 = HTTP %d, want 422", rec.Code)
+	}
+	// 거부 문구와 함께 그 주문의 상세(A-505)가 다시 그려진다 — 오류만 넘기던 판은
+	// 주문 없는 빈 상세를 그렸다.
+	refusalShown(t, rec.Body.String(), "「결제완료」 상태에서 「배송완료」 상태로 변경할 수 없습니다.")
+	if got, _ := drawn["Order"].(*commerce.OrderDetail); got == nil || got.OrderNo != order.OrderNo {
+		t.Errorf("거부된 뒤 다시 그린 화면의 주문 = %v, want %s", drawn["Order"], order.OrderNo)
 	}
 	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaid)
 

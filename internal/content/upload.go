@@ -42,6 +42,17 @@ var (
 	ErrUploadSetting = errors.New("content: 첨부 설정값이 올바르지 않습니다")
 )
 
+// LimitError is a refusal that carries the limit it hit — bytes for
+// ErrUploadTooLarge, files per post for ErrUploadTooMany — so the screen can say
+// 「최대 10MB」 instead of 「너무 큽니다」.
+type LimitError struct {
+	Err   error
+	Limit int64
+}
+
+func (e LimitError) Error() string { return fmt.Sprintf("%v (상한 %d)", e.Err, e.Limit) }
+func (e LimitError) Unwrap() error { return e.Err }
+
 // MaxAttachmentBytes bounds one attachment by default. NFR-101 sizes the box at
 // 1 vCPU and 512MB–1GB; a request that buffers more than this is a denial of
 // service on its own, whatever the file turns out to be.
@@ -228,7 +239,7 @@ func StoreUpload(root, name string, r io.Reader, now time.Time, limits UploadLim
 		// The partial file goes: a half-written attachment that no row points
 		// at is litter nobody will ever identify.
 		_ = rt.Remove(rel)
-		return StoredUpload{}, fmt.Errorf("%w: %d 바이트 초과", ErrUploadTooLarge, limits.MaxBytes)
+		return StoredUpload{}, LimitError{Err: ErrUploadTooLarge, Limit: limits.MaxBytes}
 	case written == 0:
 		_ = rt.Remove(rel)
 		return StoredUpload{}, ErrUploadEmpty

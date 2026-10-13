@@ -154,12 +154,11 @@ func TestFormIgnoresBoardAndAuthorFields(t *testing.T) {
 		"title": {"글"}, "body": {"본문"},
 		"board_id": {otherID}, "author_id": {victim},
 	})
-	body := resp.StatusCode
-	resp.Body.Close()
 	// 스키마에 없는 키라 커스텀 필드 검증이 거부한다 — 조용히 버리지 않는다.
-	if body != http.StatusUnprocessableEntity {
-		t.Fatalf("정의되지 않은 키가 HTTP %d 로 처리됐다", body)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("정의되지 않은 키가 HTTP %d 로 처리됐다", resp.StatusCode)
 	}
+	refusalShown(t, readAll(t, resp), "입력 항목이 변경되었습니다. 페이지를 새로고침한 뒤 다시 입력해 주세요.")
 
 	// 정상 작성은 경로의 게시판과 세션의 작성자로 들어간다.
 	resp = httpPost(t, c, srv.URL+"/board/free/write", url.Values{"title": {"글"}, "body": {"본문"}})
