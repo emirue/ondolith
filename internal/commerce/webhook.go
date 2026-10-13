@@ -12,20 +12,33 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ErrWebhookDuplicate 는 이미 받은 이벤트라는 뜻이다. **오류가 아니라 정상
-// 응답의 근거다** — 재전송에 멱등이어야 하므로 200 으로 답한다 (FR-610).
-var ErrWebhookDuplicate = errors.New("commerce: 이미 받은 웹훅 이벤트입니다")
+var (
+	// ErrWebhookDuplicate 는 이미 받은 이벤트라는 뜻이다. **오류가 아니라 정상
+	// 응답의 근거다** — 재전송에 멱등이어야 하므로 200 으로 답한다 (FR-610).
+	ErrWebhookDuplicate = errors.New("commerce: 이미 받은 웹훅 이벤트입니다")
+	// ErrWebhookUnmatched 는 알림이 우리 결제를 가리키지 않는다는 뜻이다 — 그 번호의
+	// 주문이 없거나, 살아 있는 결제가 없거나, 결제키·secret 이 승인 때 받은 것과 다르다.
+	// P-905 의 「출처 검증 실패」다: 400 이고 아무것도 기록하지 않는다.
+	ErrWebhookUnmatched = errors.New("commerce: 우리 결제와 맞지 않는 웹훅입니다")
+)
 
 // RecordWebhook writes the event and returns its row id.
 //
-// **판단은 애플리케이션 조회가 아니라 유니크 인덱스가 한다.** `SELECT` 로 먼저
+// **우리 결제와 맞는 알림만 기록한다** (matchWebhook). 이 주소는 공개이고 토스는
+// 결제 상태 알림에 서명하지 않으므로, 형태만 보고 기록하면 아무나 주문번호와
+// 결제키를 지어내 요청마다 원문(최대 64KiB)을 쌓을 수 있었다. 모든 기록이 이 함수를
+// 지나므로 대조도 여기서 한다.
+//
+// **중복 판단은 애플리케이션 조회가 아니라 유니크 인덱스가 한다.** `SELECT` 로 먼저
 // 봐서는 동시에 도착한 재전송 두 건이 함께 통과한다 — 둘 다 "없다" 를 읽기
 // 때문이다. 여기서 기대하는 실패는 23505 이고, 그것이 곧 멱등이다.
 //
 // 주문 연결은 **우리가 발급한 order_no 로만** 찾는다. 페이로드의 내부 PK 는
-// 형식상 있어도 읽지 않는다 (D19 P-905 받지 않는 필드). 못 찾으면 NULL 로
-// 남긴다 — 우리 주문이 아닌 알림도 기록은 남아야 A-603 에서 보인다.
+// 형식상 있어도 읽지 않는다 (D19 P-905 받지 않는 필드).
 func (s *Store) RecordWebhook(ctx context.Context, pg string, ev *WebhookEvent) (string, error) {
+	if err := s.matchWebhook(ctx, ev); err != nil {
+		return "", err
+	}
 	id, err := s.q.RecordWebhook(ctx, commerceq.RecordWebhookParams{
 		Pg: pg, EventID: ev.EventID, OrderNo: ev.OrderNo, Payload: ev.Raw})
 	var pgErr *pgconn.PgError
@@ -36,6 +49,37 @@ func (s *Store) RecordWebhook(ctx context.Context, pg string, ev *WebhookEvent) 
 		return "", err
 	}
 	return id, nil
+}
+
+// matchWebhook reports whether ev names one of our payments. 결제 상태 알림은
+// paymentKey 로, 입금 알림(paymentKey 가 없다)은 secret 으로 그 결제에 묶인다. 어느
+// 쪽이든 secret 이 오가면 같아야 한다 — processWebhook 과 같은 규칙을 기록 앞에 둔다.
+// 상수 시간 비교다: `!=` 는 앞에서부터 비교하다 멈추므로 한 글자씩 맞춰 볼 수 있다.
+func (s *Store) matchWebhook(ctx context.Context, ev *WebhookEvent) error {
+	o, err := s.q.OrderForWebhook(ctx, ev.OrderNo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWebhookUnmatched
+	}
+	if err != nil {
+		return err
+	}
+	p, err := s.q.LivePayment(ctx, o.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWebhookUnmatched
+	}
+	if err != nil {
+		return err
+	}
+	same := func(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
+	switch {
+	case ev.PaymentKey == "" && ev.Secret == "":
+		return ErrWebhookUnmatched // 무엇도 이 알림을 그 결제에 묶지 않는다
+	case ev.PaymentKey != "" && !same(ev.PaymentKey, p.PaymentKey):
+		return ErrWebhookUnmatched
+	case (ev.Secret != "" || p.Secret != "") && !same(ev.Secret, p.Secret):
+		return ErrWebhookUnmatched
+	}
+	return nil
 }
 
 // ProcessWebhook is the half that runs after the 200 went out.
@@ -66,7 +110,7 @@ func (s *Store) ProcessWebhook(ctx context.Context, gw Gateway, eventID string, 
 func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent) error {
 	o, err := s.q.OrderForWebhook(ctx, ev.OrderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// 우리 주문이 아니다. 기록은 남았고 그 이상 할 일이 없다.
+		// 기록 전 대조(matchWebhook)가 이 경우를 막으므로 사실상 닿지 않는다.
 		return fmt.Errorf("%w: 주문 %q", ErrNotFound, ev.OrderNo)
 	}
 	if err != nil {
