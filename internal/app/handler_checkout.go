@@ -122,7 +122,8 @@ func (d *shopDeps) checkoutCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/cart", http.StatusSeeOther)
 		return
 	case errors.Is(err, commerce.ErrTermsRequired), errors.Is(err, commerce.ErrOrdererContact),
-		errors.Is(err, commerce.ErrOutOfStock), errors.Is(err, commerce.ErrNotSellable):
+		errors.Is(err, commerce.ErrOutOfStock), errors.Is(err, commerce.ErrNotSellable),
+		errors.Is(err, commerce.ErrQuantityRange):
 		d.checkoutError(w, r, err)
 		return
 	case err != nil:
@@ -150,7 +151,7 @@ func (d *shopDeps) checkoutError(w http.ResponseWriter, r *http.Request, cause e
 	d.renderPage(w, r, "shop/checkout.html", http.StatusUnprocessableEntity,
 		d.shopView(r, "주문서", map[string]any{
 			"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee,
-			"Terms": terms, "Error": cause.Error(),
+			"Terms": terms, "Error": cartMessage(cause),
 		}))
 }
 

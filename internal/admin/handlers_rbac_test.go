@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/emirue/ondolith/internal/content"
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 // R4 and R5 are enforced on the server. Hiding the superuser row in the UI is
@@ -261,6 +262,8 @@ func TestReParentingUnderOwnDescendantIsRefusedBeforeWriting(t *testing.T) {
 	// 조부를 자기 손자 밑으로: 세 항목이 서로를 가리키는 고리가 된다.
 	if rec := update(grand, child); rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("자손 밑으로 옮기는 요청이 HTTP %d 로 통과했다", rec.Code)
+	} else {
+		refusalShown(t, rec.Body.String(), "자기 자신이나 하위 메뉴를 상위 메뉴로 지정할 수 없습니다.")
 	}
 	// 자기 자신을 부모로.
 	if rec := update(child, child); rec.Code != http.StatusUnprocessableEntity {
@@ -308,7 +311,7 @@ func TestThemeActivationRefusesAnInvalidTheme(t *testing.T) {
 	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"theme.activate": true}})
 	d.ValidateTheme = func(name string) (string, error) {
 		if name == "broken" {
-			return "", errors.New("base.html 이 없습니다")
+			return "", theme.ErrNoBase
 		}
 		return "", nil
 	}
@@ -316,6 +319,8 @@ func TestThemeActivationRefusesAnInvalidTheme(t *testing.T) {
 	if rec := post(d.ThemeActivate, "/admin/themes", url.Values{
 		"theme": {"broken"}}); rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("base.html 없는 테마가 HTTP %d 로 활성화됐다", rec.Code)
+	} else {
+		refusalShown(t, rec.Body.String(), "테마를 활성화하지 못했습니다. 테마에 base.html 파일이 없습니다.")
 	}
 	// ...and it must not have been recorded either. Refusing the response while
 	// storing the value would leave the site pointed at a theme it cannot draw.

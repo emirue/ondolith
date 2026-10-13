@@ -263,8 +263,15 @@ func TestAddToCartSumsAndChecksTheTotalAgainstStock(t *testing.T) {
 	if err := s.AddToCart(ctx, owner, variant, 3); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddToCart(ctx, owner, variant, 3); !errors.Is(err, ErrOutOfStock) {
+	err := s.AddToCart(ctx, owner, variant, 3)
+	if !errors.Is(err, ErrOutOfStock) {
 		t.Fatalf("합계 6 (재고 5) = %v, want ErrOutOfStock", err)
+	}
+	// 화면이 「이미 3개 담겼다」를 말할 수 있어야 한다 — 남은 수량만 보이면 5개를 담으려다
+	// 같은 거부를 다시 받는다.
+	var se *StockError
+	if !errors.As(err, &se) || se.Left != 5 || se.InCart != 3 {
+		t.Errorf("err = %v, want StockError{Left 5, InCart 3}", err)
 	}
 	if err := s.AddToCart(ctx, owner, variant, 2); err != nil {
 		t.Fatalf("합계 5 가 막혔다: %v", err)
@@ -547,5 +554,22 @@ func TestReparentRefusesCyclesAndSerialises(t *testing.T) {
 	}
 	if err := s.Reparent(ctx, d, c); err != nil {
 		t.Errorf("잠금 해제 뒤 이동이 막혔다: %v", err)
+	}
+}
+
+// 재고가 모자란 조합을 오류가 가리킨다 — 주문서가 그 품목의 이름을 말하려면 필요하다.
+func TestAdjustStockNamesTheShortVariant(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	_, variant := seedProduct(t, pool, "mug", 9000, 0, 1)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	err = s.AdjustStock(ctx, tx, []StockDelta{{VariantID: variant, Delta: -2}})
+	var se *StockError
+	if !errors.As(err, &se) || se.VariantID != variant || se.Want != 2 || se.Left != 1 {
+		t.Errorf("err = %v, want StockError{Want 2, Left 1, VariantID %s}", err, variant)
 	}
 }

@@ -187,6 +187,18 @@ func TestStoredContentMatchesWhatWasSent(t *testing.T) {
 	}
 }
 
+// 거부는 상한을 숫자로 싣는다 — 화면이 「너무 큽니다」 대신 「최대 10MB」를
+// 말하려면 그 값이 오류에 있어야 한다.
+func TestOversizeUploadCarriesTheLimit(t *testing.T) {
+	limits := DefaultUploadLimits()
+	big := io.MultiReader(bytes.NewReader(pngBytes), io.LimitReader(zeros{}, limits.MaxBytes+1))
+	_, err := StoreUpload(t.TempDir(), "x.png", big, uploadAt, limits)
+	var le LimitError
+	if !errors.As(err, &le) || le.Limit != limits.MaxBytes || !errors.Is(err, ErrUploadTooLarge) {
+		t.Fatalf("err = %v, want LimitError{ErrUploadTooLarge, %d}", err, limits.MaxBytes)
+	}
+}
+
 // 상한을 넘긴 업로드는 거부되고, **부분 파일을 남기지 않는다** — 어떤 행도
 // 가리키지 않는 반쪽 파일은 나중에 누구도 정체를 알 수 없다.
 func TestOversizeUploadIsRefusedAndLeavesNothing(t *testing.T) {

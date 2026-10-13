@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
@@ -12,6 +13,10 @@ import (
 )
 
 var (
+	// ErrTermsIncomplete 는 종류·버전·본문 중 빈 것이 있다는 뜻이다.
+	ErrTermsIncomplete = errors.New("commerce: 종류·버전·본문이 필요합니다")
+	// ErrTermsTooLong 은 terms 의 길이 CHECK(종류 50·버전 20·본문 20,000자)를 넘었다는 뜻이다.
+	ErrTermsTooLong = errors.New("commerce: 약관 종류·버전·본문이 너무 깁니다")
 	// ErrTermsVersionTaken 은 (종류, 버전) 이 겹친 경우다. 겹치면 어느 본문에
 	// 동의했는지 특정할 수 없다 (FR-619).
 	ErrTermsVersionTaken = errors.New("commerce: 이미 있는 약관 버전입니다")
@@ -51,6 +56,19 @@ func (s *Store) ListTerms(ctx context.Context) ([]Terms, error) {
 	return out, nil
 }
 
+// validateTerms is terms' NOT NULL and length CHECKs (종류 50·버전 20·본문 20,000자),
+// said before the database says them as a constraint name.
+func validateTerms(t Terms) error {
+	if t.Kind == "" || t.Version == "" || t.Body == "" {
+		return ErrTermsIncomplete
+	}
+	if utf8.RuneCountInString(t.Kind) > 50 || utf8.RuneCountInString(t.Version) > 20 ||
+		utf8.RuneCountInString(t.Body) > 20000 {
+		return ErrTermsTooLong
+	}
+	return nil
+}
+
 func termsFromRow(r commerceq.Term) Terms {
 	return Terms{ID: r.ID, Kind: r.Kind, Version: r.Version, Body: r.Body,
 		EffectiveAt: r.EffectiveAt, Required: r.IsRequired, CreatedAt: r.CreatedAt}
@@ -62,8 +80,8 @@ func termsFromRow(r commerceq.Term) Terms {
 // 바뀌면 동의 이력이 거짓이 된다 (D13, FR-619) — 그래서 이 파일에는 UPDATE 가
 // 없고, 개정은 새 행이다.
 func (s *Store) AddTerms(ctx context.Context, t Terms, now time.Time) (string, error) {
-	if t.Kind == "" || t.Version == "" || t.Body == "" {
-		return "", fmt.Errorf("commerce: 종류·버전·본문이 필요합니다")
+	if err := validateTerms(t); err != nil {
+		return "", err
 	}
 	// 소급 금지. DB CHECK (`effective_at >= created_at`) 도 막지만 거기서
 	// 나오는 것은 제약 위반이라 화면이 500 을 그린다 — 운영자가 고칠 수 있는

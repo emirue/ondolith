@@ -145,7 +145,7 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 	err := d.Content.DeleteBoard(r.Context(), id, force)
 	switch {
 	case errors.Is(err, content.ErrBoardInUse):
-		http.Error(w, err.Error()+" — 확인 후 다시 시도하세요.", http.StatusConflict)
+		http.Error(w, msgBoardInUse, http.StatusConflict)
 	case errors.Is(err, content.ErrNotFound):
 		http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
 	case err != nil:
@@ -219,8 +219,26 @@ func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {
 		f.Sort = n
 	}
 	if err := d.Content.SaveBoardField(ctx, boardID, f); err != nil {
-		d.Render(w, r, "admin/board-fields.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "필드를 저장하지 못했습니다: " + err.Error()})
+		// 다시 그리는 화면은 GET 과 같은 데이터를 가져야 한다 — 오류만 넘기면 필드
+		// 목록이 사라지고 폼이 `/admin/boards//fields` 로 보낸다.
+		b, berr := d.Content.BoardByID(ctx, boardID)
+		if errors.Is(berr, content.ErrNotFound) {
+			http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
+			return
+		}
+		fields, ferr := d.Content.BoardFields(ctx, boardID)
+		if berr != nil || ferr != nil {
+			// 다시 그리지 못해도 저장이 거부된 원인은 남긴다 — 그것이 운영자가 고칠 것이다.
+			if d.Logger != nil {
+				d.Logger.Error("필드 저장 실패", "board", boardID, "err", errors.Join(err, berr, ferr))
+			}
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		d.Render(w, r, "admin/board-fields.html", http.StatusUnprocessableEntity, map[string]any{
+			"Board": b, "Fields": fields, "Types": content.FieldTypes(),
+			"Error": d.refusal(r, fieldDefMessage(err, f), err),
+		})
 		return
 	}
 	d.log(r, c, "board.manage", "board_field", boardID, "필드 '"+f.Key+"' 저장")

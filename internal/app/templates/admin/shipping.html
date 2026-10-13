@@ -1,5 +1,4 @@
 {{define "content"}}
-{{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
 <div class="adm-card">
 {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
 {{/* 송장 입력은 상태를 옮기지 않는다. 옮기면 `배송준비 → 배송중` 을 일으키는

@@ -50,6 +50,12 @@ func (d *Deps) OrderDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	d.orderDetail(w, r, http.StatusOK, "")
+}
+
+// orderDetail draws A-505 for the order in the path, with msg above it when a
+// change was refused.
+func (d *Deps) orderDetail(w http.ResponseWriter, r *http.Request, code int, msg string) {
 	order, err := d.Commerce.OrderByNoUnscoped(r.Context(), r.PathValue("no"))
 	if d.fail(w, r, err) {
 		return
@@ -59,8 +65,8 @@ func (d *Deps) OrderDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/order.html", http.StatusOK, map[string]any{
-		"Order": order, "Shipments": shipments,
+	d.Render(w, r, "admin/order.html", code, map[string]any{
+		"Order": order, "Shipments": shipments, "Error": msg,
 		// 드롭다운은 **상태머신이 낸 목록**이다. 전체 상태를 나열하고 서버에서
 		// 검증하지 않는 것이 D14 5절이 지목한 가장 흔한 구현 실수다. 여기서
 		// 파생시키면 화면과 서버가 같은 표를 본다.
@@ -102,9 +108,9 @@ func (d *Deps) OrderTransition(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrTransitionNotAllowed),
 		errors.Is(err, commerce.ErrActorNotAllowed),
 		errors.Is(err, commerce.ErrUnknownStatus):
-		// 422 다. 요청은 이해했고 규칙이 거부한 것이다.
-		d.Render(w, r, "admin/order.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": err.Error()})
+		// 422 다. 요청은 이해했고 규칙이 거부한 것이다. 화면은 A-505 를 그대로
+		// 다시 그린다 — 오류만 넘기면 주문 없이 빈 상세가 그려졌다.
+		d.orderDetail(w, r, http.StatusUnprocessableEntity, transitionMessage(err))
 		return
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
@@ -245,7 +251,7 @@ func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
 	// 없는 상위와 같다 (그대로 내려가면 `::uuid` 캐스트가 22P02 로 터진다).
 	if cat.ParentID != "" && !content.IsUUID(cat.ParentID) {
 		d.categoryError(w, r, http.StatusUnprocessableEntity,
-			commerce.ErrCategoryMissing.Error())
+			categoryMessage(commerce.ErrCategoryMissing))
 		return
 	}
 	if cat.Name == "" {
@@ -255,12 +261,12 @@ func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
 	// 슬러그는 URL 이 된다 — 형식과 예약어를 게시판·페이지와 **같은 함수**로
 	// 검사한다 (D19 A-509). 여기서 따로 정규식을 쓰면 그 둘과 갈라진다.
 	if err := content.ValidateSlug(cat.Slug); err != nil {
-		d.categoryError(w, r, http.StatusUnprocessableEntity, err.Error())
+		d.categoryError(w, r, http.StatusUnprocessableEntity, slugMessage(err))
 		return
 	}
 	switch _, err := d.Commerce.CreateCategory(r.Context(), cat); {
 	case errors.Is(err, commerce.ErrSlugTaken), errors.Is(err, commerce.ErrCategoryMissing):
-		d.categoryError(w, r, http.StatusUnprocessableEntity, err.Error())
+		d.categoryError(w, r, http.StatusUnprocessableEntity, categoryMessage(err))
 		return
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
@@ -282,7 +288,7 @@ func (d *Deps) CategoryDelete(w http.ResponseWriter, r *http.Request) {
 	switch err := d.Commerce.DeleteCategory(r.Context(), id); {
 	case errors.Is(err, commerce.ErrCategoryInUse):
 		// 409 다. 요청은 올바르고 지금 상태가 거부한 것이다 (D19 A-509).
-		d.categoryError(w, r, http.StatusConflict, err.Error())
+		d.categoryError(w, r, http.StatusConflict, categoryMessage(err))
 		return
 	case errors.Is(err, commerce.ErrNotFound):
 		d.categoryError(w, r, http.StatusNotFound, "없는 카테고리입니다.")
@@ -308,7 +314,7 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 	id, parent := r.PostFormValue("id"), r.PostFormValue("parent_id")
 	if !content.IsUUID(id) || (parent != "" && !content.IsUUID(parent)) {
 		d.categoryError(w, r, http.StatusUnprocessableEntity,
-			commerce.ErrCategoryMissing.Error())
+			categoryMessage(commerce.ErrCategoryMissing))
 		return
 	}
 	err := d.Commerce.Reparent(r.Context(), id, parent)
@@ -317,7 +323,7 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 		errors.Is(err, commerce.ErrCategoryMissing):
 		cats, _ := d.Commerce.Categories(r.Context())
 		d.Render(w, r, "admin/categories.html", http.StatusUnprocessableEntity,
-			map[string]any{"Categories": cats, "Error": err.Error()})
+			map[string]any{"Categories": cats, "Error": categoryMessage(err)})
 		return
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)

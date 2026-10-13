@@ -93,6 +93,10 @@ func (s *Store) AddToCart(ctx context.Context, o CartOwner, variantID string, qt
 	}
 	total := int(existing) + qty
 	if err := sell.CheckAvailable(total); err != nil {
+		var se *StockError
+		if errors.As(err, &se) {
+			se.InCart = int(existing)
+		}
 		return err
 	}
 
