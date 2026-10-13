@@ -75,7 +75,7 @@ JOIN posts p ON p.id = c.post_id
 LEFT JOIN users u ON u.id = c.author_id
 WHERE p.board_id = $1
 ORDER BY c.created_at DESC, c.id DESC
-LIMIT $2;
+LIMIT $2 OFFSET $3;
 
 -- name: CommentByID :one
 SELECT id, post_id, coalesce(parent_id::text, '')::text AS parent_id, coalesce(author_id::text, '')::text AS author_id,
@@ -102,6 +102,10 @@ WHERE id = $1 AND deleted_at IS NULL;
 -- 여부·작성자를 계산한다. 한 층으로 쓰면 정렬이 인덱스를 못 타는 순간 걸러진 행
 -- **전부**에 대해 댓글을 세고 나서 정렬한다. 바깥 ORDER BY 는 안쪽과 같은 사슬이다 —
 -- 조인이 순서를 지켜 준다는 보장은 없다 (post_shape_test.go 가 둘이 같은지 본다).
+--
+-- **ListPosts 의 안쪽은 id 만 고른다** (지연 조인, FR-508). 정렬 열과 거르는 조건이 공개
+-- 목록 부분 인덱스(00029)에 다 있어서 안쪽은 인덱스만 읽는다 — OFFSET 이 건너뛰는 행마다
+-- 표를 읽지 않는다. 열을 고르던 판은 5,000쪽에서 2.9초였다(100만 건, 00029 주석).
 -- name: ListPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
        p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
@@ -109,8 +113,7 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-           p.view_count, p.created_at, p.updated_at
+    SELECT p.id
     FROM posts p
     WHERE p.board_id = $1
       AND p.status = 'published'
@@ -124,7 +127,8 @@ FROM (
              CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
              CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
     LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
-) p
+) k
+JOIN posts p ON p.id = k.id
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
          CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
@@ -229,7 +233,7 @@ FROM posts p
 LEFT JOIN users u ON u.id = p.author_id
 WHERE p.board_id = $1
 ORDER BY p.is_pinned DESC, p.created_at DESC, p.id DESC
-LIMIT $2;
+LIMIT $2 OFFSET $3;
 
 -- name: RecentPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,

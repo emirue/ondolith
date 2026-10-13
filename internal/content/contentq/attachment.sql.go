@@ -93,16 +93,17 @@ FROM attachments a
 JOIN posts p ON p.id = a.post_id
 WHERE p.board_id = $1
 ORDER BY a.created_at DESC, a.id DESC
-LIMIT $2
+LIMIT $2 OFFSET $3
 `
 
 type BoardAttachmentsParams struct {
 	BoardID string
 	Limit   int32
+	Offset  int32
 }
 
 func (q *Queries) BoardAttachments(ctx context.Context, arg BoardAttachmentsParams) ([]Attachment, error) {
-	rows, err := q.db.Query(ctx, boardAttachments, arg.BoardID, arg.Limit)
+	rows, err := q.db.Query(ctx, boardAttachments, arg.BoardID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

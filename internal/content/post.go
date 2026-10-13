@@ -97,7 +97,16 @@ func (s *Store) ListPosts(ctx context.Context, boardID string, q ListQuery) ([]P
 // there is a page that is not there. 검색 절은 ListPosts 와 같은 이유로 조건부다.
 func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (int64, error) {
 	if q.Search == "" {
-		return s.q.CountPosts(ctx, boardID)
+		now := time.Now()
+		n, ok, gen := s.counts.get(boardID, now)
+		if ok {
+			return n, nil
+		}
+		n, err := s.q.CountPosts(ctx, boardID)
+		if err == nil {
+			s.counts.put(boardID, n, now, gen)
+		}
+		return n, err
 	}
 	return s.q.CountPostsSearch(ctx, contentq.CountPostsSearchParams{
 		BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
@@ -165,6 +174,7 @@ func (s *Store) PostByID(ctx context.Context, id, viewerID string, canSecret boo
 }
 
 func (s *Store) CreatePost(ctx context.Context, p Post) (string, error) {
+	defer s.counts.reset()
 	fields, err := marshalFields(p.CustomFields)
 	if err != nil {
 		return "", err
@@ -190,6 +200,7 @@ func (s *Store) UpdatePost(ctx context.Context, id string, p Post) error {
 
 // SetPostFlags is the moderator's edit (A-307).
 func (s *Store) SetPostFlags(ctx context.Context, id string, pinned bool, status string) error {
+	defer s.counts.reset()
 	if status != "published" && status != "hidden" {
 		return errors.New("content: 알 수 없는 글 상태")
 	}
@@ -203,6 +214,7 @@ func (s *Store) SetPostFlags(ctx context.Context, id string, pinned bool, status
 // 지우는 것은 `Attachments.DeletePost` 이고, 화면은 그쪽을 부른다. 이 메서드는
 // 첨부를 쓰지 않는 경로(P-210 툼스톤 정리 등)만 쓴다.
 func (s *Store) DeletePost(ctx context.Context, id string) error {
+	defer s.counts.reset()
 	return affected(s.q.DeletePost(ctx, id))
 }
 
@@ -389,15 +401,15 @@ func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []strin
 // ModeratePosts is A-307's list: everything on one board, hidden and secret
 // included. That is what moderating means — a moderator who cannot see the
 // hidden post cannot un-hide it.
-func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit int) ([]Post, error) {
+func (s *Store) ModeratePosts(ctx context.Context, boardID string, limit, offset int) ([]Post, error) {
 	return postsOf(s.q.ModeratePosts(ctx, contentq.ModeratePostsParams{
-		BoardID: boardID, Limit: int32(limit)}))
+		BoardID: boardID, Limit: int32(limit), Offset: int32(offset)}))
 }
 
 // ModerateComments is A-308's list, newest first across one board.
-func (s *Store) ModerateComments(ctx context.Context, boardID string, limit int) ([]Comment, error) {
+func (s *Store) ModerateComments(ctx context.Context, boardID string, limit, offset int) ([]Comment, error) {
 	rows, err := s.q.ModerateComments(ctx, contentq.ModerateCommentsParams{
-		BoardID: boardID, Limit: int32(limit)})
+		BoardID: boardID, Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}

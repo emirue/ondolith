@@ -22,6 +22,7 @@
                 <form method="post" action="/admin/posts">
                   <input type="hidden" name="post_id" value="{{$p.ID}}">
                   <input type="hidden" name="action" value="{{$act}}">
+                  <input type="hidden" name="page" value="{{$.PageNo}}">
                   <button class="adm-btn adm-btn--sm{{if eq $act "delete"}} adm-btn--danger{{end}}">{{$label}}</button>
                 </form>
               {{end}}
@@ -34,5 +35,13 @@
       </tbody>
     </table>
   </div>
+  {{if .PageNo}}
+  <div class="adm-pagination">
+    <span class="adm-count">{{.PageNo}}쪽</span>
+    {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
+  </div>
+  {{end}}
 </div>
 {{end}}

@@ -32,6 +32,8 @@ type Store struct {
 	// q 는 sqlc 가 queries/*.sql 에서 생성한 질의다 (D22 6절). 트랜잭션 안에서는
 	// q.WithTx(tx). 이 패키지에 손으로 스캔하는 질의는 없다 — pool 은 Begin 에만 쓴다.
 	q *contentq.Queries
+	// counts 는 게시판마다 「전체 N건」을 기억한다 (postcount.go).
+	counts postCounts
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: contentq.New(pool)} }

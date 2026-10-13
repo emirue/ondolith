@@ -298,13 +298,9 @@ func payloadFor(name string) any {
 				CustomFields: map[string]any{"color": "빨강"},
 				CreatedAt:    time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
 			}},
-			"Total": int64(1),
-			"Query": struct{ Search string }{Search: "검색어"},
-			"Pager": map[string]any{
-				"Base": "/board/free", "Query": struct{ Search string }{Search: "검색어"},
-				"Total": int64(1), "PageNo": 1, "PrevPage": 0, "NextPage": 2,
-				"HasPrev": false, "HasNext": true,
-			},
+			"Total":    int64(1),
+			"Query":    struct{ Search string }{Search: "검색어"},
+			"Pager":    pagerFixture("/board/free", 1),
 			"Columns":  []fieldLike{{Key: "color", Label: "색상"}},
 			"CanWrite": true,
 		}
@@ -337,11 +333,7 @@ func payloadFor(name string) any {
 			"Boards": map[string]boardLike{"b1": {ID: "b1", Slug: "free", Name: "자유게시판"}},
 			"Results": []postLike{{ID: "p1", BoardID: "b1", Title: "찾은 글", Body: "본문",
 				CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
-			"Pager": map[string]any{
-				"Base": "/search", "Query": struct{ Search string }{Search: "검색어"},
-				"Total": int64(1), "PageNo": 2, "PrevPage": 1, "NextPage": 3,
-				"HasPrev": true, "HasNext": true,
-			},
+			"Pager": pagerFixture("/search", 2),
 		}
 	case "comment/form.html":
 		return map[string]any{
@@ -862,5 +854,26 @@ func TestClosedSignupHidesTheWayIn(t *testing.T) {
 	}
 	if !strings.Contains(render("auth/signup.html", true), "회원가입을 받지 않습니다") {
 		t.Error("닫힌 가입 화면이 이유를 말하지 않는다")
+	}
+}
+
+// pagerFixture is what app.pagerFor hands partials/pagination.html: numbered
+// links with one current, and every edge link set, so that each branch of the
+// partial is drawn — an empty edge would skip its {{with}}.
+func pagerFixture(base string, cur int) map[string]any {
+	type pageLink struct {
+		No      int
+		URL     string
+		Current bool
+	}
+	var pages []pageLink
+	for n := 1; n <= 3; n++ {
+		pages = append(pages, pageLink{No: n, URL: base + "?page=" + string(rune('0'+n)), Current: n == cur})
+	}
+	return map[string]any{
+		"Base": base, "Query": struct{ Search string }{Search: "검색어"},
+		"Total": int64(60), "PageNo": cur, "PrevPage": cur - 1, "NextPage": cur + 1,
+		"HasPrev": cur > 1, "HasNext": true, "LastPage": 3, "Pages": pages,
+		"FirstURL": base, "PrevURL": base, "NextURL": base + "?page=3", "LastURL": base + "?page=3",
 	}
 }

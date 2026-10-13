@@ -110,10 +110,15 @@ func TestAuditIndexes(t *testing.T) {
 		"return_items_return_idx":            0,
 		"terms_kind_effective_uniq":          1,
 		"terms_kind_idx":                     0,
-		// 성능 (게시판·회원)
-		"posts_board_title_desc_idx": 1,
-		"posts_board_published_idx":  1,
-		"users_created_idx":          1,
+		// 성능 (게시판·회원). 공개 목록 넷은 부분 인덱스로 바뀌었고(00029) 「전체 N건」
+		// 전용 인덱스는 지웠다.
+		"posts_board_pub_created_idx":    1,
+		"posts_board_pub_views_idx":      1,
+		"posts_board_pub_title_idx":      1,
+		"posts_board_pub_title_desc_idx": 1,
+		"posts_board_title_desc_idx":     0,
+		"posts_board_published_idx":      0,
+		"users_created_idx":              1,
 		// 성능 (커머스)
 		"orders_created_idx":         1,
 		"webhook_events_history_idx": 1,
@@ -121,6 +126,11 @@ func TestAuditIndexes(t *testing.T) {
 		if n := count(t, pool, `SELECT count(*) FROM pg_indexes WHERE indexname = $1`, name); n != want {
 			t.Errorf("인덱스 %s: %d개, want %d", name, n, want)
 		}
+	}
+	// 무효 인덱스(indisvalid=false — CONCURRENTLY 생성이 실패하면 남는다)는 쓰기 비용만 내고
+	// 질의는 쓰지 못한다.
+	if n := count(t, pool, `SELECT count(*) FROM pg_index WHERE NOT indisvalid`); n != 0 {
+		t.Errorf("무효 인덱스 %d개", n)
 	}
 }
 

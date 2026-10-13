@@ -73,7 +73,7 @@ func TestModeratePostsSeesHiddenAndSecretInOneBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := s.ModeratePosts(ctx, boardID, 10)
+	got, err := s.ModeratePosts(ctx, boardID, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestModeratePostsSeesHiddenAndSecretInOneBoard(t *testing.T) {
 		t.Errorf("숨긴 글 상태 %q, want hidden", got[3].Status)
 	}
 
-	two, err := s.ModeratePosts(ctx, boardID, 2)
+	two, err := s.ModeratePosts(ctx, boardID, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestModerateCommentsSeesTombstonesInOneBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := s.ModerateComments(ctx, boardID, 10)
+	got, err := s.ModerateComments(ctx, boardID, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestModerateCommentsSeesTombstonesInOneBoard(t *testing.T) {
 		t.Errorf("답글의 부모 %q, want %q", got[1].ParentID, parent)
 	}
 
-	two, err := s.ModerateComments(ctx, boardID, 2)
+	two, err := s.ModerateComments(ctx, boardID, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

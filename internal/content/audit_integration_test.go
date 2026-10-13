@@ -55,7 +55,8 @@ func TestPostPageSkipsTheListWhenThePageIsEmpty(t *testing.T) {
 		{"맞는 글이 없는 검색", url.Values{"q": {"없는말"}}, 0, 0, 1},
 		{"마지막 쪽을 넘긴 page", url.Values{"page": {"9"}}, 0, 3, 1},
 		{"맞는 글이 있는 검색", url.Values{"q": {"게시판"}}, 2, 2, 2},
-		{"첫 쪽", url.Values{}, 3, 3, 2},
+		// 「전체 N건」은 둘째 줄에서 센 것을 기억해 쓴다(postCounts) — 목록 하나만 읽는다.
+		{"첫 쪽", url.Values{}, 3, 3, 1},
 	} {
 		tr.n.Store(0)
 		posts, total, err := s.PostPage(ctx, boardID, ParseListQuery(c.query, 20))

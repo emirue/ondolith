@@ -601,4 +601,10 @@ func TestPaginationLinksReflectWhereYouAre(t *testing.T) {
 	if strings.Contains(second, ">다음<") {
 		t.Error("마지막 페이지에 '다음'이 있다 — 빈 페이지로 간다")
 	}
+
+	// 마지막 쪽 너머의 번호는 마지막 쪽을 그린다 — 낡은 즐겨찾기가 빈 화면으로 가지 않는다.
+	_, beyond := mustGet(t, client(), srv.URL+"/board/free?per_page=20&page=999")
+	if !strings.Contains(beyond, `aria-current="page">2<`) || !strings.Contains(beyond, "글 ") {
+		t.Errorf("999쪽이 마지막 쪽(2쪽)을 그리지 않는다: %.300s", beyond)
+	}
 }

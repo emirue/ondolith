@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict g1cKL9AJeOi4yJQSdj77ZI2gNIdq8LIliGnxxMgRJd8zH3OcU7dIhhCmUxdc7kw
+\restrict hcsnEKNAFLwht3VfVYb9PfzPfvqV7JOHo09VAcsmYcNZfHTQXeGbb4UJb4xnEum
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1600,31 +1600,31 @@ CREATE INDEX posts_board_list_idx ON public.posts USING btree (board_id, is_pinn
 
 
 --
--- Name: posts_board_published_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: posts_board_pub_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX posts_board_published_idx ON public.posts USING btree (board_id) WHERE (status = 'published'::text);
-
-
---
--- Name: posts_board_title_desc_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX posts_board_title_desc_idx ON public.posts USING btree (board_id, is_pinned DESC, title DESC, id DESC);
+CREATE INDEX posts_board_pub_created_idx ON public.posts USING btree (board_id, is_pinned DESC, created_at DESC, id DESC) WHERE (status = 'published'::text);
 
 
 --
--- Name: posts_board_title_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: posts_board_pub_title_desc_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX posts_board_title_idx ON public.posts USING btree (board_id, is_pinned DESC, title, id);
+CREATE INDEX posts_board_pub_title_desc_idx ON public.posts USING btree (board_id, is_pinned DESC, title DESC, id DESC) WHERE (status = 'published'::text);
 
 
 --
--- Name: posts_board_views_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: posts_board_pub_title_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX posts_board_views_idx ON public.posts USING btree (board_id, is_pinned DESC, view_count DESC, id DESC);
+CREATE INDEX posts_board_pub_title_idx ON public.posts USING btree (board_id, is_pinned DESC, title, id) WHERE (status = 'published'::text);
+
+
+--
+-- Name: posts_board_pub_views_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_board_pub_views_idx ON public.posts USING btree (board_id, is_pinned DESC, view_count DESC, id DESC) WHERE (status = 'published'::text);
 
 
 --
@@ -2288,5 +2288,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict g1cKL9AJeOi4yJQSdj77ZI2gNIdq8LIliGnxxMgRJd8zH3OcU7dIhhCmUxdc7kw
+\unrestrict hcsnEKNAFLwht3VfVYb9PfzPfvqV7JOHo09VAcsmYcNZfHTQXeGbb4UJb4xnEum
 

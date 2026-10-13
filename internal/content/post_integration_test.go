@@ -450,3 +450,48 @@ func TestCommentThreadsAreChronological(t *testing.T) {
 		t.Errorf("댓글 순서 %v, want %v — 첫 댓글, 그 답, 둘째 댓글", ids, want)
 	}
 }
+
+// 「전체 N건」은 기억해 두고, 이 저장소를 지나는 쓰기마다 다시 센다. 기억이 실제로 쓰이는지는
+// 저장소를 거치지 않은 쓰기(psql 같은)가 바로 보이지 않는 것으로 안다 — 그래야 매 요청 세지
+// 않는다는 뜻이다. 거치는 쓰기(쓰기·숨김·삭제) 뒤에는 바로 맞는 수다.
+func TestBoardCountIsRememberedAndRefreshedByWrites(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	boardID := seedBoard(t, s)
+	q := ParseListQuery(url.Values{}, 20)
+	count := func() int64 {
+		t.Helper()
+		n, err := s.CountPosts(ctx, boardID, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	first := mkPost(t, s, boardID, "첫 글")
+	if n := count(); n != 1 {
+		t.Fatalf("첫 수 = %d, want 1", n)
+	}
+	if _, err := s.pool.Exec(ctx, `INSERT INTO posts (board_id, title, body) VALUES ($1, '밖에서', '본문')`, boardID); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Errorf("저장소 밖 쓰기 뒤 = %d, want 1 — 기억을 쓰지 않고 매번 센다", n)
+	}
+	second := mkPost(t, s, boardID, "둘째 글")
+	if n := count(); n != 3 {
+		t.Errorf("글을 쓴 뒤 = %d, want 3", n)
+	}
+	if err := s.SetPostFlags(ctx, first, false, "hidden"); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 2 {
+		t.Errorf("숨긴 뒤 = %d, want 2", n)
+	}
+	if err := s.DeletePost(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Errorf("발행 글을 지운 뒤 = %d, want 1", n)
+	}
+}

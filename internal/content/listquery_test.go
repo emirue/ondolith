@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 )
 
 func q(s string) url.Values {
@@ -62,7 +61,11 @@ func TestOutOfRangeValuesAreClampedNotRefused(t *testing.T) {
 		{"page=1&per_page=20", 0, 20},
 		{"page=0", 0, 20},
 		{"page=-5", 0, 20},
-		{"page=99999", MaxPage - 1, 20},
+		// 개수를 세는 목록(게시판·통합 검색)에 100쪽 상한은 없다 — 오래된 글도 쪽으로 닿는다.
+		// 남은 상한은 OFFSET 이 int32 를 넘지 않게 하는 것뿐이다.
+		{"page=99999", 99998, 20},
+		{"page=99999999", MaxListPage - 1, 20},
+		{"page=99999&q=x", MaxPage - 1, 20}, // 검색은 100쪽에서 접힌다 (ListQuery.MaxPages)
 		{"page=abc", 0, 20},
 		{"per_page=10000", 0, MaxPerPage},
 		{"per_page=0", 0, 20},
@@ -108,19 +111,18 @@ func TestSearchTermIsBounded(t *testing.T) {
 	}
 }
 
-// 키셋 커서는 왕복해야 한다. 깨진 커서는 오류가 아니라 첫 페이지다 — 링크가
-// 낡은 것과 구분할 수 없고, 방문자에게는 같은 일이다.
-func TestCursorRoundTrips(t *testing.T) {
-	c := Cursor{Pinned: true, Created: time.Unix(0, 1754400000123456789).UTC(), ID: "abc-123"}
-	got := ParseListQuery(url.Values{"after": {c.String()}}, 20).After
-	if got.ID != c.ID || got.Pinned != c.Pinned || !got.Created.Equal(c.Created) {
-		t.Errorf("커서 왕복 실패: %+v → %+v", c, got)
-	}
-
-	for _, bad := range []string{"garbage", "1:notanumber:x", "1:5", "", ":::", "1:5:"} {
-		if got := ParseListQuery(url.Values{"after": {bad}}, 20).After; !got.IsZero() {
-			t.Errorf("깨진 커서 %q 가 통과했다: %+v", bad, got)
+// 쪽을 넘겨도 정렬이 풀리지 않는다 — 쪽 주소에 싣는 값이 다시 읽혀 같은 정렬이 된다.
+// 앞 판의 쪽 링크는 `page` 와 `q` 만 실어서, 조회순으로 보다 다음 쪽을 누르면 최신순이 됐다.
+func TestSortParamRoundTrips(t *testing.T) {
+	for _, s := range []string{"", "views", "title", "-title"} {
+		a := ParseListQuery(url.Values{"sort": {s}}, 20)
+		b := ParseListQuery(url.Values{"sort": {a.SortParam()}}, 20)
+		if a.Sort != b.Sort || a.Desc != b.Desc {
+			t.Errorf("sort=%q → %q → %s/%v, want %s/%v", s, a.SortParam(), b.Sort, b.Desc, a.Sort, a.Desc)
 		}
+	}
+	if got := ParseListQuery(url.Values{}, 20).SortParam(); got != "" {
+		t.Errorf("기본 정렬이 주소에 실렸다: %q", got)
 	}
 }
 
