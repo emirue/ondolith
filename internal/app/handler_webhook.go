@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/emirue/ondolith/internal/commerce"
@@ -15,9 +16,8 @@ import (
 // 파싱하지 않는다는 규칙(D19 P-905)은 크기 상한이 있어야 의미가 있다 — 없으면
 // 파싱 전에 이미 메모리를 다 쓴다.
 //
-// 64KiB 다. 이 주소는 인증이 없고(토스 웹훅에는 서명이 없다) 형태만 맞으면
-// 원문이 webhook_events 에 남으므로, 상한이 곧 요청 하나가 쌓을 수 있는 양이다.
-// 토스의 결제 객체는 그보다 한 자릿수 이상 작다.
+// 64KiB 다. 이 주소는 인증이 없고(토스 웹훅에는 서명이 없다), 우리 결제와 맞는
+// 알림의 원문은 webhook_events 에 남는다. 토스의 결제 객체는 그보다 한 자릿수 이상 작다.
 const maxWebhookBody = 64 << 10
 
 // webhookDeps is what P-905 needs. shopDeps 를 통째로 받지 않는다 — 이 경로는
@@ -27,6 +27,38 @@ type webhookDeps struct {
 	gateway func() commerce.Gateway
 	pgName  func() string
 	log     *slog.Logger
+	// One throttle per message, so a scan's verification failures do not hide the
+	// rarer 「대조 실패」 that a real but refused event leaves. webhookMux fills them.
+	refused, unmatched, failed *logThrottle
+}
+
+// webhookWarnEvery is how often a refused webhook may write a line.
+const webhookWarnEvery = 10 * time.Second
+
+// logThrottle writes at most one line per webhookWarnEvery and puts the number
+// it held back on the next one. P-905 is public and unauthenticated: a line per
+// refused request would let anyone fill the journal (journald drops past its own
+// rate limit; a Docker json-file log has no limit at all).
+type logThrottle struct {
+	mu   sync.Mutex
+	next time.Time
+	held int
+}
+
+func (t *logThrottle) log(log *slog.Logger, level slog.Level, now time.Time, msg string, args ...any) {
+	t.mu.Lock()
+	if now.Before(t.next) {
+		t.held++
+		t.mu.Unlock()
+		return
+	}
+	held := t.held
+	t.held, t.next = 0, now.Add(webhookWarnEvery)
+	t.mu.Unlock()
+	if held > 0 {
+		args = append(args, "suppressed", held)
+	}
+	log.Log(context.Background(), level, msg, args...)
 }
 
 // webhookMux is P-905's **별도 서브트리**다 (D15 SC-8 1항).
@@ -38,6 +70,11 @@ type webhookDeps struct {
 // 것에 기대지 않기 위해 이 경로를 본 트리 밖에 둔다. 여기에는 세션도 CSRF 도
 // 액터도 붙지 않고, 붙지 않는다는 것이 이 함수가 존재하는 이유다.
 func webhookMux(d webhookDeps) http.Handler {
+	for _, t := range []**logThrottle{&d.refused, &d.unmatched, &d.failed} {
+		if *t == nil {
+			*t = &logThrottle{}
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /webhooks/payment/{pg}", d.receive)
 	return mux
@@ -45,9 +82,9 @@ func webhookMux(d webhookDeps) http.Handler {
 
 // receive is P-905.
 //
-// **수신과 처리를 분리한다** (D19 P-905): 기록이 끝나면 곧바로 200 을 돌려주고
-// 대조는 그 뒤에 한다. 처리 결과로 응답 코드를 가르면 우리 쪽 오류가 PG 의
-// 재전송을 부르고, 재전송이 다시 같은 오류를 낸다.
+// **수신과 처리를 분리한다** (D19 P-905): 우리 결제와 맞는 알림을 기록하면 곧바로
+// 200 을 돌려주고, 금액 대조와 상태 확인은 그 뒤에 한다. 처리 결과로 응답 코드를 가르면
+// 우리 쪽 오류가 PG 의 재전송을 부르고, 재전송이 다시 같은 오류를 낸다.
 func (d webhookDeps) receive(w http.ResponseWriter, r *http.Request) {
 	pg := r.PathValue("pg")
 	// 등록된 어댑터만. 목록 밖은 404 다 — 어떤 PG 를 쓰는지 알려주지 않는다.
@@ -83,7 +120,7 @@ func (d webhookDeps) receive(w http.ResponseWriter, r *http.Request) {
 	// 는 잘못된 신호를 준다.
 	ev, err := d.gateway().VerifyWebhook(r.Context(), body)
 	if err != nil {
-		d.log.Warn("웹훅 검증 실패", "pg", pg, "remote", r.RemoteAddr,
+		d.refused.log(d.log, slog.LevelWarn, time.Now(), "웹훅 검증 실패", "pg", pg, "remote", r.RemoteAddr,
 			"content_type", r.Header.Get("Content-Type"), "bytes", len(body))
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -92,14 +129,24 @@ func (d webhookDeps) receive(w http.ResponseWriter, r *http.Request) {
 	// **멱등의 근거는 유니크 인덱스다** (FR-610). 조회로 판단하면 동시에 도착한
 	// 재전송 두 건이 둘 다 "없다" 를 읽고 함께 통과한다.
 	id, err := d.store.RecordWebhook(r.Context(), pg, ev)
+	if errors.Is(err, commerce.ErrWebhookUnmatched) {
+		// 우리 결제를 가리키지 않는다 — 출처 검증 실패와 같다 (D19 P-905). 400 이면 승인
+		// 결과를 저장하기 전(secret 이 아직 없다)에 온 진짜 알림은 토스의 재전송이 다시 가져온다.
+		// 주문번호를 남긴다 — 기록이 없으니 거부된 진짜 알림을 운영자가 찾을 곳이 여기뿐이다.
+		d.unmatched.log(d.log, slog.LevelWarn, time.Now(), "웹훅 대조 실패", "pg", pg,
+			"remote", r.RemoteAddr, "type", ev.Type, "order", ev.OrderNo)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	if errors.Is(err, commerce.ErrWebhookDuplicate) {
 		d.log.Debug("웹훅 재전송", "pg", pg, "event", ev.EventID)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 	if err != nil {
-		// 기록조차 못 했다. 이것만은 재전송이 의미가 있다.
-		d.log.Error("웹훅 기록", "pg", pg, "event", ev.EventID, "err", err)
+		// 기록조차 못 했다. 이것만은 재전송이 의미가 있다. 이 줄도 묶는다 — 연결을 끊어
+		// 요청 컨텍스트를 취소하는 것만으로 밖에서 이 경로를 밟을 수 있다.
+		d.failed.log(d.log, slog.LevelError, time.Now(), "웹훅 기록", "pg", pg, "event", ev.EventID, "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

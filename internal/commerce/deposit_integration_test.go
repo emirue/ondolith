@@ -123,7 +123,14 @@ func TestWebhookSecretMismatchIsRefused(t *testing.T) {
 	gw.getResponse = &Payment{PaymentKey: "pk-va", Status: PaymentApproved, Amount: total}
 
 	for _, wrong := range []string{"s3cret-x", ""} {
-		err := s.ProcessWebhook(ctx, gw, webhook(t, s, orderNo, wrong, total), &WebhookEvent{
+		// 기록 단계에서 먼저 걸린다 — 맞지 않는 알림은 행을 남기지 않는다.
+		if _, err := s.RecordWebhook(ctx, "toss", &WebhookEvent{
+			EventID: "DEPOSIT_CALLBACK:" + orderNo + ":" + wrong, OrderNo: orderNo,
+			PaymentKey: "pk-va", Secret: wrong, Raw: []byte(`{}`)}); !errors.Is(err, ErrWebhookUnmatched) {
+			t.Errorf("secret %q 기록 = %v, want ErrWebhookUnmatched", wrong, err)
+		}
+		// 처리 단계의 대조도 그대로다 — 기록된 행에 다른 secret 의 알림을 붙여 본다.
+		err := s.ProcessWebhook(ctx, gw, webhook(t, s, orderNo, "s3cret", total), &WebhookEvent{
 			OrderNo: orderNo, PaymentKey: "pk-va", Secret: wrong, Amount: total})
 		if err == nil {
 			t.Errorf("secret %q 이 통과했다", wrong)
@@ -225,4 +232,54 @@ func TestExchangeRefusesHiddenVariant(t *testing.T) {
 		t.Fatalf("숨긴 조합으로 교환 = %v, want ErrNotFound", err)
 	}
 	assertStock(t, pool, hidden, 5)
+}
+
+// **우리 결제와 맞는 알림만 기록된다** (P-905 「출처 검증 실패」). 이 주소는 공개이고
+// 토스는 결제 상태 알림에 서명하지 않으므로, 형태만 보고 기록하면 아무나 주문번호와
+// 결제키를 지어내 webhook_events 를 요청마다 64KiB 씩 채울 수 있었다.
+func TestOnlyOurPaymentsAreRecorded(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "va", 1)
+	depositOrder(t, s, pool, orderNo, total, "s3cret")
+	unpaid, _ := seedOrder(t, s, pool, "card", 1)
+	// 카드 결제는 secret 이 없다 — 결제키 하나가 알림을 그 결제에 묶는다.
+	card, cardTotal := seedOrder(t, s, pool, "card2", 1)
+	if _, err := s.ConfirmPayment(ctx, okGateway(), "toss", card, "pk-1", cardTotal, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := func(order, key, secret string) *WebhookEvent {
+		return &WebhookEvent{EventID: "E:" + order + ":" + key + ":" + secret, OrderNo: order,
+			PaymentKey: key, Secret: secret, Raw: []byte(`{}`)}
+	}
+	for _, tc := range []struct {
+		name string
+		ev   *WebhookEvent
+		ok   bool
+	}{
+		{"없는 주문", ev("20260101-NOPE", "pk-va", "s3cret"), false},
+		{"결제가 없는 주문", ev(unpaid, "pk-va", "s3cret"), false},
+		{"다른 결제키", ev(orderNo, "pk-other", "s3cret"), false},
+		{"다른 secret", ev(orderNo, "pk-va", "s3cret-x"), false},
+		{"결제키도 secret 도 없음", ev(orderNo, "", ""), false},
+		{"secret 만 빠짐 (가상계좌)", ev(orderNo, "pk-va", ""), false},
+		{"카드: 결제키도 secret 도 없음", ev(card, "", ""), false},
+		{"카드: 우리에게 없는 secret", ev(card, "pk-1", "남의"), false},
+		{"결제 상태 알림", ev(orderNo, "pk-va", "s3cret"), true},
+		{"입금 알림 (결제키 없음)", ev(orderNo, "", "s3cret"), true},
+		{"카드 결제 상태 알림 (secret 없음)", ev(card, "pk-1", ""), true},
+	} {
+		_, err := s.RecordWebhook(ctx, "toss", tc.ev)
+		if tc.ok && err != nil || !tc.ok && !errors.Is(err, ErrWebhookUnmatched) {
+			t.Errorf("%s: err = %v, want ok=%v", tc.name, err, tc.ok)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM webhook_events`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Errorf("webhook_events %d행, want 3 — 맞지 않는 알림이 기록됐다", n)
+	}
 }

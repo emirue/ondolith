@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -102,6 +103,20 @@ func (t *Toss) Get(ctx context.Context, paymentKey string) (*Payment, error) {
 // secret 대조는 호출자가 한다 — 대조 상대인 승인 응답의 secret 은 payments
 // 행에 있고, 어댑터는 DB 를 모른다. 그리고 D50 이 적었듯 이 값은 아는 사람이
 // 흉내낼 수 있으므로, 웹훅은 신호로만 쓰고 실제 상태는 Get 으로 확인한다.
+// tossOrderID is the orderId rule in Toss's API reference: 영문 대소문자·숫자·`-`·`_`,
+// 6~64자. Our order numbers fit it. Anything else is not an order of ours — and
+// refusing it here keeps a NUL, which PostgreSQL rejects as text, away from the
+// lookup that would turn it into a 500 and an error line per request.
+var tossOrderID = regexp.MustCompile(`^[A-Za-z0-9_-]{6,64}$`)
+
+// tossEventTypes are the enveloped events this adapter acts on. 이벤트 ID 가
+// 「종류:주문:결제키」 라서, 아무 종류나 받으면 결제키를 아는 구매자가 종류만 바꿔
+// 같은 결제로 행을 끝없이 만들 수 있다. 목록 밖은 출처 검증 실패와 같다.
+var tossEventTypes = map[string]bool{"PAYMENT_STATUS_CHANGED": true, "CANCEL_STATUS_CHANGED": true}
+
+// tossMaxKey is paymentKey's documented maximum (토스 API 레퍼런스: 최대 200자).
+const tossMaxKey = 200
+
 func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, error) {
 	if len(body) == 0 || len(body) > tossMaxBody {
 		return nil, ErrWebhookUnverified
@@ -130,7 +145,8 @@ func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, err
 		// 입금 알림. 금액·paymentKey 가 없다 — 비워 두면 호출자가 금액 대조를
 		// 건너뛰고 저장된 paymentKey 로 조회한다. 멱등 키는 거래 단위인
 		// transactionKey 다: 입금과 그 뒤의 취소가 같은 주문에 따로 온다.
-		if raw.OrderID == "" || raw.TransactionKey == "" {
+		if !tossOrderID.MatchString(raw.OrderID) || raw.TransactionKey == "" ||
+			len(raw.TransactionKey) > tossMaxKey {
 			return nil, ErrWebhookUnverified
 		}
 		return &WebhookEvent{
@@ -141,7 +157,8 @@ func (t *Toss) VerifyWebhook(_ context.Context, body []byte) (*WebhookEvent, err
 			Raw:     body,
 		}, nil
 	}
-	if raw.Data.OrderID == "" {
+	if !tossEventTypes[raw.EventType] || !tossOrderID.MatchString(raw.Data.OrderID) ||
+		len(raw.Data.PaymentKey) > tossMaxKey {
 		return nil, ErrWebhookUnverified
 	}
 	// 이벤트 ID 는 (eventType, orderId, paymentKey) 로 만든다. 토스는 별도

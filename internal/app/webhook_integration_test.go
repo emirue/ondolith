@@ -50,11 +50,13 @@ func waitForWebhookStatus(t *testing.T, pool *pgxpool.Pool, eventID string) stri
 // 것을, **Origin 을 붙인 교차 출처 요청도 통과하는지**로 확인한다. 본 트리
 // 안이었다면 그 요청은 차단된다.
 func TestWebhookIsOutsideTheMainTree(t *testing.T) {
-	srvT, _, _ := shopSite(t)
+	srvT, pool, _ := shopSite(t)
 	srv := srvT.URL
+	orderNo, _ := seedPaidOrderForWebhook(t, pool)
 
 	req, _ := http.NewRequest(http.MethodPost, srv+"/webhooks/payment/toss",
-		strings.NewReader(`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"orderId":"없는주문","paymentKey":"pk"}}`))
+		strings.NewReader(`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"orderId":"`+orderNo+
+			`","paymentKey":"pk-wh","secret":"wh-secret"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	// 브라우저가 붙이는 교차 출처 표시. 본 트리라면 여기서 차단된다.
 	req.Header.Set("Origin", "https://evil.example.com")
@@ -112,8 +114,8 @@ func TestWebhookVerificationFailureSaysNothing(t *testing.T) {
 // 본문 크기 상한을 넘으면 413 이다. 서명 검증 전에 파싱하지 않는다는 규칙은
 // 크기 상한이 있어야 의미가 있다 — 없으면 파싱 전에 메모리를 다 쓴다.
 //
-// **상한은 64KiB 다.** 이 주소는 인증이 없고(토스 웹훅에는 서명이 없다) 형태만
-// 맞으면 원문이 `webhook_events` 에 남는다. 1MiB 였던 앞 판은 요청 하나로 1MiB 를
+// **상한은 64KiB 다.** 이 주소는 인증이 없고(토스 웹훅에는 서명이 없다), 우리 결제와
+// 맞는 알림의 원문은 `webhook_events` 에 남는다. 1MiB 였던 앞 판은 요청 하나로 1MiB 를
 // 쌓을 수 있었고, A-603 한 쪽이 그런 행 100개를 메모리에 읽었다.
 func TestWebhookRejectsOversizedBody(t *testing.T) {
 	srvT, _, _ := shopSite(t)
@@ -131,7 +133,9 @@ func TestWebhookRejectsOversizedBody(t *testing.T) {
 func TestWebhookIsIdempotentOnResend(t *testing.T) {
 	srvT, pool, _ := shopSite(t)
 	srv := srvT.URL
-	body := `{"eventType":"PAYMENT_STATUS_CHANGED","data":{"orderId":"없는주문","paymentKey":"pk-1"}}`
+	orderNo, _ := seedPaidOrderForWebhook(t, pool)
+	body := `{"eventType":"PAYMENT_STATUS_CHANGED","data":{"orderId":"` + orderNo +
+		`","paymentKey":"pk-wh","secret":"wh-secret"}}`
 	for i := range 2 {
 		resp := postWebhook(t, srv, "toss", body)
 		resp.Body.Close()
@@ -219,7 +223,9 @@ func TestWebhookNeverMovesOrderStatus(t *testing.T) {
 	}
 }
 
-// secret 이 승인 응답과 다르면 우리 결제에 대한 알림이 아니다.
+// secret 이 승인 응답과 다르면 우리 결제에 대한 알림이 아니다 — 출처 검증 실패로
+// 400 이고 기록하지 않는다 (D19 P-905). 승인 결과를 저장하기 전에 도착한 진짜 알림이면
+// 토스의 재전송(최대 7회, 3일 19시간)이 저장 뒤에 다시 가져온다.
 func TestWebhookSecretMustMatchTheApproval(t *testing.T) {
 	srvT, pool, _ := shopSite(t)
 	srv := srvT.URL
@@ -231,13 +237,10 @@ func TestWebhookSecretMustMatchTheApproval(t *testing.T) {
 	b, _ := json.Marshal(payload)
 	resp := postWebhook(t, srv, "toss", string(b))
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("= HTTP %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("secret 불일치 = HTTP %d, want 400", resp.StatusCode)
 	}
-	if got := waitForWebhookStatus(t, pool,
-		"PAYMENT_STATUS_CHANGED:"+orderNo+":pk-wh"); got != "실패" {
-		t.Errorf("secret 불일치인데 상태가 %q", got)
-	}
+	assertNoWebhookRows(t, pool)
 }
 
 // **토스가 실제로 보내는 입금 알림이 문을 통과한다.** DEPOSIT_CALLBACK 은
@@ -271,10 +274,54 @@ func TestDepositCallbackInTheDocumentedShapeIsRecordedAndChecked(t *testing.T) {
 		t.Errorf("주문 연결 = %q (%v), want %q", linked, err, orderNo)
 	}
 
-	// secret 대조는 이 형태에서도 그대로다 — 흉내 낸 알림은 처리되지 않는다.
-	post("남의-secret", "tk-forged")
-	if got := waitForWebhookStatus(t, pool, "DEPOSIT_CALLBACK:"+orderNo+":tk-forged"); got != "실패" {
-		t.Errorf("secret 불일치인데 상태가 %q", got)
+	// secret 대조는 이 형태에서도 그대로다 — 흉내 낸 알림은 400 이고 기록되지 않는다.
+	resp := postWebhook(t, srv, "toss", `{"createdAt":"2026-10-03T21:00:00.000000",`+
+		`"secret":"남의-secret","status":"DONE","transactionKey":"tk-forged","orderId":"`+orderNo+`"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("secret 이 다른 입금 알림 = HTTP %d, want 400", resp.StatusCode)
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM webhook_events WHERE event_id = $1`,
+		"DEPOSIT_CALLBACK:"+orderNo+":tk-forged").Scan(&n); err != nil || n != 0 {
+		t.Errorf("흉내 낸 입금 알림이 %d행 기록됐다 (%v)", n, err)
+	}
+}
+
+// **지어낸 알림은 행을 남기지 않는다.** 이 주소는 인증이 없고 토스는 결제 상태
+// 알림에 서명하지 않는다 — 형태만 보고 기록하던 앞 판은 주문번호·결제키를 지어낸
+// 요청마다 webhook_events 에 최대 64KiB 를 쌓았다.
+func TestForgedWebhooksLeaveNoRows(t *testing.T) {
+	srvT, pool, _ := shopSite(t)
+	srv := srvT.URL
+	orderNo, _ := seedPaidOrderForWebhook(t, pool)
+	for _, body := range []string{
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"orderId":"없는주문","paymentKey":"pk-wh"}}`,
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"orderId":"` + orderNo + `","paymentKey":"지어낸키","secret":"wh-secret"}}`,
+	} {
+		resp := postWebhook(t, srv, "toss", body)
+		buf := make([]byte, 512)
+		n, _ := resp.Body.Read(buf)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s = HTTP %d, want 400", body, resp.StatusCode)
+		}
+		if n != 0 {
+			t.Errorf("거부 사유가 실려 나갔다: %q", buf[:n])
+		}
+	}
+	assertNoWebhookRows(t, pool)
+}
+
+func assertNoWebhookRows(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM webhook_events`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("맞지 않는 알림이 webhook_events 에 %d행 기록됐다", n)
 	}
 }
 
@@ -332,11 +379,12 @@ func TestProviderNameAndGatewayNeverDisagree(t *testing.T) {
 		}
 		srv := restartOnSameSchema(t).URL
 
-		// 웹훅은 이름으로 갈린다.
+		// 웹훅은 이름으로 갈린다. 닫힌 경로는 404, 열린 경로에서 이 알림은 검증에서
+		// 걸려 400 이다 — 열림은 정확히 400 으로 본다.
 		resp := postWebhook(t, srv, "toss",
 			`{"eventType":"X","data":{"orderId":"없는주문","paymentKey":"pk"}}`)
 		resp.Body.Close()
-		gotHook := resp.StatusCode == http.StatusOK
+		gotHook := resp.StatusCode == http.StatusBadRequest
 
 		// 결제창은 어댑터로 갈린다. 둘이 같은 답을 내야 한다.
 		c := client()

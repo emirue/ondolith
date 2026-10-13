@@ -288,14 +288,14 @@ func TestVerifyWebhookReadsTheDocumentedDepositCallback(t *testing.T) {
 	ctx := context.Background()
 	body := func(tk string) []byte {
 		return []byte(`{"createdAt":"2026-10-03T21:00:00.000000","secret":"wsk",` +
-			`"status":"DONE","transactionKey":"` + tk + `","orderId":"o-1"}`)
+			`"status":"DONE","transactionKey":"` + tk + `","orderId":"order-1"}`)
 	}
 
 	ev, err := tp.VerifyWebhook(ctx, body("tk-1"))
 	if err != nil {
 		t.Fatalf("문서의 입금 알림 = %v, want 통과", err)
 	}
-	if ev.Type != "DEPOSIT_CALLBACK" || ev.OrderNo != "o-1" || ev.Secret != "wsk" {
+	if ev.Type != "DEPOSIT_CALLBACK" || ev.OrderNo != "order-1" || ev.Secret != "wsk" {
 		t.Errorf("= %+v", ev)
 	}
 	// 금액이 없는 이벤트다. 0 이어야 호출자가 「대조할 금액 없음」으로 읽는다.
@@ -315,7 +315,7 @@ func TestVerifyWebhookReadsTheDocumentedDepositCallback(t *testing.T) {
 	// 문서가 정한 식별 필드가 빠지면 형태가 아니다.
 	for _, bad := range []string{
 		`{"secret":"wsk","status":"DONE","transactionKey":"tk"}`,
-		`{"secret":"wsk","status":"DONE","orderId":"o-1"}`,
+		`{"secret":"wsk","status":"DONE","orderId":"order-1"}`,
 	} {
 		if _, err := tp.VerifyWebhook(ctx, []byte(bad)); !errors.Is(err, ErrWebhookUnverified) {
 			t.Errorf("%s = %v, want ErrWebhookUnverified", bad, err)
@@ -332,28 +332,39 @@ func TestVerifyWebhookParsesAndBuildsAnEventID(t *testing.T) {
 	// 봉투가 있는 이벤트(PAYMENT_STATUS_CHANGED). 입금 알림은 형태가 달라
 	// 위 테스트가 따로 본다.
 	ev, err := tp.VerifyWebhook(ctx, []byte(
-		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-1","orderId":"o-1","secret":"wsk"}}`))
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-1","orderId":"order-1","secret":"wsk"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.Type != "PAYMENT_STATUS_CHANGED" || ev.OrderNo != "o-1" || ev.Secret != "wsk" {
+	if ev.Type != "PAYMENT_STATUS_CHANGED" || ev.OrderNo != "order-1" || ev.Secret != "wsk" {
 		t.Errorf("= %+v", ev)
 	}
 	// 같은 이벤트는 같은 ID 다 — 재전송 멱등의 키다 (FR-610).
 	again, _ := tp.VerifyWebhook(ctx, []byte(
-		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-1","orderId":"o-1","secret":"다름"}}`))
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-1","orderId":"order-1","secret":"다름"}}`))
 	if ev.EventID != again.EventID {
 		t.Errorf("같은 이벤트에 다른 ID: %q vs %q", ev.EventID, again.EventID)
 	}
 	// 다른 주문은 다른 ID 다. 아니면 두 번째 입금이 중복으로 버려진다.
 	other, _ := tp.VerifyWebhook(ctx, []byte(
-		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-2","orderId":"o-2"}}`))
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-2","orderId":"order-2"}}`))
 	if ev.EventID == other.EventID {
 		t.Errorf("다른 주문에 같은 ID: %q", other.EventID)
 	}
 
 	for _, bad := range []string{``, `not json`, `{}`, `{"eventType":"X"}`,
-		`{"data":{"orderId":"o"}}`} {
+		`{"data":{"orderId":"o"}}`,
+		// 처리하지 않는 이벤트 종류. 받으면 종류만 바꿔 같은 결제로 행을 끝없이 쌓을 수 있다 —
+		// 이벤트 ID 가 종류:주문:결제키 이기 때문이다.
+		`{"eventType":"X1","data":{"paymentKey":"pk-1","orderId":"order-1"}}`,
+		// 토스의 orderId 규칙(영문·숫자·-·_ 6~64자) 밖. NUL 은 DB 가 받지 않는다.
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-1","orderId":"a\u0000bcdef"}}`,
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-1","orderId":"o-1"}}`,
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"pk-1","orderId":"없는주문번호"}}`,
+		`{"createdAt":"x","secret":"wsk","status":"DONE","transactionKey":"tk","orderId":"a\u0000bcdef"}`,
+		// 결제키는 토스 문서상 최대 200자다.
+		`{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"` + strings.Repeat("k", 201) + `","orderId":"order-1"}}`,
+	} {
 		if _, err := tp.VerifyWebhook(ctx, []byte(bad)); !errors.Is(err, ErrWebhookUnverified) {
 			t.Errorf("%q = %v, want ErrWebhookUnverified", bad, err)
 		}
