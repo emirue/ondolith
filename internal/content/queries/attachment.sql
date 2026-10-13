@@ -25,4 +25,4 @@ FROM attachments a
 JOIN posts p ON p.id = a.post_id
 WHERE p.board_id = $1
 ORDER BY a.created_at DESC, a.id DESC
-LIMIT $2;
+LIMIT $2 OFFSET $3;

@@ -334,13 +334,14 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 }
 
 // adminMaxPage 는 관리자 목록의 쪽 번호 상한이다. 공개 목록(100쪽)과 달리 오래된
-// 주문까지 닿아야 해서 사실상 열어 두되, 가장 큰 쪽 크기(100)를 곱해도 OFFSET 이
+// 주문까지 닿아야 해서 사실상 열어 두되, 가장 큰 쪽 크기(첨부 200)를 곱해도 OFFSET 이
 // int32 를 넘지 않게 한다 — 상한이 없던 판은 쪽 번호 하나로 음수 OFFSET 500 이 났다.
 const adminMaxPage = 1_000_000
 
-// pageOf reads the page number, clamped to 1..adminMaxPage.
+// pageOf reads the page number, clamped to 1..adminMaxPage — from the query, or
+// from the form of a POST that returns to the page it came from.
 func pageOf(r *http.Request) int {
-	n, err := strconv.Atoi(r.URL.Query().Get("page"))
+	n, err := strconv.Atoi(r.FormValue("page"))
 	if err != nil || n < 1 {
 		return 1
 	}

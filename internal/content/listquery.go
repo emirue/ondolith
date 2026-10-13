@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // ListQuery is a normalised board list request: what P-203 asks for, after the
@@ -22,28 +21,17 @@ type ListQuery struct {
 	Page int
 	// PerPage is bounded by the board's setting and by a hard ceiling.
 	PerPage int
+	// perPageAsked is whether the URL chose PerPage — then the pager's links
+	// carry it, or page 4 of 50 rows would link to page 5 of 20.
+	perPageAsked bool
 	// Search is the raw query string; the caller binds it as a parameter.
 	Search string
-	// After is the keyset cursor. Empty means the first page.
-	After Cursor
 	// ViewerID·CanSecret 은 **검색에서** 읽을 수 없는 비밀글을 빼는 데 쓴다.
 	// URL 에서 오지 않는다 — 핸들러가 행위자로 채운다. 비워 두면 익명·권한 없음,
 	// 즉 남의 비밀글이 검색에 걸리지 않는 쪽이다(닫힌 기본값).
 	ViewerID  string
 	CanSecret bool
 }
-
-// Cursor is the keyset position D30 measured: (is_pinned, created_at, id), all
-// DESC, so the row comparison reaches the index. OFFSET fell to a sequential
-// scan plus a 19,020-row sort at page 950; the same query as a keyset was an
-// Index Only Scan touching 20 rows.
-type Cursor struct {
-	Pinned  bool
-	Created time.Time
-	ID      string
-}
-
-func (c Cursor) IsZero() bool { return c.ID == "" }
 
 // sortKeys is the allow list: what a URL may say. Each key is one CASE branch
 // in the ORDER BY of queries/post.sql (ListPosts·ListPostsSearch·SearchPosts);
@@ -67,11 +55,14 @@ const (
 	// MaxPerPage is the ceiling regardless of the board's setting. A visitor
 	// asking for 10,000 rows is a denial of service with a query string.
 	MaxPerPage = 100
-	// MaxPage bounds OFFSET paging. D30 measured page 950 falling to a
-	// sequential scan plus a 19,020-row sort; at 100 pages × 100 rows the
-	// worst OFFSET skips 10,000 index entries, which the board index absorbs.
-	// A three-digit page number is a crawler, not a reader.
+	// MaxPage bounds the lists that do not count their rows (상품 목록·상품 검색·
+	// 주문 내역, 「한 행 더 읽어」 다음을 안다). A three-digit page number there is
+	// a crawler, not a reader.
 	MaxPage = 100
+	// MaxListPage bounds the counted lists (게시판 P-203·통합 검색 P-212) only so
+	// that OFFSET stays inside int32 at MaxPerPage. Their pager numbers every page,
+	// and a reader looking for an old post walks back as far as the board goes.
+	MaxListPage = 1_000_000
 	// MaxSearchRunes bounds the search term. A megabyte of text in a tsquery is
 	// work the database does before it can refuse.
 	MaxSearchRunes = 100
@@ -99,12 +90,17 @@ func ParseListQuery(q url.Values, boardPerPage int) ListQuery {
 		}
 	}
 
+	out.Search = strings.TrimSpace(q.Get("q"))
+	if r := []rune(out.Search); len(r) > MaxSearchRunes {
+		out.Search = string(r[:MaxSearchRunes])
+	}
+
 	if n, err := strconv.Atoi(q.Get("page")); err == nil {
 		switch {
 		case n < 1:
 			out.Page = 0
-		case n > MaxPage:
-			out.Page = MaxPage - 1
+		case n > out.MaxPages():
+			out.Page = out.MaxPages() - 1
 		default:
 			out.Page = n - 1 // URLs are 1-based, offsets are not
 		}
@@ -112,7 +108,7 @@ func ParseListQuery(q url.Values, boardPerPage int) ListQuery {
 
 	out.PerPage = boardPerPage
 	if n, err := strconv.Atoi(q.Get("per_page")); err == nil && n > 0 {
-		out.PerPage = n
+		out.PerPage, out.perPageAsked = n, true
 	}
 	if out.PerPage < 1 {
 		out.PerPage = 20
@@ -121,13 +117,27 @@ func ParseListQuery(q url.Values, boardPerPage int) ListQuery {
 		out.PerPage = MaxPerPage
 	}
 
-	out.Search = strings.TrimSpace(q.Get("q"))
-	if r := []rune(out.Search); len(r) > MaxSearchRunes {
-		out.Search = string(r[:MaxSearchRunes])
-	}
-
-	out.After = parseCursor(q.Get("after"))
 	return out
+}
+
+// PerPageParam is the `per_page` value for the pager's links — "" when the URL
+// left it to the board's setting.
+func (l ListQuery) PerPageParam() string {
+	if !l.perPageAsked {
+		return ""
+	}
+	return strconv.Itoa(l.PerPage)
+}
+
+// MaxPages is the last page number this list may ask for. A list with a search
+// term keeps MaxPage: its OFFSET still sorts every match it skips (본문까지 —
+// 검색 질의는 인덱스만으로 쪽을 고르지 못한다), so a deep page of a common word
+// would sort them all.
+func (l ListQuery) MaxPages() int {
+	if l.Search != "" {
+		return MaxPage
+	}
+	return MaxListPage
 }
 
 // sortKey is what the query's ORDER BY CASE chain is handed.
@@ -143,39 +153,19 @@ func (l ListQuery) sortKey() string {
 	return "created"
 }
 
-// Offset is for the numbered-page path. Keyset paging uses After instead.
+// Offset is the rows before this page.
 func (l ListQuery) Offset() int { return l.Page * l.PerPage }
 
-// parseCursor reads `after` as pinned:unixnano:id. A malformed cursor is no
-// cursor: it means the first page, which is the same thing a visitor sees on a
-// link that has gone stale.
-func parseCursor(s string) Cursor {
-	if s == "" {
-		return Cursor{}
-	}
-	parts := strings.SplitN(s, ":", 3)
-	if len(parts) != 3 || parts[2] == "" {
-		return Cursor{}
-	}
-	nano, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return Cursor{}
-	}
-	return Cursor{
-		Pinned:  parts[0] == "1",
-		Created: time.Unix(0, nano).UTC(),
-		ID:      parts[2],
-	}
-}
-
-// String renders a cursor for the next-page link.
-func (c Cursor) String() string {
-	if c.IsZero() {
+// SortParam is the `sort` value ParseListQuery reads back as this sort, for the
+// pager's links — "" for the default. Without it the next page falls back to
+// newest-first.
+func (l ListQuery) SortParam() string {
+	switch key := l.sortKey(); {
+	case key == "created" && l.Desc:
 		return ""
+	case key == "title" && l.Desc:
+		return "-title"
+	default:
+		return key
 	}
-	p := "0"
-	if c.Pinned {
-		p = "1"
-	}
-	return p + ":" + strconv.FormatInt(c.Created.UnixNano(), 10) + ":" + c.ID
 }

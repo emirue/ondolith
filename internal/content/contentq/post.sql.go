@@ -261,8 +261,7 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-           p.view_count, p.created_at, p.updated_at
+    SELECT p.id
     FROM posts p
     WHERE p.board_id = $1
       AND p.status = 'published'
@@ -276,7 +275,8 @@ FROM (
              CASE WHEN $3::bool THEN p.id END DESC,
              CASE WHEN NOT $3::bool THEN p.id END ASC
     LIMIT $5::int OFFSET $4::int
-) p
+) k
+JOIN posts p ON p.id = k.id
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
          CASE WHEN $2::text = 'created' AND $3::bool THEN p.created_at END DESC,
@@ -322,6 +322,10 @@ type ListPostsRow struct {
 // 여부·작성자를 계산한다. 한 층으로 쓰면 정렬이 인덱스를 못 타는 순간 걸러진 행
 // **전부**에 대해 댓글을 세고 나서 정렬한다. 바깥 ORDER BY 는 안쪽과 같은 사슬이다 —
 // 조인이 순서를 지켜 준다는 보장은 없다 (post_shape_test.go 가 둘이 같은지 본다).
+//
+// **ListPosts 의 안쪽은 id 만 고른다** (지연 조인, FR-508). 정렬 열과 거르는 조건이 공개
+// 목록 부분 인덱스(00029)에 다 있어서 안쪽은 인덱스만 읽는다 — OFFSET 이 건너뛰는 행마다
+// 표를 읽지 않는다. 열을 고르던 판은 5,000쪽에서 2.9초였다(100만 건, 00029 주석).
 func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]ListPostsRow, error) {
 	rows, err := q.db.Query(ctx, listPosts,
 		arg.BoardID,
@@ -491,12 +495,13 @@ JOIN posts p ON p.id = c.post_id
 LEFT JOIN users u ON u.id = c.author_id
 WHERE p.board_id = $1
 ORDER BY c.created_at DESC, c.id DESC
-LIMIT $2
+LIMIT $2 OFFSET $3
 `
 
 type ModerateCommentsParams struct {
 	BoardID string
 	Limit   int32
+	Offset  int32
 }
 
 type ModerateCommentsRow struct {
@@ -511,7 +516,7 @@ type ModerateCommentsRow struct {
 }
 
 func (q *Queries) ModerateComments(ctx context.Context, arg ModerateCommentsParams) ([]ModerateCommentsRow, error) {
-	rows, err := q.db.Query(ctx, moderateComments, arg.BoardID, arg.Limit)
+	rows, err := q.db.Query(ctx, moderateComments, arg.BoardID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -549,12 +554,13 @@ FROM posts p
 LEFT JOIN users u ON u.id = p.author_id
 WHERE p.board_id = $1
 ORDER BY p.is_pinned DESC, p.created_at DESC, p.id DESC
-LIMIT $2
+LIMIT $2 OFFSET $3
 `
 
 type ModeratePostsParams struct {
 	BoardID string
 	Limit   int32
+	Offset  int32
 }
 
 type ModeratePostsRow struct {
@@ -578,7 +584,7 @@ type ModeratePostsRow struct {
 }
 
 func (q *Queries) ModeratePosts(ctx context.Context, arg ModeratePostsParams) ([]ModeratePostsRow, error) {
-	rows, err := q.db.Query(ctx, moderatePosts, arg.BoardID, arg.Limit)
+	rows, err := q.db.Query(ctx, moderatePosts, arg.BoardID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

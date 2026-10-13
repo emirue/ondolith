@@ -1,17 +1,16 @@
-{{/* 페이지 이동.
-     페이지 번호는 Go 가 계산해 넘긴다 — html/template 에 산술이 없고,
-     D17 함수맵에 없는 이름은 템플릿에서 쓸 수 없다. 여기서 더하기를 하려고
-     함수를 늘리면 다음 화면이 또 하나를 늘린다.
+{{/* 페이지 이동 (FR-508). 번호를 열 개씩 보이고 처음·이전·다음·마지막을 단다.
+     번호와 주소는 Go 가 계산해 넘긴다 — html/template 에 산술이 없고, D17 함수맵에
+     없는 이름은 템플릿에서 쓸 수 없다. 주소에는 정렬·검색어가 이미 실려 있다.
 
-     기대하는 데이터: {Base, Query, Total, PageNo, PrevPage, NextPage, HasPrev, HasNext} */}}
-{{$q := .Query}}{{$base := .Base}}
-<nav class="pager">
+     기대하는 데이터: {Total, Pages[{No, URL, Current}], FirstURL, PrevURL, NextURL, LastURL}
+     — 빈 주소는 그 링크가 없다는 뜻. 앞 판의 {Base, Query, PageNo, PrevPage, NextPage,
+     HasPrev, HasNext} 도 그대로 들어온다 (이 조각을 덮어쓴 테마를 위해). */}}
+<nav class="pager" aria-label="페이지">
   <span class="meta">전체 {{number .Total}}건</span>
-  {{if .HasPrev}}
-    <a class="btn btn--sm" href="{{$base}}?page={{.PrevPage}}{{if $q.Search}}&q={{$q.Search}}{{end}}">이전</a>
+  {{with .FirstURL}}<a class="btn btn--sm" href="{{.}}">처음</a>{{end}}
+  {{with .PrevURL}}<a class="btn btn--sm" href="{{.}}">이전</a>{{end}}
+  {{range .Pages}}{{if .Current}}<span class="page-current" aria-current="page">{{.No}}</span>{{else}}<a class="btn btn--sm" href="{{.URL}}">{{.No}}</a>{{end}}
   {{end}}
-  <span class="page-current">{{.PageNo}}</span>
-  {{if .HasNext}}
-    <a class="btn btn--sm" href="{{$base}}?page={{.NextPage}}{{if $q.Search}}&q={{$q.Search}}{{end}}">다음</a>
-  {{end}}
+  {{with .NextURL}}<a class="btn btn--sm" href="{{.}}">다음</a>{{end}}
+  {{with .LastURL}}<a class="btn btn--sm" href="{{.}}">마지막</a>{{end}}
 </nav>

@@ -131,7 +131,7 @@ themes/{이름}/
 | `partials/head.html` | (전체) | 폴백 | `<head>` 내용. 메타·OG 태그 (FR-511) |
 | `partials/header.html` | (전체) | 폴백 | 상단. 메뉴(FR-405)와 로그인 상태 |
 | `partials/footer.html` | (전체) | 폴백 | 하단. 사업자 정보(FR-711)가 여기 들어간다 |
-| `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508). 전체 건수를 세는 게시판(P-203)·통합 검색(P-212) |
+| `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508). 전체 건수를 세는 게시판(P-203)·통합 검색(P-212). 데이터 `{Total, LastPage, Pages[{No, URL, Current}], FirstURL, PrevURL, NextURL, LastURL}` — 번호는 열 개씩, 빈 주소는 링크 없음, 주소에 정렬·검색어가 실려 있다. 앞 판의 `{Base, Query, PageNo, PrevPage, NextPage, HasPrev, HasNext}` 도 함께 들어온다 |
 | `partials/pager.html` | P-301, P-302, P-305, P-501 | 폴백 | 「이전·다음」. 건수를 세지 않고 한 행 더 읽는 목록. 데이터 `{PageNo, PrevURL, NextURL}` — 빈 주소는 링크 없음 |
 | `partials/flash.html` | (전체) | 폴백 | 성공·오류 메시지 |
 | `partials/field.html` | P-203, P-204, P-205 | 폴백 | **커스텀 필드 하나를 그린다** (FR-503). 타입별 분기가 여기 있다 |

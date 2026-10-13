@@ -29,15 +29,21 @@ func (d *boardDeps) search(w http.ResponseWriter, r *http.Request) {
 	var results []content.Post
 	var total int64
 	if q.Search != "" && len(readable) > 0 {
-		results, err = d.content.SearchPosts(ctx, readable, secretIn, q, actorID(a))
-		if err != nil {
-			d.serverError(w, r, err)
-			return
-		}
+		// 먼저 센다 — 마지막 쪽 너머는 마지막 쪽이고(P-203 과 같다), 맞는 글이 없으면 목록을
+		// 읽지 않는다. 목록부터 읽던 판은 너머 쪽에서 정렬을 두 번 했다.
 		total, err = d.content.CountSearchPosts(ctx, readable, secretIn, q, actorID(a))
 		if err != nil {
 			d.serverError(w, r, err)
 			return
+		}
+		if last := lastPage(total, q); q.Page+1 > last {
+			q.Page = last - 1
+		}
+		if total > 0 {
+			if results, err = d.content.SearchPosts(ctx, readable, secretIn, q, actorID(a)); err != nil {
+				d.serverError(w, r, err)
+				return
+			}
 		}
 	}
 

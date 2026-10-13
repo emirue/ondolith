@@ -53,6 +53,12 @@ func TestPostQueriesShareColumnsAndConverter(t *testing.T) {
 		}
 	}
 
+	// **ListPosts 의 안쪽은 id 만 고른다** (지연 조인, 00029). 열이 다시 들어가면 깊은 쪽에서
+	// OFFSET 이 건너뛰는 행마다 표를 읽는다 — 100만 건에서 5,000쪽이 13ms 에서 2.9초가 된다.
+	if lp := normalizeSQL(all["ListPosts"]); !strings.Contains(lp, "FROM ( SELECT p.id FROM posts p WHERE") {
+		t.Errorf("ListPosts 안쪽이 id 만 고르지 않는다: %.200s", lp)
+	}
+
 	// Post 를 만드는 곳도 하나여야 한다. 행 타입이 여섯이라도 변환이 둘이면
 	// custom_fields 를 푸는 규칙이 갈라진다.
 	if n := postLiterals(t); n != 1 {

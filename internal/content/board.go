@@ -144,6 +144,7 @@ func listStyle(s string) string {
 // succeed silently: A-305 has a confirmation step, and "이 게시판의 글 128건도
 // 함께 삭제됩니다" is the only thing that makes that step mean anything.
 func (s *Store) DeleteBoard(ctx context.Context, id string, force bool) error {
+	defer s.counts.reset()
 	if !force {
 		posts, err := s.q.CountBoardPosts(ctx, id)
 		if err != nil {

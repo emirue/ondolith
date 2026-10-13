@@ -5,10 +5,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/alexedwards/scs/v2"
 
+	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/content"
 )
@@ -102,6 +104,12 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	// 총수는 화면 요소다 — 내장 테마의 페이저가 「전체 N건」을 그린다
 	// (partials/pagination.html). 한 줄 더 읽어 HasNext 만 아는 것으로는 부족하다.
 	posts, total, err := d.content.PostPage(ctx, b.ID, q)
+	// 마지막 쪽 너머는 마지막 쪽이다 — 낡은 즐겨찾기나 글이 지워진 뒤의 쪽 번호. 상한이
+	// 사라졌으니 빈 쪽을 그리면 번호만 있고 글이 없는 화면이 된다.
+	if last := lastPage(total, q); err == nil && q.Page+1 > last {
+		q.Page = last - 1
+		posts, total, err = d.content.PostPage(ctx, b.ID, q)
+	}
 	if err != nil {
 		d.serverError(w, r, err)
 		return
@@ -526,16 +534,56 @@ func firstLine(s string) string {
 // The arithmetic is here because html/template has none, and D17 closes the
 // function map — adding `add` for this would be the first of several, and the
 // screen after next would want `mul`.
+//
+// 번호는 열 개씩(pageWindow) 묶어 보이고 처음·이전·다음·마지막을 단다 — 그누보드와
+// 같은 모양이다. 주소는 통째로 만들어 넘긴다: 정렬·검색어를 템플릿에서 이으면 화면마다
+// 빠뜨릴 자리가 생기고, 빠뜨린 쪽에서 다음 쪽의 정렬이 풀린다. 앞의 키들(PageNo·
+// PrevPage·NextPage·HasPrev·HasNext)은 이 조각을 덮어쓴 디스크 테마를 위해 남긴다.
 func pagerFor(base string, q content.ListQuery, total int64) map[string]any {
-	prev := q.Page // URLs are 1-based, so the previous page's number IS q.Page
-	return map[string]any{
-		"Base": base, "Query": q, "Total": total,
-		"PageNo":   q.Page + 1,
-		"PrevPage": prev,
-		"NextPage": q.Page + 2,
-		"HasPrev":  q.Page > 0,
-		// 상한 쪽(content.MaxPage)에서는 다음이 없다 — 그 뒤는 상한으로 접혀
-		// 같은 쪽이 끝없이 이어진다.
-		"HasNext": int64((q.Page+1)*q.PerPage) < total && q.Page+1 < content.MaxPage,
+	last := lastPage(total, q)
+	cur := min(q.Page+1, last) // 핸들러가 맞추지 않은 쪽(빈 검색 등)도 없는 쪽을 가리키지 않는다
+	keep := url.Values{"q": {q.Search}, "sort": {q.SortParam()}, "per_page": {q.PerPageParam()}}
+	link := func(n int) string { return admin.ListURL(base, keep, n) }
+
+	start := (cur-1)/pageWindow*pageWindow + 1
+	pages := []pageLink{}
+	for n := start; n <= min(start+pageWindow-1, last); n++ {
+		pages = append(pages, pageLink{No: n, URL: link(n), Current: n == cur})
 	}
+	p := map[string]any{
+		"Base": base, "Query": q, "Total": total,
+		"PageNo":   cur,
+		"PrevPage": cur - 1,
+		"NextPage": cur + 1,
+		"HasPrev":  cur > 1,
+		"HasNext":  cur < last,
+		"LastPage": last, "Pages": pages,
+		"FirstURL": "", "PrevURL": "", "NextURL": "", "LastURL": "",
+	}
+	if cur > 1 {
+		p["FirstURL"], p["PrevURL"] = link(1), link(cur-1)
+	}
+	if cur < last {
+		p["NextURL"], p["LastURL"] = link(cur+1), link(last)
+	}
+	return p
+}
+
+// pageWindow is how many page numbers the pager shows at once.
+const pageWindow = 10
+
+// pageLink is one number in the pager.
+type pageLink struct {
+	No      int
+	URL     string
+	Current bool
+}
+
+// lastPage is the number of the last page that has rows; 1 for an empty list.
+// It never passes q.MaxPages(), where ParseListQuery stops.
+func lastPage(total int64, q content.ListQuery) int {
+	if total <= 0 || q.PerPage <= 0 {
+		return 1
+	}
+	return int(min((total+int64(q.PerPage)-1)/int64(q.PerPage), int64(q.MaxPages())))
 }

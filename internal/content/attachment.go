@@ -213,9 +213,9 @@ func (a *Attachments) removeFile(rel string) error { return RemoveUpload(a.root,
 // BoardAttachments is A-309's list: every attachment on one board, newest
 // first. The board scopes it because post.moderate does (D15 2.4) — "every
 // attachment on the site" is a list nobody has permission for as a whole.
-func (s *Store) BoardAttachments(ctx context.Context, boardID string, limit int) ([]Attachment, error) {
+func (s *Store) BoardAttachments(ctx context.Context, boardID string, limit, offset int) ([]Attachment, error) {
 	rows, err := s.q.BoardAttachments(ctx, contentq.BoardAttachmentsParams{
-		BoardID: boardID, Limit: int32(limit)})
+		BoardID: boardID, Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}

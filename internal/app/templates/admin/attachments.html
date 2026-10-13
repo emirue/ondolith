@@ -18,6 +18,7 @@
           <td>
             <form method="post" action="/admin/attachments">
               <input type="hidden" name="attachment_id" value="{{.ID}}">
+              <input type="hidden" name="page" value="{{$.PageNo}}">
               <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
             </form>
           </td>
@@ -28,5 +29,13 @@
       </tbody>
     </table>
   </div>
+  {{if .PageNo}}
+  <div class="adm-pagination">
+    <span class="adm-count">{{.PageNo}}쪽</span>
+    {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
+    <span class="adm-page adm-page--current">{{.PageNo}}</span>
+    {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
+  </div>
+  {{end}}
 </div>
 {{end}}

@@ -621,24 +621,33 @@ ALTER TABLE board_fields ADD CONSTRAINT board_fields_options_when
 ```sql
 CHECK (jsonb_typeof(custom_fields) = 'object' AND octet_length(custom_fields::text) <= 16384)
 
+-- 관리 목록(A-307)은 숨긴 글도 본다.
 CREATE INDEX posts_board_list_idx ON posts (board_id, is_pinned DESC, created_at DESC, id DESC);
 CREATE INDEX posts_author_id_idx  ON posts (author_id);
--- 정렬 키마다 하나 (00022·00023). 고정 글이 앞이라 방향이 섞인 정렬은 인덱스 하나를
--- 거꾸로 걸어서는 되지 않는다 — 제목은 방향마다 따로 있다.
-CREATE INDEX posts_board_views_idx      ON posts (board_id, is_pinned DESC, view_count DESC, id DESC);
-CREATE INDEX posts_board_title_idx      ON posts (board_id, is_pinned DESC, title ASC, id ASC);
-CREATE INDEX posts_board_title_desc_idx ON posts (board_id, is_pinned DESC, title DESC, id DESC);
--- 페이저의 「전체 N건」과 홈의 최근 글.
-CREATE INDEX posts_board_published_idx  ON posts (board_id) WHERE status = 'published';
-CREATE INDEX posts_recent_idx           ON posts (created_at DESC, id DESC) WHERE status = 'published';
+-- 공개 목록(P-203)은 정렬 키마다 발행 글 부분 인덱스 하나 (00029). 고정 글이 앞이라 방향이
+-- 섞인 정렬은 인덱스 하나를 거꾸로 걸어서는 되지 않는다 — 제목은 방향마다 따로 있다.
+CREATE INDEX posts_board_pub_created_idx    ON posts (board_id, is_pinned DESC, created_at DESC, id DESC) WHERE status = 'published';
+CREATE INDEX posts_board_pub_views_idx      ON posts (board_id, is_pinned DESC, view_count DESC, id DESC) WHERE status = 'published';
+CREATE INDEX posts_board_pub_title_idx      ON posts (board_id, is_pinned DESC, title ASC, id ASC) WHERE status = 'published';
+CREATE INDEX posts_board_pub_title_desc_idx ON posts (board_id, is_pinned DESC, title DESC, id DESC) WHERE status = 'published';
+-- 홈의 최근 글.
+CREATE INDEX posts_recent_idx               ON posts (created_at DESC, id DESC) WHERE status = 'published';
 CREATE INDEX posts_search_idx     ON posts USING GIN (search_vector);  -- 00008
 ```
 
-**측정한 것 — 인덱스 끝의 `id`는 FR-508 때문이다.** 20,000행에서 `LIMIT 20 OFFSET 19000`은
-이 인덱스가 있어도 **Seq Scan + 19,020행 정렬**로 떨어졌다. 같은 조건의 키셋 질의
-`(is_pinned, created_at, id) < (...)`는 **Index Only Scan, 실제 접근 20행**이었다. 즉 FR-508은
-인덱스가 아니라 **키셋 페이지네이션**이 충족하고, `id`가 그 tiebreaker다. 세 정렬 컬럼의 방향이
-전부 DESC로 같아야 행 비교가 인덱스 조건으로 내려간다.
+**측정한 것 — FR-508 은 쪽 번호 + 인덱스만 읽는 안쪽 질의가 충족한다 (2026-10-13, PG 18).**
+글 100만 건(50만 건 게시판 하나 + 5.5만 건 게시판 아홉), DB 메모리 512MB. 열을 고르던 목록 질의는
+5,000쪽(`OFFSET 99,980`)에서 **2,919ms** 였다 — 건너뛰는 행마다 표를 읽었다(디스크 8.9만 회). 안쪽이
+id 만 고르고(지연 조인) 거르는 조건 `status` 까지 부분 인덱스에 있으면 **Index Only Scan, Heap Fetches 0,
+13ms** 다. 키셋(「다음」만 있는 커서)은 이보다 싸지만 쪽 번호로 건너뛸 수 없어서, 그누보드처럼 몇 쪽이든
+번호로 가는 화면을 만들 수 없다. 앞 판의 이 절은 「FR-508 은 키셋이 충족한다」고 적었으나 커서는 읽기만 하고
+어떤 질의도 쓰지 않았고, 대신 목록이 100쪽에서 접혀 그 너머의 글에 쪽으로 닿을 수 없었다. 인덱스 끝의
+`id` 는 같은 시각의 글 사이의 순서를 정한다.
+
+**「전체 N건」은 세어 두고 쓴다** (`content.postCounts`). 50만 건 게시판을 세는 것은 캐시 밖 183ms 였고
+글 수에 비례한다. 글을 쓰거나 숨기거나 지울 때만 다시 센다. 트리거로 유지하는 열로 두지 않은 이유:
+글 하나마다 게시판 한 행을 고쳐 그 행에 쓰기가 몰리고 팽창한다. 데이터만 붓는 복원(`--data-only`)은
+트리거를 다시 돌려 수를 틀리게 한다.
 
 **`custom_fields`에 GIN 인덱스를 만들지 않는다.** FR-509("커스텀 필드 기준 정렬")에 **GIN은
 아무 도움이 되지 않는다** — GIN은 포함 연산자만 지원하고 순서를 제공하지 않는다. 정렬을

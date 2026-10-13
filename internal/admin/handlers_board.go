@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -318,7 +319,8 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "알 수 없는 동작입니다.", http.StatusUnprocessableEntity)
 		return
 	}
-	http.Redirect(w, r, "/admin/posts?board="+b.Slug, http.StatusSeeOther)
+	// 조작한 그 쪽으로 돌아간다 — 2쪽에서 숨김을 풀 때마다 1쪽으로 튕기면 쪽 넘김이 무의미하다.
+	http.Redirect(w, r, ListURL("/admin/posts", url.Values{"board": {b.Slug}}, pageOf(r)), http.StatusSeeOther)
 }
 
 // CommentModerate is A-308, with comment.moderate on the comment's board.
@@ -361,7 +363,7 @@ func (d *Deps) CommentModerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "comment.moderate", "comment", commentID, "게시판 '"+b.Slug+"' 의 댓글 삭제")
-	http.Redirect(w, r, "/admin/comments", http.StatusSeeOther)
+	http.Redirect(w, r, ListURL("/admin/comments", url.Values{"board": {b.Slug}}, pageOf(r)), http.StatusSeeOther)
 }
 
 // PostList is A-307's read. It needs a board: post.moderate is scoped, so
@@ -398,13 +400,18 @@ func (d *Deps) PostList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The moderator sees hidden and secret posts — that is what moderating is.
-	posts, err := d.Content.ModeratePosts(ctx, b.ID, 100)
+	// 쪽이 있어야 오래된 글에 닿는다 — 최신 100행만 보이던 판은 그 너머의 숨긴 글을 풀 수도
+	// 지울 수도 없었다. 한 행 더 읽어 다음 쪽을 안다.
+	page := pageOf(r)
+	posts, err := d.Content.ModeratePosts(ctx, b.ID, moderationPage+1, (page-1)*moderationPage)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	more := len(posts) > moderationPage
 	data["Board"] = b
-	data["Posts"] = posts
+	data["Posts"] = posts[:min(len(posts), moderationPage)]
+	pager(data, "/admin/posts", url.Values{"board": {slug}}, page, more)
 	d.Render(w, r, "admin/posts.html", http.StatusOK, data)
 }
 
@@ -434,14 +441,23 @@ func (d *Deps) CommentList(w http.ResponseWriter, r *http.Request) {
 		Forbidden(w)
 		return
 	}
-	comments, err := d.Content.ModerateComments(ctx, b.ID, 100)
+	page := pageOf(r)
+	comments, err := d.Content.ModerateComments(ctx, b.ID, moderationPage+1, (page-1)*moderationPage)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/comments.html", http.StatusOK,
-		map[string]any{"BoardSlug": slug, "Board": b, "Comments": comments})
+	data := map[string]any{"BoardSlug": slug, "Board": b,
+		"Comments": comments[:min(len(comments), moderationPage)]}
+	pager(data, "/admin/comments", url.Values{"board": {slug}}, page, len(comments) > moderationPage)
+	d.Render(w, r, "admin/comments.html", http.StatusOK, data)
 }
+
+// moderationPage·attachmentPage are the rows on one page of A-307·A-308 and A-309.
+const (
+	moderationPage = 100
+	attachmentPage = 200
+)
 
 // AttachmentList is A-309's read, scoped like the other two.
 func (d *Deps) AttachmentList(w http.ResponseWriter, r *http.Request) {
@@ -469,13 +485,16 @@ func (d *Deps) AttachmentList(w http.ResponseWriter, r *http.Request) {
 		Forbidden(w)
 		return
 	}
-	files, err := d.Content.BoardAttachments(ctx, b.ID, 200)
+	page := pageOf(r)
+	files, err := d.Content.BoardAttachments(ctx, b.ID, attachmentPage+1, (page-1)*attachmentPage)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/attachments.html", http.StatusOK,
-		map[string]any{"BoardSlug": slug, "Board": b, "Attachments": files})
+	data := map[string]any{"BoardSlug": slug, "Board": b,
+		"Attachments": files[:min(len(files), attachmentPage)]}
+	pager(data, "/admin/attachments", url.Values{"board": {slug}}, page, len(files) > attachmentPage)
+	d.Render(w, r, "admin/attachments.html", http.StatusOK, data)
 }
 
 // AttachmentDelete is A-309's destructive half.
@@ -533,5 +552,5 @@ func (d *Deps) AttachmentDelete(w http.ResponseWriter, r *http.Request) {
 	// D15 7절: 남의 첨부 삭제도 분쟁의 근거다.
 	d.log(r, c, "post.moderate", "attachment", id,
 		"게시판 '"+b.Slug+"' 의 첨부 '"+at.OriginalName+"' 삭제")
-	http.Redirect(w, r, "/admin/attachments?board="+b.Slug, http.StatusSeeOther)
+	http.Redirect(w, r, ListURL("/admin/attachments", url.Values{"board": {b.Slug}}, pageOf(r)), http.StatusSeeOther)
 }
