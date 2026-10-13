@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -218,4 +219,73 @@ func TestReservedKeysAreRefusedWhenDefiningAField(t *testing.T) {
 			t.Errorf("평범한 키 %q 가 거부됐다: %v", k, err)
 		}
 	}
+}
+
+// 화면은 운영자가 붙인 이름으로 항목을 가리킨다 (FR-215). 키만 실려 있을 때
+// 가입 화면에 나간 것이 `phone: content: 필수 필드` 였다.
+func TestFieldErrorNamesTheFieldByItsLabel(t *testing.T) {
+	_, err := ValidateCustomFields(schema(), url.Values{"qty": {"열두개"}}, nil)
+	var fe FieldError
+	if !errors.As(err, &fe) {
+		t.Fatalf("err = %v, want FieldError", err)
+	}
+	if fe.Label != "수량" || fe.Type != FieldNumber {
+		t.Errorf("FieldError = %+v, want Label 수량 · Type number", fe)
+	}
+}
+
+// 항목 정의는 DB 의 CHECK 에 닿기 전에 걸러진다. 거기서 걸리면 운영자가 본 것은
+// `ERROR: new row … violates check constraint "board_fields_options_when"
+// (SQLSTATE 23514)` 였다 — 보통 폼으로 선택지 없는 select 를 저장하면 나온다.
+func TestFieldDefinitionsAreCheckedBeforeTheDatabase(t *testing.T) {
+	ok := FieldSchema{Key: "phone", Label: "연락처", Type: FieldText}
+	with := func(edit func(*FieldSchema)) FieldSchema { f := ok; edit(&f); return f }
+	tests := []struct {
+		name  string
+		f     FieldSchema
+		board bool
+		want  error
+	}{
+		{"정상 (회원)", ok, false, nil},
+		{"정상 (게시판)", ok, true, nil},
+		{"정상 선택형", with(func(f *FieldSchema) { f.Type = FieldSelect; f.Options = []string{"가"} }), true, nil},
+		{"대문자 키", with(func(f *FieldSchema) { f.Key = "Phone" }), false, ErrFieldKeyFormat},
+		{"한글 키", with(func(f *FieldSchema) { f.Key = "연락처" }), true, ErrFieldKeyFormat},
+		{"숫자로 시작하는 키", with(func(f *FieldSchema) { f.Key = "1st" }), false, ErrFieldKeyFormat},
+		{"33자 키", with(func(f *FieldSchema) { f.Key = strings.Repeat("a", 33) }), true, ErrFieldKeyFormat},
+		{"회원 예약 키", with(func(f *FieldSchema) { f.Key = "email" }), false, ErrFieldKeyReserved},
+		{"글 예약 키", with(func(f *FieldSchema) { f.Key = "title" }), true, ErrFieldKeyReserved},
+		{"빈 라벨", with(func(f *FieldSchema) { f.Label = "" }), false, ErrFieldLabel},
+		{"101자 라벨", with(func(f *FieldSchema) { f.Label = strings.Repeat("가", 101) }), true, ErrFieldLabel},
+		{"선택지 없는 select", with(func(f *FieldSchema) { f.Type = FieldSelect }), true, ErrFieldOptions},
+		{"선택지 없는 multiselect", with(func(f *FieldSchema) { f.Type = FieldMultiselect }), true, ErrFieldOptions},
+		{"선택지 있는 text", with(func(f *FieldSchema) { f.Options = []string{"가"} }), true, ErrFieldOptions},
+		{"32자 키", with(func(f *FieldSchema) { f.Key = strings.Repeat("a", 32) }), true, nil},
+		{"100자 라벨", with(func(f *FieldSchema) { f.Label = strings.Repeat("가", 100) }), false, nil},
+		{"모르는 타입", with(func(f *FieldSchema) { f.Type = "color" }), false, ErrFieldTypeUnknown},
+		// 4096 바이트 상한 (options_shape). 「가」는 3바이트라 따옴표·쉼표·공백까지 7바이트다.
+		{"긴 선택지 (회원)", with(func(f *FieldSchema) { f.Type = FieldSelect; f.Options = manyOptions(600) }), false, ErrFieldOptionsLong},
+		{"긴 선택지 (게시판)", with(func(f *FieldSchema) { f.Type = FieldSelect; f.Options = manyOptions(600) }), true, ErrFieldOptionsLong},
+		{"상한 안 선택지", with(func(f *FieldSchema) { f.Type = FieldSelect; f.Options = manyOptions(500) }), true, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			validate := ValidateUserField
+			if tc.board {
+				validate = ValidateBoardField
+			}
+			err := validate(tc.f)
+			if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+				t.Errorf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func manyOptions(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "가"
+	}
+	return out
 }

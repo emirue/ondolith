@@ -3,6 +3,8 @@ package theme
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"os"
@@ -171,7 +173,7 @@ func TestZipBombIsStoppedByBytesRead(t *testing.T) {
 	if err == nil {
 		t.Fatal("zip 폭탄이 통과했다")
 	}
-	if !errors.Is(err, ErrZipTooLarge) && !errors.Is(err, ErrZipRatio) {
+	if !errors.Is(err, ErrZipUnpackedTooLarge) && !errors.Is(err, ErrZipRatio) {
 		t.Errorf("다른 이유로 실패했다: %v", err)
 	}
 	if countFiles(t, root) != 0 {
@@ -452,5 +454,34 @@ func TestRejectedZipNeverTouchesTheOldTheme(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "첫판") {
 		t.Errorf("base.html 이 %q", got)
+	}
+}
+
+// 올린 파일은 상한 안인데 풀면 넘는 경우는 따로 말한다 — 3MB 를 올린 운영자에게
+// 「최대 20MB」는 엉뚱한 말이다. 압축비 검사(100배)에 걸리지 않게 무작위 16진수로
+// 채운다(약 2배로 줄어든다).
+func TestUnpackedSizeIsItsOwnRefusal(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("big.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := make([]byte, (MaxEntryBytes+1<<20)/2)
+	if _, err := rand.Read(src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hex.NewEncoder(w).Write(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if buf.Len() > MaxZipBytes {
+		t.Fatalf("압축 파일 %d 바이트 — 업로드 상한 안이어야 이 경로를 본다", buf.Len())
+	}
+	b := buf.Bytes()
+	if err := Install(t.TempDir(), "t", bytes.NewReader(b), int64(len(b)), false); !errors.Is(err, ErrZipUnpackedTooLarge) {
+		t.Fatalf("err = %v, want ErrZipUnpackedTooLarge", err)
 	}
 }

@@ -31,6 +31,16 @@ func TestCheckAvailable(t *testing.T) {
 	}
 }
 
+// 재고 부족은 남은 수량을 싣는다 — 「재고가 부족합니다」만 보면 손님은 몇 개로
+// 줄여야 하는지 모른다.
+func TestOutOfStockCarriesWhatIsLeft(t *testing.T) {
+	err := Sellable{true, true, 3}.CheckAvailable(4)
+	var se *StockError
+	if !errors.As(err, &se) || se.Want != 4 || se.Left != 3 {
+		t.Fatalf("err = %v, want StockError{Want 4, Left 3}", err)
+	}
+}
+
 // D50 「비회원 장바구니 병합」: 더하되 재고 상한에서 자른다.
 func TestMergeQuantity(t *testing.T) {
 	cases := []struct {
@@ -43,7 +53,7 @@ func TestMergeQuantity(t *testing.T) {
 		{"비회원 쪽만 있다", 2, 0, 10, 2},
 		{"회원 쪽만 있다", 0, 3, 10, 3},
 		{"재고 0", 2, 3, 0, 0},
-		{"수량 상한에서도 자른다", 900, 900, 100000, maxQuantity},
+		{"수량 상한에서도 자른다", 900, 900, 100000, MaxQuantity},
 	}
 	for _, c := range cases {
 		if got := MergeQuantity(c.guest, c.member, c.stock); got != c.want {
@@ -111,5 +121,18 @@ func TestStockReturnsToZeroNetAcrossEveryReleasePath(t *testing.T) {
 func TestPickupDoesNotRestock(t *testing.T) {
 	if d := PickupRestock(); len(d) != 0 {
 		t.Errorf("수거가 재고를 %v 만큼 건드렸다 — 재입고는 A-503 에서 사람이 한다", d)
+	}
+}
+
+// 재고 차감에서 모자란 조합에 품목 이름이 붙는다 — 동시 주문이 마지막 재고를 가져간
+// 경우가 이 경로다. 다른 오류는 그대로 지나간다.
+func TestShortfallIsNamedByItsLine(t *testing.T) {
+	lines := map[string]string{"v1": "티셔츠", "v2": "머그컵"}
+	var item ItemError
+	if err := nameShortItem(&StockError{Want: 2, Left: 1, VariantID: "v2"}, lines); !errors.As(err, &item) || item.Name != "머그컵" {
+		t.Errorf("err = %v, want ItemError{머그컵}", err)
+	}
+	if err := nameShortItem(ErrNotFound, lines); err != ErrNotFound {
+		t.Errorf("다른 오류가 바뀌었다: %v", err)
 	}
 }

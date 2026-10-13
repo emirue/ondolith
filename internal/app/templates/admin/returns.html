@@ -1,5 +1,4 @@
 {{define "content"}}
-{{with .Error}}<p class="adm-alert adm-alert--error" role="alert">{{.}}</p>{{end}}
 {{with .Order}}<div class="adm-card"><p>주문 {{.OrderNo}} · 상태 {{.Status}}</p></div>{{end}}
 {{range .Returns}}
 <section class="adm-panel">

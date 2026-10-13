@@ -19,6 +19,31 @@ var (
 	ErrReservationMissing = errors.New("commerce: 해제할 예약이 없습니다")
 )
 
+// StockError is ErrOutOfStock with the numbers: a person told only 「재고가
+// 부족합니다」 does not know how far to lower the quantity.
+type StockError struct {
+	Want, Left int
+	// InCart is what the cart already held when adding (P-401) — Want includes it.
+	InCart int
+	// VariantID is set by AdjustStock, so CreateOrder can name the product.
+	VariantID string
+}
+
+func (e *StockError) Error() string {
+	return fmt.Sprintf("%v: 요청 %d, 재고 %d", ErrOutOfStock, e.Want, e.Left)
+}
+func (e *StockError) Unwrap() error { return ErrOutOfStock }
+
+// ItemError names the product a refusal is about — an order has several lines,
+// and 「재고가 부족합니다」 does not say which one.
+type ItemError struct {
+	Name string
+	Err  error
+}
+
+func (e ItemError) Error() string { return e.Name + ": " + e.Err.Error() }
+func (e ItemError) Unwrap() error { return e.Err }
+
 // Sellable is what a variant must satisfy before it can be added or ordered.
 //
 // 상품과 조합 둘 다 본다. 조합만 보면 상품을 숨긴 뒤에도 조합 URL 을 아는
@@ -38,11 +63,11 @@ func (s Sellable) CheckAvailable(want int) error {
 	if !s.ProductVisible || !s.VariantVisible {
 		return ErrNotSellable
 	}
-	if want < 1 || want > maxQuantity {
-		return fmt.Errorf("%w: %d (1~%d)", ErrQuantityRange, want, maxQuantity)
+	if want < 1 || want > MaxQuantity {
+		return fmt.Errorf("%w: %d (1~%d)", ErrQuantityRange, want, MaxQuantity)
 	}
 	if s.Stock < want {
-		return fmt.Errorf("%w: 요청 %d, 재고 %d", ErrOutOfStock, want, s.Stock)
+		return &StockError{Want: want, Left: s.Stock}
 	}
 	return nil
 }
@@ -58,8 +83,8 @@ func MergeQuantity(guest, member, stock int) int {
 	if sum > stock {
 		sum = stock
 	}
-	if sum > maxQuantity {
-		sum = maxQuantity
+	if sum > MaxQuantity {
+		sum = MaxQuantity
 	}
 	if sum < 0 {
 		return 0

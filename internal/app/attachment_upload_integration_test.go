@@ -175,9 +175,7 @@ func TestBoardThatDisallowsAttachmentsRefusesFiles(t *testing.T) {
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("첨부 금지 게시판에 첨부 = HTTP %d, want 422", resp.StatusCode)
 	}
-	if !strings.Contains(body, "첨부를 받지 않습니다") {
-		t.Errorf("거부 사유가 게시판 설정이 아니다: %.300s", body)
-	}
+	refusalShown(t, body, "글은 저장되었지만 파일을 첨부하지 못했습니다. 이 게시판에는 파일을 첨부할 수 없습니다.")
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachments`).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -208,18 +206,18 @@ func TestUploadWiringGoesThroughContentValidation(t *testing.T) {
 	// 확장자는 허용목록에 있으나 내용이 GIF 가 아니다.
 	resp := writePostMultipart(t, c, srv.URL, slug, "위장 파일",
 		map[string][]byte{"payload.gif": []byte("<?php system($_GET['c']); ?>")})
-	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("내용이 다른 파일 = HTTP %d, want 422", resp.StatusCode)
 	}
+	refusalShown(t, readAll(t, resp), "허용되지 않는 파일 형식입니다.")
 
 	// 허용목록에 없는 확장자.
 	resp = writePostMultipart(t, c, srv.URL, slug, "실행 파일",
 		map[string][]byte{"shell.php": []byte("<?php ?>")})
-	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("허용하지 않는 확장자 = HTTP %d, want 422", resp.StatusCode)
 	}
+	refusalShown(t, readAll(t, resp), "허용되지 않는 파일 형식입니다.")
 
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachments`).Scan(&n); err != nil {

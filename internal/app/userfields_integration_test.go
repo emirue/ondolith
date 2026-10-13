@@ -182,10 +182,10 @@ func TestRequiredFieldIsEnforcedOnTheServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("필수 항목 없이 가입 = HTTP %d, want 422", resp.StatusCode)
 	}
+	refusalShown(t, readAll(t, resp), "「연락처」 항목을 입력해 주세요.")
 
 	// 헛돌기 방지: 값을 넣으면 통과해야 한다. 그렇지 않으면 위 단언은
 	// 「가입 자체가 안 된다」일 수도 있다.
@@ -327,6 +327,31 @@ func TestShowInListAddsAColumnToTheUserList(t *testing.T) {
 //
 // 글의 예약어 목록(`title`·`body`…)에는 `email`·`display_name` 이 없어서, 그
 // 목록을 그대로 쓰던 동안 이 이름들이 통과했다.
+// DB 의 CHECK 가 거르던 정의는 그 전에 문장으로 거부된다. 전에는 화면에
+// `ERROR: new row … violates check constraint "user_fields_key_check" (SQLSTATE 23514)` 가 나갔다.
+func TestUserFieldDefinitionRefusalsAreSentences(t *testing.T) {
+	srv, pool := liveSite(t)
+	_, post := adminSession(t, srv, pool)
+	for _, tc := range []struct {
+		name string
+		form url.Values
+		want string
+	}{
+		{"대문자 키", url.Values{"key": {"Phone"}, "label": {"연락처"}, "field_type": {"text"}},
+			"키는 영문 소문자로 시작해야 하며, 영문 소문자·숫자·밑줄(_)만 사용해 32자 이내로 입력해 주세요."},
+		{"빈 라벨", url.Values{"key": {"phone"}, "label": {" "}, "field_type": {"text"}},
+			"라벨은 1자 이상 100자 이하로 입력해 주세요."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := post("/admin/user-fields", tc.form)
+			if resp.StatusCode != http.StatusUnprocessableEntity {
+				t.Errorf("HTTP %d, want 422", resp.StatusCode)
+			}
+			refusalShown(t, readAll(t, resp), tc.want)
+		})
+	}
+}
+
 func TestUserFieldKeysCannotShadowAccountColumns(t *testing.T) {
 	srv, pool := liveSite(t)
 	_, post := adminSession(t, srv, pool)
@@ -338,10 +363,10 @@ func TestUserFieldKeysCannotShadowAccountColumns(t *testing.T) {
 				"key": {key}, "label": {"겹치는 이름"}, "field_type": {"text"},
 				"sort_order": {"0"},
 			})
-			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusUnprocessableEntity {
 				t.Errorf("예약어 %q = HTTP %d, want 422", key, resp.StatusCode)
 			}
+			refusalShown(t, readAll(t, resp), "기본 항목과 이름이 같은 키는 사용할 수 없습니다.")
 		})
 	}
 	var n int

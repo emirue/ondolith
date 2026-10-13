@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/emirue/ondolith/internal/content/contentq"
 )
@@ -42,13 +45,25 @@ var (
 	ErrFieldRequired = errors.New("content: 필수 필드")
 	ErrFieldType     = errors.New("content: 값의 형식이 필드 타입과 맞지 않습니다")
 	ErrFieldOption   = errors.New("content: 선택지에 없는 값")
+
+	// 항목 정의(A-306·A-406)의 거부. board_fields·user_fields 의 CHECK 와 같은
+	// 규칙을 DB 앞에서 말로 거른다 — DB 에서 걸리면 화면에 나가는 것이 제약 이름이다.
+	ErrFieldKeyFormat   = errors.New("content: 항목 키 형식이 올바르지 않습니다")
+	ErrFieldKeyReserved = errors.New("content: 기본 항목 이름과 겹치는 키입니다")
+	ErrFieldLabel       = errors.New("content: 항목 라벨은 1~100자입니다")
+	ErrFieldOptions     = errors.New("content: 선택지는 선택형 항목에만, 선택형 항목에는 반드시 있어야 합니다")
+	ErrFieldOptionsLong = errors.New("content: 선택지가 너무 깁니다")
+	ErrFieldTypeUnknown = errors.New("content: 알 수 없는 항목 타입입니다")
 )
 
 // FieldError names the field so the form can put the message next to the input
-// rather than at the top of the page.
+// rather than at the top of the page. Label and Type are what a sentence for a
+// person needs: the key is ours, the label is what the operator called it.
 type FieldError struct {
-	Key string
-	Err error
+	Key   string
+	Label string
+	Type  FieldType
+	Err   error
 }
 
 func (e FieldError) Error() string { return e.Key + ": " + e.Err.Error() }
@@ -86,18 +101,69 @@ var reservedUserFieldKeys = map[string]bool{
 	"confirm": true,
 }
 
+// fieldKeyPattern is the key CHECK of board_fields and user_fields (00007·00019),
+// length included.
+var fieldKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
 // ValidateFieldKey is A-306's check on a new field name (게시판 커스텀 필드).
 func ValidateFieldKey(key string) error {
-	if reservedFieldKeys[key] {
-		return fmt.Errorf("%w: %q 는 글의 기본 항목 이름입니다", ErrFieldType, key)
-	}
-	return nil
+	return validateKey(key, reservedFieldKeys, "글")
 }
 
 // ValidateUserFieldKey is A-406's check (회원 프로필 항목).
 func ValidateUserFieldKey(key string) error {
-	if reservedUserFieldKeys[key] {
-		return fmt.Errorf("%w: %q 는 계정의 기본 항목 이름입니다", ErrFieldType, key)
+	return validateKey(key, reservedUserFieldKeys, "계정")
+}
+
+func validateKey(key string, reserved map[string]bool, owner string) error {
+	if !fieldKeyPattern.MatchString(key) {
+		return fmt.Errorf("%w: %q", ErrFieldKeyFormat, key)
+	}
+	if reserved[key] {
+		return fmt.Errorf("%w: %q 는 %s의 기본 항목 이름입니다", ErrFieldKeyReserved, key, owner)
+	}
+	return nil
+}
+
+// ValidateBoardField is everything board_fields' CHECKs refuse, said before the
+// database says it as a constraint name.
+func ValidateBoardField(f FieldSchema) error {
+	if err := ValidateFieldKey(f.Key); err != nil {
+		return err
+	}
+	if err := validateDef(f); err != nil {
+		return err
+	}
+	// board_fields_options_when. user_fields 에는 이 제약이 없어 회원 항목에는
+	// 걸지 않는다 — 여기서 새 규칙을 만들지 않고 DB 가 이미 하는 말만 앞당긴다.
+	if (f.Type == FieldSelect || f.Type == FieldMultiselect) != (len(f.Options) > 0) {
+		return ErrFieldOptions
+	}
+	return nil
+}
+
+// ValidateUserField is ValidateBoardField for user_fields.
+func ValidateUserField(f FieldSchema) error {
+	if err := ValidateUserFieldKey(f.Key); err != nil {
+		return err
+	}
+	return validateDef(f)
+}
+
+// validateDef is the CHECKs both tables share: the label is
+// `length(label) BETWEEN 1 AND 100` (characters, not bytes), the type is one of
+// the eight, and the options are `octet_length(options::text) <= 4096`.
+func validateDef(f FieldSchema) error {
+	if n := utf8.RuneCountInString(f.Label); n < 1 || n > 100 {
+		return ErrFieldLabel
+	}
+	if !slices.Contains(FieldTypes(), f.Type) {
+		return fmt.Errorf("%w: %q", ErrFieldTypeUnknown, f.Type)
+	}
+	// jsonb 의 text 출력은 원소 사이에 공백을 둔다(`["가", "나"]`). json.Marshal 은
+	// 그 공백이 없고 대신 더 많이 이스케이프하므로, 공백만 더하면 DB 가 잴 길이 이상이다.
+	if b, err := fieldOptions(f.Options); err != nil || len(b)+max(len(f.Options)-1, 0) > 4096 {
+		return ErrFieldOptionsLong
 	}
 	return nil
 }
@@ -140,7 +206,7 @@ func ValidateCustomFields(schema []FieldSchema, form url.Values, prev map[string
 	for _, f := range schema {
 		v, err := coerceField(f, form)
 		if err != nil {
-			return nil, FieldError{Key: f.Key, Err: err}
+			return nil, FieldError{Key: f.Key, Label: f.Label, Type: f.Type, Err: err}
 		}
 		if v == nil {
 			// An optional field left blank is absent, not null: an absent key
@@ -300,7 +366,7 @@ func (s *Store) UserFields(ctx context.Context) ([]FieldSchema, error) {
 func (s *Store) SaveUserField(ctx context.Context, f FieldSchema) error {
 	// **회원용 예약어를 쓴다.** 글의 목록에는 `email`·`display_name` 이 없어서,
 	// 그것을 쓰면 가입 폼의 이름과 겹치는 항목을 만들 수 있었다.
-	if err := ValidateUserFieldKey(f.Key); err != nil {
+	if err := ValidateUserField(f); err != nil {
 		return err
 	}
 	opts, err := fieldOptions(f.Options)

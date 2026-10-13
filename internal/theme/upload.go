@@ -28,6 +28,10 @@ var (
 	ErrZipNoBase    = errors.New("theme: base.html 이 없습니다")
 	ErrThemeExists  = errors.New("theme: 같은 이름의 테마가 이미 있습니다")
 	ErrThemeBadName = errors.New("theme: 테마 이름이 올바르지 않습니다")
+	ErrZipRead      = errors.New("theme: zip 을 읽을 수 없습니다")
+	// ErrZipUnpackedTooLarge 는 압축을 푼 크기가 상한을 넘었다는 뜻이다. ErrZipTooLarge
+	// (올린 파일 자체)와 나눈다 — 3MB 를 올린 사람에게 「최대 20MB」는 엉뚱한 말이다.
+	ErrZipUnpackedTooLarge = errors.New("theme: 압축을 푼 크기가 너무 큽니다")
 )
 
 // Limits are D60's numbers. NFR-101 sizes the box at 1 vCPU and 512MB–1GB, and
@@ -71,7 +75,7 @@ func Install(root, name string, r io.ReaderAt, size int64, replace bool) (err er
 
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
-		return fmt.Errorf("theme: zip 을 읽을 수 없습니다: %w", err)
+		return fmt.Errorf("%w: %w", ErrZipRead, err)
 	}
 	if len(zr.File) > MaxEntries {
 		return fmt.Errorf("%w: %d개", ErrZipTooMany, len(zr.File))
@@ -178,11 +182,14 @@ func Install(root, name string, r io.ReaderAt, size int64, replace bool) (err er
 func extractOne(out *os.Root, f *zip.File, clean string, soFar int64) (int64, error) {
 	rc, err := f.Open()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w: %w", ErrZipRead, err) // 모르는 압축 방식·깨진 헤더
 	}
 	defer rc.Close()
 
 	dst, err := out.OpenFile(clean, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return 0, fmt.Errorf("%w: 같은 이름이 두 번 %q", ErrZipEntry, f.Name)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -201,11 +208,14 @@ func extractOne(out *os.Root, f *zip.File, clean string, soFar int64) (int64, er
 		remaining = left
 	}
 	written, err := io.Copy(dst, io.LimitReader(rc, remaining+1))
+	if errors.Is(err, zip.ErrChecksum) {
+		return 0, fmt.Errorf("%w: %w", ErrZipRead, err)
+	}
 	if err != nil {
 		return 0, err
 	}
 	if written > remaining {
-		return 0, fmt.Errorf("%w: %q 에서 상한 초과", ErrZipTooLarge, f.Name)
+		return 0, fmt.Errorf("%w: %q 에서 상한 초과", ErrZipUnpackedTooLarge, f.Name)
 	}
 	// A ratio check on top of the byte cap. It matters BELOW the cap: 4 KiB that
 	// unpacks to 8 MiB never trips the 20 MiB limit, and 500 such entries fill

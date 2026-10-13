@@ -40,7 +40,7 @@
       <h1>{{.Title}}</h1>
       {{block "pageactions" .}}{{end}}
     </div>
-    {{if .Error}}<p class="adm-toast adm-toast--error">{{.Error}}</p>{{end}}
+    {{if .Error}}<p class="adm-toast adm-toast--error" role="alert">{{.Error}}</p>{{end}}
     {{if .Warning}}<p class="adm-toast adm-toast--warn">{{.Warning}}</p>{{end}}
     {{if .Notice}}<p class="adm-toast">{{.Notice}}</p>{{end}}
     {{template "content" .}}

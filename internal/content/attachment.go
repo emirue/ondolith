@@ -72,7 +72,7 @@ func (a *Attachments) Save(ctx context.Context, postID, name string, r io.Reader
 		return Attachment{}, err
 	}
 	if n >= int64(limits.MaxPerPost) {
-		return Attachment{}, fmt.Errorf("%w: 글당 %d개", ErrUploadTooMany, limits.MaxPerPost)
+		return Attachment{}, LimitError{Err: ErrUploadTooMany, Limit: int64(limits.MaxPerPost)}
 	}
 
 	stored, err := StoreUpload(a.root, name, r, time.Now(), limits)

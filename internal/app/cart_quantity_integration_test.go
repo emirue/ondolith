@@ -160,13 +160,13 @@ func TestCartQuantityOverStockStillReportsStock(t *testing.T) {
 	// 픽스처의 재고는 5 다.
 	r := send(t, c, http.MethodPatch, srv.URL+"/cart/items/"+id,
 		url.Values{"quantity": {"999"}})
-	r.Body.Close()
 	if r.StatusCode == http.StatusBadRequest {
 		t.Fatal("재고 초과가 400 으로 나왔다 — 수량 파싱 가드가 재고 판정을 가로챘다")
 	}
 	if r.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("재고 초과 HTTP %d, 기대 422", r.StatusCode)
 	}
+	refusalShown(t, readAll(t, r), "재고가 부족합니다. (남은 수량 5개)")
 	if _, qty, _ := cartItem(t, pool); qty != 1 {
 		t.Errorf("재고 초과가 거부됐는데 수량이 %d 로 바뀌었다", qty)
 	}

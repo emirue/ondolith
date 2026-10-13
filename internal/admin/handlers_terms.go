@@ -65,7 +65,7 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 		d.renderTerms(w, r, http.StatusUnprocessableEntity,
 			"시행일은 오늘 이후여야 합니다. 소급 시행은 동의 이력을 거짓으로 만듭니다.")
 	case err != nil:
-		d.renderTerms(w, r, http.StatusUnprocessableEntity, "저장하지 못했습니다: "+err.Error())
+		d.renderTerms(w, r, http.StatusUnprocessableEntity, d.refusal(r, termsMessage(err), err))
 	default:
 		d.log(r, c, "settings.update", "terms", t.Kind+" "+t.Version, "약관 버전 추가")
 		http.Redirect(w, r, "/admin/terms", http.StatusSeeOther)

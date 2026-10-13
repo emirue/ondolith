@@ -586,7 +586,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := strings.TrimSpace(r.PostFormValue("slug"))
 	if err := content.ValidateSlug(slug); err != nil {
-		d.renderPageEdit(w, r, http.StatusUnprocessableEntity, map[string]any{"Error": err.Error()})
+		d.renderPageEdit(w, r, http.StatusUnprocessableEntity, map[string]any{"Error": slugMessage(err)})
 		return
 	}
 	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
@@ -1055,20 +1055,12 @@ func (d *Deps) UserFieldSave(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(r.PostFormValue("sort_order")); err == nil {
 		f.Sort = n
 	}
-	// 화면에서도 먼저 거른다 — 저장소가 마지막 방어선이고, 여기서 걸러야
-	// 운영자가 무엇이 왜 거부됐는지 그 화면에서 본다.
-	if err := content.ValidateUserFieldKey(f.Key); err != nil {
-		fields, _ := d.Content.UserFields(ctx)
-		d.Render(w, r, "admin/user-fields.html", http.StatusUnprocessableEntity,
-			map[string]any{"Fields": fields, "Types": content.FieldTypes(),
-				"Error": err.Error()})
-		return
-	}
+	// 정의 검사는 저장소가 DB 앞에서 한다(SaveUserField) — 거부 이유는 그 오류에서 문구로 바꾼다.
 	if err := d.Content.SaveUserField(ctx, f); err != nil {
 		fields, _ := d.Content.UserFields(ctx)
 		d.Render(w, r, "admin/user-fields.html", http.StatusUnprocessableEntity,
 			map[string]any{"Fields": fields, "Types": content.FieldTypes(),
-				"Error": "항목을 저장하지 못했습니다: " + err.Error()})
+				"Error": d.refusal(r, fieldDefMessage(err, f), err)})
 		return
 	}
 	d.log(r, c, "user.update", "user_field", f.Key, "회원 항목 '"+f.Key+"' 저장")

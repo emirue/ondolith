@@ -10,8 +10,23 @@ import (
 	"strings"
 )
 
-// ErrRequiresNewer means the theme asked for an Ondolith newer than this one.
-var ErrRequiresNewer = errors.New("테마가 더 높은 Ondolith 버전을 요구합니다")
+var (
+	// ErrRequiresNewer means the theme asked for an Ondolith newer than this one.
+	ErrRequiresNewer = errors.New("테마가 더 높은 Ondolith 버전을 요구합니다")
+	// ErrManifest means theme.json is there but cannot be read as D17 describes.
+	ErrManifest = errors.New("theme: theme.json 형식이 올바르지 않습니다")
+)
+
+// RequiresError is ErrRequiresNewer with both versions, for the sentence A-202
+// shows the operator.
+type RequiresError struct {
+	Need, Have string
+}
+
+func (e *RequiresError) Error() string {
+	return fmt.Sprintf("%v: %s 이상 필요, 현재 %s", ErrRequiresNewer, e.Need, e.Have)
+}
+func (e *RequiresError) Unwrap() error { return ErrRequiresNewer }
 
 // Manifest is theme.json (D17). Only the keys the core acts on are read: name,
 // version and author are for display and gate nothing.
@@ -37,7 +52,7 @@ func ReadManifest(dir string) (Manifest, error) {
 	}
 	var m Manifest
 	if err := json.Unmarshal(b, &m); err != nil {
-		return Manifest{}, fmt.Errorf("theme.json: %w", err)
+		return Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
 	return m, nil
 }
@@ -98,7 +113,7 @@ func CheckRequires(requires, current string) (warn string, err error) {
 	}
 	req, ok := parseVersion(requires)
 	if !ok {
-		return "", fmt.Errorf("theme.json: requires 값이 major.minor.patch 형식이 아닙니다: %q", requires)
+		return "", fmt.Errorf("%w: requires 값이 major.minor.patch 형식이 아닙니다: %q", ErrManifest, requires)
 	}
 	if IsDevBuild(current) {
 		return fmt.Sprintf("개발 빌드(%s)라 테마 요구 버전 %s 검사를 건너뜁니다", current, requires), nil
@@ -108,7 +123,7 @@ func CheckRequires(requires, current string) (warn string, err error) {
 		return fmt.Sprintf("현재 버전 %q 을 해석할 수 없어 테마 요구 버전 %s 검사를 건너뜁니다", current, requires), nil
 	}
 	if olderThan(cur, req) {
-		return "", fmt.Errorf("%w: %s 이상 필요, 현재 %s", ErrRequiresNewer, requires, current)
+		return "", &RequiresError{Need: requires, Have: current}
 	}
 	return "", nil
 }

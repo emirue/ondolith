@@ -86,6 +86,7 @@ func TestCategoryCreateHonoursTheParent(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("없는 상위 = HTTP %d, want 422", rec.Code)
 	}
+	refusalShown(t, rec.Body.String(), "상위 카테고리를 찾을 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.")
 	if _, err := d.Commerce.CategoryBySlug(ctx, "orphan"); err == nil {
 		t.Error("거부됐는데 행이 생겼다")
 	}
@@ -102,21 +103,24 @@ func TestCategoryCreateRefusesBadSlugs(t *testing.T) {
 		"name": {"매트"}, "slug": {"mat"}, "sort_order": {"0"},
 	})
 
+	format := "주소에는 영문 소문자, 숫자, 하이픈(-)만 사용할 수 있으며, 영문 소문자나 숫자로 시작해야 합니다."
 	for _, tc := range []struct {
 		name string
 		form url.Values
+		want string
 	}{
-		{"주소 중복", url.Values{"name": {"다른 이름"}, "slug": {"mat"}}},
-		{"대문자", url.Values{"name": {"이름"}, "slug": {"Mat"}}},
-		{"경로 문자", url.Values{"name": {"이름"}, "slug": {"a/b"}}},
-		{"예약어", url.Values{"name": {"이름"}, "slug": {"admin"}}},
-		{"이름 없음", url.Values{"name": {"  "}, "slug": {"blank"}}},
+		{"주소 중복", url.Values{"name": {"다른 이름"}, "slug": {"mat"}}, "이미 사용 중인 주소입니다. 다른 주소를 입력해 주세요."},
+		{"대문자", url.Values{"name": {"이름"}, "slug": {"Mat"}}, format},
+		{"경로 문자", url.Values{"name": {"이름"}, "slug": {"a/b"}}, format},
+		{"예약어", url.Values{"name": {"이름"}, "slug": {"admin"}}, "시스템에서 사용하는 주소입니다. 다른 주소를 입력해 주세요."},
+		{"이름 없음", url.Values{"name": {"  "}, "slug": {"blank"}}, "이름을 입력하세요."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := postAdmin(t, d.CategoryCreate, "/admin/categories/new", nil, tc.form)
 			if rec.Code != http.StatusUnprocessableEntity {
 				t.Errorf("HTTP %d, want 422", rec.Code)
 			}
+			refusalShown(t, rec.Body.String(), tc.want)
 		})
 	}
 
@@ -161,6 +165,7 @@ func TestCategoryDeleteIsRefusedWhileSomethingPointsAtIt(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Errorf("하위가 있는 카테고리 삭제 = HTTP %d, want 409", rec.Code)
 	}
+	refusalShown(t, rec.Body.String(), "상품이나 하위 카테고리가 있는 카테고리는 삭제할 수 없습니다.")
 	if _, err := d.Commerce.CategoryBySlug(ctx, "furniture"); err != nil {
 		t.Error("거부됐는데 행이 사라졌다")
 	}

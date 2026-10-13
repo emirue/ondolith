@@ -274,7 +274,7 @@ func (d *shopDeps) cartAdd(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrOutOfStock), errors.Is(err, commerce.ErrNotSellable),
 		errors.Is(err, commerce.ErrQuantityRange):
 		d.renderPage(w, r, "shop/cart.html", http.StatusUnprocessableEntity,
-			d.shopView(r, "장바구니", map[string]any{"Error": err.Error()}))
+			d.shopView(r, "장바구니", map[string]any{"Error": cartMessage(err)}))
 		return
 	case errors.Is(err, commerce.ErrNotFound):
 		d.notFound(w, r)
@@ -347,7 +347,7 @@ func (d *shopDeps) cartUpdate(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrOutOfStock), errors.Is(err, commerce.ErrQuantityRange),
 		errors.Is(err, commerce.ErrNotSellable):
 		d.renderPage(w, r, "shop/cart.html", http.StatusUnprocessableEntity,
-			d.shopView(r, "장바구니", map[string]any{"Error": err.Error()}))
+			d.shopView(r, "장바구니", map[string]any{"Error": cartMessage(err)}))
 		return
 	case err != nil:
 		d.serverError(w, r, err)
