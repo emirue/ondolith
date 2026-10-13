@@ -117,10 +117,13 @@ func (q *Queries) CountPosts(ctx context.Context, boardID string) (int64, error)
 }
 
 const countPostsSearch = `-- name: CountPostsSearch :one
-SELECT count(*) FROM posts p
-WHERE p.board_id = $1 AND p.status = 'published'
-  AND (NOT p.is_secret OR $2::bool OR p.author_id = $3)
-  AND p.search_vector @@ to_tsquery('simple', $4)
+SELECT count(*) FROM (
+    SELECT 1 FROM posts p
+    WHERE p.board_id = $1 AND p.status = 'published'
+      AND (NOT p.is_secret OR $2::bool OR p.author_id = $3)
+      AND p.search_vector @@ to_tsquery('simple', $4)
+    LIMIT $5::int
+) m
 `
 
 type CountPostsSearchParams struct {
@@ -128,17 +131,21 @@ type CountPostsSearchParams struct {
 	CanSecret bool
 	ViewerID  *string
 	Search    string
+	Cap       int32
 }
 
 // **읽을 수 없는 비밀글은 검색에서 빠진다.** 목록은 비밀글 제목을 누구에게나
 // 보이므로, 검색이 본문을 보고 비밀글을 남기면 「이 낱말로 그 글이 걸렸다」가
 // 곧 본문 한 낱말이다. ListPostsSearch 와 같은 술어여야 합계가 쪽과 맞는다.
+// **상한(cap)까지만 센다.** 흔한 낱말은 맞는 글이 수십만이고, 다 세면 표를 끝까지 읽는다(100만 건에서
+// 960ms). cap 에서 멈추면 51ms 다 — 화면은 「10,000건 이상」이라 쓴다.
 func (q *Queries) CountPostsSearch(ctx context.Context, arg CountPostsSearchParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countPostsSearch,
 		arg.BoardID,
 		arg.CanSecret,
 		arg.ViewerID,
 		arg.Search,
+		arg.Cap,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -146,10 +153,13 @@ func (q *Queries) CountPostsSearch(ctx context.Context, arg CountPostsSearchPara
 }
 
 const countSearchPosts = `-- name: CountSearchPosts :one
-SELECT count(*) FROM posts p
-WHERE p.board_id = ANY($1::uuid[]) AND p.status = 'published'
-  AND (NOT p.is_secret OR p.board_id = ANY($2::uuid[]) OR p.author_id = $3)
-  AND p.search_vector @@ to_tsquery('simple', $4)
+SELECT count(*) FROM (
+    SELECT 1 FROM posts p
+    WHERE p.board_id = ANY($1::uuid[]) AND p.status = 'published'
+      AND (NOT p.is_secret OR p.board_id = ANY($2::uuid[]) OR p.author_id = $3)
+      AND p.search_vector @@ to_tsquery('simple', $4)
+    LIMIT $5::int
+) m
 `
 
 type CountSearchPostsParams struct {
@@ -157,14 +167,17 @@ type CountSearchPostsParams struct {
 	SecretIn []string
 	ViewerID *string
 	Search   string
+	Cap      int32
 }
 
+// 상한까지만 센다 (CountPostsSearch 와 같은 이유).
 func (q *Queries) CountSearchPosts(ctx context.Context, arg CountSearchPostsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countSearchPosts,
 		arg.Readable,
 		arg.SecretIn,
 		arg.ViewerID,
 		arg.Search,
+		arg.Cap,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -377,8 +390,7 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-           p.view_count, p.created_at, p.updated_at
+    SELECT p.id
     FROM posts p
     WHERE p.board_id = $1
       AND p.status = 'published'
@@ -395,7 +407,8 @@ FROM (
              CASE WHEN $6::bool THEN p.id END DESC,
              CASE WHEN NOT $6::bool THEN p.id END ASC
     LIMIT $8::int OFFSET $7::int
-) p
+) k
+JOIN posts p ON p.id = k.id
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
          CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
@@ -439,6 +452,16 @@ type ListPostsSearchRow struct {
 	HasAttachment bool
 }
 
+// **검색 목록은 두 모양이다** (2026-10-13, 100만 건 실측). 개수를 먼저 세고(상한 SearchCountCap 까지) 그
+// 수로 고른다 — 계획기는 접두 tsquery 의 선택도를 맞히지 못해(D30) 드문 낱말에 정렬 인덱스를 걸어 게시판을
+// 끝까지 걷고(239ms), 흔한 낱말에 GIN 으로 맞는 글을 다 모아 정렬한다(957ms).
+//
+//	· 걷는 모양(ListPostsSearch·SearchPosts): 정렬 인덱스를 따라 걸으며 거르다 한 쪽이 차면 멈춘다. 맞는 글이
+//	  많을 때 빠르다 — 통합 검색 흔한 낱말 1쪽 957ms → 5ms (posts_pub_pinned_recent_idx, 00030).
+//	· 모으는 모양(…Few): 맞는 글을 GIN 으로 먼저 모은 뒤(MATERIALIZED — 정렬 인덱스 쪽으로 다시 풀리지 않게)
+//	  그 안에서 정렬한다. 맞는 글이 적을 때 빠르다 — 게시판 드문 낱말 239ms → 9ms.
+//
+// 둘 다 안쪽은 id 만 고르고 본문·열은 고른 행에서만 읽는다 — 정렬이 본문(최대 5만 자)을 들고 다니지 않는다.
 func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams) ([]ListPostsSearchRow, error) {
 	rows, err := q.db.Query(ctx, listPostsSearch,
 		arg.BoardID,
@@ -457,6 +480,126 @@ func (q *Queries) ListPostsSearch(ctx context.Context, arg ListPostsSearchParams
 	items := []ListPostsSearchRow{}
 	for rows.Next() {
 		var i ListPostsSearchRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.AuthorID,
+			&i.AuthorName,
+			&i.Title,
+			&i.Body,
+			&i.BodyHtml,
+			&i.CoverMediaID,
+			&i.CustomFields,
+			&i.Status,
+			&i.IsPinned,
+			&i.IsSecret,
+			&i.ViewCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CommentCount,
+			&i.HasAttachment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPostsSearchFew = `-- name: ListPostsSearchFew :many
+WITH m AS MATERIALIZED (
+    SELECT p.id, p.is_pinned, p.created_at, p.view_count, p.title
+    FROM posts p
+    WHERE p.board_id = $5
+    AND p.status = 'published'
+    -- CountPostsSearch 의 주석 참고. 검색에서만 거른다 — 검색어 없는 목록은 제목을 보인다.
+    AND (NOT p.is_secret OR $6::bool OR p.author_id = $7)
+    AND p.search_vector @@ to_tsquery('simple', $8)
+)
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM (
+    SELECT p.id
+    FROM m p
+    ORDER BY p.is_pinned DESC,
+             CASE WHEN $1::text = 'created' AND $2::bool THEN p.created_at END DESC,
+             CASE WHEN $1::text = 'created' AND NOT $2::bool THEN p.created_at END ASC,
+             CASE WHEN $1::text = 'views' AND $2::bool THEN p.view_count END DESC,
+             CASE WHEN $1::text = 'views' AND NOT $2::bool THEN p.view_count END ASC,
+             CASE WHEN $1::text = 'title' AND $2::bool THEN p.title END DESC,
+             CASE WHEN $1::text = 'title' AND NOT $2::bool THEN p.title END ASC,
+             CASE WHEN $2::bool THEN p.id END DESC,
+             CASE WHEN NOT $2::bool THEN p.id END ASC
+    LIMIT $4::int OFFSET $3::int
+) k
+JOIN posts p ON p.id = k.id
+LEFT JOIN users u ON u.id = p.author_id
+ORDER BY p.is_pinned DESC,
+         CASE WHEN $1::text = 'created' AND $2::bool THEN p.created_at END DESC,
+         CASE WHEN $1::text = 'created' AND NOT $2::bool THEN p.created_at END ASC,
+         CASE WHEN $1::text = 'views' AND $2::bool THEN p.view_count END DESC,
+         CASE WHEN $1::text = 'views' AND NOT $2::bool THEN p.view_count END ASC,
+         CASE WHEN $1::text = 'title' AND $2::bool THEN p.title END DESC,
+         CASE WHEN $1::text = 'title' AND NOT $2::bool THEN p.title END ASC,
+         CASE WHEN $2::bool THEN p.id END DESC,
+         CASE WHEN NOT $2::bool THEN p.id END ASC
+`
+
+type ListPostsSearchFewParams struct {
+	Sort      string
+	Desc      bool
+	Offset    int32
+	Limit     int32
+	BoardID   string
+	CanSecret bool
+	ViewerID  *string
+	Search    string
+}
+
+type ListPostsSearchFewRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	BodyHtml      string
+	CoverMediaID  string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) ListPostsSearchFew(ctx context.Context, arg ListPostsSearchFewParams) ([]ListPostsSearchFewRow, error) {
+	rows, err := q.db.Query(ctx, listPostsSearchFew,
+		arg.Sort,
+		arg.Desc,
+		arg.Offset,
+		arg.Limit,
+		arg.BoardID,
+		arg.CanSecret,
+		arg.ViewerID,
+		arg.Search,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPostsSearchFewRow{}
+	for rows.Next() {
+		var i ListPostsSearchFewRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.BoardID,
@@ -775,8 +918,7 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-           p.view_count, p.created_at, p.updated_at
+    SELECT p.id
     FROM posts p
     WHERE p.board_id = ANY($1::uuid[])
       AND p.status = 'published'
@@ -792,7 +934,8 @@ FROM (
              CASE WHEN $6::bool THEN p.id END DESC,
              CASE WHEN NOT $6::bool THEN p.id END ASC
     LIMIT $8::int OFFSET $7::int
-) p
+) k
+JOIN posts p ON p.id = k.id
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
          CASE WHEN $5::text = 'created' AND $6::bool THEN p.created_at END DESC,
@@ -854,6 +997,125 @@ func (q *Queries) SearchPosts(ctx context.Context, arg SearchPostsParams) ([]Sea
 	items := []SearchPostsRow{}
 	for rows.Next() {
 		var i SearchPostsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.AuthorID,
+			&i.AuthorName,
+			&i.Title,
+			&i.Body,
+			&i.BodyHtml,
+			&i.CoverMediaID,
+			&i.CustomFields,
+			&i.Status,
+			&i.IsPinned,
+			&i.IsSecret,
+			&i.ViewCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CommentCount,
+			&i.HasAttachment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchPostsFew = `-- name: SearchPostsFew :many
+WITH m AS MATERIALIZED (
+    SELECT p.id, p.is_pinned, p.created_at, p.view_count, p.title
+    FROM posts p
+    WHERE p.board_id = ANY($5::uuid[])
+    AND p.status = 'published'
+    AND (NOT p.is_secret OR p.board_id = ANY($6::uuid[]) OR p.author_id = $7)
+    AND p.search_vector @@ to_tsquery('simple', $8)
+)
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, p.body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM (
+    SELECT p.id
+    FROM m p
+    ORDER BY p.is_pinned DESC,
+             CASE WHEN $1::text = 'created' AND $2::bool THEN p.created_at END DESC,
+             CASE WHEN $1::text = 'created' AND NOT $2::bool THEN p.created_at END ASC,
+             CASE WHEN $1::text = 'views' AND $2::bool THEN p.view_count END DESC,
+             CASE WHEN $1::text = 'views' AND NOT $2::bool THEN p.view_count END ASC,
+             CASE WHEN $1::text = 'title' AND $2::bool THEN p.title END DESC,
+             CASE WHEN $1::text = 'title' AND NOT $2::bool THEN p.title END ASC,
+             CASE WHEN $2::bool THEN p.id END DESC,
+             CASE WHEN NOT $2::bool THEN p.id END ASC
+    LIMIT $4::int OFFSET $3::int
+) k
+JOIN posts p ON p.id = k.id
+LEFT JOIN users u ON u.id = p.author_id
+ORDER BY p.is_pinned DESC,
+         CASE WHEN $1::text = 'created' AND $2::bool THEN p.created_at END DESC,
+         CASE WHEN $1::text = 'created' AND NOT $2::bool THEN p.created_at END ASC,
+         CASE WHEN $1::text = 'views' AND $2::bool THEN p.view_count END DESC,
+         CASE WHEN $1::text = 'views' AND NOT $2::bool THEN p.view_count END ASC,
+         CASE WHEN $1::text = 'title' AND $2::bool THEN p.title END DESC,
+         CASE WHEN $1::text = 'title' AND NOT $2::bool THEN p.title END ASC,
+         CASE WHEN $2::bool THEN p.id END DESC,
+         CASE WHEN NOT $2::bool THEN p.id END ASC
+`
+
+type SearchPostsFewParams struct {
+	Sort     string
+	Desc     bool
+	Offset   int32
+	Limit    int32
+	Readable []string
+	SecretIn []string
+	ViewerID *string
+	Search   string
+}
+
+type SearchPostsFewRow struct {
+	ID            string
+	BoardID       string
+	AuthorID      string
+	AuthorName    string
+	Title         string
+	Body          string
+	BodyHtml      string
+	CoverMediaID  string
+	CustomFields  []byte
+	Status        string
+	IsPinned      bool
+	IsSecret      bool
+	ViewCount     int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CommentCount  int64
+	HasAttachment bool
+}
+
+func (q *Queries) SearchPostsFew(ctx context.Context, arg SearchPostsFewParams) ([]SearchPostsFewRow, error) {
+	rows, err := q.db.Query(ctx, searchPostsFew,
+		arg.Sort,
+		arg.Desc,
+		arg.Offset,
+		arg.Limit,
+		arg.Readable,
+		arg.SecretIn,
+		arg.ViewerID,
+		arg.Search,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchPostsFewRow{}
+	for rows.Next() {
+		var i SearchPostsFewRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.BoardID,

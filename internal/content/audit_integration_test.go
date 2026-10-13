@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 // 메뉴 항목을 고쳐도 updated_at 이 만든 날에 머물렀다 — 다른 표의 UPDATE 는 전부
@@ -72,7 +74,7 @@ func TestPostPageSkipsTheListWhenThePageIsEmpty(t *testing.T) {
 	}
 }
 
-// 정렬되는 세 질의(ListPosts·ListPostsSearch·SearchPosts)는 쪽을 안쪽 질의에서 고른
+// 정렬되는 다섯 질의(ListPosts 와 검색의 두 모양씩)는 쪽을 안쪽 질의에서 고른
 // 뒤 바깥에서 다시 정렬한다. 키·방향마다 쪽을 이어 붙인 순서가 「고정 → 키 → id」
 // 전순서와 같아야 한다 — 쪽 경계에서 행이 빠지거나 겹치면 여기서 드러난다.
 func TestSortedListsPageInTheSameTotalOrder(t *testing.T) {
@@ -164,9 +166,19 @@ func TestSortedListsPageInTheSameTotalOrder(t *testing.T) {
 			q.Search = "note"
 			return s.ListPosts(ctx, boardID, q)
 		},
+		"ListPostsSearchFew": func(q ListQuery) ([]Post, error) {
+			return postsOf(s.q.ListPostsSearchFew(ctx, contentq.ListPostsSearchFewParams{
+				BoardID: boardID, Search: toPrefixQuery("note"), Sort: q.sortKey(), Desc: q.Desc,
+				Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
+		},
+		// 걷는 모양은 상한을 넘은 수에서만 고른다(gatherSearch) — 그 수를 넘겨 강제한다.
 		"SearchPosts": func(q ListQuery) ([]Post, error) {
 			q.Search = "note"
-			return s.SearchPosts(ctx, []string{boardID}, nil, q, "")
+			return s.SearchPosts(ctx, []string{boardID}, nil, q, "", SearchCountCap+1)
+		},
+		"SearchPostsFew": func(q ListQuery) ([]Post, error) {
+			q.Search = "note"
+			return s.SearchPosts(ctx, []string{boardID}, nil, q, "", 0)
 		},
 	}
 	for name, list := range lists {

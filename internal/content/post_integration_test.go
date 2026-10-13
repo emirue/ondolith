@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/emirue/ondolith/internal/content/contentq"
 )
 
 func seedBoard(t *testing.T, s *Store) string {
@@ -397,7 +400,7 @@ func TestSearchWithNoTermReturnsNothing(t *testing.T) {
 	mkPost(t, s, boardID, "어떤 글")
 
 	q := ParseListQuery(url.Values{}, 20)
-	got, err := s.SearchPosts(ctx, []string{boardID}, nil, q, "")
+	got, err := s.SearchPosts(ctx, []string{boardID}, nil, q, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +417,7 @@ func TestSearchWithNoTermReturnsNothing(t *testing.T) {
 
 	// 읽을 수 있는 게시판이 없어도 마찬가지다.
 	q2 := ParseListQuery(url.Values{"q": {"어떤"}}, 20)
-	if got, err := s.SearchPosts(ctx, nil, nil, q2, ""); err != nil || len(got) != 0 {
+	if got, err := s.SearchPosts(ctx, nil, nil, q2, "", 0); err != nil || len(got) != 0 {
 		t.Errorf("읽을 게시판이 없는데 %d행 (err=%v)", len(got), err)
 	}
 }
@@ -493,5 +496,100 @@ func TestBoardCountIsRememberedAndRefreshedByWrites(t *testing.T) {
 	}
 	if n := count(); n != 1 {
 		t.Errorf("발행 글을 지운 뒤 = %d, want 1", n)
+	}
+}
+
+// **검색의 두 모양은 같은 결과를 낸다** — 맞는 글이 적거나 쪽이 깊을 때 모으는 모양(…Few), 흔한
+// 낱말에서 걷는 모양. 어느 쪽을 고를지는 개수와 쪽 깊이만 정하므로, 정렬·고정 글·비밀글·쪽이
+// 모양에 따라 달라지면 같은 검색이 글 수에 따라 다른 쪽을 보인다. 두 질의를 직접 부른다 —
+// 고르는 문턱이 바뀌어도 비교가 「걷기 대 걷기」로 헛돌지 않게.
+func TestSearchShapesAgree(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	boardID := seedBoard(t, s)
+	var authorID string
+	if err := s.pool.QueryRow(ctx, `INSERT INTO users (email, password_hash, display_name)
+		VALUES ('w@example.com','h','작성자') RETURNING id`).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 30 {
+		id := mkPost(t, s, boardID, fmt.Sprintf("공지 %02d", i))
+		var author any
+		if i%3 == 0 {
+			author = authorID // 이 작성자의 비밀글은 그에게만 검색된다
+		}
+		if _, err := s.pool.Exec(ctx, `UPDATE posts SET view_count = $2, is_pinned = $3, is_secret = $4,
+			created_at = now() - $5 * interval '1 minute', author_id = $6 WHERE id = $1`,
+			id, (i*7)%11, i%9 == 0, i%5 == 0, i, author); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := func(ps []Post, err error) []string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, p := range ps {
+			out = append(out, p.ID)
+		}
+		return out
+	}
+	for _, who := range []struct {
+		name      string
+		viewer    string
+		canSecret bool
+	}{{"익명", "", false}, {"작성자", authorID, false}, {"비밀글 권한", "", true}} {
+		for _, v := range []url.Values{
+			{"q": {"공지"}},
+			{"q": {"공지"}, "sort": {"views"}, "page": {"2"}, "per_page": {"7"}},
+			{"q": {"공지"}, "sort": {"title"}, "per_page": {"10"}},
+			{"q": {"공지"}, "sort": {"-title"}, "page": {"3"}, "per_page": {"10"}},
+		} {
+			q := ParseListQuery(v, 20)
+			q.ViewerID, q.CanSecret = who.viewer, who.canSecret
+			p := contentq.ListPostsSearchParams{BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
+				Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+				Limit: int32(q.PerPage), Offset: int32(q.Offset())}
+			walk := ids(postsOf(s.q.ListPostsSearch(ctx, p)))
+			few := ids(postsOf(s.q.ListPostsSearchFew(ctx, contentq.ListPostsSearchFewParams{
+				BoardID: p.BoardID, CanSecret: p.CanSecret, ViewerID: p.ViewerID, Search: p.Search,
+				Sort: p.Sort, Desc: p.Desc, Limit: p.Limit, Offset: p.Offset})))
+			if !reflect.DeepEqual(walk, few) || len(walk) == 0 {
+				t.Errorf("게시판 %s %v: 걷기 %v ≠ 모으기 %v", who.name, v, walk, few)
+			}
+			var secretIn []string
+			if who.canSecret {
+				secretIn = []string{boardID}
+			}
+			sp := contentq.SearchPostsParams{Readable: []string{boardID}, SecretIn: secretIn, ViewerID: strPtr(who.viewer),
+				Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+				Limit: int32(q.PerPage), Offset: int32(q.Offset())}
+			sw := ids(postsOf(s.q.SearchPosts(ctx, sp)))
+			sf := ids(postsOf(s.q.SearchPostsFew(ctx, contentq.SearchPostsFewParams{
+				Readable: sp.Readable, SecretIn: sp.SecretIn, ViewerID: sp.ViewerID, Search: sp.Search,
+				Sort: sp.Sort, Desc: sp.Desc, Limit: sp.Limit, Offset: sp.Offset})))
+			if !reflect.DeepEqual(sw, sf) || len(sw) == 0 {
+				t.Errorf("통합 %s %v: 걷기 %v ≠ 모으기 %v", who.name, v, sw, sf)
+			}
+		}
+	}
+}
+
+// 검색 개수는 상한까지만 센다 — 넘으면 상한+1 을 돌려줘 화면이 「이상」을 안다.
+func TestSearchCountStopsAtTheCap(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	boardID := seedBoard(t, s)
+	if _, err := s.pool.Exec(ctx, `INSERT INTO posts (board_id, title, body)
+		SELECT $1, '흔한말 ' || g, '본문' FROM generate_series(1, $2::int) g`, boardID, SearchCountCap+5); err != nil {
+		t.Fatal(err)
+	}
+	q := ParseListQuery(url.Values{"q": {"흔한말"}}, 20)
+	if n, err := s.CountPosts(ctx, boardID, q); err != nil || n != SearchCountCap+1 {
+		t.Errorf("게시판 검색 개수 = %d (%v), want %d", n, err, SearchCountCap+1)
+	}
+	if n, err := s.CountSearchPosts(ctx, []string{boardID}, nil, q, ""); err != nil || n != SearchCountCap+1 {
+		t.Errorf("통합 검색 개수 = %d (%v), want %d", n, err, SearchCountCap+1)
 	}
 }

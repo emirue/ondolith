@@ -875,5 +875,7 @@ func pagerFixture(base string, cur int) map[string]any {
 		"Total": int64(60), "PageNo": cur, "PrevPage": cur - 1, "NextPage": cur + 1,
 		"HasPrev": cur > 1, "HasNext": true, "LastPage": 3, "Pages": pages,
 		"FirstURL": base, "PrevURL": base, "NextURL": base + "?page=3", "LastURL": base + "?page=3",
+		// 검색은 상한을 넘은 경우로 그린다 — 「10,000건 이상」 분기도 렌더링 검사를 지난다.
+		"Capped": base == "/search", "CapTotal": int64(10000),
 	}
 }

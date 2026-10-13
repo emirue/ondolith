@@ -116,6 +116,7 @@ func TestAuditIndexes(t *testing.T) {
 		"posts_board_pub_views_idx":      1,
 		"posts_board_pub_title_idx":      1,
 		"posts_board_pub_title_desc_idx": 1,
+		"posts_pub_pinned_recent_idx":    1,
 		"posts_board_title_desc_idx":     0,
 		"posts_board_published_idx":      0,
 		"users_created_idx":              1,

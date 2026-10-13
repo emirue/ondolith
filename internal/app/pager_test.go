@@ -1,10 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/emirue/ondolith/internal/content"
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 // **상한 쪽에서는 「다음」이 없다.** 그 뒤의 쪽 번호는 상한으로 접혀 같은 쪽이
@@ -78,10 +81,10 @@ func TestLastPageRoundsUp(t *testing.T) {
 			t.Errorf("lastPage(%d) = %d, want %d", tc.total, got, tc.want)
 		}
 	}
-	// 검색어가 있는 목록은 100쪽에서 접힌다 — 깊은 쪽이 맞는 글 전부를 정렬하지 않게.
+	// 검색은 SearchCountCap 까지만 센다 — 쪽도 거기까지다(20건이면 500쪽).
 	sq := content.ParseListQuery(url.Values{"q": {"공지"}}, 20)
-	if got := lastPage(1_000_000, sq); got != content.MaxPage {
-		t.Errorf("검색의 마지막 쪽 = %d, want %d", got, content.MaxPage)
+	if got := lastPage(1_000_000, sq); got != content.SearchCountCap/20 {
+		t.Errorf("검색의 마지막 쪽 = %d, want %d", got, content.SearchCountCap/20)
 	}
 }
 
@@ -98,5 +101,44 @@ func TestPagerKeepsAskedPageSizeAndStaysInRange(t *testing.T) {
 	empty := pagerFor("/search", content.ParseListQuery(url.Values{"page": {"5"}}, 20), 0)
 	if empty["PageNo"] != 1 || empty["PrevURL"] != "" || empty["FirstURL"] != "" {
 		t.Errorf("빈 목록의 5쪽 = %v · 이전 %q · 처음 %q", empty["PageNo"], empty["PrevURL"], empty["FirstURL"])
+	}
+}
+
+// 검색은 SearchCountCap 까지만 센다 — 넘으면 「10,000건 이상」이고, 쪽도 거기까지다(20건이면 500쪽).
+func TestSearchPagerStopsAtTheCountCap(t *testing.T) {
+	q := content.ParseListQuery(url.Values{"q": {"공지"}}, 20)
+	p := pagerFor("/search", q, content.SearchCountCap+1)
+	if p["Capped"] != true || p["LastPage"] != 500 {
+		t.Errorf("상한을 넘은 검색 = Capped %v · 마지막 %v, want true · 500", p["Capped"], p["LastPage"])
+	}
+	if p := pagerFor("/search", q, content.SearchCountCap); p["Capped"] != false {
+		t.Errorf("상한 그대로의 검색이 「이상」으로 그려진다")
+	}
+	if p := pagerFor("/board/free", content.ParseListQuery(url.Values{}, 20), 50_000); p["Capped"] != false {
+		t.Errorf("검색어 없는 목록이 「이상」으로 그려진다 — 그 수는 정확하다")
+	}
+}
+
+// 상한을 넘은 검색의 쪽 넘김이 **끝까지 그려진다.** 상한 값이 int 로 들어가 테마 함수
+// number(int64)에서 렌더링이 「전체 」 뒤에서 끊긴 적이 있다 — 200 이 나간 뒤라 잘린 화면이
+// 그대로 갔다. 손으로 만든 데이터가 아니라 pagerFor 가 낸 것을 그린다.
+func TestCappedSearchPagerRendersWhole(t *testing.T) {
+	l := theme.New(theme.Builtin(), "", false, theme.FuncMap(theme.Deps{}))
+	q := content.ParseListQuery(url.Values{"q": {"공지"}}, 20)
+	for total, want := range map[int64]string{
+		content.SearchCountCap + 1: "전체 10,000건 이상",
+		1234:                       "전체 1,234건",
+	} {
+		tpl, err := l.Template("search.html")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		if err := tpl.ExecuteTemplate(&buf, "partials/pagination.html", pagerFor("/search", q, total)); err != nil {
+			t.Fatalf("total %d: %v", total, err)
+		}
+		if !strings.Contains(buf.String(), want) || !strings.Contains(buf.String(), "</nav>") {
+			t.Errorf("total %d: %q 가 없거나 끝까지 그려지지 않았다: %s", total, want, buf.String())
+		}
 	}
 }

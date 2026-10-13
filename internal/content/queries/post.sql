@@ -6,16 +6,25 @@ WHERE p.board_id = $1 AND p.status = 'published';
 -- **읽을 수 없는 비밀글은 검색에서 빠진다.** 목록은 비밀글 제목을 누구에게나
 -- 보이므로, 검색이 본문을 보고 비밀글을 남기면 「이 낱말로 그 글이 걸렸다」가
 -- 곧 본문 한 낱말이다. ListPostsSearch 와 같은 술어여야 합계가 쪽과 맞는다.
-SELECT count(*) FROM posts p
-WHERE p.board_id = sqlc.arg('board_id') AND p.status = 'published'
-  AND (NOT p.is_secret OR sqlc.arg('can_secret')::bool OR p.author_id = sqlc.narg('viewer_id'))
-  AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'));
+-- **상한(cap)까지만 센다.** 흔한 낱말은 맞는 글이 수십만이고, 다 세면 표를 끝까지 읽는다(100만 건에서
+-- 960ms). cap 에서 멈추면 51ms 다 — 화면은 「10,000건 이상」이라 쓴다.
+SELECT count(*) FROM (
+    SELECT 1 FROM posts p
+    WHERE p.board_id = sqlc.arg('board_id') AND p.status = 'published'
+      AND (NOT p.is_secret OR sqlc.arg('can_secret')::bool OR p.author_id = sqlc.narg('viewer_id'))
+      AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
+    LIMIT sqlc.arg('cap')::int
+) m;
 
 -- name: CountSearchPosts :one
-SELECT count(*) FROM posts p
-WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[]) AND p.status = 'published'
-  AND (NOT p.is_secret OR p.board_id = ANY(sqlc.arg('secret_in')::uuid[]) OR p.author_id = sqlc.narg('viewer_id'))
-  AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'));
+-- 상한까지만 센다 (CountPostsSearch 와 같은 이유).
+SELECT count(*) FROM (
+    SELECT 1 FROM posts p
+    WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[]) AND p.status = 'published'
+      AND (NOT p.is_secret OR p.board_id = ANY(sqlc.arg('secret_in')::uuid[]) OR p.author_id = sqlc.narg('viewer_id'))
+      AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
+    LIMIT sqlc.arg('cap')::int
+) m;
 
 -- 게시판마다 posts_board_list_idx 를 앞에서부터 per_board 건만 읽는다. 창 함수
 -- (row_number) 로 쓰면 읽을 수 있는 글 전부에 번호를 매긴 뒤 자른다.
@@ -140,6 +149,14 @@ ORDER BY p.is_pinned DESC,
          CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
          CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC;
 
+-- **검색 목록은 두 모양이다** (2026-10-13, 100만 건 실측). 개수를 먼저 세고(상한 SearchCountCap 까지) 그
+-- 수로 고른다 — 계획기는 접두 tsquery 의 선택도를 맞히지 못해(D30) 드문 낱말에 정렬 인덱스를 걸어 게시판을
+-- 끝까지 걷고(239ms), 흔한 낱말에 GIN 으로 맞는 글을 다 모아 정렬한다(957ms).
+--   · 걷는 모양(ListPostsSearch·SearchPosts): 정렬 인덱스를 따라 걸으며 거르다 한 쪽이 차면 멈춘다. 맞는 글이
+--     많을 때 빠르다 — 통합 검색 흔한 낱말 1쪽 957ms → 5ms (posts_pub_pinned_recent_idx, 00030).
+--   · 모으는 모양(…Few): 맞는 글을 GIN 으로 먼저 모은 뒤(MATERIALIZED — 정렬 인덱스 쪽으로 다시 풀리지 않게)
+--     그 안에서 정렬한다. 맞는 글이 적을 때 빠르다 — 게시판 드문 낱말 239ms → 9ms.
+-- 둘 다 안쪽은 id 만 고르고 본문·열은 고른 행에서만 읽는다 — 정렬이 본문(최대 5만 자)을 들고 다니지 않는다.
 -- name: ListPostsSearch :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
        p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
@@ -147,8 +164,7 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-           p.view_count, p.created_at, p.updated_at
+    SELECT p.id
     FROM posts p
     WHERE p.board_id = sqlc.arg('board_id')
       AND p.status = 'published'
@@ -165,7 +181,8 @@ FROM (
              CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
              CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
     LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
-) p
+) k
+JOIN posts p ON p.id = k.id
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
          CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
@@ -177,6 +194,46 @@ ORDER BY p.is_pinned DESC,
          CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
          CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC;
 
+-- name: ListPostsSearchFew :many
+WITH m AS MATERIALIZED (
+    SELECT p.id, p.is_pinned, p.created_at, p.view_count, p.title
+    FROM posts p
+    WHERE p.board_id = sqlc.arg('board_id')
+    AND p.status = 'published'
+    -- CountPostsSearch 의 주석 참고. 검색에서만 거른다 — 검색어 없는 목록은 제목을 보인다.
+    AND (NOT p.is_secret OR sqlc.arg('can_secret')::bool OR p.author_id = sqlc.narg('viewer_id'))
+    AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
+)
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, ''::text AS body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM (
+    SELECT p.id
+    FROM m p
+    ORDER BY p.is_pinned DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'created' AND NOT sqlc.arg('desc')::bool THEN p.created_at END ASC,
+             CASE WHEN sqlc.arg('sort')::text = 'views' AND sqlc.arg('desc')::bool THEN p.view_count END DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'views' AND NOT sqlc.arg('desc')::bool THEN p.view_count END ASC,
+             CASE WHEN sqlc.arg('sort')::text = 'title' AND sqlc.arg('desc')::bool THEN p.title END DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'title' AND NOT sqlc.arg('desc')::bool THEN p.title END ASC,
+             CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
+             CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
+    LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
+) k
+JOIN posts p ON p.id = k.id
+LEFT JOIN users u ON u.id = p.author_id
+ORDER BY p.is_pinned DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND NOT sqlc.arg('desc')::bool THEN p.created_at END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND sqlc.arg('desc')::bool THEN p.view_count END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND NOT sqlc.arg('desc')::bool THEN p.view_count END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND sqlc.arg('desc')::bool THEN p.title END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND NOT sqlc.arg('desc')::bool THEN p.title END ASC,
+         CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
+         CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC;
 -- name: SearchPosts :many
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
        p.title, p.body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
@@ -184,8 +241,7 @@ SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coa
        (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
        EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
 FROM (
-    SELECT p.id, p.board_id, p.author_id, p.title, p.body, p.cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
-           p.view_count, p.created_at, p.updated_at
+    SELECT p.id
     FROM posts p
     WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[])
       AND p.status = 'published'
@@ -201,7 +257,8 @@ FROM (
              CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
              CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
     LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
-) p
+) k
+JOIN posts p ON p.id = k.id
 LEFT JOIN users u ON u.id = p.author_id
 ORDER BY p.is_pinned DESC,
          CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
@@ -213,6 +270,45 @@ ORDER BY p.is_pinned DESC,
          CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
          CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC;
 
+-- name: SearchPostsFew :many
+WITH m AS MATERIALIZED (
+    SELECT p.id, p.is_pinned, p.created_at, p.view_count, p.title
+    FROM posts p
+    WHERE p.board_id = ANY(sqlc.arg('readable')::uuid[])
+    AND p.status = 'published'
+    AND (NOT p.is_secret OR p.board_id = ANY(sqlc.arg('secret_in')::uuid[]) OR p.author_id = sqlc.narg('viewer_id'))
+    AND p.search_vector @@ to_tsquery('simple', sqlc.arg('search'))
+)
+SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
+       p.title, p.body, ''::text AS body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,
+       p.view_count, p.created_at, p.updated_at,
+       (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::bigint AS comment_count,
+       EXISTS (SELECT 1 FROM attachments a WHERE a.post_id = p.id)::bool AS has_attachment
+FROM (
+    SELECT p.id
+    FROM m p
+    ORDER BY p.is_pinned DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'created' AND NOT sqlc.arg('desc')::bool THEN p.created_at END ASC,
+             CASE WHEN sqlc.arg('sort')::text = 'views' AND sqlc.arg('desc')::bool THEN p.view_count END DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'views' AND NOT sqlc.arg('desc')::bool THEN p.view_count END ASC,
+             CASE WHEN sqlc.arg('sort')::text = 'title' AND sqlc.arg('desc')::bool THEN p.title END DESC,
+             CASE WHEN sqlc.arg('sort')::text = 'title' AND NOT sqlc.arg('desc')::bool THEN p.title END ASC,
+             CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
+             CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC
+    LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
+) k
+JOIN posts p ON p.id = k.id
+LEFT JOIN users u ON u.id = p.author_id
+ORDER BY p.is_pinned DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND sqlc.arg('desc')::bool THEN p.created_at END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'created' AND NOT sqlc.arg('desc')::bool THEN p.created_at END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND sqlc.arg('desc')::bool THEN p.view_count END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'views' AND NOT sqlc.arg('desc')::bool THEN p.view_count END ASC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND sqlc.arg('desc')::bool THEN p.title END DESC,
+         CASE WHEN sqlc.arg('sort')::text = 'title' AND NOT sqlc.arg('desc')::bool THEN p.title END ASC,
+         CASE WHEN sqlc.arg('desc')::bool THEN p.id END DESC,
+         CASE WHEN NOT sqlc.arg('desc')::bool THEN p.id END ASC;
 -- name: PostByID :one
 SELECT p.id, p.board_id, coalesce(p.author_id::text, '')::text AS author_id, coalesce(u.display_name, '')::text AS author_name,
        p.title, p.body, p.body_html, coalesce(p.cover_media_id::text, '')::text AS cover_media_id, p.custom_fields, p.status, p.is_pinned, p.is_secret,

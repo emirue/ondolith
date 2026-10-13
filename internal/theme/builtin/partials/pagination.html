@@ -2,11 +2,12 @@
      번호와 주소는 Go 가 계산해 넘긴다 — html/template 에 산술이 없고, D17 함수맵에
      없는 이름은 템플릿에서 쓸 수 없다. 주소에는 정렬·검색어가 이미 실려 있다.
 
-     기대하는 데이터: {Total, Pages[{No, URL, Current}], FirstURL, PrevURL, NextURL, LastURL}
+     기대하는 데이터: {Total, Capped, CapTotal, Pages[{No, URL, Current}], FirstURL, PrevURL, NextURL, LastURL}
+     — Capped 는 검색이 CapTotal 에서 세기를 멈췄다는 뜻(「10,000건 이상」)
      — 빈 주소는 그 링크가 없다는 뜻. 앞 판의 {Base, Query, PageNo, PrevPage, NextPage,
      HasPrev, HasNext} 도 그대로 들어온다 (이 조각을 덮어쓴 테마를 위해). */}}
 <nav class="pager" aria-label="페이지">
-  <span class="meta">전체 {{number .Total}}건</span>
+  <span class="meta">전체 {{if .Capped}}{{number .CapTotal}}건 이상{{else}}{{number .Total}}건{{end}}</span>
   {{with .FirstURL}}<a class="btn btn--sm" href="{{.}}">처음</a>{{end}}
   {{with .PrevURL}}<a class="btn btn--sm" href="{{.}}">이전</a>{{end}}
   {{range .Pages}}{{if .Current}}<span class="page-current" aria-current="page">{{.No}}</span>{{else}}<a class="btn btn--sm" href="{{.URL}}">{{.No}}</a>{{end}}

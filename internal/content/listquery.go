@@ -34,7 +34,7 @@ type ListQuery struct {
 }
 
 // sortKeys is the allow list: what a URL may say. Each key is one CASE branch
-// in the ORDER BY of queries/post.sql (ListPosts·ListPostsSearch·SearchPosts);
+// in the ORDER BY of queries/post.sql (ListPosts, the two search shapes of each search);
 // a key not in that chain sorts nothing, so the set here and the chain there
 // must name the same keys.
 //
@@ -59,10 +59,15 @@ const (
 	// 주문 내역, 「한 행 더 읽어」 다음을 안다). A three-digit page number there is
 	// a crawler, not a reader.
 	MaxPage = 100
-	// MaxListPage bounds the counted lists (게시판 P-203·통합 검색 P-212) only so
-	// that OFFSET stays inside int32 at MaxPerPage. Their pager numbers every page,
+	// MaxListPage bounds the board list without a search term (P-203) only so
+	// that OFFSET stays inside int32 at MaxPerPage. A search stops at
+	// SearchCountCap instead (MaxPages). Their pager numbers every page,
 	// and a reader looking for an old post walks back as far as the board goes.
 	MaxListPage = 1_000_000
+	// SearchCountCap is how far a search counts its matches. 흔한 낱말은 맞는 글이
+	// 수십만이고 다 세면 표를 끝까지 읽는다(100만 건에서 960ms). 넘으면 화면이
+	// 「10,000건 이상」이라 쓰고, 쪽도 거기까지다 — 그 너머는 검색어를 좁힐 일이다.
+	SearchCountCap = 10_000
 	// MaxSearchRunes bounds the search term. A megabyte of text in a tsquery is
 	// work the database does before it can refuse.
 	MaxSearchRunes = 100
@@ -95,17 +100,7 @@ func ParseListQuery(q url.Values, boardPerPage int) ListQuery {
 		out.Search = string(r[:MaxSearchRunes])
 	}
 
-	if n, err := strconv.Atoi(q.Get("page")); err == nil {
-		switch {
-		case n < 1:
-			out.Page = 0
-		case n > out.MaxPages():
-			out.Page = out.MaxPages() - 1
-		default:
-			out.Page = n - 1 // URLs are 1-based, offsets are not
-		}
-	}
-
+	// 쪽 크기를 쪽 번호보다 먼저 정한다 — 검색의 쪽 상한(MaxPages)이 쪽 크기에 달렸다.
 	out.PerPage = boardPerPage
 	if n, err := strconv.Atoi(q.Get("per_page")); err == nil && n > 0 {
 		out.PerPage, out.perPageAsked = n, true
@@ -115,6 +110,17 @@ func ParseListQuery(q url.Values, boardPerPage int) ListQuery {
 	}
 	if out.PerPage > MaxPerPage {
 		out.PerPage = MaxPerPage
+	}
+
+	if n, err := strconv.Atoi(q.Get("page")); err == nil {
+		switch {
+		case n < 1:
+			out.Page = 0
+		case n > out.MaxPages():
+			out.Page = out.MaxPages() - 1
+		default:
+			out.Page = n - 1 // URLs are 1-based, offsets are not
+		}
 	}
 
 	return out
@@ -129,13 +135,12 @@ func (l ListQuery) PerPageParam() string {
 	return strconv.Itoa(l.PerPage)
 }
 
-// MaxPages is the last page number this list may ask for. A list with a search
-// term keeps MaxPage: its OFFSET still sorts every match it skips (본문까지 —
-// 검색 질의는 인덱스만으로 쪽을 고르지 못한다), so a deep page of a common word
-// would sort them all.
+// MaxPages is the last page number this list may ask for. A search counts its
+// matches only up to SearchCountCap, so its pages end there.
 func (l ListQuery) MaxPages() int {
 	if l.Search != "" {
-		return MaxPage
+		per := max(l.PerPage, 1) // 손으로 만든 ListQuery 에서도 0 으로 나누지 않는다
+		return max(1, (SearchCountCap+per-1)/per)
 	}
 	return MaxListPage
 }

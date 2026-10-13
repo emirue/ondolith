@@ -632,6 +632,8 @@ CREATE INDEX posts_board_pub_title_idx      ON posts (board_id, is_pinned DESC, 
 CREATE INDEX posts_board_pub_title_desc_idx ON posts (board_id, is_pinned DESC, title DESC, id DESC) WHERE status = 'published';
 -- 홈의 최근 글.
 CREATE INDEX posts_recent_idx               ON posts (created_at DESC, id DESC) WHERE status = 'published';
+-- 통합 검색(P-212)이 맞는 글이 많을 때 「고정 → 최신」 순으로 걸으며 거르는 데 (00030).
+CREATE INDEX posts_pub_pinned_recent_idx    ON posts (is_pinned DESC, created_at DESC, id DESC) WHERE status = 'published';
 CREATE INDEX posts_search_idx     ON posts USING GIN (search_vector);  -- 00008
 ```
 
@@ -667,6 +669,17 @@ Seq Scan 이다** — `제목 1`·`본문 1` 같은 연번 텍스트로 15만 �
 
 이 수치는 튜닝 대상이 아니라 **작은 사이트에서 Seq Scan 이 나오는 것이 정상**이라는 뜻이다.
 검색이 느리다는 신고가 오면 먼저 행 수를 본다.
+
+**측정한 것 — 검색은 개수로 질의 모양을 고른다 (2026-10-13, 같은 100만 건).** 계획기는 접두 tsquery
+의 선택도를 맞히지 못한다(위). 그래서 드문 낱말(986건)에 정렬 인덱스를 걸어 게시판을 끝까지 걸었고(239ms),
+흔한 낱말(90만 건)에 GIN 으로 맞는 글을 다 모아 본문째 정렬했다(통합 검색 957ms). 이제
+먼저 센다 — **10,000건까지만**(`SearchCountCap`; 다 세면 960ms, 상한에서 멈추면 51ms) — 그리고 그 수로 고른다.
+맞는 글이 1,000건 이하이거나 쪽 끝이 1,000행을 넘으면(상한 안이라 모으는 비용이 1만 행으로 묶인다) GIN 으로
+모아 그 안에서 정렬하고(239ms → 9ms), 상한을 넘은 흔한 낱말은 정렬 인덱스를 걸으며 거르다 한 쪽이 차면 멈춘다
+(통합 검색 1쪽 957ms → 5ms, `posts_pub_pinned_recent_idx`) — `content.gatherSearch`. 어느 모양이든 본문은 고른 행에서만 읽는다.
+HTTP 로는 통합 검색 흔한 낱말 1쪽 1,391ms → 14ms, 마지막 쪽(500쪽) 25ms, 맞는 글 5천 건 낱말은 어느 쪽이든
+10ms 안팎이다. 가장 느린 곳은 게시판 안 흔한 낱말의 마지막 쪽(500쪽, 걸으며 1만 행의 표를 읽는다) 171ms 와,
+통합 검색을 조회순·제목순으로 정렬한 흔한 낱말(GAP-30) 715ms 다.
 
 **측정한 것 — 전문검색은 `simple` config + 접두 질의여야 한다.** 스톡 PostgreSQL에 한국어 사전이
 없고 `english`는 한국어를 망가뜨린다. 본문 "게시판을 새로 열었습니다"에 대해
