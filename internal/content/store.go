@@ -34,6 +34,8 @@ type Store struct {
 	q *contentq.Queries
 	// counts 는 게시판마다 「전체 N건」을 기억한다 (postcount.go).
 	counts postCounts
+	// views 는 아직 쓰지 않은 조회수다 (viewcount.go).
+	views viewBuffer
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, q: contentq.New(pool)} }

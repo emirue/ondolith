@@ -10,12 +10,22 @@ import (
 	"time"
 )
 
-const bumpViewCount = `-- name: BumpViewCount :exec
-UPDATE posts SET view_count = view_count + 1 WHERE id = $1
+const addViewCounts = `-- name: AddViewCounts :exec
+UPDATE posts p SET view_count = p.view_count + v.n
+FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::int[]) AS n) v
+WHERE p.id = v.id
 `
 
-func (q *Queries) BumpViewCount(ctx context.Context, id string) error {
-	_, err := q.db.Exec(ctx, bumpViewCount, id)
+type AddViewCountsParams struct {
+	Ids    []string
+	Counts []int32
+}
+
+// 모아 둔 조회수를 한 문장으로 더한다 (content.viewBuffer). 그 사이 지워진 글은 맞는 행이
+// 없어 건너뛴다. 두 배열은 같은 길이라 select 목록의 unnest 둘이 나란히 짝지어진다
+// (sqlc 는 인자 둘인 unnest 를 모른다).
+func (q *Queries) AddViewCounts(ctx context.Context, arg AddViewCountsParams) error {
+	_, err := q.db.Exec(ctx, addViewCounts, arg.Ids, arg.Counts)
 	return err
 }
 

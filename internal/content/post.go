@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -253,8 +254,31 @@ func (s *Store) DeletePost(ctx context.Context, id string) error {
 // decision. Duplicate suppression is the caller's (the session remembers what
 // it has already counted) — putting it here would need the store to know about
 // sessions, and FR-305 keeps that out.
-func (s *Store) BumpViewCount(ctx context.Context, id string) error {
-	return s.q.BumpViewCount(ctx, id)
+//
+// **쓰지 않고 모은다** (viewBuffer). view_count 는 조회순 인덱스의 키라 고칠 때마다 HOT 갱신이
+// 못 되고 posts 의 모든 인덱스(GIN 포함)에 새 항목이 생긴다 — 글을 열 때마다 그랬다.
+// FlushViewCounts 가 viewFlushEvery 마다 글당 한 번씩 더한다.
+func (s *Store) BumpViewCount(_ context.Context, id string) error {
+	s.views.add(id)
+	return nil
+}
+
+// FlushViewCounts writes the gathered views in one statement. On failure the
+// counts go back into the buffer for the next flush.
+func (s *Store) FlushViewCounts(ctx context.Context) error {
+	got := s.views.take()
+	if len(got) == 0 {
+		return nil
+	}
+	ids, counts := make([]string, 0, len(got)), make([]int32, 0, len(got))
+	for id, n := range got {
+		ids, counts = append(ids, id), append(counts, int32(min(n, math.MaxInt32)))
+	}
+	if err := s.q.AddViewCounts(ctx, contentq.AddViewCountsParams{Ids: ids, Counts: counts}); err != nil {
+		s.views.putBack(got)
+		return err
+	}
+	return nil
 }
 
 // commentRow is the shape Comments and ModerateComments share (fieldRow 와

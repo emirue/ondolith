@@ -593,3 +593,49 @@ func TestSearchCountStopsAtTheCap(t *testing.T) {
 		t.Errorf("통합 검색 개수 = %d (%v), want %d", n, err, SearchCountCap+1)
 	}
 }
+
+// 조회수는 글을 열 때마다 쓰지 않고 모아 두었다가 한 번에 쓴다 (FR-504). 열자마자 DB 가 바뀌지
+// 않고, 반영하면 합이 한 번에 더해진다. 반영이 실패하면 모은 몫을 잃지 않는다. 그 사이 지워진 글은
+// 조용히 건너뛴다.
+func TestViewCountsAreBatched(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	boardID := seedBoard(t, s)
+	a, b, gone := mkPost(t, s, boardID, "가"), mkPost(t, s, boardID, "나"), mkPost(t, s, boardID, "다")
+	views := func(id string) int64 {
+		t.Helper()
+		var n int64
+		if err := s.pool.QueryRow(ctx, `SELECT view_count FROM posts WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for range 3 {
+		if err := s.BumpViewCount(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.BumpViewCount(ctx, b)
+	_ = s.BumpViewCount(ctx, gone)
+	if n := views(a); n != 0 {
+		t.Errorf("반영 전 조회수 = %d, want 0 — 열 때마다 쓰고 있다", n)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.FlushViewCounts(canceled); err == nil {
+		t.Fatal("취소된 반영이 성공했다")
+	}
+	if err := s.DeletePost(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FlushViewCounts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if na, nb := views(a), views(b); na != 3 || nb != 1 {
+		t.Errorf("반영 뒤 = 가 %d · 나 %d, want 3 · 1 — 실패한 반영이 몫을 잃었다", na, nb)
+	}
+	if err := s.FlushViewCounts(ctx); err != nil || views(a) != 3 {
+		t.Errorf("빈 반영이 수를 바꿨다 (%v, 가 %d)", err, views(a))
+	}
+}
