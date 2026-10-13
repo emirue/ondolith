@@ -8,7 +8,7 @@
   </form>
 
   {{if .Query.Search}}
-    <p class="meta">{{number .Total}}건</p>
+    <p class="meta">{{if .Pager.Capped}}{{number .Pager.CapTotal}}건 이상{{else}}{{number .Total}}건{{end}}</p>
     <ul class="search-results">
       {{$boards := .Boards}}
       {{range .Results}}

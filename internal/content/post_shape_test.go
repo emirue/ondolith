@@ -37,9 +37,9 @@ func TestPostQueriesShareColumnsAndConverter(t *testing.T) {
 		}
 	}
 
-	// **헛돌기 방지는 대상 질의로 한다.** posts 를 Post 로 읽는 질의는 여섯이다;
+	// **헛돌기 방지는 대상 질의로 한다.** posts 를 Post 로 읽는 질의는 여덟이다;
 	// 더 적게 찾았으면 질의를 못 본 것이지 검사가 통과한 것이 아니다.
-	if len(queries) < 6 {
+	if len(queries) < 8 {
 		t.Fatalf("posts 를 읽는 질의를 %d 개밖에 못 찾았다 — 검사가 헛돌았다: %v",
 			len(queries), queries)
 	}
@@ -47,7 +47,7 @@ func TestPostQueriesShareColumnsAndConverter(t *testing.T) {
 	// **목록은 본문을 읽지 않는다.** 바깥 목록의 `''::text AS body` 만으로는
 	// 부족하다 — 안쪽 질의가 p.body 를 고르면 정렬이 본문을 들고 다닌다.
 	all := namedQueries(t)
-	for _, name := range []string{"ListPosts", "ListPostsSearch", "ModeratePosts", "RecentPosts"} {
+	for _, name := range []string{"ListPosts", "ListPostsSearch", "ListPostsSearchFew", "ModeratePosts", "RecentPosts"} {
 		if strings.Contains(all[name], "p.body") {
 			t.Errorf("%s 가 p.body 를 읽는다 — 목록은 본문 없이 그린다", name)
 		}
@@ -57,6 +57,20 @@ func TestPostQueriesShareColumnsAndConverter(t *testing.T) {
 	// OFFSET 이 건너뛰는 행마다 표를 읽는다 — 100만 건에서 5,000쪽이 13ms 에서 2.9초가 된다.
 	if lp := normalizeSQL(all["ListPosts"]); !strings.Contains(lp, "FROM ( SELECT p.id FROM posts p WHERE") {
 		t.Errorf("ListPosts 안쪽이 id 만 고르지 않는다: %.200s", lp)
+	}
+	// 검색도 안쪽(쪽 선택)은 id 만 고르고, 모으는 CTE 는 정렬 열만 싣는다 — 본문이 안쪽에 들어가면
+	// 정렬이 본문(최대 5만 자)을 들고 다닌다.
+	for _, name := range []string{"ListPostsSearch", "SearchPosts"} {
+		if q := normalizeSQL(all[name]); !strings.Contains(q, "FROM ( SELECT p.id FROM posts p WHERE") {
+			t.Errorf("%s 안쪽이 id 만 고르지 않는다", name)
+		}
+	}
+	for _, name := range []string{"ListPostsSearchFew", "SearchPostsFew"} {
+		q := normalizeSQL(all[name])
+		if !strings.Contains(q, "WITH m AS MATERIALIZED ( SELECT p.id, p.is_pinned, p.created_at, p.view_count, p.title FROM posts p") ||
+			!strings.Contains(q, "FROM ( SELECT p.id FROM m p ORDER BY") {
+			t.Errorf("%s 의 CTE·안쪽이 정렬 열·id 만 고르지 않는다", name)
+		}
 	}
 
 	// Post 를 만드는 곳도 하나여야 한다. 행 타입이 여섯이라도 변환이 둘이면
@@ -71,7 +85,7 @@ func TestPostQueriesShareColumnsAndConverter(t *testing.T) {
 // 않는다 — 허용 목록에 키를 더하고 사슬을 잊으면 그 정렬은 「되는 것처럼」
 // 보이면서 고정·id 순으로 나온다.
 func TestSortableQueriesShareTheCaseChain(t *testing.T) {
-	sortable := []string{"ListPosts", "ListPostsSearch", "SearchPosts"}
+	sortable := []string{"ListPosts", "ListPostsSearch", "ListPostsSearchFew", "SearchPosts", "SearchPostsFew"}
 	chains := map[string]string{}
 	for name, body := range namedQueries(t) {
 		i := strings.Index(body, "ORDER BY")
@@ -127,8 +141,15 @@ func postReadingQueries(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	for name, body := range namedQueries(t) {
+		if !strings.Contains(body, "FROM posts p\n") {
+			continue
+		}
+		// 맞는 글을 먼저 모으는 검색(…Few)은 CTE 뒤의 SELECT 가 바깥이다.
+		if strings.HasPrefix(body, "WITH ") {
+			body = body[strings.Index(body, "\nSELECT ")+1:]
+		}
 		from := strings.Index(body, "\nFROM ")
-		if from < 0 || !strings.HasPrefix(body, "SELECT ") || !strings.Contains(body, "FROM posts p\n") {
+		if from < 0 || !strings.HasPrefix(body, "SELECT ") {
 			continue
 		}
 		cols := normalizeSQL(strings.TrimPrefix(body[:from], "SELECT "))

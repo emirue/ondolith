@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict hcsnEKNAFLwht3VfVYb9PfzPfvqV7JOHo09VAcsmYcNZfHTQXeGbb4UJb4xnEum
+\restrict eLFhTHyhMegF6178DEzXt6nKxfcrpqU3E8WnoIgke6iW2JQTeaLGymSRJvXoqQt
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1628,6 +1628,13 @@ CREATE INDEX posts_board_pub_views_idx ON public.posts USING btree (board_id, is
 
 
 --
+-- Name: posts_pub_pinned_recent_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_pub_pinned_recent_idx ON public.posts USING btree (is_pinned DESC, created_at DESC, id DESC) WHERE (status = 'published'::text);
+
+
+--
 -- Name: posts_recent_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2288,5 +2295,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict hcsnEKNAFLwht3VfVYb9PfzPfvqV7JOHo09VAcsmYcNZfHTQXeGbb4UJb4xnEum
+\unrestrict eLFhTHyhMegF6178DEzXt6nKxfcrpqU3E8WnoIgke6iW2JQTeaLGymSRJvXoqQt
 

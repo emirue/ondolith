@@ -110,7 +110,29 @@ func (s *Store) CountPosts(ctx context.Context, boardID string, q ListQuery) (in
 	}
 	return s.q.CountPostsSearch(ctx, contentq.CountPostsSearchParams{
 		BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
-		Search: toPrefixQuery(q.Search)})
+		Search: toPrefixQuery(q.Search), Cap: SearchCountCap + 1})
+}
+
+// searchFewRows picks the search list's shape (queries/post.sql 「검색 목록은 두 모양」).
+const searchFewRows = 1000
+
+// gatherSearch reports whether a search page should gather its matches through the
+// GIN index (…Few) instead of walking the sort index (queries/post.sql 「검색 목록은 두 모양」).
+//
+// 걷는 쪽은 쪽 끝(offset+limit)까지의 맞는 글을 찾으려고 대략 「표의 글 수 ÷ 맞는 글 수 ×
+// 쪽 끝」 행을 읽는다 — 맞는 글이 드물거나 쪽이 깊으면 많다. 모으는 쪽은 맞는 글 수만큼
+// 읽는다 — 맞는 글이 많으면 많다. 그래서:
+//   - 상한(SearchCountCap)을 넘은 흔한 낱말은 늘 걷는다. 모으면 수십만 행이다.
+//   - 그 밖에는 맞는 글이 적거나(searchFewRows 이하) 쪽 끝이 searchFewRows 를 넘으면
+//     모은다 — 모으는 비용은 상한 1만 행으로 묶인다.
+//
+// ponytail: 문턱은 고정값이다. 게시판 크기와 글 길이에 따라 맞는 지점은 움직인다 — 한쪽이
+// 눈에 띄게 느린 실측이 나오면 그때 다시 잰다.
+func gatherSearch(total int64, q ListQuery) bool {
+	if total > SearchCountCap {
+		return false
+	}
+	return total <= searchFewRows || q.Offset()+q.PerPage > searchFewRows
 }
 
 // PostPage is P-203's read: one page and the pager total.
@@ -123,6 +145,13 @@ func (s *Store) PostPage(ctx context.Context, boardID string, q ListQuery) ([]Po
 	total, err := s.CountPosts(ctx, boardID, q)
 	if err != nil || total <= int64(q.Offset()) {
 		return nil, total, err
+	}
+	if q.Search != "" && gatherSearch(total, q) {
+		posts, err := postsOf(s.q.ListPostsSearchFew(ctx, contentq.ListPostsSearchFewParams{
+			BoardID: boardID, CanSecret: q.CanSecret, ViewerID: strPtr(q.ViewerID),
+			Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+			Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
+		return posts, total, err
 	}
 	posts, err := s.ListPosts(ctx, boardID, q)
 	return posts, total, err
@@ -372,14 +401,22 @@ func (s *Store) BoardByPost(ctx context.Context, postID string) (*Board, error) 
 // Two lists rather than one flag: `post.read` and `post.read_secret` are
 // granted per board, so "may I see secret posts here" has a different answer on
 // each board a caller can read.
+// SearchPosts is P-212's page. total is CountSearchPosts' answer for the same
+// query — it picks the list's shape (gatherSearch).
 func (s *Store) SearchPosts(ctx context.Context, readable, secretIn []string,
-	q ListQuery, viewerID string,
+	q ListQuery, viewerID string, total int64,
 ) ([]Post, error) {
 	// 검사가 아니라 왕복 절약이다. 빈 목록은 `ANY('{}')` 로, 빈 검색어는
 	// 빈 tsquery 로 어차피 0행이 된다 — 이 두 줄을 지워도 결과는 같고,
 	// 그래서 여기에 규칙이 있는 척하지 않는다.
 	if len(readable) == 0 || q.Search == "" {
 		return nil, nil
+	}
+	if gatherSearch(total, q) {
+		return postsOf(s.q.SearchPostsFew(ctx, contentq.SearchPostsFewParams{
+			Readable: readable, SecretIn: secretIn, ViewerID: strPtr(viewerID),
+			Search: toPrefixQuery(q.Search), Sort: q.sortKey(), Desc: q.Desc,
+			Limit: int32(q.PerPage), Offset: int32(q.Offset())}))
 	}
 	return postsOf(s.q.SearchPosts(ctx, contentq.SearchPostsParams{
 		Readable: readable, SecretIn: secretIn, ViewerID: strPtr(viewerID),
@@ -395,7 +432,7 @@ func (s *Store) CountSearchPosts(ctx context.Context, readable, secretIn []strin
 	}
 	return s.q.CountSearchPosts(ctx, contentq.CountSearchPostsParams{
 		Readable: readable, SecretIn: secretIn, ViewerID: strPtr(viewerID),
-		Search: toPrefixQuery(q.Search)})
+		Search: toPrefixQuery(q.Search), Cap: SearchCountCap + 1})
 }
 
 // ModeratePosts is A-307's list: everything on one board, hidden and secret
@@ -446,11 +483,12 @@ type postRow struct {
 }
 
 type postRows interface {
-	contentq.ListPostsRow | contentq.ListPostsSearchRow | contentq.SearchPostsRow |
+	contentq.ListPostsRow | contentq.ListPostsSearchRow | contentq.ListPostsSearchFewRow |
+		contentq.SearchPostsRow | contentq.SearchPostsFewRow |
 		contentq.ModeratePostsRow | contentq.RecentPostsRow
 }
 
-// postOf is the ONE place a posts row becomes a Post. 생성 행 타입이 여섯이라도
+// postOf is the ONE place a posts row becomes a Post. 생성 행 타입이 여덟이라도
 // Post 를 만드는 곳이 둘이면 custom_fields 풀기 같은 규칙이 갈라진다.
 func postOf(r postRow) (Post, error) {
 	p := Post{ID: r.ID, BoardID: r.BoardID, AuthorID: r.AuthorID, AuthorName: r.AuthorName,

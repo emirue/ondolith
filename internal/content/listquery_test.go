@@ -65,7 +65,9 @@ func TestOutOfRangeValuesAreClampedNotRefused(t *testing.T) {
 		// 남은 상한은 OFFSET 이 int32 를 넘지 않게 하는 것뿐이다.
 		{"page=99999", 99998, 20},
 		{"page=99999999", MaxListPage - 1, 20},
-		{"page=99999&q=x", MaxPage - 1, 20}, // 검색은 100쪽에서 접힌다 (ListQuery.MaxPages)
+		// 검색은 SearchCountCap 까지만 세므로 쪽도 거기까지다 (ListQuery.MaxPages).
+		{"page=99999&q=x", SearchCountCap/20 - 1, 20},
+		{"page=99999&q=x&per_page=30", (SearchCountCap+29)/30 - 1, 30},
 		{"page=abc", 0, 20},
 		{"per_page=10000", 0, MaxPerPage},
 		{"per_page=0", 0, 20},

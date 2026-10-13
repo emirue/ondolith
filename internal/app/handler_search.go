@@ -40,7 +40,7 @@ func (d *boardDeps) search(w http.ResponseWriter, r *http.Request) {
 			q.Page = last - 1
 		}
 		if total > 0 {
-			if results, err = d.content.SearchPosts(ctx, readable, secretIn, q, actorID(a)); err != nil {
+			if results, err = d.content.SearchPosts(ctx, readable, secretIn, q, actorID(a), total); err != nil {
 				d.serverError(w, r, err)
 				return
 			}

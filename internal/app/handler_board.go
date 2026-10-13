@@ -558,6 +558,10 @@ func pagerFor(base string, q content.ListQuery, total int64) map[string]any {
 		"HasPrev":  cur > 1,
 		"HasNext":  cur < last,
 		"LastPage": last, "Pages": pages,
+		// 검색은 SearchCountCap 까지만 센다 — 넘으면 「10,000건 이상」이다.
+		// CapTotal 은 int64 다 — 테마 함수 number 가 int64 만 받는다. 상수를 그대로 넣으면 int 로
+		// 들어가 「전체 」 뒤에서 렌더링이 끊긴다(200 이 나간 뒤라 잘린 화면이 그대로 간다).
+		"Capped": q.Search != "" && total > content.SearchCountCap, "CapTotal": int64(content.SearchCountCap),
 		"FirstURL": "", "PrevURL": "", "NextURL": "", "LastURL": "",
 	}
 	if cur > 1 {
