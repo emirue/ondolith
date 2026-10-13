@@ -323,11 +323,48 @@ A-602(관리자 시스템 정보)에서 한다.
 - 이 프로젝트의 배포 단위는 **정적 바이너리 하나**다 (NFR-102). 이미지는 그 바이너리를
   한 겹 더 싸는 것이고, 그 겹은 베이스 이미지 갱신·태그 정책·레지스트리 계정이라는
   유지 대상 셋을 새로 만든다. 바이너리에는 그중 아무것도 없다
-- 이미지를 쓰고 싶은 사람은 `FROM scratch` 에 바이너리를 넣는 세 줄이면 된다. 우리가
-  제공하는 이미지는 그 세 줄보다 나은 점이 없으면서, 취약점 스캐너가 베이스 이미지에서
-  찾아내는 CVE의 책임만 가져온다
+- 이미지를 쓰고 싶은 사람은 아래 다섯 줄이면 된다. 우리가 제공하는 이미지는 그보다 나은
+  점이 없으면서, 취약점 스캐너가 베이스 이미지에서 찾아내는 CVE의 책임만 가져온다
 - **업그레이드 절차가 바이너리 교체 하나로 끝나는 것**(위 「업그레이드 절차」)이 이
   프로젝트의 설계 목표인데, 이미지를 제공하면 그 절차가 둘이 된다
+
+### 직접 만들 때
+
+```dockerfile
+FROM alpine:3.23
+RUN apk add --no-cache ca-certificates tzdata postgresql18-client
+COPY ondolith /usr/local/bin/ondolith
+WORKDIR /data
+ENTRYPOINT ["ondolith"]
+```
+
+```bash
+docker build -t ondolith-local .     # 위 파일과 리눅스용 바이너리 `ondolith` 가 있는 폴더에서
+docker run -d --name ondolith --restart unless-stopped -p 8080:8080 \
+  -v ondolith-data:/data -e TZ=Asia/Seoul \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  ondolith-local
+```
+
+**`FROM scratch` 에 바이너리만 넣으면 뜨기는 하지만 셋이 조용히 망가진다** (앞의 둘은 2026-10-13 실측,
+셋째는 scratch 가 빈 이미지라서):
+
+| 빠진 것 | 증상 |
+|---|---|
+| CA 인증서 (`ca-certificates`) | 토스 API 호출(결제 승인 등)이 `x509: certificate signed by unknown authority` 로 실패한다 |
+| 시간대 자료 (`tzdata`) | `TZ=Asia/Seoul` 을 줘도 UTC 로 돈다(로그 시각이 `Z`). 관리자 기간 조회(FR-712)의 하루와 자동 백업 시각(FR-715)이 9시간 어긋난다 — [D71](71-install-guide.md) 「시작하기 전」의 서버 시간대와 같은 문제다 |
+| `pg_dump`·`/tmp` | A-604 백업(FR-713·FR-715)이 둘 다 쓴다. 클라이언트는 **DB 서버와 같거나 높은 메이저**여야 한다 — 서버가 PostgreSQL 18 이면 `postgresql18-client` |
+
+위 이미지로 확인한 것(44MB): 로그 시각 `+09:00`, 토스 API HTTPS 연결, `pg_dump` 18.6 이 PostgreSQL 18
+서버의 스키마를 덤프. 글 100만 건 DB 의 전체 백업은 돌려 보지 않았다.
+
+- **`/data` 볼륨 하나에 다 담긴다.** 설정 파일(`ondolith.json`)이 작업 폴더에 생기고 업로드·테마·백업
+  폴더는 설정 파일 옆에 잡힌다
+- **로그 크기를 정한다.** Docker 의 기본 로그 드라이버(`json-file`)는 `max-size` 기본값이 `-1`(무제한)이라
+  지우지 않고 계속 쌓는다([Docker 문서](https://docs.docker.com/engine/logging/drivers/json-file/)).
+  `daemon.json` 의 `log-opts` 로 기본값을 바꿔도 **이미 만든 컨테이너에는 적용되지 않는다** — 다시 만든다
+- **업그레이드**는 이미지를 새 바이너리로 다시 빌드하고 컨테이너를 다시 만드는 것이다. `docker stop` 은
+  SIGTERM 을 보내고 앱은 처리 중인 요청을 마친 뒤 끝낸다. 백업은 위 「업그레이드 절차」 1단계 그대로다
 
 ## 모니터링
 
