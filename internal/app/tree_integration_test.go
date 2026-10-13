@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,6 +33,14 @@ func liveSite(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 }
 
 func liveSiteWith(t *testing.T, tweak ...func(*config.Config)) (*httptest.Server, *pgxpool.Pool) {
+	t.Helper()
+	srv, pool, _ := liveSiteStoppable(t, tweak...)
+	return srv, pool
+}
+
+// liveSiteStoppable is liveSiteWith whose stop the test can call midway — 멈추는 일(cleanup)이
+// 남은 조회수를 쓰므로, 그 뒤의 DB 를 읽어야 하는 시험이 쓴다. 두 번 불려도 한 번만 멈춘다.
+func liveSiteStoppable(t *testing.T, tweak ...func(*config.Config)) (*httptest.Server, *pgxpool.Pool, func()) {
 	t.Helper()
 	dsn := os.Getenv(dsnEnv)
 	if dsn == "" {
@@ -61,11 +70,12 @@ func liveSiteWith(t *testing.T, tweak ...func(*config.Config)) (*httptest.Server
 	if err != nil {
 		t.Fatalf("기동 실패: %v", err)
 	}
-	t.Cleanup(cleanup)
 
 	srv := httptest.NewServer(h)
-	t.Cleanup(srv.Close)
-	return srv, pool
+	var once sync.Once
+	stop := func() { once.Do(func() { srv.Close(); cleanup() }) }
+	t.Cleanup(stop)
+	return srv, pool, stop
 }
 
 // liveSiteWithUploads is liveSite plus a temporary upload directory, for the

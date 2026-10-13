@@ -598,7 +598,35 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 	}()
 
+	// 조회수 반영 (FR-504). 글을 열 때마다 쓰지 않고 모아 두었다가 viewFlushEvery 마다 한 번에
+	// 쓴다(content.viewBuffer). 멈출 때 남은 것을 쓰고 끝낸다 — 그 전에 풀을 닫으면 잃는다.
+	// 반영마다 시간을 제한한다: cleanup 이 이 고루틴을 기다리므로, 걸린 반영이 종료를 막으면 안 된다.
+	stopViews, viewsDone := make(chan struct{}), make(chan struct{})
+	flushViews := func() {
+		ctx, cancel := context.WithTimeout(settingCtx, 5*time.Second)
+		defer cancel()
+		if err := contentStore.FlushViewCounts(ctx); err != nil {
+			log.Warn("조회수 반영", "err", err)
+		}
+	}
+	go func() {
+		defer close(viewsDone)
+		t := time.NewTicker(viewFlushEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopViews:
+				flushViews()
+				return
+			case <-t.C:
+				flushViews()
+			}
+		}
+	}()
+
 	cleanup := func() {
+		close(stopViews)
+		<-viewsDone
 		close(stopBackup)
 		close(stopExpire)
 		sessionStore.StopCleanup()
@@ -607,6 +635,11 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 	return h, cleanup, nil
 }
+
+// viewFlushEvery is how often gathered view counts are written (FR-504): a post
+// read a thousand times in this window costs one row update, not a thousand.
+// It is also how many views a crash can lose.
+const viewFlushEvery = 30 * time.Second
 
 // themePath resolves a theme NAME to its directory.
 //

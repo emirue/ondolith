@@ -17,7 +17,7 @@
 -- CONCURRENTLY 를 쓰지 않는다. 마이그레이션은 서비스를 멈춘 뒤 부팅에서 돌아(D70 업그레이드
 -- 절차) 그 사이 쓰는 쪽이 없다 — CONCURRENTLY 는 표를 두 번 훑어 부팅만 길게 하고, 트랜잭션
 -- 밖에서 돌아 중간에 실패하면 무효 인덱스가 남는다. 이 파일은 한 트랜잭션이라 실패하면 통째로
--- 되돌아간다. 100만 건에서 인덱스 하나에 약 1.4초다.
+-- 되돌아간다. 100만 건 실측(2026-10-13): 넷 합쳐 약 8.9초 — 제목 정렬 둘이 각 3초대다.
 CREATE INDEX posts_board_pub_created_idx
     ON posts (board_id, is_pinned DESC, created_at DESC, id DESC) WHERE status = 'published';
 CREATE INDEX posts_board_pub_views_idx

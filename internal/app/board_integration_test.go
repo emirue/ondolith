@@ -287,8 +287,11 @@ func TestPostIDFromAnotherBoardIsNotServed(t *testing.T) {
 }
 
 // 조회수는 세션당 한 번만 는다. 새로고침으로 부풀면 숫자가 무의미해진다.
+//
+// 조회수는 모아 두었다가 viewFlushEvery 마다, 그리고 멈출 때 쓴다 (FR-504). 그래서 열람을 다 한
+// 뒤 사이트를 멈추고(cleanup — 남은 조회수를 쓴다) 수를 읽는다.
 func TestViewCountCountsOncePerSession(t *testing.T) {
-	srv, pool := liveSite(t)
+	srv, pool, stop := liveSiteStoppable(t)
 	mkBoard(t, pool, "free", content.PresetPublic)
 	store := content.NewStore(pool)
 	id, err := store.CreatePost(context.Background(), content.Post{
@@ -302,14 +305,6 @@ func TestViewCountCountsOncePerSession(t *testing.T) {
 		if code, _ := mustGet(t, c, srv.URL+"/board/free/"+id); code != http.StatusOK {
 			t.Fatalf("상세 HTTP %d", code)
 		}
-	}
-	var n int
-	if err := pool.QueryRow(context.Background(),
-		`SELECT view_count FROM posts WHERE id = $1`, id).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("조회수 = %d, want 1 (같은 세션의 새로고침)", n)
 	}
 	// **익명 열람이 세션 행을 만들지 않는다.** 앞 판은 본 글 목록을 세션에 적어,
 	// 쿠키 없는 크롤러가 글 하나를 열 때마다 sessions 에 행이 하나씩 쌓였다.
@@ -325,12 +320,22 @@ func TestViewCountCountsOncePerSession(t *testing.T) {
 	if code, _ := mustGet(t, client(), srv.URL+"/board/free/"+id); code != http.StatusOK {
 		t.Fatal("다른 세션 상세 실패")
 	}
+
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT view_count FROM posts WHERE id = $1`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("반영 전 조회수 = %d, want 0 — 열 때마다 쓰고 있다", n)
+	}
+	stop()
 	if err := pool.QueryRow(context.Background(),
 		`SELECT view_count FROM posts WHERE id = $1`, id).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {
-		t.Errorf("다른 세션 후 조회수 = %d, want 2", n)
+		t.Errorf("조회수 = %d, want 2 (같은 세션 세 번은 한 번, 다른 세션 한 번)", n)
 	}
 }
 
