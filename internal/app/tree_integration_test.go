@@ -711,7 +711,12 @@ func TestFinalMailFailureIsInTheOperationLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// SMTP 를 넣지 않은 사이트다 — 발송은 세 번 다 「SMTP 설정이 없습니다」로 실패한다.
+	// SMTP 는 있는데 닿지 않는 사이트 — 발송은 세 번 다 접속 거부로 실패한다. 비어
+	// 있는 경우는 남기지 않는다(mailFailureEntry, 대시보드가 알린다).
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES
+		('mail.smtp_host', '127.0.0.1'), ('mail.smtp_port', '1'), ('mail.tls_mode', 'none')`); err != nil {
+		t.Fatal(err)
+	}
 	resp, err := client().PostForm(srv.URL+"/password/reset", url.Values{"email": {"member@example.com"}})
 	if err != nil {
 		t.Fatal(err)
@@ -741,7 +746,7 @@ func TestFinalMailFailureIsInTheOperationLog(t *testing.T) {
 	if target != "비밀번호 재설정" {
 		t.Errorf("대상 = %q, want 비밀번호 재설정 (메일 제목)", target)
 	}
-	for _, want := range []string{"member@example.com", "SMTP"} {
+	for _, want := range []string{"member@example.com", "refused"} {
 		if !strings.Contains(summary, want) {
 			t.Errorf("요약에 %q 가 없다: %q", want, summary)
 		}

@@ -567,7 +567,9 @@ func smtpHostOK(h string) bool {
 			return false
 		}
 		for _, c := range label {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+			// 밑줄은 RFC 1123 호스트명에는 없지만 Docker compose 서비스 이름(mail_relay)에
+			// 흔하고 리졸버가 해석한다 — 막으면 그런 릴레이를 쓸 수 없다.
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
 				return false
 			}
 		}

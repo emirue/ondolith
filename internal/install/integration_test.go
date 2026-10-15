@@ -293,6 +293,36 @@ func TestInstallRefusesDatabaseThatAlreadyHasAdmin(t *testing.T) {
 	}
 }
 
+// FR-214 기본값은 **새 사이트에만** 넣는다. 설정 파일을 잃고 같은 DB 로 마법사를
+// 다시 돌리면(다른 관리자 이메일이면 설치가 진행된다) 이 기본값이 운영 중인
+// 사이트의 인증을 켜서, 인증 없이 쓰던 회원이 글·주문에서 막힌다.
+func TestReinstallOverALiveSiteLeavesVerificationAlone(t *testing.T) {
+	dsn := testDSN(t)
+	pool := freshSchema(t, dsn)
+	ctx := context.Background()
+	if rec := newWizard(t).post(installForm(dsn)); rec.Code != http.StatusSeeOther {
+		t.Fatalf("첫 설치 HTTP %d, want 303", rec.Code)
+	}
+	// 이 기본값이 생기기 전에 설치했고 A-201 을 한 번도 저장하지 않은 사이트 — 행이 없다.
+	if _, err := pool.Exec(ctx, `DELETE FROM settings WHERE key = 'auth.email_verification_required'`); err != nil {
+		t.Fatal(err)
+	}
+
+	form := installForm(dsn)
+	form.Set("admin_email", "second@example.com")
+	if rec := newWizard(t).post(form); rec.Code != http.StatusSeeOther {
+		t.Fatalf("다른 이메일로 재설치 HTTP %d, want 303 (이 테스트의 전제)", rec.Code)
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM settings WHERE key = 'auth.email_verification_required'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Error("회원이 있는 DB 에 재설치했더니 이메일 인증이 켜졌다 — 운영 중인 사이트의 동작이 바뀐다")
+	}
+}
+
 // NFR-302: migrations are idempotent, which is what makes "replace the binary
 // and restart" safe.
 func TestMigrationsAreRerunnable(t *testing.T) {

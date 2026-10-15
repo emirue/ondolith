@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -327,14 +328,14 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// D13: 끝내 나가지 못한 메일은 작업 로그에 남긴다. 화면은 실패를 말할 수
 	// 없어서(FR-207) 여기가 아니면 운영자가 알 곳이 없다. 자동 백업과 같이 주체는
 	// system 이다 (D15 7절). 본문은 받지 않는다 — 재설정 링크가 곧 토큰이다.
-	// 제목은 「대상」에 둔다: 요약은 자격증명 낱말 검사(content.Redacted)를 거치는데
-	// 「비밀번호 재설정」 제목이 그 검사에 걸려 요약 전체가 가려졌다.
 	mailer.OnFail = func(to, subject string, err error) {
+		e, ok := mailFailureEntry(to, subject, err)
+		if !ok {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if rerr := contentStore.OpLog().Record(ctx, content.Entry{ActorEmail: "system",
-			Action: "mail.failed", TargetType: "mail", TargetID: subject,
-			Summary: to + " 에 메일을 보내지 못했습니다 — " + truncate(err.Error(), 300)}); rerr != nil {
+		if rerr := contentStore.OpLog().Record(ctx, e); rerr != nil {
 			log.Error("작업 로그 기록 실패", "action", "mail.failed", "err", rerr)
 		}
 	}
@@ -678,6 +679,23 @@ func themePath(cfg *config.Config, name string) string {
 func backupSchedule(kv map[string]string) backup.Schedule {
 	return backup.Schedule{Enabled: kv["backup.auto"] != "",
 		Hour: atoiOr(kv["backup.hour"], 0), Keep: atoiOr(kv["backup.keep"], 7)}
+}
+
+// mailFailureEntry is the operation-log row for a mail that never went out, or
+// false when the failure is not worth a row.
+//
+// SMTP 가 비어 있어서 실패한 것은 남기지 않는다. 그 상태는 대시보드가 알리고,
+// 남기면 공개 재설정·가입 요청마다 지울 수 없는 행이 하나씩 쌓여 외부에서 작업
+// 로그를 채울 수 있다. 제목은 「대상」에 둔다: 요약은 자격증명 낱말 검사
+// (content.Redacted)를 거치는데 「비밀번호 재설정」 제목이 걸려 요약 전체가
+// 가려졌다. SMTP 응답에 그 낱말이 있으면(Gmail 535 「Password not accepted」)
+// 요약은 여전히 가려진다 — 행과 대상은 남고, 원인은 A-205 시험 발송이 보인다.
+func mailFailureEntry(to, subject string, err error) (content.Entry, bool) {
+	if errors.Is(err, ErrMailNotConfigured) {
+		return content.Entry{}, false
+	}
+	return content.Entry{ActorEmail: "system", Action: "mail.failed", TargetType: "mail",
+		TargetID: subject, Summary: to + " 에 메일을 보내지 못했습니다 — " + truncate(err.Error(), 300)}, true
 }
 
 func truncate(s string, n int) string {

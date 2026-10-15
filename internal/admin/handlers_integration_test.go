@@ -1542,8 +1542,9 @@ func TestMailSettingsRefuseMalformedValues(t *testing.T) {
 		t.Errorf("발신 주소 = %q, want 소문자", got["mail.from_address"])
 	}
 
-	// 비운 설정은 받는다 — 메일을 끄는 방법이다. IP 호스트도 정상이다.
-	for _, host := range []string{"", "10.0.0.25"} {
+	// 비운 설정은 받는다 — 메일을 끄는 방법이다. IP 호스트, 밑줄이 든 Docker
+	// compose 서비스 이름(리졸버가 해석한다)도 정상이다.
+	for _, host := range []string{"", "10.0.0.25", "mail_relay"} {
 		empty := url.Values{"mail.smtp_host": {host}, "mail.smtp_port": {""},
 			"mail.tls_mode": {"none"}, "mail.from_address": {""}}
 		if rec := post(d.MailSettingsSave, "/admin/settings/mail", empty); rec.Code != http.StatusSeeOther {
@@ -1601,17 +1602,28 @@ func TestMailTestSendsOnlyToTheAdminItself(t *testing.T) {
 
 	// 계정당 5회/시간 (D15 4.3-2) — 남의 SMTP 를 우리가 대신 두드리는 요청이다.
 	fail = nil
-	for len(sentTo) < 5 {
+	for i := 0; i < 10 && len(sentTo) < 5; i++ { // 상한: 한도가 일찍 막아도 멈춘다
 		post(d.MailTest, "/admin/settings/mail/test", nil)
 	}
 	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusTooManyRequests || len(sentTo) != 5 {
 		t.Errorf("여섯 번째 = HTTP %d·발송 %d회, want 429·5회", rec.Code, len(sentTo))
 	}
 
+	// 재인증 창이 지난 superuser 는 비밀번호를 다시 넣어야 보낸다 (저장과 같은 문).
+	stale := &fakeCaller{superuser: true, reauth: true, email: "late@example.com", password: "correct horse battery"}
+	d.Caller = func(*http.Request) Caller { return stale }
+	before := len(sentTo)
+	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusForbidden || len(sentTo) != before {
+		t.Errorf("재인증 없이 = HTTP %d·발송 %d회, want 403·0회", rec.Code, len(sentTo)-before)
+	}
+	if rec := post(d.MailTest, "/admin/settings/mail/test", url.Values{"password": {"correct horse battery"}}); rec.Code != http.StatusOK || len(sentTo) != before+1 {
+		t.Errorf("재인증 뒤 = HTTP %d·발송 %d회, want 200·1회 — 위 단언이 「늘 거부」였다", rec.Code, len(sentTo)-before)
+	}
+
 	// 저장과 같은 문: superuser 만 (D15 5.1 R7).
 	op := &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"}
 	d.Caller = func(*http.Request) Caller { return op }
-	before := len(sentTo)
+	before = len(sentTo)
 	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusForbidden || len(sentTo) != before {
 		t.Errorf("settings.update 만 있는 운영자 = HTTP %d·발송 %d회, want 403·0회", rec.Code, len(sentTo)-before)
 	}

@@ -260,7 +260,8 @@ func (h *handler) provision(ctx context.Context, cfg *config.Config, f *form) er
 	// 문장 자체는 queries/install.sql 에 있다 (D22 6절).
 	//
 	// 기본 설정은 계정보다 먼저 넣는다. 계정을 만든 뒤 실패하면 재설치가 「이미
-	// 계정이 존재한다」로 막혀 그 사이트는 인증 꺼짐으로 굳는다 (FR-214).
+	// 계정이 존재한다」로 막혀 그 사이트는 인증 꺼짐으로 굳는다 (FR-214). 질의가
+	// 회원이 없는 DB 에만 넣으므로, 운영 중인 DB 에 재설치해도 설정은 그대로다.
 	q := installq.New(pool)
 	if err := q.SeedDefaultSettings(ctx); err != nil {
 		return fmt.Errorf("기본 설정을 넣지 못했습니다: %w", err)

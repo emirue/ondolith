@@ -181,7 +181,17 @@ func TestBuildMessageIsWellFormed(t *testing.T) {
 	if cte := m.Header.Get("Content-Transfer-Encoding"); cte != "base64" {
 		t.Errorf("Content-Transfer-Encoding = %q, want base64", cte)
 	}
-	b, _ := io.ReadAll(base64.NewDecoder(base64.StdEncoding, m.Body))
+	encoded, _ := io.ReadAll(m.Body)
+	lines := strings.Split(strings.TrimRight(string(encoded), "\r\n"), "\r\n")
+	if len(lines) < 2 {
+		t.Fatalf("본문이 한 줄뿐이다 — 이 단언은 줄을 나눠야 하는 길이를 전제한다: %q", encoded)
+	}
+	for _, l := range lines {
+		if len(l) > 76 {
+			t.Errorf("base64 줄이 %d자다 — RFC 2045 는 76자까지: %q", len(l), l)
+		}
+	}
+	b, _ := io.ReadAll(base64.NewDecoder(base64.StdEncoding, bytes.NewReader(encoded)))
 	if string(b) != body {
 		t.Errorf("본문 = %q, want %q", b, body)
 	}
@@ -200,5 +210,22 @@ func TestBuildMessageNameCannotInjectHeaders(t *testing.T) {
 	}
 	if bcc := m.Header.Get("Bcc"); bcc != "" {
 		t.Errorf("이름의 줄바꿈으로 Bcc 머리글이 생겼다: %q", bcc)
+	}
+}
+
+// SMTP 가 비어 있어서 실패한 것은 작업 로그에 남기지 않는다. 그 상태는 대시보드가
+// 알리고, 남기면 공개 재설정(IP당 3회/시간)·가입 요청마다 지울 수 없는 행이 하나씩
+// 쌓여 외부에서 작업 로그를 채울 수 있다. 설정이 있는데 실패한 것은 남긴다.
+func TestMailFailureEntrySkipsUnconfiguredSMTP(t *testing.T) {
+	if _, ok := mailFailureEntry("a@example.com", "비밀번호 재설정", ErrMailNotConfigured); ok {
+		t.Error("SMTP 미설정 실패를 작업 로그에 남긴다 — 외부 요청으로 로그가 쌓인다")
+	}
+	e, ok := mailFailureEntry("a@example.com", "비밀번호 재설정", errors.New("dial tcp 10.0.0.1:587: connect: connection refused"))
+	if !ok {
+		t.Fatal("설정이 있는데 실패한 발송을 남기지 않는다")
+	}
+	if e.ActorEmail != "system" || e.Action != "mail.failed" || e.TargetID != "비밀번호 재설정" ||
+		!strings.Contains(e.Summary, "a@example.com") || !strings.Contains(e.Summary, "connection refused") {
+		t.Errorf("작업 로그 항목 = %+v", e)
 	}
 }
