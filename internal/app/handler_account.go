@@ -175,6 +175,21 @@ func (d *accountDeps) sendVerification(ctx contextLike, userID, email string) {
 		"아래 링크로 인증을 완료하세요:\n"+d.baseURL+"/verify/"+raw)
 }
 
+// refuseUnverified is the login gate of FR-214 (loginDeps.unverified): with
+// verification required, an unverified account gets no session, and the
+// verification mail goes out again within the per-account limit (3 an hour,
+// the same bucket as P-113 — D15 4.3-2).
+func (d *accountDeps) refuseUnverified(ctx context.Context, u *auth.User) (refused, sent bool) {
+	if !d.verifyRequired() || u.EmailVerifiedAt != nil {
+		return false, false
+	}
+	if d.limiter.Allow("verify-resend:acct:"+u.ID, d.limits.VerifyMailAccount) {
+		d.sendVerification(ctx, u.ID, u.Email)
+		return true, true
+	}
+	return true, false
+}
+
 // P-110 GET — the withdrawal form.
 func (d *accountDeps) deleteForm(w http.ResponseWriter, r *http.Request) {
 	if !ActorFrom(r.Context()).IsAuthenticated() {

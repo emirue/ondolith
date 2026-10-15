@@ -90,6 +90,8 @@ func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handl
 		signupClosed:   func() bool { return false },
 		baseURL:        "https://example.com",
 	}
+	// 운영(app.go)과 같이 로그인 문에 미인증 판정을 단다 (FR-214).
+	d.loginDeps.unverified = d.refuseUnverified
 	// The production tree, not a hand-written one.
 	//
 	// This fixture used to list its own patterns, and one of them — /verify
@@ -389,5 +391,42 @@ func TestClosedSignupOnTheLiveSite(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("닫힌 가입으로 계정이 %d개 생겼다", n)
+	}
+}
+
+// **인증을 켠 사이트에서 미인증 계정은 로그인되지 않는다** (FR-214).
+//
+// 인증 전 계정은 글·주문을 못 하는데 로그인은 됐다 — 「인증」이 반쪽이었다. 비밀번호가
+// 맞으면 세션 대신 인증 메일을 다시 보낸다: 재발송(P-113)이 로그인을 전제로 했으므로
+// 로그인을 막으면 그것이 재발송의 자리다. 인증을 끈 사이트는 그대로 로그인된다.
+func TestUnverifiedAccountCannotLogInWhenVerificationIsRequired(t *testing.T) {
+	_, h, store, sender := accountFixture(t, true)
+	id := mkAccount(t, store, "u@example.com", "correct-horse-battery")
+	login := url.Values{"email": {"u@example.com"}, "password": {"correct-horse-battery"}}
+
+	rec := postForm(h, "/login", login, nil)
+	if rec.Code != http.StatusForbidden || sessionCookie(rec) != nil {
+		t.Fatalf("미인증 로그인 = HTTP %d·세션 %v, want 403·없음", rec.Code, sessionCookie(rec) != nil)
+	}
+	if !strings.Contains(rec.Body.String(), "인증") {
+		t.Errorf("왜 막혔는지 말하지 않는다: %q", rec.Body.String())
+	}
+	if p := mailedPath(t, sender, "u@example.com", "https://example.com/verify/"); p == "" {
+		t.Error("막으면서 인증 메일을 다시 보내지 않았다 — 인증할 길이 없다")
+	}
+
+	if err := store.MarkEmailVerified(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if c := sessionCookie(postForm(h, "/login", login, nil)); c == nil {
+		t.Error("인증한 뒤에도 로그인되지 않는다 — 위 단언이 「늘 거부」였다")
+	}
+
+	// 인증을 끈 사이트(FR-214 off, 사내망)는 인증 없이 로그인된다.
+	_, hOff, storeOff, _ := accountFixture(t, false)
+	mkAccount(t, storeOff, "off@example.com", "correct-horse-battery")
+	if c := sessionCookie(postForm(hOff, "/login", url.Values{
+		"email": {"off@example.com"}, "password": {"correct-horse-battery"}}, nil)); c == nil {
+		t.Error("인증을 끈 사이트에서 미인증 계정이 로그인되지 않는다")
 	}
 }

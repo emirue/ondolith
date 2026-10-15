@@ -1011,12 +1011,19 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	// No role is assigned here. Handing user.create the ability to pick a role
 	// would make it a way to mint an administrator (A-405 owns that).
-	if _, err := d.Auth.CreateUser(r.Context(), email, hash, name); err != nil {
+	id, err := d.Auth.CreateUser(r.Context(), email, hash, name)
+	if err != nil {
 		if errors.Is(err, auth.ErrEmailTaken) {
 			d.Render(w, r, "admin/user-detail.html", http.StatusConflict,
 				map[string]any{"Error": "이미 사용 중인 이메일입니다."})
 			return
 		}
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// 관리자가 만든 계정은 인증된 채로 둔다 (FR-214) — 관리자가 보증한 주소이고, 인증을
+	// 켠 사이트는 미인증 계정의 로그인을 막으므로 그대로 두면 만든 계정이 들어오지 못한다.
+	if err := d.Auth.MarkEmailVerified(r.Context(), id); err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}

@@ -906,8 +906,9 @@ func TestSignupSentOffersResendOnlyWhenLoggedIn(t *testing.T) {
 	if strings.Contains(anon, `action="/verify/resend"`) {
 		t.Error("로그인 전인데 재발송 버튼을 그린다 — 누르면 로그인 화면으로 튕긴다")
 	}
-	// 머리글에도 로그인 링크가 있으므로 링크가 아니라 안내 문장을 찾는다.
-	if !strings.Contains(anon, "로그인한 뒤") {
+	// 머리글에도 로그인 링크가 있으므로 링크가 아니라 안내 문장을 찾는다. 인증 전 계정은
+	// 로그인되지 않고, 로그인 시도가 인증 메일을 다시 보낸다 (FR-214).
+	if !strings.Contains(anon, "인증 메일을 다시 보내") {
 		t.Error("로그인 전 접수 화면에 재발송 방법(로그인) 안내가 없다")
 	}
 	if !strings.Contains(render(true), `action="/verify/resend"`) {

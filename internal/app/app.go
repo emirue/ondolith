@@ -349,6 +349,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	spam := spamGuard{keys: turnstileKeys, verify: turnstile.Verify, log: log}
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
 		userFields: contentStore.UserFields, verifyRequired: verifyRequired, signupClosed: signupClosed, spam: spam}
+	// 로그인·소셜 로그인의 미인증 판정은 가입 쪽이 안다(인증 설정·재발송) (FR-214).
+	lg.unverified = acc.refuseUnverified
 
 	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
 	// five directions share one markup, so switching is a token swap.
@@ -449,7 +451,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// **콜백 URL 은 요청에서 만든다.** 설정으로 두면 관리자가 그 값을 바꿔
 	// 인가 코드를 다른 곳으로 돌릴 수 있고, 그것이 D19 A-206 이 콜백 URL 을
 	// 받지 않기로 한 이유다.
-	soc := &socialDeps{publicDeps: pub, sm: sessions, store: authStore,
+	soc := &socialDeps{publicDeps: pub, sm: sessions, store: authStore, unverified: acc.refuseUnverified,
 		provider: func(r *http.Request, name string) (goth.Provider, error) {
 			cfg := socialConfigOf(name)
 			// **꺼진 프로바이더는 없는 것과 같다** (FR-709). 자격증명이

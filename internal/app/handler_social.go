@@ -46,6 +46,8 @@ type socialDeps struct {
 	provider func(r *http.Request, name string) (goth.Provider, error)
 	// enabled 는 A-206 에서 켠 프로바이더다. 화면이 버튼을 그리는 데 쓴다.
 	enabled func() []auth.SocialConfig
+	// unverified 는 로그인과 같은 판정이다 (loginDeps.unverified, FR-214).
+	unverified func(ctx context.Context, u *auth.User) (refused, sent bool)
 }
 
 // oauthState makes an unguessable state value.
@@ -170,6 +172,14 @@ func (d *socialDeps) finishSocialLogin(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		d.serverError(w, r, err)
 		return
+	}
+	// FR-214: 소셜로도 미인증 계정은 들이지 않는다 — 이 규칙 전에 미인증인 채로
+	// 연결해 둔 계정이 소셜로 인증을 우회하면 안 된다.
+	if d.unverified != nil {
+		if refused, _ := d.unverified(ctx, u); refused {
+			d.socialFail(w, r, "이메일 인증이 끝나지 않았습니다. 가입한 주소로 인증 메일을 보냈습니다. 메일의 링크를 누른 뒤 다시 로그인하세요.")
+			return
+		}
 	}
 
 	// FR-204 세션 고정: 도착할 때의 토큰으로 인증 상태를 만들지 않는다.

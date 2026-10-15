@@ -160,7 +160,12 @@ JAR=$WORK/cookies-buyer
 want "T2.3 회원가입 — 접수 화면" 200 "$(code POST /signup \
 	--data-urlencode "email=buyer@example.com" --data-urlencode "display_name=구매자" \
 	--data-urlencode "password=e2e-buyer-passphrase")"
-want "T2.3 가입한 계정으로 로그인" 303 "$(code POST /login \
+# 새 설치는 이메일 인증이 켜져 있고(FR-214), 인증 전 계정은 로그인되지 않는다.
+want "T2.3 인증 전에는 로그인되지 않는다" 403 "$(code POST /login \
+	--data-urlencode "email=buyer@example.com" --data-urlencode "password=e2e-buyer-passphrase")"
+# 메일의 인증 링크를 누른 것과 같다 — 메일은 이 시험 밖이다.
+sql "update users set email_verified_at = now() where email = 'buyer@example.com'" >/dev/null
+want "T2.3 인증한 뒤 로그인" 303 "$(code POST /login \
 	--data-urlencode "email=buyer@example.com" --data-urlencode "password=e2e-buyer-passphrase")"
 want "T2.3 로그인 상태다" 200 "$(code GET /me)"
 want "T2.6 로그아웃" 303 "$(code POST /logout)"

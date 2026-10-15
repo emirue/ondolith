@@ -974,6 +974,16 @@ func TestUserCreateValidatesAndAssignsNoRole(t *testing.T) {
 	if roles != 0 {
 		t.Errorf("생성만으로 역할 %d개가 붙었다 — user.create 가 곧 권한 부여가 된다", roles)
 	}
+	// 관리자가 만든 계정은 **인증된 채로** 만든다 — 관리자가 보증한 주소이고, 인증을
+	// 켠 사이트에서 미인증이면 로그인조차 되지 않는다 (FR-214).
+	var verified bool
+	if err := pool.QueryRow(ctx,
+		`SELECT email_verified_at IS NOT NULL FROM users WHERE email = 'new@example.com'`).Scan(&verified); err != nil {
+		t.Fatal(err)
+	}
+	if !verified {
+		t.Error("관리자가 만든 계정이 미인증이다 — 인증 켬에서 로그인할 수 없다")
+	}
 
 	// 중복은 DB UNIQUE 가 막는다.
 	if rec := post(d.UserCreate, "/admin/users", url.Values{
