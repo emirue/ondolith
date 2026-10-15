@@ -135,6 +135,9 @@ JAR=$WORK/jar-member
 code POST /signup --data-urlencode "email=member@example.com" \
 	--data-urlencode "display_name=회원" --data-urlencode "password=$MEMBER_PW" \
 	--data-urlencode "nickname=온돌이" >/dev/null
+# 가입은 로그인시키지 않는다 (FR-210) — 회원 세션은 로그인으로 연다.
+code POST /login --data-urlencode "email=member@example.com" \
+	--data-urlencode "password=$MEMBER_PW" >/dev/null
 code POST /cart/items --data-urlencode "variant_id=$VAR" --data-urlencode "quantity=2" >/dev/null
 POST_ID=$(sql "select id from posts limit 1")
 code POST "/board/notice/$POST_ID/comments" --data-urlencode "body=댓글 예시입니다." >/dev/null

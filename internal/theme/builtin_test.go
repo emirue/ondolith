@@ -857,6 +857,34 @@ func TestClosedSignupHidesTheWayIn(t *testing.T) {
 	}
 }
 
+// 가입 접수 화면은 새 가입과 중복 가입이 함께 쓴다 (FR-210). 인증이 꺼진
+// 사이트에서는 확인 메일이 가지 않으므로 「확인 메일을 보냈습니다」라고 하면
+// 거짓이다 — 그때는 로그인을 안내한다.
+func TestSignupSentCopyFollowsVerificationSetting(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(data map[string]any) string {
+		v := fullView()
+		v.User = nil
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "auth/signup-sent.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	on := render(map[string]any{"Email": "a@example.com"})
+	if !strings.Contains(on, "확인 메일을 보냈습니다") {
+		t.Error("인증이 켜진 사이트의 접수 화면이 확인 메일을 말하지 않는다")
+	}
+	off := render(map[string]any{"Email": "a@example.com", "NoVerify": true})
+	if strings.Contains(off, "확인 메일") {
+		t.Error("인증이 꺼진 사이트에서 「확인 메일」을 말한다 — 보내지 않는 메일이다")
+	}
+	if !strings.Contains(off, `href="/login"`) {
+		t.Error("인증이 꺼진 사이트의 접수 화면에 로그인 안내가 없다")
+	}
+}
+
 // pagerFixture is what app.pagerFor hands partials/pagination.html: numbered
 // links with one current, and every edge link set, so that each branch of the
 // partial is drawn — an empty edge would skip its {{with}}.

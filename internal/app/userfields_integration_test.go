@@ -63,8 +63,9 @@ func TestOperatorDefinedFieldReachesSignupAndProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("가입 = HTTP %d, want 303", resp.StatusCode)
+	// 가입은 로그인시키지 않는다 — 새 가입과 중복 가입이 같은 응답이어야 한다 (FR-210).
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("가입 = HTTP %d, want 200 (접수 화면)", resp.StatusCode)
 	}
 
 	var stored string
@@ -78,6 +79,13 @@ func TestOperatorDefinedFieldReachesSignupAndProfile(t *testing.T) {
 	}
 
 	// 내 정보에 다시 보이고, 고치면 반영된다.
+	resp, err = c.PostForm(srv.URL+"/login", url.Values{
+		"email": {"member@example.com"}, "password": {"user-integration-passphrase"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 	me := bodyOf(t, c, srv.URL+"/me")
 	if !strings.Contains(me, "온돌이") {
 		t.Errorf("내 정보에 적어 낸 값이 없다: %.400s", me)
@@ -123,8 +131,8 @@ func TestSignupDropsFieldsNobodyDefined(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("가입 = HTTP %d, want 303", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("가입 = HTTP %d, want 200 (접수 화면)", resp.StatusCode)
 	}
 
 	var raw string
@@ -197,8 +205,8 @@ func TestRequiredFieldIsEnforcedOnTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Errorf("필수 항목을 채운 가입 = HTTP %d, want 303 — 위 단언이 헛돌았다",
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("필수 항목을 채운 가입 = HTTP %d, want 200 — 위 단언이 헛돌았다",
 			resp.StatusCode)
 	}
 }

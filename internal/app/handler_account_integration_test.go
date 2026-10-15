@@ -78,6 +78,10 @@ func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handl
 					if e, ok := mm["Error"].(string); ok {
 						_, _ = w.Write([]byte("|" + e))
 					}
+					// 접수 화면의 문구를 가르는 값. 본문 비교(FR-210)에 함께 걸린다.
+					if nv, ok := mm["NoVerify"].(bool); ok && nv {
+						_, _ = w.Write([]byte("|noverify"))
+					}
 				}
 			},
 		},
@@ -141,19 +145,37 @@ func TestSignupOnExistingAccountNotifiesTheOwner(t *testing.T) {
 	}
 }
 
-// FR-214 off: the account is usable at once, and the visitor is logged in —
-// which is what "sign up" means to the person who clicked it.
-func TestSignupWithoutVerificationLogsInImmediately(t *testing.T) {
-	_, h, _, _ := accountFixture(t, false)
+// FR-210 은 인증을 꺼도(FR-214 off) 그대로다.
+//
+// 예전에는 인증이 꺼져 있으면 새 가입만 곧바로 로그인시켰다(303 → 홈). 중복
+// 주소는 로그인시킬 수 없으니 「확인 메일을 보냈습니다」(200)를 받았고, 그 차이로
+// 아무 주소나 가입 여부를 알아낼 수 있었다. 쿠키 하나의 유무도 같은 신호다.
+func TestSignupWithoutVerificationDoesNotRevealExistingAccount(t *testing.T) {
+	_, h, store, _ := accountFixture(t, false)
+	mkAccount(t, store, "taken@example.com", "correct-horse-battery")
 
-	rec := postForm(h, "/signup", url.Values{
-		"email": {"a@example.com"}, "password": {"correct-horse-battery"}, "display_name": {"홍길동"},
+	fresh := postForm(h, "/signup", url.Values{
+		"email": {"new@example.com"}, "password": {"correct-horse-battery"}, "display_name": {"새 사람"},
 	}, nil)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("HTTP %d, want 303 (본문 %q)", rec.Code, rec.Body.String())
+	dup := postForm(h, "/signup", url.Values{
+		"email": {"taken@example.com"}, "password": {"correct-horse-battery"}, "display_name": {"침입자"},
+	}, nil)
+
+	if fresh.Code != dup.Code || fresh.Body.String() != dup.Body.String() {
+		t.Errorf("신규 %d %q, 중복 %d %q — 응답으로 계정 존재가 새어나간다",
+			fresh.Code, fresh.Body.String(), dup.Code, dup.Body.String())
 	}
-	if sessionCookie(rec) == nil {
-		t.Error("인증이 꺼져 있는데 로그인되지 않았다")
+	if (sessionCookie(fresh) == nil) != (sessionCookie(dup) == nil) {
+		t.Error("신규 가입에만 세션 쿠키가 붙는다 — 쿠키로 계정 존재가 새어나간다")
+	}
+	if !strings.Contains(fresh.Body.String(), "noverify") {
+		t.Error("인증이 꺼졌다는 것을 접수 화면에 넘기지 않는다 — 보내지 않은 「확인 메일」을 말한다")
+	}
+	// 가입은 된 것이다: 그 계정으로 바로 로그인할 수 있어야 한다.
+	if c := sessionCookie(postForm(h, "/login", url.Values{
+		"email": {"new@example.com"}, "password": {"correct-horse-battery"},
+	}, nil)); c == nil {
+		t.Error("인증이 꺼져 있는데 새 계정으로 로그인되지 않는다")
 	}
 }
 
