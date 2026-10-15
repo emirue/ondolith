@@ -2,11 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net"
+	"net/mail"
 	"net/netip"
 	"net/smtp"
 	"strings"
@@ -55,10 +59,45 @@ func (s settingsSender) Send(ctx context.Context, to, subject, body string) erro
 	}
 	// The body is assembled here and never logged: it carries the verification
 	// and reset links, which are single-use credentials (D60).
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\n"+
-		"Content-Type: text/plain; charset=utf-8\r\n\r\n%s",
-		formatFrom(kv["mail.from_name"], from), to, subject, body)
-	return sendMail(ctx, net.JoinHostPort(host, port), host, kv["mail.tls_mode"], auth, from, []string{to}, []byte(msg))
+	msg := buildMessage(kv["mail.from_name"], from, to, subject, body, time.Now())
+	return sendMail(ctx, net.JoinHostPort(host, port), host, kv["mail.tls_mode"], auth, from, []string{to}, msg)
+}
+
+// buildMessage writes the RFC 5322 message. Headers stay 7-bit: the subject and
+// the display name go out as RFC 2047 encoded words, and the body as base64.
+// Date and Message-ID are ours to set — SES fills them in when they are missing
+// (measured 2026-10-15), but a relay that does not leaves a mail without a Date,
+// which spam filters score against, and raw UTF-8 headers some clients garble.
+func buildMessage(name, from, to, subject, body string, now time.Time) []byte {
+	// A newline in the name would end the header and let the next line be
+	// anything (Bcc). Address.String encodes control characters too; stripping
+	// them first keeps that from depending on a library detail.
+	name = strings.NewReplacer("\r", "", "\n", "").Replace(name)
+	var b strings.Builder
+	b.WriteString("From: " + (&mail.Address{Name: name, Address: from}).String() + "\r\n")
+	b.WriteString("To: " + (&mail.Address{Address: to}).String() + "\r\n")
+	b.WriteString("Subject: " + mime.BEncoding.Encode("utf-8", subject) + "\r\n")
+	b.WriteString("Date: " + now.Format(time.RFC1123Z) + "\r\n")
+	b.WriteString("Message-ID: " + messageID(from) + "\r\n")
+	b.WriteString("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n" +
+		"Content-Transfer-Encoding: base64\r\n\r\n")
+	enc := base64.StdEncoding.EncodeToString([]byte(body))
+	for len(enc) > 76 { // RFC 2045: encoded lines of at most 76 characters
+		b.WriteString(enc[:76] + "\r\n")
+		enc = enc[76:]
+	}
+	b.WriteString(enc + "\r\n")
+	return []byte(b.String())
+}
+
+// messageID is random and carries the sender's domain, so two mails never share
+// one — a receiver may drop the second as a duplicate.
+func messageID(from string) string {
+	domain := "localhost"
+	if i := strings.LastIndexByte(from, '@'); i >= 0 && i < len(from)-1 {
+		domain = from[i+1:]
+	}
+	return "<" + rand.Text() + "@" + domain + ">"
 }
 
 // ErrMailHostBlocked is what an SMTP host inside 169.254.0.0/16 gets.
@@ -175,14 +214,4 @@ func sendSMTP(ctx context.Context, conn net.Conn, host, mode string, auth smtp.A
 		return err
 	}
 	return c.Quit()
-}
-
-func formatFrom(name, addr string) string {
-	if name == "" {
-		return addr
-	}
-	// A name with a quote or newline would break out of the header. Newlines
-	// are header injection; the quote just ends the phrase early.
-	name = strings.NewReplacer("\r", "", "\n", "", `"`, "").Replace(name)
-	return `"` + name + `" <` + addr + ">"
 }

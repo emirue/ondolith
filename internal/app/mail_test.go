@@ -2,11 +2,18 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"io"
+	"mime"
 	"net"
+	"net/mail"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBlockMetadataAddr(t *testing.T) {
@@ -135,5 +142,63 @@ func fakeSMTPWithSTARTTLS(conn net.Conn, startTLS bool) string {
 		default:
 			write("500 5.5.1 unknown")
 		}
+	}
+}
+
+// 메일 원문은 RFC 5322·2047 을 따른다 (FR-708). SES 는 빠진 Date·Message-ID 를
+// 붙이고 한글 제목을 인코딩해 줬지만(2026-10-15 Gmail 수신 원문으로 실측), 그러지
+// 않는 릴레이로 나가면 Date 없는 메일은 스팸 점수를 받고 8비트 머리글은 깨질 수
+// 있다 — 고쳐 주는 쪽에 기대지 않는다.
+func TestBuildMessageIsWellFormed(t *testing.T) {
+	now := time.Date(2026, 10, 15, 13, 25, 41, 0, time.UTC)
+	body := "아래 링크로 비밀번호를 재설정하세요.\nhttps://example.com/password/reset/abc"
+	raw := buildMessage("온돌샵", "noreply@ondolith.com", "buyer@example.com", "비밀번호 재설정", body, now)
+
+	head := raw[:bytes.Index(raw, []byte("\r\n\r\n"))]
+	for _, c := range head {
+		if c >= 0x80 {
+			t.Fatalf("머리글에 8비트 문자가 있다 (RFC 2047 인코딩 없음):\n%s", head)
+		}
+	}
+	m, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("메일로 읽히지 않는다: %v\n%s", err, raw)
+	}
+	dec := new(mime.WordDecoder)
+	if subj, _ := dec.DecodeHeader(m.Header.Get("Subject")); subj != "비밀번호 재설정" {
+		t.Errorf("제목 = %q", subj)
+	}
+	from, err := m.Header.AddressList("From")
+	if err != nil || len(from) != 1 || from[0].Name != "온돌샵" || from[0].Address != "noreply@ondolith.com" {
+		t.Errorf("From = %v (%v)", from, err)
+	}
+	if d, err := m.Header.Date(); err != nil || !d.Equal(now) {
+		t.Errorf("Date = %v (%v), want %v", d, err, now)
+	}
+	if id := m.Header.Get("Message-ID"); !regexp.MustCompile(`^<[^@\s<>]+@ondolith\.com>$`).MatchString(id) {
+		t.Errorf("Message-ID = %q, want <…@ondolith.com>", id)
+	}
+	if cte := m.Header.Get("Content-Transfer-Encoding"); cte != "base64" {
+		t.Errorf("Content-Transfer-Encoding = %q, want base64", cte)
+	}
+	b, _ := io.ReadAll(base64.NewDecoder(base64.StdEncoding, m.Body))
+	if string(b) != body {
+		t.Errorf("본문 = %q, want %q", b, body)
+	}
+	if bytes.Equal(raw, buildMessage("온돌샵", "noreply@ondolith.com", "buyer@example.com", "비밀번호 재설정", body, now)) {
+		t.Error("Message-ID 가 매번 같다 — 수신 측이 같은 메일로 보고 버린다")
+	}
+}
+
+// 보내는 이름은 관리자가 적는 값이다. 줄바꿈이 머리글을 끝내면 Bcc 를 끼워 넣어
+// 우리 SMTP 로 아무에게나 보낼 수 있다.
+func TestBuildMessageNameCannotInjectHeaders(t *testing.T) {
+	raw := buildMessage("온돌\r\nBcc: evil@example.com", "noreply@ondolith.com", "buyer@example.com", "제목", "본문", time.Now())
+	m, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bcc := m.Header.Get("Bcc"); bcc != "" {
+		t.Errorf("이름의 줄바꿈으로 Bcc 머리글이 생겼다: %q", bcc)
 	}
 }
