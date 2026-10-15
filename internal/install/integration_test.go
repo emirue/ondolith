@@ -232,6 +232,18 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 	if verify != "1" {
 		t.Errorf("auth.email_verification_required = %q, want 1 (FR-214 기본 켬)", verify)
 	}
+	// 그러면 **설치한 관리자도 인증돼 있어야 한다.** 인증 전 계정은 글·주문을
+	// 못 하는데(FR-214), 설치 직후에는 SMTP 도 없어 스스로 인증할 길이 없다 —
+	// 사이트 주인이 자기 사이트에 글을 못 쓴다(make e2e T4.3 이 잡았다). 설치
+	// 폼에 이메일을 적은 사람이 곧 그 주소의 주인이다.
+	var verified bool
+	if err := pool.QueryRow(ctx,
+		`SELECT email_verified_at IS NOT NULL FROM users WHERE email = 'admin@example.com'`).Scan(&verified); err != nil {
+		t.Fatal(err)
+	}
+	if !verified {
+		t.Error("설치한 관리자가 미인증이다 — 인증 기본 켬에서 자기 사이트에 글·주문을 못 한다")
+	}
 
 	// FR-105: the config is written, owner-only, and loads back.
 	fi, err := os.Stat(w.configPath)

@@ -1,7 +1,10 @@
 -- name: CreateFirstAdmin :execrows
+-- 첫 관리자는 **인증된 채로** 만든다 (FR-214). 설치 폼에 주소를 적은 사람이 그 주소의
+-- 주인이고, 인증 기본 켬에서 미인증이면 SMTP 가 없는 설치 직후에 자기 사이트에 글·주문을
+-- 못 한다 — 스스로 인증할 메일도 나가지 않는다.
 WITH created AS (
-    INSERT INTO users (email, password_hash, display_name)
-    VALUES ($1, $2, $3)
+    INSERT INTO users (email, password_hash, display_name, email_verified_at)
+    VALUES ($1, $2, $3, now())
     ON CONFLICT (email) DO NOTHING
     RETURNING id
 )
