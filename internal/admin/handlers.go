@@ -620,6 +620,12 @@ func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
 				strings.Join(missing, ", ") + " — 전자상거래법 표시 의무 항목입니다."
 		}
 	}
+	// **메일(SMTP)이 비어 있으면 알린다** (FR-708). 새 설치는 인증이 켜진 채로
+	// 시작하므로(FR-214) SMTP 전에는 가입한 회원이 인증 메일을 받지 못하는데, 공개
+	// 화면은 그것을 말할 수 없다 (FR-207). 이 줄이 그 사실을 아는 자리다.
+	if mk, err := d.Content.Settings(r.Context(), "mail.smtp_host"); err == nil && mk["mail.smtp_host"] == "" {
+		data["MailWarning"] = "메일(SMTP)이 설정되지 않아 가입 인증·비밀번호 재설정 메일이 나가지 않습니다."
+	}
 	d.Render(w, r, "admin/dashboard.html", http.StatusOK, data)
 }
 

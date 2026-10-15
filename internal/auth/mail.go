@@ -28,6 +28,12 @@ type Mailer struct {
 	sleep   func(time.Duration) // injectable so tests do not wait
 	Retries int
 	Base    time.Duration
+	// OnFail hears about the final failure only — after the last retry, never for
+	// a send that recovered. D13 puts that failure in the operation log: the
+	// response cannot say it (FR-207), so without this the operator could not
+	// see from any admin screen that mail is not going out. The body is not
+	// passed on; a reset body is the token.
+	OnFail func(to, subject string, err error)
 }
 
 func NewMailer(s Sender, log *slog.Logger) *Mailer {
@@ -74,4 +80,7 @@ func (m *Mailer) sendWithRetry(to, subject, body string) {
 	// token, and a token in the log is a token an operator can replay (C5).
 	m.log.Error("메일 발송 실패", "to", to, "subject", subject,
 		"attempts", m.Retries, "err", last)
+	if m.OnFail != nil {
+		m.OnFail(to, subject, last)
+	}
 }

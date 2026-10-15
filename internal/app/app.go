@@ -324,6 +324,20 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
 		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
+	// D13: 끝내 나가지 못한 메일은 작업 로그에 남긴다. 화면은 실패를 말할 수
+	// 없어서(FR-207) 여기가 아니면 운영자가 알 곳이 없다. 자동 백업과 같이 주체는
+	// system 이다 (D15 7절). 본문은 받지 않는다 — 재설정 링크가 곧 토큰이다.
+	// 제목은 「대상」에 둔다: 요약은 자격증명 낱말 검사(content.Redacted)를 거치는데
+	// 「비밀번호 재설정」 제목이 그 검사에 걸려 요약 전체가 가려졌다.
+	mailer.OnFail = func(to, subject string, err error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if rerr := contentStore.OpLog().Record(ctx, content.Entry{ActorEmail: "system",
+			Action: "mail.failed", TargetType: "mail", TargetID: subject,
+			Summary: to + " 에 메일을 보내지 못했습니다 — " + truncate(err.Error(), 300)}); rerr != nil {
+			log.Error("작업 로그 기록 실패", "action", "mail.failed", "err", rerr)
+		}
+	}
 	// 메일 링크의 주소는 설치 때 잡아 둔 값이다 (config.SiteURL). 비어 있으면
 	// 링크가 `/password/reset/…` 뿐이라 메일에서 눌리지 않는다 — v0.1.0 으로
 	// 설치한 사이트가 그렇다. 요청의 Host 로 채우지 않는 이유는 그 필드에 있다.

@@ -1151,6 +1151,42 @@ func postThemeZip(t *testing.T, d *Deps, name string) *httptest.ResponseRecorder
 	return rec
 }
 
+// **메일(SMTP)이 비어 있으면 대시보드가 알린다** (FR-708, D13 A-205).
+//
+// 새 설치는 이메일 인증이 켜진 채로 시작한다(FR-214). SMTP 를 넣기 전에는
+// 가입한 회원이 인증 메일을 받지 못하고, 재설정도 「보냈습니다」라고만 답한다
+// (계정 열거 방지라 화면이 실패를 말할 수 없다). 그 사실을 아는 자리가 필요하다.
+func TestDashboardWarnsWhenMailIsNotConfigured(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"admin.access": true}, id: "u1"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	var warning string
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		warning = ""
+		if m, ok := data.(map[string]any); ok {
+			if s, ok := m["MailWarning"].(string); ok {
+				warning = s
+			}
+		}
+	}
+	call := func() {
+		d.Dashboard(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin", nil))
+	}
+
+	call()
+	if !strings.Contains(warning, "메일") {
+		t.Errorf("SMTP 가 비어 있는데 경고하지 않았다: %q", warning)
+	}
+	if err := d.Content.PutSettings(ctx, map[string]string{"mail.smtp_host": "smtp.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	call()
+	if warning != "" {
+		t.Errorf("SMTP 를 넣었는데도 경고한다: %q — 위 단언이 「늘 경고한다」였다", warning)
+	}
+}
+
 // **shop 모드에서 사업자 정보가 비면 대시보드가 알린다** (FR-711, W3-33).
 //
 // 저장을 막지 않기로 했으므로 (설치 직후는 항상 비어 있다) 알리는 자리가

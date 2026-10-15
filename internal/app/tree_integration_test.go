@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -690,5 +691,62 @@ func TestLoginRateLimitIsPerVisitorBehindTheProxy(t *testing.T) {
 	// 다른 방문자는 막히지 않는다.
 	if code := try("203.0.113.9", 99); code == http.StatusTooManyRequests {
 		t.Error("다른 방문자의 로그인이 429 다 — 프록시 뒤에서 IP 제한이 사이트 전체 제한이 됐다")
+	}
+}
+
+// **메일이 끝내 나가지 못하면 작업 로그에 남는다** (D13 A-205, D15 7절).
+//
+// 화면은 실패를 말할 수 없다 — 「보냈습니다」가 계정 유무와 무관하게 같아야
+// 해서다 (FR-207). 그래서 서버 로그에만 남기면 운영자는 관리 화면 어디에서도
+// 메일이 나가지 않는다는 것을 알 수 없었다. 본문은 남기지 않는다: 재설정 링크가
+// 곧 토큰이다 (D15 7절 「절대 기록하지 않음」).
+func TestFinalMailFailureIsInTheOperationLog(t *testing.T) {
+	srv, pool := liveSite(t)
+	ctx := context.Background()
+	hash, err := auth.HashPassword("member-integration-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.NewStore(pool).CreateUser(ctx, "member@example.com", hash, "회원"); err != nil {
+		t.Fatal(err)
+	}
+
+	// SMTP 를 넣지 않은 사이트다 — 발송은 세 번 다 「SMTP 설정이 없습니다」로 실패한다.
+	resp, err := client().PostForm(srv.URL+"/password/reset", url.Values{"email": {"member@example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("재설정 요청 = HTTP %d, want 200 (실패를 화면이 말하면 안 된다)", resp.StatusCode)
+	}
+
+	var actor, target, summary string
+	deadline := time.Now().Add(20 * time.Second) // 재시도 백오프 1s+2s 를 기다린다
+	for {
+		err := pool.QueryRow(ctx, `SELECT actor_email, coalesce(target_id, ''), summary FROM operation_logs
+			WHERE action = 'mail.failed' ORDER BY created_at DESC LIMIT 1`).Scan(&actor, &target, &summary)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("최종 발송 실패가 작업 로그에 없다: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if actor != "system" {
+		t.Errorf("주체 = %q, want system — 사람이 아니라 서버가 한 일이다", actor)
+	}
+	// 어떤 메일이 누구에게 왜 — 셋이 다 있어야 운영자가 손을 쓸 수 있다.
+	if target != "비밀번호 재설정" {
+		t.Errorf("대상 = %q, want 비밀번호 재설정 (메일 제목)", target)
+	}
+	for _, want := range []string{"member@example.com", "SMTP"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("요약에 %q 가 없다: %q", want, summary)
+		}
+	}
+	if strings.Contains(summary, "/password/reset/") {
+		t.Errorf("요약에 재설정 링크(토큰)가 실렸다: %q", summary)
 	}
 }

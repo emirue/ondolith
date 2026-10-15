@@ -81,6 +81,36 @@ func TestMailGivesUpAfterThreeAndLogs(t *testing.T) {
 	}
 }
 
+// D13: 세 번 다 실패하면 운영자가 보는 곳(작업 로그)에 남긴다. 서버 로그에만
+// 남기면 관리 화면 어디에도 드러나지 않는다. 알리는 것은 최종 실패 한 번이고,
+// 중간에 회복한 발송은 알리지 않는다.
+func TestMailReportsOnlyTheFinalFailure(t *testing.T) {
+	type report struct{ to, subject string }
+	var mu sync.Mutex
+	var got []report
+	newM := func(s Sender) *Mailer {
+		m := newTestMailer(s, &bytes.Buffer{})
+		m.OnFail = func(to, subject string, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append(got, report{to, subject})
+			if err == nil {
+				t.Error("실패 원인 없이 알렸다")
+			}
+		}
+		return m
+	}
+
+	<-newM(&fakeSender{failFor: 2}).SendAsync("a@example.com", "제목", "본문")
+	if len(got) != 0 {
+		t.Fatalf("결국 성공했는데 실패로 알렸다: %v", got)
+	}
+	<-newM(&fakeSender{failFor: 99}).SendAsync("b@example.com", "비밀번호 재설정", "본문")
+	if len(got) != 1 || got[0] != (report{"b@example.com", "비밀번호 재설정"}) {
+		t.Errorf("최종 실패 보고 = %v, want b@example.com·비밀번호 재설정 한 번", got)
+	}
+}
+
 // C5: a reset mail body holds the token. A token in the log is a token an
 // operator can replay.
 func TestMailFailureLogDoesNotCarryTheBody(t *testing.T) {
