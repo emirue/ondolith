@@ -880,8 +880,38 @@ func TestSignupSentCopyFollowsVerificationSetting(t *testing.T) {
 	if strings.Contains(off, "확인 메일") {
 		t.Error("인증이 꺼진 사이트에서 「확인 메일」을 말한다 — 보내지 않는 메일이다")
 	}
-	if !strings.Contains(off, `href="/login"`) {
+	if !strings.Contains(off, "로그인</a>해 주세요") {
 		t.Error("인증이 꺼진 사이트의 접수 화면에 로그인 안내가 없다")
+	}
+}
+
+// 인증 메일 재발송(P-113)은 세션의 계정으로 보낸다 — 주소를 받지 않는다. 가입
+// 직후에는 로그인 전이라, 버튼을 그리면 누르는 순간 로그인 화면으로 튕긴다.
+// 로그인 전에는 버튼 대신 로그인 안내, 로그인 뒤(재발송 결과 화면)에는 버튼.
+func TestSignupSentOffersResendOnlyWhenLoggedIn(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(loggedIn bool) string {
+		v := fullView()
+		if !loggedIn {
+			v.User = nil
+		}
+		v.Data = map[string]any{"Email": "a@example.com"}
+		var b bytes.Buffer
+		if err := l.Render(&b, "auth/signup-sent.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	anon := render(false)
+	if strings.Contains(anon, `action="/verify/resend"`) {
+		t.Error("로그인 전인데 재발송 버튼을 그린다 — 누르면 로그인 화면으로 튕긴다")
+	}
+	// 머리글에도 로그인 링크가 있으므로 링크가 아니라 안내 문장을 찾는다.
+	if !strings.Contains(anon, "로그인한 뒤") {
+		t.Error("로그인 전 접수 화면에 재발송 방법(로그인) 안내가 없다")
+	}
+	if !strings.Contains(render(true), `action="/verify/resend"`) {
+		t.Error("로그인한 미인증 회원에게 재발송 버튼이 없다")
 	}
 }
 
