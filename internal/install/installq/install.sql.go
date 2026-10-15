@@ -33,3 +33,15 @@ func (q *Queries) CreateFirstAdmin(ctx context.Context, arg CreateFirstAdminPara
 	}
 	return result.RowsAffected(), nil
 }
+
+const seedDefaultSettings = `-- name: SeedDefaultSettings :exec
+INSERT INTO settings (key, value) VALUES ('auth.email_verification_required', '1')
+ON CONFLICT (key) DO NOTHING
+`
+
+// FR-214: 이메일 인증은 기본 켬이다. 설정 행이 없으면 꺼짐으로 읽히므로 설치가 넣는다.
+// 이미 있는 값은 건드리지 않는다 — 운영자가 끈 사이트를 재설치 시도가 켜면 안 된다.
+func (q *Queries) SeedDefaultSettings(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, seedDefaultSettings)
+	return err
+}

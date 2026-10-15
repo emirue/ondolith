@@ -258,7 +258,14 @@ func (h *handler) provision(ctx context.Context, cfg *config.Config, f *form) er
 	// 상태가 되고, 재설치는 「이미 계정이 존재한다」로 거부된다. 둘은 함께
 	// 성립하거나 함께 없어야 한다.
 	// 문장 자체는 queries/install.sql 에 있다 (D22 6절).
-	n, err := installq.New(pool).CreateFirstAdmin(ctx, installq.CreateFirstAdminParams{
+	//
+	// 기본 설정은 계정보다 먼저 넣는다. 계정을 만든 뒤 실패하면 재설치가 「이미
+	// 계정이 존재한다」로 막혀 그 사이트는 인증 꺼짐으로 굳는다 (FR-214).
+	q := installq.New(pool)
+	if err := q.SeedDefaultSettings(ctx); err != nil {
+		return fmt.Errorf("기본 설정을 넣지 못했습니다: %w", err)
+	}
+	n, err := q.CreateFirstAdmin(ctx, installq.CreateFirstAdminParams{
 		Email: f.AdminEmail, PasswordHash: string(hash), DisplayName: f.displayName()})
 	if err != nil {
 		return fmt.Errorf("관리자 계정을 만들지 못했습니다: %w", err)

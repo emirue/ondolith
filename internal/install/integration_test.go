@@ -222,6 +222,17 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 		t.Errorf("bcrypt 해시가 아니거나 비밀번호와 맞지 않는다: %v", err)
 	}
 
+	// FR-214: 이메일 인증은 **기본 켬**이다. 설정 행이 없으면 꺼진 것으로 읽히므로
+	// 설치가 넣지 않으면 새 사이트는 인증 없이 열린다 — 실제로 그렇게 배포됐다.
+	var verify string
+	if err := pool.QueryRow(ctx,
+		`SELECT value FROM settings WHERE key = 'auth.email_verification_required'`).Scan(&verify); err != nil {
+		t.Fatalf("이메일 인증 설정이 없다 — 새 사이트가 인증 꺼짐으로 시작한다 (FR-214): %v", err)
+	}
+	if verify != "1" {
+		t.Errorf("auth.email_verification_required = %q, want 1 (FR-214 기본 켬)", verify)
+	}
+
 	// FR-105: the config is written, owner-only, and loads back.
 	fi, err := os.Stat(w.configPath)
 	if err != nil {
