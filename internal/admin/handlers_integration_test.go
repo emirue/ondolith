@@ -1454,6 +1454,67 @@ func TestMailSettingsAreSuperuserOnlyReauthedAndLogged(t *testing.T) {
 	}
 }
 
+// **SMTP 설정은 형식을 검사한다** (D19 A-205). 검사하지 않으면 포트 「abc」·발신
+// 「not-an-email」이 저장되고, 그 뒤의 재설정·인증 메일은 화면 아무 데도 드러나지
+// 않은 채 전부 실패한다. 비운 설정은 받는다 — A-205 「설정이 비어 있는 상태 저장:
+// 거부하지 않는다」.
+func TestMailSettingsRefuseMalformedValues(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{superuser: true})
+	ctx := context.Background()
+	ok := url.Values{"mail.smtp_host": {"smtp.example.com"}, "mail.smtp_port": {"587"},
+		"mail.tls_mode": {"starttls"}, "mail.from_address": {"noreply@example.com"}}
+	if rec := post(d.MailSettingsSave, "/admin/settings/mail", ok); rec.Code != http.StatusSeeOther {
+		t.Fatalf("정상 값 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	bad := map[string][2]string{
+		"포트 글자":    {"mail.smtp_port", "abc"},
+		"포트 0":     {"mail.smtp_port", "0"},
+		"포트 범위 밖":  {"mail.smtp_port", "70000"},
+		"발신 주소 형식": {"mail.from_address", "not-an-email"},
+		"호스트에 공백":  {"mail.smtp_host", "smtp example.com"},
+		"호스트에 스킴":  {"mail.smtp_host", "smtp://smtp.example.com"},
+		"호스트에 포트":  {"mail.smtp_host", "smtp.example.com:587"},
+	}
+	for name, kv := range bad {
+		t.Run(name, func(t *testing.T) {
+			form := url.Values{}
+			for k, v := range ok {
+				form[k] = v
+			}
+			form.Set(kv[0], kv[1])
+			if rec := post(d.MailSettingsSave, "/admin/settings/mail", form); rec.Code != http.StatusUnprocessableEntity {
+				t.Errorf("%s=%q → HTTP %d, want 422", kv[0], kv[1], rec.Code)
+			}
+			if got, _ := d.Content.Settings(ctx, kv[0]); got[kv[0]] != ok.Get(kv[0]) {
+				t.Errorf("거부했는데 %s 가 %q 로 바뀌었다", kv[0], got[kv[0]])
+			}
+		})
+	}
+
+	// 발신 주소는 소문자로 저장한다 (D19 A-205, D30 3절).
+	form := url.Values{}
+	for k, v := range ok {
+		form[k] = v
+	}
+	form.Set("mail.from_address", "NoReply@Example.COM")
+	if rec := post(d.MailSettingsSave, "/admin/settings/mail", form); rec.Code != http.StatusSeeOther {
+		t.Fatalf("대문자 발신 주소 = HTTP %d", rec.Code)
+	}
+	if got, _ := d.Content.Settings(ctx, "mail.from_address"); got["mail.from_address"] != "noreply@example.com" {
+		t.Errorf("발신 주소 = %q, want 소문자", got["mail.from_address"])
+	}
+
+	// 비운 설정은 받는다 — 메일을 끄는 방법이다. IP 호스트도 정상이다.
+	for _, host := range []string{"", "10.0.0.25"} {
+		empty := url.Values{"mail.smtp_host": {host}, "mail.smtp_port": {""},
+			"mail.tls_mode": {"none"}, "mail.from_address": {""}}
+		if rec := post(d.MailSettingsSave, "/admin/settings/mail", empty); rec.Code != http.StatusSeeOther {
+			t.Errorf("호스트 %q·빈 포트·빈 발신 = HTTP %d, want 303", host, rec.Code)
+		}
+	}
+}
+
 // **작업 로그에 키 값이 남지 않는다** (D15 7절, D22 4절). 로그는 지워지지
 // 않으므로 (append-only) 한 번 새면 영구히 남는다.
 func TestPaymentSettingsLogNeverCarriesTheKey(t *testing.T) {

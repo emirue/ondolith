@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -445,6 +446,13 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "TLS 모드 값이 올바르지 않습니다.")
 		return
 	}
+	// D19 A-205 의 형식 검사. 빈 값은 받는다 — 「설정이 비어 있는 상태 저장:
+	// 거부하지 않는다」. 검사하지 않으면 잘못 적은 설정이 저장되고, 그 뒤의
+	// 재설정·인증 메일은 어떤 화면에도 드러나지 않은 채 전부 실패한다.
+	if msg := mailSettingsProblem(kv); msg != "" {
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusUnprocessableEntity, msg)
+		return
+	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
@@ -452,6 +460,56 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 값은 남기지 않는다 — 비밀번호가 섞여 있고 로그는 지워지지 않는다 (D15 7절).
 	d.log(r, c, "settings.update", "settings", "mail", "메일(SMTP) 설정 변경")
 	http.Redirect(w, r, "/admin/settings/mail", http.StatusSeeOther)
+}
+
+// mailSettingsProblem checks the non-empty SMTP fields and normalizes them in
+// place: trimmed, and the sender lower-cased (D30 3절). It returns the refusal
+// shown to the operator, or "" when the values may be stored.
+func mailSettingsProblem(kv map[string]string) string {
+	for _, k := range []string{"mail.smtp_host", "mail.smtp_port", "mail.from_address"} {
+		if v, ok := kv[k]; ok {
+			kv[k] = strings.TrimSpace(v)
+		}
+	}
+	if h := kv["mail.smtp_host"]; h != "" && !smtpHostOK(h) {
+		return "SMTP 호스트는 smtp.example.com 처럼 이름이나 IP 주소만 적습니다(스킴·포트 없이)."
+	}
+	if p := kv["mail.smtp_port"]; p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return "포트는 1~65535 사이의 숫자여야 합니다."
+		}
+	}
+	if a := kv["mail.from_address"]; a != "" {
+		n, err := content.ValidateEmail(a)
+		if err != nil {
+			return "보내는 주소가 이메일 형식이 아닙니다."
+		}
+		kv["mail.from_address"] = n
+	}
+	return ""
+}
+
+// smtpHostOK accepts a bare host name or IP address. The dialer joins it with
+// the port field, so "host:587" would dial "host:587:587" and a scheme or a
+// space never resolves — both fail only later, at send time, out of sight.
+func smtpHostOK(h string) bool {
+	if net.ParseIP(h) != nil {
+		return true
+	}
+	if len(h) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(h, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ---- A-301 / A-302 / A-303 페이지 --------------------------------------------
