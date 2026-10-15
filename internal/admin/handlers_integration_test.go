@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -1548,6 +1549,71 @@ func TestMailSettingsRefuseMalformedValues(t *testing.T) {
 		if rec := post(d.MailSettingsSave, "/admin/settings/mail", empty); rec.Code != http.StatusSeeOther {
 			t.Errorf("호스트 %q·빈 포트·빈 발신 = HTTP %d, want 303", host, rec.Code)
 		}
+	}
+}
+
+// **메일 설정 시험 발송** (D13·D19 A-205, D15 4.3-2).
+//
+// 없던 동안 운영자는 저장한 SMTP 가 맞는지 알 방법이 없었다 — 재설정·인증
+// 메일의 실패는 공개 화면이 말할 수 없다 (FR-207). 받는 주소는 **로그인한
+// 관리자 본인**뿐이다: 주소를 받으면 우리 SMTP 가 임의 주소로 쏘는 중계가 된다.
+func TestMailTestSendsOnlyToTheAdminItself(t *testing.T) {
+	su := &fakeCaller{superuser: true, email: "su@example.com"}
+	d, pool := fixture(t, su)
+	ctx := context.Background()
+	var sentTo []string
+	var fail error
+	d.SendMailTest = func(_ context.Context, to string) error {
+		sentTo = append(sentTo, to)
+		return fail
+	}
+	d.Limiter = auth.NewLimiter()
+	d.Limits = auth.DefaultLimits()
+	var shown map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
+		w.WriteHeader(code)
+		shown, _ = data.(map[string]any)
+	}
+
+	// 폼이 다른 주소를 실어 와도 무시한다.
+	rec := post(d.MailTest, "/admin/settings/mail/test", url.Values{"to": {"victim@example.com"}})
+	if rec.Code != http.StatusOK || len(sentTo) != 1 || sentTo[0] != "su@example.com" {
+		t.Fatalf("HTTP %d, 받는 주소 %v — want 200·관리자 본인 한 번", rec.Code, sentTo)
+	}
+	if n, _ := shown["Notice"].(string); !strings.Contains(n, "su@example.com") {
+		t.Errorf("성공 안내에 받는 주소가 없다: %q", n)
+	}
+
+	// 실패는 SMTP 원인을 보이고 작업 로그에 남는다 (D19 A-205 「테스트 발송 실패: 남김」).
+	fail = errors.New("535 Authentication Credentials Invalid")
+	post(d.MailTest, "/admin/settings/mail/test", nil)
+	if e, _ := shown["Error"].(string); !strings.Contains(e, "발송에 실패했습니다") || !strings.Contains(e, "535") {
+		t.Errorf("실패 안내 = %q, want 「발송에 실패했습니다: …535…」", e)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs
+		WHERE action = 'mail.failed' AND actor_email = 'su@example.com'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("시험 발송 실패 작업 로그 %d건, want 1", n)
+	}
+
+	// 계정당 5회/시간 (D15 4.3-2) — 남의 SMTP 를 우리가 대신 두드리는 요청이다.
+	fail = nil
+	for len(sentTo) < 5 {
+		post(d.MailTest, "/admin/settings/mail/test", nil)
+	}
+	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusTooManyRequests || len(sentTo) != 5 {
+		t.Errorf("여섯 번째 = HTTP %d·발송 %d회, want 429·5회", rec.Code, len(sentTo))
+	}
+
+	// 저장과 같은 문: superuser 만 (D15 5.1 R7).
+	op := &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"}
+	d.Caller = func(*http.Request) Caller { return op }
+	before := len(sentTo)
+	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusForbidden || len(sentTo) != before {
+		t.Errorf("settings.update 만 있는 운영자 = HTTP %d·발송 %d회, want 403·0회", rec.Code, len(sentTo)-before)
 	}
 }
 

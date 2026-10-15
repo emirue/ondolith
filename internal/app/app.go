@@ -418,6 +418,12 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			mailer.SendAsync(email, "비밀번호 재설정",
 				"아래 링크로 재설정하세요:\n"+strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token)
 		},
+		// 시험 발송은 기다려서 결과를 본다 — 재시도 큐(mailer)를 거치지 않는다.
+		SendMailTest: func(ctx context.Context, to string) error {
+			return settingsSender{settings: setting, log: log}.Send(ctx, to, "메일 설정 시험",
+				"관리자 화면에서 보낸 메일 설정 시험입니다. 이 메일을 받으셨다면 SMTP 설정이 맞습니다.")
+		},
+		Limiter: limiter, Limits: limits,
 	}
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,

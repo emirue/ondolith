@@ -105,6 +105,14 @@ type Deps struct {
 	// forget: mail delivery must not decide whether an account operation
 	// succeeded, and the raw token is never logged or rendered.
 	SendReset func(email, token string)
+	// SendMailTest sends A-205's test mail with the saved SMTP settings and
+	// waits for the answer — unlike SendReset, the point is to see the result.
+	// The address is always the signed-in administrator's (D13).
+	SendMailTest func(ctx context.Context, to string) error
+	// Limiter and Limits carry D15 4.3-2's thresholds into the screens that
+	// have one (A-205 test send: per account, 5 an hour).
+	Limiter *auth.Limiter
+	Limits  auth.Limits
 	// DumpDB writes `pg_dump --format=custom` of the site database, and UploadDir is
 	// the upload folder — together they are A-604's backup (FR-713).
 	DumpDB    func(ctx context.Context, w io.Writer) error
@@ -379,6 +387,13 @@ var mailSettingKeys = []string{
 func (d *Deps) renderSettings(w http.ResponseWriter, r *http.Request,
 	screen string, keys []string, code int, msg string,
 ) {
+	d.renderSettingsNotice(w, r, screen, keys, code, msg, "")
+}
+
+// renderSettingsNotice is renderSettings with a success line as well.
+func (d *Deps) renderSettingsNotice(w http.ResponseWriter, r *http.Request,
+	screen string, keys []string, code int, msg, notice string,
+) {
 	kv, err := d.Content.Settings(r.Context(), keys...)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
@@ -394,7 +409,7 @@ func (d *Deps) renderSettings(w http.ResponseWriter, r *http.Request,
 		shown[k] = v
 	}
 	d.Render(w, r, screen, code,
-		map[string]any{"Settings": shown, "SecretSaved": saved, "Error": msg})
+		map[string]any{"Settings": shown, "SecretSaved": saved, "Error": msg, "Notice": notice})
 }
 
 func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
@@ -460,6 +475,54 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 값은 남기지 않는다 — 비밀번호가 섞여 있고 로그는 지워지지 않는다 (D15 7절).
 	d.log(r, c, "settings.update", "settings", "mail", "메일(SMTP) 설정 변경")
 	http.Redirect(w, r, "/admin/settings/mail", http.StatusSeeOther)
+}
+
+// MailTest is A-205's test send (D13, D19 A-205). It answers with the result
+// on the same screen: the one place a mail failure may be shown, because the
+// person asking is the operator, not a visitor probing for accounts (FR-207).
+//
+// **받는 주소를 받지 않는다** (D13) — 로그인한 관리자 본인에게만 보낸다. 주소를
+// 받으면 우리 SMTP 가 임의 주소로 쏘는 중계가 된다. 문은 저장과 같다: superuser
+// + 재인증 (D15 5.1 R7). 이 경로로 운영자가 SMTP 를 두드려 볼 수 있으므로
+// 계정당 5회/시간이다 (D15 4.3-2).
+func (d *Deps) MailTest(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "settings.update")
+	if !ok {
+		return
+	}
+	if !c.IsSuperuser() {
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusForbidden,
+			"메일(SMTP) 설정은 최고 관리자만 바꿀 수 있습니다.")
+		return
+	}
+	if !reauthOK(c, r) {
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusForbidden,
+			"비밀번호를 다시 입력하세요.")
+		return
+	}
+	if d.SendMailTest == nil {
+		http.Error(w, "시험 발송을 쓸 수 없습니다.", http.StatusNotFound)
+		return
+	}
+	if d.Limiter != nil && !d.Limiter.Allow("mail-test:acct:"+c.Email(), d.Limits.MailTestAccount) {
+		w.Header().Set("Retry-After", "3600")
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusTooManyRequests,
+			"시험 발송은 한 시간에 5번까지입니다. 잠시 후 다시 시도하세요.")
+		return
+	}
+	to := c.Email()
+	if err := d.SendMailTest(r.Context(), to); err != nil {
+		reason := err.Error()
+		if len([]rune(reason)) > 200 {
+			reason = string([]rune(reason)[:200]) + "…"
+		}
+		d.log(r, c, "mail.failed", "mail", "시험 발송", to+" 에 시험 메일을 보내지 못했습니다 — "+reason)
+		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusOK,
+			"발송에 실패했습니다: "+reason)
+		return
+	}
+	d.renderSettingsNotice(w, r, "admin/mail.html", mailSettingKeys, http.StatusOK, "",
+		to+" 로 시험 메일을 보냈습니다. 받은편지함과 스팸함을 확인하세요.")
 }
 
 // mailSettingsProblem checks the non-empty SMTP fields and normalizes them in
