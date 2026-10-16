@@ -571,3 +571,22 @@ func TestRefusalsRedrawTheLists(t *testing.T) {
 		t.Error("테마 거절 화면이 지금 테마를 모른다")
 	}
 }
+
+// 글·댓글·첨부 관리는 고르는 목록을 그리도록 게시판 목록을 넘긴다.
+func TestModerationScreensReceiveBoards(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"admin.access": true, "comment.moderate": true, "post.moderate": true}})
+	if _, err := d.Content.CreateBoard(context.Background(), content.Board{Slug: "notice", Name: "공지", PerPage: 20}, content.PresetPublic); err != nil {
+		t.Fatal(err)
+	}
+	for name, h := range map[string]http.HandlerFunc{"글": d.PostList, "댓글": d.CommentList, "첨부": d.AttachmentList} {
+		var got any
+		d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, v any) {
+			got = v.(map[string]any)["Boards"]
+			w.WriteHeader(code)
+		}
+		h(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/x", nil))
+		if bs, _ := got.([]content.Board); len(bs) != 1 {
+			t.Errorf("%s 관리: 게시판 목록 %v, want 1개", name, got)
+		}
+	}
+}

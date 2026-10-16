@@ -53,6 +53,15 @@
      D19 C7). 별도 재인증 화면을 두지 않기로 했으므로 **칸이 폼 안에 있어야
      한다** — 없으면 15분이 지난 운영자는 그 동작을 영원히 못 한다. 창이 아직
      살아 있으면 서버가 값을 읽지 않는다. */}}
+{{/* board-picker 는 글·댓글·첨부 관리(A-307~309)의 게시판 고르기다. 주소를 직접 치게 했고,
+     댓글 관리에는 고르는 칸조차 없었다. 데이터 {Boards, BoardSlug}. */}}
+{{define "board-picker"}}
+<select name="board" aria-label="게시판">
+  <option value="">게시판을 고르세요</option>
+  {{range .Boards}}<option value="{{.Slug}}"{{if eq .Slug $.BoardSlug}} selected{{end}}>{{.Name}}</option>{{end}}
+</select>
+{{end}}
+
 {{define "reauth-field"}}
 <label class="adm-field">
   <span>비밀번호 재확인</span>

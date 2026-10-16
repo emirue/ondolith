@@ -190,3 +190,24 @@ func TestMenusScreenPicksParentsByTitle(t *testing.T) {
 		t.Error("부모를 아직 텍스트(UUID)로 받는다")
 	}
 }
+
+// 글·댓글·첨부 관리는 게시판을 목록에서 고른다 — 주소를 직접 쳐야 했고, 댓글 관리에는
+// 고르는 칸조차 없었다. 고르기 전과 고른 게시판이 비었을 때를 다르게 말한다.
+func TestModerationScreensPickABoard(t *testing.T) {
+	boards := []content.Board{{Slug: "notice", Name: "공지"}, {Slug: "free", Name: "자유"}}
+	for _, name := range []string{"admin/posts.html", "admin/comments.html", "admin/attachments.html"} {
+		picked := renderAdmin(t, name, map[string]any{"Boards": boards, "BoardSlug": "free"})
+		if !strings.Contains(picked, `<option value="free" selected>자유</option>`) {
+			t.Errorf("%s: 게시판을 목록에서 고를 수 없다", name)
+		}
+		if strings.Contains(picked, `placeholder="게시판 주소"`) || strings.Contains(picked, "게시판 주소를 입력하세요") {
+			t.Errorf("%s: 아직 게시판 주소를 치게 한다", name)
+		}
+		if !strings.Contains(picked, "없습니다") {
+			t.Errorf("%s: 고른 게시판이 비었다는 말이 없다", name)
+		}
+		if none := renderAdmin(t, name, map[string]any{"Boards": boards}); !strings.Contains(none, "게시판을 고르세요") {
+			t.Errorf("%s: 고르기 전에 무엇을 하라는지 말하지 않는다", name)
+		}
+	}
+}

@@ -382,6 +382,18 @@ func (d *Deps) CommentModerate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, ListURL("/admin/comments", url.Values{"board": {b.Slug}}, pageOf(r)), http.StatusSeeOther)
 }
 
+// renderModeration draws A-307~309 with the board list for the picker — 게시판
+// 주소를 직접 치게 하던 칸이다.
+func (d *Deps) renderModeration(w http.ResponseWriter, r *http.Request, name string, code int, data map[string]any) {
+	boards, err := d.Content.Boards(r.Context())
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	data["Boards"] = boards
+	d.Render(w, r, name, code, data)
+}
+
 // PostList is A-307's read. It needs a board: post.moderate is scoped, so
 // "every post on the site" is a list nobody has permission for as a whole.
 func (d *Deps) PostList(w http.ResponseWriter, r *http.Request) {
@@ -398,12 +410,12 @@ func (d *Deps) PostList(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if slug == "" {
-		d.Render(w, r, "admin/posts.html", http.StatusOK, data)
+		d.renderModeration(w, r, "admin/posts.html", http.StatusOK, data)
 		return
 	}
 	b, err := d.Content.BoardBySlug(ctx, slug)
 	if errors.Is(err, content.ErrNotFound) {
-		d.Render(w, r, "admin/posts.html", http.StatusNotFound,
+		d.renderModeration(w, r, "admin/posts.html", http.StatusNotFound,
 			map[string]any{"BoardSlug": slug, "Error": "게시판을 찾을 수 없습니다."})
 		return
 	}
@@ -428,7 +440,7 @@ func (d *Deps) PostList(w http.ResponseWriter, r *http.Request) {
 	data["Board"] = b
 	data["Posts"] = posts[:min(len(posts), moderationPage)]
 	pager(data, "/admin/posts", url.Values{"board": {slug}}, page, more)
-	d.Render(w, r, "admin/posts.html", http.StatusOK, data)
+	d.renderModeration(w, r, "admin/posts.html", http.StatusOK, data)
 }
 
 // CommentList is A-308's read, scoped the same way.
@@ -440,12 +452,12 @@ func (d *Deps) CommentList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	slug := r.URL.Query().Get("board")
 	if slug == "" {
-		d.Render(w, r, "admin/comments.html", http.StatusOK, map[string]any{"BoardSlug": slug})
+		d.renderModeration(w, r, "admin/comments.html", http.StatusOK, map[string]any{"BoardSlug": slug})
 		return
 	}
 	b, err := d.Content.BoardBySlug(ctx, slug)
 	if errors.Is(err, content.ErrNotFound) {
-		d.Render(w, r, "admin/comments.html", http.StatusNotFound,
+		d.renderModeration(w, r, "admin/comments.html", http.StatusNotFound,
 			map[string]any{"BoardSlug": slug, "Error": "게시판을 찾을 수 없습니다."})
 		return
 	}
@@ -466,7 +478,7 @@ func (d *Deps) CommentList(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{"BoardSlug": slug, "Board": b,
 		"Comments": comments[:min(len(comments), moderationPage)]}
 	pager(data, "/admin/comments", url.Values{"board": {slug}}, page, len(comments) > moderationPage)
-	d.Render(w, r, "admin/comments.html", http.StatusOK, data)
+	d.renderModeration(w, r, "admin/comments.html", http.StatusOK, data)
 }
 
 // moderationPage·attachmentPage are the rows on one page of A-307·A-308 and A-309.
@@ -484,12 +496,12 @@ func (d *Deps) AttachmentList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	slug := r.URL.Query().Get("board")
 	if slug == "" {
-		d.Render(w, r, "admin/attachments.html", http.StatusOK, map[string]any{"BoardSlug": slug})
+		d.renderModeration(w, r, "admin/attachments.html", http.StatusOK, map[string]any{"BoardSlug": slug})
 		return
 	}
 	b, err := d.Content.BoardBySlug(ctx, slug)
 	if errors.Is(err, content.ErrNotFound) {
-		d.Render(w, r, "admin/attachments.html", http.StatusNotFound,
+		d.renderModeration(w, r, "admin/attachments.html", http.StatusNotFound,
 			map[string]any{"BoardSlug": slug, "Error": "게시판을 찾을 수 없습니다."})
 		return
 	}
@@ -510,7 +522,7 @@ func (d *Deps) AttachmentList(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{"BoardSlug": slug, "Board": b,
 		"Attachments": files[:min(len(files), attachmentPage)]}
 	pager(data, "/admin/attachments", url.Values{"board": {slug}}, page, len(files) > attachmentPage)
-	d.Render(w, r, "admin/attachments.html", http.StatusOK, data)
+	d.renderModeration(w, r, "admin/attachments.html", http.StatusOK, data)
 }
 
 // AttachmentDelete is A-309's destructive half.
