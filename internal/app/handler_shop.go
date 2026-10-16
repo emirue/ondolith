@@ -305,6 +305,7 @@ func (d *shopDeps) cartView(w http.ResponseWriter, r *http.Request) {
 	fee, _ := d.shipping().Fee(goods)
 	d.renderPage(w, r, "shop/cart.html", http.StatusOK, d.shopView(r, "장바구니", map[string]any{
 		"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee,
+		"Blocked": hasUnsellable(items),
 	}))
 }
 
@@ -432,4 +433,15 @@ func pgAdapterFor(provider, secret string) (string, commerce.Gateway) {
 	default:
 		return "", nil
 	}
+}
+
+// hasUnsellable reports a cart item that P-406 would refuse. 장바구니에서 멈춘다 —
+// 주문서까지 보내면 받는 분·주소를 다 쓴 뒤에야 거절된다.
+func hasUnsellable(items []commerce.CartItem) bool {
+	for _, it := range items {
+		if !it.Sellable {
+			return true
+		}
+	}
+	return false
 }

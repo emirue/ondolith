@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -184,9 +185,10 @@ func payloadFor(name string) any {
 			"Items": []cartItemLike{{ID: "ci1", Name: "티셔츠",
 				Option: map[string]string{"크기": "L"}, UnitPrice: 13000, Quantity: 2}},
 			"Goods": 26000, "Fee": 3000, "Total": 29000,
-			"Email": "a@example.com",
-			"Terms": []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
-			"Error": "필수 약관에 동의해야 합니다",
+			"Form":   url.Values{"orderer_email": {"a@example.com"}},
+			"Agreed": map[string]bool{},
+			"Terms":  []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
+			"Error":  "필수 약관에 동의해야 합니다",
 		}
 	case "shop/pay.html", "shop/complete.html":
 		return map[string]any{
@@ -285,7 +287,7 @@ func payloadFor(name string) any {
 		return map[string]any{
 			"Items": []cartItemLike{{ID: "ci1", VariantID: "v1", ProductID: "p1",
 				Slug: "tee", Name: "티셔츠", Option: map[string]string{"크기": "L"},
-				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true}},
+				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true, ProductVisible: true}},
 			"Goods": 26000, "Fee": 3000, "Total": 29000,
 			"Error": "수량이 재고를 넘습니다",
 		}
@@ -516,7 +518,7 @@ type cartItemLike struct {
 	ID, VariantID, ProductID, Slug, Name string
 	Option                               map[string]string
 	UnitPrice, Quantity, Stock           int
-	Sellable                             bool
+	Sellable, ProductVisible             bool
 }
 
 type termLike struct {

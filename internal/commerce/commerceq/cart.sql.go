@@ -76,7 +76,8 @@ func (q *Queries) CartItemVariant(ctx context.Context, arg CartItemVariantParams
 const cartItems = `-- name: CartItems :many
 SELECT ci.id, ci.variant_id, p.id AS product_id, p.slug, p.name, v.option_values,
        (p.base_price + v.price_delta)::int AS unit_price, ci.quantity, v.stock,
-       (p.is_visible AND v.is_visible AND v.stock >= ci.quantity)::boolean AS sellable
+       (p.is_visible AND v.is_visible AND v.stock >= ci.quantity)::boolean AS sellable,
+       p.is_visible AS product_visible
 FROM cart_items ci
 JOIN carts c            ON c.id = ci.cart_id
 JOIN product_variants v ON v.id = ci.variant_id
@@ -92,16 +93,17 @@ type CartItemsParams struct {
 }
 
 type CartItemsRow struct {
-	ID           string
-	VariantID    string
-	ProductID    string
-	Slug         string
-	Name         string
-	OptionValues []byte
-	UnitPrice    int32
-	Quantity     int32
-	Stock        int32
-	Sellable     bool
+	ID             string
+	VariantID      string
+	ProductID      string
+	Slug           string
+	Name           string
+	OptionValues   []byte
+	UnitPrice      int32
+	Quantity       int32
+	Stock          int32
+	Sellable       bool
+	ProductVisible bool
 }
 
 func (q *Queries) CartItems(ctx context.Context, arg CartItemsParams) ([]CartItemsRow, error) {
@@ -124,6 +126,7 @@ func (q *Queries) CartItems(ctx context.Context, arg CartItemsParams) ([]CartIte
 			&i.Quantity,
 			&i.Stock,
 			&i.Sellable,
+			&i.ProductVisible,
 		); err != nil {
 			return nil, err
 		}

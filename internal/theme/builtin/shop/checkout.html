@@ -16,24 +16,26 @@
   </dl>
   {{/* 금액 필드가 없다. 있으면 클라이언트 값이 계산에 닿고 FR-607 의 대조가
        자기 자신과의 대조가 된다 (D19 P-406 「받지 않는 필드」). */}}
+  {{/* 거절로 다시 그릴 때 보낸 값을 되살린다 (Form·Agreed). 비우면 받는 분·주소를
+       처음부터 다시 써야 한다. */}}
   <form method="post" action="/checkout" class="form">
     <label for="receiver_name">받는 분</label>
-    <input id="receiver_name" name="receiver_name" required maxlength="100">
+    <input id="receiver_name" name="receiver_name" required maxlength="100" value="{{.Form.Get "receiver_name"}}">
     <label for="receiver_phone">연락처</label>
-    <input id="receiver_phone" name="receiver_phone" required maxlength="20">
+    <input id="receiver_phone" name="receiver_phone" required maxlength="20" value="{{.Form.Get "receiver_phone"}}">
     <label for="postcode">우편번호</label>
-    <input id="postcode" name="postcode" required maxlength="10">
+    <input id="postcode" name="postcode" required maxlength="10" value="{{.Form.Get "postcode"}}">
     <label for="address1">주소</label>
-    <input id="address1" name="address1" required maxlength="200">
+    <input id="address1" name="address1" required maxlength="200" value="{{.Form.Get "address1"}}">
     <label for="address2">상세 주소</label>
-    <input id="address2" name="address2" maxlength="200">
+    <input id="address2" name="address2" maxlength="200" value="{{.Form.Get "address2"}}">
     <label for="delivery_memo">배송 메모</label>
-    <input id="delivery_memo" name="delivery_memo" maxlength="200">
+    <input id="delivery_memo" name="delivery_memo" maxlength="200" value="{{.Form.Get "delivery_memo"}}">
     <label for="orderer_email">주문자 이메일</label>
     <input id="orderer_email" name="orderer_email" type="email" required maxlength="254"
-           value="{{.Email}}">
+           value="{{.Form.Get "orderer_email"}}">
     <label for="orderer_phone">주문자 연락처</label>
-    <input id="orderer_phone" name="orderer_phone" required maxlength="20">
+    <input id="orderer_phone" name="orderer_phone" required maxlength="20" value="{{.Form.Get "orderer_phone"}}">
     <p class="hint">주문자 연락처는 비회원 주문 조회에 씁니다.</p>
 
     {{/* 시행 중인 약관이 없으면 상자도 오지 않는다. 빈 「약관」 상자는 무언가
@@ -44,7 +46,7 @@
       <legend>약관</legend>
       {{range .Terms}}
       <label>
-        <input type="checkbox" name="agreed_terms" value="{{.ID}}"{{if .Required}} required{{end}}>
+        <input type="checkbox" name="agreed_terms" value="{{.ID}}"{{if index $.Data.Agreed .ID}} checked{{end}}{{if .Required}} required{{end}}>
         {{.Kind}} ({{.Version}}){{if .Required}} <em>필수</em>{{end}}
       </label>
       {{end}}

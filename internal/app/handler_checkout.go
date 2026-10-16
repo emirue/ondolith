@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -35,7 +36,7 @@ func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
-	if len(items) == 0 {
+	if len(items) == 0 || hasUnsellable(items) {
 		http.Redirect(w, r, "/cart", http.StatusSeeOther)
 		return
 	}
@@ -56,11 +57,13 @@ func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := ActorFrom(ctx)
+	form := url.Values{}
+	if a.IsAuthenticated() {
+		form.Set("orderer_email", a.User.Email)
+	}
 	data := map[string]any{
 		"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee, "Terms": terms,
-	}
-	if a.IsAuthenticated() {
-		data["Email"] = a.User.Email
+		"Form": form, "Agreed": map[string]bool{},
 	}
 	d.renderPage(w, r, "shop/checkout.html", http.StatusOK, d.shopView(r, "주문서", data))
 }
@@ -148,10 +151,15 @@ func (d *shopDeps) checkoutError(w http.ResponseWriter, r *http.Request, cause e
 		goods += it.UnitPrice * it.Quantity
 	}
 	fee, _ := d.shipping().Fee(goods)
+	agreed := map[string]bool{}
+	for _, id := range r.PostForm["agreed_terms"] {
+		agreed[id] = true
+	}
 	d.renderPage(w, r, "shop/checkout.html", http.StatusUnprocessableEntity,
 		d.shopView(r, "주문서", map[string]any{
 			"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee,
 			"Terms": terms, "Error": cartMessage(cause),
+			"Form": r.PostForm, "Agreed": agreed,
 		}))
 }
 
