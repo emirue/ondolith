@@ -792,6 +792,13 @@ func TestAdminVocabularyIsConsistent(t *testing.T) {
 	if !strings.Contains(html, "<td>토스페이먼츠</td>") {
 		t.Error("웹훅 이력이 결제사를 코드(toss)로 그린다")
 	}
+	html = renderAdmin(t, "admin/reconcile.html", map[string]any{
+		"Rows":    []commerce.ReconcileRow{{PG: "toss", OrderNo: "ORD-1", Kind: "주문결제", OurStatus: "승인"}},
+		"PGNames": map[string]string{"toss": "토스페이먼츠"},
+	})
+	if !strings.Contains(html, "<td>토스페이먼츠</td>") {
+		t.Error("결제 목록이 결제사를 코드(toss)로 그린다")
+	}
 }
 
 // **회원·계정 화면은 탭 제목이 있다.** 이 화면들은 renderNamed 로 그려지는데 그것이 제목을
