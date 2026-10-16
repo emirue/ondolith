@@ -246,8 +246,10 @@ func payloadFor(name string) any {
 			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "배송완료",
 				Items: []orderItemLike{{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L",
 					UnitPrice: 13000, Quantity: 2, LineAmount: 26000, Settled: 1}}},
-			"Variants": []variantLike{{ID: "v2",
-				OptionValues: map[string]string{"크기": "M"}, PriceDelta: 1000, Stock: 3}},
+			"Exchange": []exchangeGroupLike{{
+				Item: orderItemLike{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L"},
+				Variants: []variantLike{{ID: "v2",
+					OptionValues: map[string]string{"크기": "M"}, PriceDelta: 1000, Stock: 3}}}},
 			"Error": "이미 처리 중인 요청이 있습니다.",
 		}
 	case "order/returns.html":
@@ -520,6 +522,12 @@ type cartItemLike struct {
 type termLike struct {
 	ID, Kind, Version, Body string
 	Required                bool
+}
+
+// exchangeGroupLike mirrors the per-item group P-512 draws (handler_returns.go).
+type exchangeGroupLike struct {
+	Item     orderItemLike
+	Variants []variantLike
 }
 
 type orderItemLike struct {
@@ -994,5 +1002,27 @@ func TestOrderPagesShowDeliveryMemo(t *testing.T) {
 				t.Errorf("%s: 메모가 없는데 「배송 메모」 줄이 있다", name)
 			}
 		}
+	}
+}
+
+// 바꿀 옵션이 하나도 없는 교환 폼은 이유를 말하고 보낼 버튼을 그리지 않는다 —
+// 전에는 선택칸만 조용히 사라지고 버튼은 남아, 누르면 422 였다.
+func TestExchangeFormWithoutOptionsSaysWhy(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("order/return-form.html").(map[string]any)
+	data["Exchange"] = nil
+	data["Error"] = ""
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/return-form.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "교환할 수 있는 다른 옵션이 없습니다") {
+		t.Error("옵션 없는 교환 폼이 이유를 말하지 않는다")
+	}
+	if strings.Contains(out, `교환 요청</button>`) {
+		t.Error("옵션 없는 교환 폼에 보내기 버튼이 있다")
 	}
 }
