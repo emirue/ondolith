@@ -251,3 +251,26 @@ func mkProduct(t *testing.T, s *Store, slug string, price int) string {
 	}
 	return id
 }
+
+// 목록은 「조합이 있는가」를 함께 낸다 — 조합 없는 상품(판매 준비 중)과 재고 없는 상품
+// (품절)을 목록이 가를 수 있어야 상품 화면과 같은 말을 쓴다.
+func TestListTellsUnreadyFromSoldOut(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	mkProduct(t, s, "ready", 10000)
+	sold := mkProduct(t, s, "sold", 10000)
+	if err := s.SetOptions(ctx, sold, nil); err != nil { // 재고 0 인 조합 하나
+		t.Fatal(err)
+	}
+	list, err := s.ListProducts(ctx, ProductQuery{Page: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][2]bool{}
+	for _, p := range list {
+		got[p.Slug] = [2]bool{p.HasVariants, p.InStock}
+	}
+	if got["ready"] != [2]bool{false, false} || got["sold"] != [2]bool{true, false} {
+		t.Errorf("(조합 있음, 재고 있음) = %v, want ready=(false,false) sold=(true,false)", got)
+	}
+}

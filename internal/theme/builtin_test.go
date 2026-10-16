@@ -496,7 +496,7 @@ type inputLike struct {
 type productLike struct {
 	ID, Slug, Name, Description string
 	BasePrice, MinDelta         int
-	InStock                     bool
+	InStock, HasVariants        bool
 	// ImageID 가 빈 것과 있는 것을 둘 다 그려 본다 (P-306).
 	ImageID string
 }
@@ -1069,5 +1069,26 @@ func TestProductDescriptionKeepsLineBreaks(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), "첫 줄<br>둘째 줄") {
 		t.Error("상품 설명의 줄바꿈이 사라졌다")
+	}
+}
+
+// 상품 목록은 상세와 같은 말을 쓴다 — 조합이 없으면 「판매 준비 중」, 있는데 재고가
+// 없으면 「품절」. 조합 없는 상품을 목록은 「품절」, 상세는 「판매 준비 중」이라 했다.
+func TestProductListNamesStockStateLikeTheDetail(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/list.html").(map[string]any)
+	data["Products"] = []productLike{
+		{ID: "p1", Slug: "ready", Name: "준비중", HasVariants: false},
+		{ID: "p2", Slug: "out", Name: "품절품", HasVariants: true, InStock: false},
+		{ID: "p3", Slug: "on", Name: "판매품", HasVariants: true, InStock: true}}
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/list.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.Count(out, "판매 준비 중") != 1 || strings.Count(out, ">품절<") != 1 {
+		t.Errorf("판매 준비 중 %d개·품절 %d개, want 1·1", strings.Count(out, "판매 준비 중"), strings.Count(out, ">품절<"))
 	}
 }

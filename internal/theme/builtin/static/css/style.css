@@ -545,6 +545,11 @@ a:focus-visible {
   border: 1px solid currentColor;
   opacity: .7;
 }
+/* 「품절」은 좋은 소식이 아니다 — 강조색(초록) 배지면 판매 중처럼 읽혔다. */
+.badge--soldout {
+  background: var(--line);
+  color: inherit;
+}
 
 /* ═══ 필터·정렬 줄 ══════════════════════════════════════════════════════════ */
 .board-filter,

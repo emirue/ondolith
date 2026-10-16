@@ -44,6 +44,9 @@ type Product struct {
 	// InStock 은 판매 가능한 조합이 하나라도 있는지다. 목록에서 품절 배지를
 	// 그리는 데 쓰고, 이것이 없으면 화면이 상품마다 조합을 조회한다 (N+1).
 	InStock bool
+	// HasVariants 는 팔 조합이 하나라도 정의돼 있는지다. 없으면 「판매 준비 중」 이고(상세와
+	// 같은 말), 있는데 재고가 없으면 「품절」이다 — 둘을 한 배지로 부르면 목록과 상세가 갈린다.
+	HasVariants bool
 	// ImageID 는 대표 이미지(올린 순서의 첫 장)의 id 다. 없으면 빈 문자열.
 	// 목록 질의가 함께 낸다 — 상품마다 이미지를 다시 읽지 않는다 (NFR-105).
 	// 주소는 `/shop/images/{ImageID}` (P-306).
@@ -117,7 +120,7 @@ func (s *Store) ListProductsMore(ctx context.Context, opt ProductQuery) ([]Produ
 func productFromList(r commerceq.ListProductsRow) Product {
 	return Product{ID: r.ID, Slug: r.Slug, Name: r.Name, Description: r.Description,
 		BasePrice: int(r.BasePrice), Visible: r.IsVisible, MinDelta: int(r.MinDelta), InStock: r.InStock,
-		ImageID: r.ImageID}
+		HasVariants: r.HasVariants, ImageID: r.ImageID}
 }
 
 func productFromRow(r commerceq.ProductByIDRow) *Product {
