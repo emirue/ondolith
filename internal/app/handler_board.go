@@ -185,12 +185,18 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	d.countView(w, r, p.ID)
 
 	v := d.view(r, p.Title, firstLine(p.Body))
+	commentForm := map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
+		"Turnstile": v.Site.Turnstile}
+	// 「답글」(?reply=댓글)은 같은 폼을 그 댓글에 대한 답글로 연다 (FR-505). 이 글의
+	// 최상위 댓글일 때만이다 — 저장할 때도 같은 판정을 한다(commentCreate).
+	if id := r.URL.Query().Get("reply"); id != "" && d.commentBelongsTo(ctx, id, p.ID) {
+		commentForm["ParentID"] = id
+	}
 	v.Data = map[string]any{
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
 		"Attachments": files,
 		"CanComment":  b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID)),
-		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
-			"Turnstile": v.Site.Turnstile},
+		"CommentForm": commentForm,
 		"CanEdit":     p.AuthorID != "" && p.AuthorID == actorID(a),
 		"CanModerate": a.CanOn("post.moderate", auth.BoardID(b.ID)),
 	}

@@ -1,8 +1,8 @@
 {{/* 댓글 입력. 상세 화면과 수정 화면이 같은 것을 쓴다. */}}
 {{$c := .}}
-<form class="form" method="post" action="{{$c.Action}}">
+<form class="form" method="post" action="{{$c.Action}}" id="comment-form">
   {{if $c.ParentID}}<input type="hidden" name="parent_id" value="{{$c.ParentID}}">{{end}}
-  <label for="comment-body">댓글</label>
+  <label for="comment-body">{{if $c.ParentID}}답글 <a href="?#comment-form">(취소)</a>{{else}}댓글{{end}}</label>
   <textarea id="comment-body" name="body" maxlength="2000" required>{{$c.Body}}</textarea>
   {{/* 새 댓글에만 (FR-216). 수정 화면은 Body 가 있다. */}}
   {{if not $c.Body}}{{template "partials/spam.html" $c.Turnstile}}{{end}}
