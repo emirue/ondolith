@@ -28,6 +28,17 @@ func (d *Deps) MenuList(w http.ResponseWriter, r *http.Request) {
 	d.Render(w, r, "admin/menus.html", http.StatusOK, map[string]any{"Items": items})
 }
 
+// menuError redraws A-204 with the list. 목록 없이 그리면 「메뉴 항목이 없습니다」가 뜨고
+// 부모 선택칸도 비어, 고쳐 다시 보낼 수가 없다.
+func (d *Deps) menuError(w http.ResponseWriter, r *http.Request, msg string) {
+	items, err := d.Content.MenuItems(r.Context())
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity, map[string]any{"Items": items, "Error": msg})
+}
+
 // MenuCreate adds one entry.
 //
 // The cycle check runs on the assembled tree, not on the row: a foreign key
@@ -48,14 +59,12 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 		ParentID: r.PostFormValue("parent_id"),
 	}
 	if item.Title == "" || content.TooLong(item.Title, content.MaxMenuTitleLen) {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "메뉴 제목은 1~50자입니다."})
+		d.menuError(w, r, "메뉴 제목은 1~50자입니다.")
 		return
 	}
 	var ok bool
 	if item.Sort, ok = menuSort(r); !ok {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "순서는 정수로 입력하세요."})
+		d.menuError(w, r, "순서는 정수로 입력하세요.")
 		return
 	}
 
@@ -63,8 +72,7 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 	// and a parent that does not exist is refused by the foreign key. The check
 	// lives in MenuUpdate, which is the operation that can build one.
 	if _, err := d.Content.CreateMenuItem(ctx, item); err != nil {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "저장하지 못했습니다."})
+		d.menuError(w, r, "저장하지 못했습니다.")
 		return
 	}
 	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
@@ -77,8 +85,9 @@ func menuSort(r *http.Request) (int, bool) {
 	if v == "" {
 		return 0, true
 	}
-	n, err := strconv.Atoi(v)
-	return n, err == nil
+	// sort_order 는 int32 다 — 그 밖의 값은 저장 때 뒤집혀(2147483648 → 음수) 맨 앞으로 간다.
+	n, err := strconv.ParseInt(v, 10, 32)
+	return int(n), err == nil
 }
 
 // MenuUpdate edits an entry, re-parenting included.
@@ -105,14 +114,12 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		ParentID: r.PostFormValue("parent_id"),
 	}
 	if item.Title == "" || content.TooLong(item.Title, content.MaxMenuTitleLen) {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "메뉴 제목은 1~50자입니다."})
+		d.menuError(w, r, "메뉴 제목은 1~50자입니다.")
 		return
 	}
 	var ok bool
 	if item.Sort, ok = menuSort(r); !ok {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "순서는 정수로 입력하세요."})
+		d.menuError(w, r, "순서는 정수로 입력하세요.")
 		return
 	}
 
@@ -135,14 +142,12 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := content.BuildMenu(probe, nil); err != nil {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": d.refusal(r, menuMessage(err), err)})
+		d.menuError(w, r, d.refusal(r, menuMessage(err), err))
 		return
 	}
 
 	if err := d.Content.UpdateMenuItem(ctx, id, item); err != nil {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "저장하지 못했습니다."})
+		d.menuError(w, r, "저장하지 못했습니다.")
 		return
 	}
 	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
@@ -324,15 +329,21 @@ func (d *Deps) ThemeList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	var installed []string
+	d.renderThemes(w, r, http.StatusOK, map[string]any{"Active": kv["theme.active"]})
+}
+
+// renderThemes draws A-202 with the installed list. 활성화가 거절되거나 경고가 날 때도
+// 같은 표다 — 목록 없이 그리면 「내장 테마 — 사용 중」이 거짓으로 찍혔다.
+func (d *Deps) renderThemes(w http.ResponseWriter, r *http.Request, code int, data map[string]any) {
 	if d.InstalledThemes != nil {
-		if installed, err = d.InstalledThemes(); err != nil {
+		installed, err := d.InstalledThemes()
+		if err != nil {
 			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 			return
 		}
+		data["Installed"] = installed
 	}
-	d.Render(w, r, "admin/themes.html", http.StatusOK,
-		map[string]any{"Active": kv["theme.active"], "Installed": installed})
+	d.Render(w, r, "admin/themes.html", code, data)
 }
 
 // ThemeActivate switches the active theme.
@@ -365,8 +376,13 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 	}
 	warn, err := d.ValidateTheme(name)
 	if err != nil {
-		d.Render(w, r, "admin/themes.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": d.themeRefusal(r, "테마를 활성화하지 못했습니다.", err)})
+		kv, kerr := d.Content.Settings(r.Context(), "theme.active")
+		if kerr != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		d.renderThemes(w, r, http.StatusUnprocessableEntity, map[string]any{"Active": kv["theme.active"],
+			"Error": d.themeRefusal(r, "테마를 활성화하지 못했습니다.", err)})
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), map[string]string{"theme.active": name}); err != nil {
@@ -380,8 +396,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		// D17: a dev build skips the version floor. The operator is told,
 		// because the alternative is a theme that misbehaves for no visible
 		// reason on the machine where it was least expected to.
-		d.Render(w, r, "admin/themes.html", http.StatusOK,
-			map[string]any{"Warning": warn, "Active": name})
+		d.renderThemes(w, r, http.StatusOK, map[string]any{"Warning": warn, "Active": name})
 		return
 	}
 	http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)

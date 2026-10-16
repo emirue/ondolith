@@ -822,7 +822,7 @@ dl { margin: 0 0 var(--s20); }
 .qr-label img { width: 100%; height: auto; }
 
 /* A-204 메뉴: 머리줄과 행이 같은 격자다 — 머리가 표 열이고 행이 colspan 안의 grid 이던
-   앞 판은 열이 어긋났다. 좁은 화면에서는 한 줄씩 쌓고 머리줄을 숨긴다(맨 아래 미디어 쿼리). */
+   앞 판은 열이 어긋났다. 좁은 화면(767px 이하)에서는 한 줄씩 쌓고 머리줄을 숨긴다. */
 .adm-menu-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 5.5rem auto;
@@ -830,7 +830,7 @@ dl { margin: 0 0 var(--s20); }
   padding: 12px 22px;
   align-items: center;
 }
-.adm-menu-grid + form + .adm-menu-grid, .adm-menu-grid--head + form + .adm-menu-grid { border-top: 1px solid var(--line); }
+.adm-menu-grid + form + .adm-menu-grid { border-top: 1px solid var(--line); }
 .adm-menu-grid--head { font-size: 12.5px; font-weight: 600; opacity: .7; }
 
 @media print {
@@ -892,9 +892,7 @@ dl { margin: 0 0 var(--s20); }
   .adm-btn { min-height: 44px; }
   .adm-sidebar a { min-height: 44px; display: flex; align-items: center; }
   .adm-filterbar a:not(.adm-btn) { min-height: 44px; display: inline-flex; align-items: center; }
-}
-
-@media (max-width: 720px) {
+  /* 메뉴 행은 한 줄씩 쌓고 머리줄을 숨긴다. */
   .adm-menu-grid { grid-template-columns: minmax(0, 1fr); }
   .adm-menu-grid--head { display: none; }
 }

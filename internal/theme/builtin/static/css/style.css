@@ -77,10 +77,12 @@ a:hover { color: var(--link-hover); }
   color: inherit;
 }
 
-/* 메뉴가 많거나 이름이 길면 **항목 단위로** 다음 줄로 간다. 줄바꿈을 막지 않으면 좁은
+/* 메뉴가 많거나 이름이 길면 **항목 단위로** 다음 줄로 간다. 한 줄에 우겨 넣으면 좁은
    화면에서 항목 안의 글자가 「고객/센터」「자유게/시판」처럼 갈라졌다(375px 실측). */
 .site-menu ul { display: flex; flex-wrap: wrap; gap: 6px 16px; list-style: none; margin: 0; padding: 0; }
-.site-menu li { white-space: nowrap; }
+/* 낱말 안에서는 꺾지 않고 공백에서만 꺾는다 — nowrap 이면 긴 메뉴 제목(50자까지 된다)이
+   휴대폰 폭을 넘어 body 의 overflow-x: hidden 에 소리 없이 잘린다. */
+.site-menu li { word-break: keep-all; }
 .site-menu ul ul { margin-left: 12px; }
 .site-menu a { color: inherit; text-decoration: none; opacity: .8; font-size: 14px; }
 .site-menu a:hover { opacity: 1; }

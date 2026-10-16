@@ -524,9 +524,11 @@ func TestMenuOrderIsSetFromTheScreen(t *testing.T) {
 	if got := titles(); got != "상품,회사 소개" {
 		t.Errorf("순서 = %s, want 상품,회사 소개", got)
 	}
-	if rec := post(d.MenuCreate, "/admin/menus", url.Values{
-		"title": {"x"}, "url": {"/"}, "sort_order": {"첫째"}}); rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("숫자 아닌 순서 = HTTP %d, want 422", rec.Code)
+	for _, bad := range []string{"첫째", "2147483648"} { // 둘째는 int32 를 넘는다 — 뒤집혀 맨 앞으로 갔다
+		if rec := post(d.MenuCreate, "/admin/menus", url.Values{
+			"title": {"x"}, "url": {"/"}, "sort_order": {bad}}); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("순서 %q = HTTP %d, want 422", bad, rec.Code)
+		}
 	}
 
 	items, _ := d.Content.MenuItems(ctx)
@@ -539,5 +541,33 @@ func TestMenuOrderIsSetFromTheScreen(t *testing.T) {
 	d.MenuUpdate(rec, req)
 	if rec.Code != http.StatusSeeOther || titles() != "회사 소개,상품" {
 		t.Errorf("순서 수정 = HTTP %d, 순서 %s", rec.Code, titles())
+	}
+}
+
+// 메뉴·테마 화면은 거절할 때도 목록을 그린다 — 목록 없이 그리면 메뉴는 「항목이 없습니다」·
+// 빈 부모 선택칸, 테마는 「내장 테마 — 사용 중」이 거짓으로 찍혔다.
+func TestRefusalsRedrawTheLists(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"menu.manage": true, "theme.activate": true}})
+	ctx := context.Background()
+	if _, err := d.Content.CreateMenuItem(ctx, contentItem("상품", "/shop", "")); err != nil {
+		t.Fatal(err)
+	}
+	var data map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, v any) {
+		data, _ = v.(map[string]any)
+		w.WriteHeader(code)
+	}
+	post(d.MenuCreate, "/admin/menus", url.Values{"title": {""}, "url": {"/"}})
+	if items, _ := data["Items"].([]content.MenuItem); len(items) != 1 {
+		t.Errorf("메뉴 거절 화면의 목록 %v, want 1개", data["Items"])
+	}
+	d.InstalledThemes = func() ([]string, error) { return []string{"warm"}, nil }
+	d.ValidateTheme = func(string) (string, error) { return "", errors.New("base.html 없음") }
+	post(d.ThemeActivate, "/admin/themes", url.Values{"theme": {"warm"}})
+	if names, _ := data["Installed"].([]string); len(names) != 1 {
+		t.Errorf("테마 거절 화면의 설치 목록 %v, want [warm]", data["Installed"])
+	}
+	if _, ok := data["Active"]; !ok {
+		t.Error("테마 거절 화면이 지금 테마를 모른다")
 	}
 }

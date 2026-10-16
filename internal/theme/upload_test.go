@@ -498,12 +498,17 @@ func TestInstalledListsThemeDirectories(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// 다른 곳의 폴더를 링크로 둔 테마도 테마다.
+	elsewhere := t.TempDir()
+	if err := os.Symlink(elsewhere, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
 	got, err := Installed(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got, ",") != "dark-2,warm" {
-		t.Errorf("= %v, want [dark-2 warm]", got)
+	if strings.Join(got, ",") != "dark-2,linked,warm" {
+		t.Errorf("= %v, want [dark-2 linked warm]", got)
 	}
 	if got, err := Installed(filepath.Join(root, "없음")); err != nil || len(got) != 0 {
 		t.Errorf("없는 폴더 = %v, %v — 설치된 테마 없음이어야 한다", got, err)
