@@ -151,6 +151,8 @@ body {
   font: 14px/1.6 var(--font-sans);
   color: var(--ink);
   background: var(--bg);
+  /* 한국어는 낱말 사이에서만 꺾는다 — 안내문이 「계정/은」처럼 갈렸다. */
+  word-break: keep-all;
 }
 
 a { color: var(--link); }

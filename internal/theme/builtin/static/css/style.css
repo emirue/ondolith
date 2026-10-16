@@ -404,7 +404,9 @@ h2 + .receipt-info { margin-top: 16px; }
 
 /* 어떤 폭에서도 **가로 스크롤이 생기지 않는다.** 표는 자기 안에서 스크롤하고
    (.table-wrap), 긴 낱말은 끊는다 — 주문번호·SKU·URL 이 그런 것들이다. */
-body { overflow-x: hidden; }
+/* 한국어는 낱말 사이에서만 꺾는다. 기본값은 음절마다 줄을 바꿔 「배송완/료」「온돌빌/딩」이
+   됐다. 한 줄에 다 안 들어가는 긴 낱말은 아래 `overflow-wrap` 이 받는다. */
+body { overflow-x: hidden; word-break: keep-all; }
 
 .page,
 .card-list li,

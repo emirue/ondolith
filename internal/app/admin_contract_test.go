@@ -661,3 +661,25 @@ func TestTableScrollersShowTheyScroll(t *testing.T) {
 		}
 	}
 }
+
+// **한국어는 낱말 사이에서만 줄을 바꾼다.**
+//
+// 브라우저 기본값은 한글 음절마다 줄바꿈을 허용해, 줄 끝에서 「합니/다」「배송완/료」
+// 「온돌빌/딩」처럼 낱말이 갈렸다. `keep-all` 은 게시판 목록 칸 한 곳에만 있었다.
+// 문서 전체(body)에 둔다 — 한 줄에 다 안 들어가는 긴 낱말은 `overflow-wrap` 이 받는다.
+func TestKoreanWordsAreNotSplit(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := regexp.MustCompile(`(?m)^body\s*\{[^}]*word-break:\s*keep-all`)
+	for name, css := range map[string][]byte{"admin/admin.css": adminCSS, "builtin/style.css": themeCSS} {
+		if !body.Match(css) {
+			t.Errorf("%s: body 에 word-break: keep-all 이 없다 — 한글 낱말이 줄 끝에서 갈린다", name)
+		}
+	}
+}
