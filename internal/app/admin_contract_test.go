@@ -941,3 +941,26 @@ func TestSelectsDrawTheirOwnShape(t *testing.T) {
 		}
 	}
 }
+
+// **글꼴 목록의 첫째는 실제로 있는 글꼴이다.** 「Noto Sans KR」을 첫째로 선언했지만 글꼴 파일을
+// 싣지 않아, 그 글꼴이 설치된 PC 에서만 그것으로 보였다 — 실제 Chrome(macOS)은 한 글자도 그것으로
+// 그리지 않았다(CDP 로 잼). 시스템 글꼴을 먼저 두고, 플랫폼별 한글 글꼴을 뒤에 둔다.
+func TestFontStackStartsWithTheSystemFont(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, css := range map[string][]byte{"admin/admin.css": adminCSS, "builtin/style.css": themeCSS} {
+		m := regexp.MustCompile(`--font-sans:\s*([^;]+);`).FindSubmatch(css)
+		if m == nil {
+			t.Fatalf("%s: --font-sans 가 없다", name)
+		}
+		if !strings.HasPrefix(string(m[1]), "system-ui") {
+			t.Errorf("%s: 글꼴 목록이 %q 로 시작한다 — 싣지 않은 글꼴이 첫째면 PC 마다 다르게 보인다", name, m[1])
+		}
+	}
+}

@@ -14,7 +14,7 @@
 
 /* ---- 공통 (5안 무관) ---------------------------------------------------- */
 :root {
-  --font-sans: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --font-sans: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
 
   /* 여백 스케일 */
   --s4: 4px;   --s6: 6px;   --s8: 8px;   --s10: 10px; --s12: 12px;

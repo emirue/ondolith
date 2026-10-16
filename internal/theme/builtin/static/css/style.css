@@ -10,7 +10,7 @@
  * 이 파일은 폴백이다. 디스크 테마가 style.css 를 두면 그쪽이 쓰인다 (FR-302).
  */
 :root {
-  --font-sans: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --font-sans: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
 
   /* 「1b 모던 소프트」의 값이다 — 관리자 화면의 기본과 같은 팔레트를 쓴다
    * (admin.css 1b, app.defaultAdminTheme). 앞뒤가 다른 사이트로 보이지 않게
