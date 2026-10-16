@@ -13,6 +13,7 @@ import (
 	"testing"
 	"text/template/parse"
 
+	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/theme"
 )
 
@@ -746,5 +747,49 @@ func TestNarrowInputsDoNotTriggerZoom(t *testing.T) {
 		if !rule.MatchString(block) {
 			t.Errorf("%s: 767px 블록에서 입력칸 글자를 16px 로 올리지 않는다 — iPhone 이 초점마다 확대한다", name)
 		}
+	}
+}
+
+// **같은 개념은 관리자 화면 어디서나 같은 말로 부른다.**
+//
+// 게시판 「주소」 / 페이지 「슬러그」 / 상품 「주소(slug)」, 공개 / 노출 / 발행, 추가 / 생성 /
+// 기록, toss / 토스페이먼츠, 작성일 / 올린 날짜가 섞여 있었고, 페이지 목록은 배지가 「공개」인데
+// 버튼이 「발행 취소」였다. 정한 말: 주소 · 공개/숨김(페이지는 공개/초안) · 추가 · 저장 ·
+// 결제사(토스페이먼츠) · 작성일(날짜)/시각(분까지). 템플릿 주석은 사람이 읽지 않으므로 뺀다.
+func TestAdminVocabularyIsConsistent(t *testing.T) {
+	comment := regexp.MustCompile(`(?s)\{\{/\*.*?\*/\}\}`)
+	banned := []string{"슬러그", "(slug)", ">노출<", "{{if .Visible}}노출", "발행 취소", "발행{{end}}",
+		">생성</button>", ">기록</button>", "올린 날짜", "<th>PG</th>"}
+	entries, err := fs.ReadDir(adminFS, "templates/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanned := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		b, err := adminFS.ReadFile("templates/admin/" + e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanned++
+		text := comment.ReplaceAllString(string(b), "")
+		for _, w := range banned {
+			if strings.Contains(text, w) {
+				t.Errorf("%s: %q — 다른 화면이 같은 것을 다르게 부른다", e.Name(), w)
+			}
+		}
+	}
+	if scanned < 30 {
+		t.Fatalf("관리자 템플릿을 %d 개밖에 못 읽었다 — 검사가 헛돌았다", scanned)
+	}
+
+	html := renderAdmin(t, "admin/webhooks.html", map[string]any{
+		"Rows":    []commerce.WebhookRow{{PG: "toss", EventID: "e1", Status: "처리"}},
+		"PGNames": map[string]string{"toss": "토스페이먼츠"},
+	})
+	if !strings.Contains(html, "<td>토스페이먼츠</td>") {
+		t.Error("웹훅 이력이 결제사를 코드(toss)로 그린다")
 	}
 }

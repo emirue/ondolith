@@ -9,13 +9,13 @@
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr>
-        <th>수신</th><th>PG</th><th>이벤트</th><th>주문</th><th>상태</th><th>원문</th>
+        <th>수신</th><th>결제사</th><th>이벤트</th><th>주문</th><th>상태</th><th>원문</th>
       </tr></thead>
       <tbody>
       {{range .Rows}}
         <tr>
           <td>{{date .CreatedAt "2006-01-02 15:04"}}</td>
-          <td>{{.PG}}</td>
+          <td>{{or (and $.PGNames (index $.PGNames .PG)) .PG}}</td>
           <td><code>{{.EventID}}</code></td>
           <td>{{with .OrderNo}}<a href="/admin/orders/{{.}}">{{.}}</a>{{else}}—{{end}}</td>
           <td>{{.Status}}{{with .Error}} · {{.}}{{end}}</td>

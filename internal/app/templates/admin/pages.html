@@ -8,7 +8,7 @@
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead>
-        <tr><th>제목</th><th>슬러그</th><th>상태</th><th>동작</th></tr>
+        <tr><th>제목</th><th>주소</th><th>상태</th><th>동작</th></tr>
       </thead>
       <tbody>
       {{range .Pages}}
@@ -23,7 +23,7 @@
             <div class="adm-actions">
               <form method="post" action="/admin/pages/{{.ID}}/publish">
                 <input type="hidden" name="status" value="{{if eq .Status "published"}}draft{{else}}published{{end}}">
-                <button class="adm-btn adm-btn--sm">{{if eq .Status "published"}}발행 취소{{else}}발행{{end}}</button>
+                <button class="adm-btn adm-btn--sm">{{if eq .Status "published"}}초안으로{{else}}공개{{end}}</button>
               </form>
               <form method="post" action="/admin/pages/{{.ID}}/delete">
                 <button onclick="return confirm('이 페이지를 삭제할까요? 되돌릴 수 없습니다.')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>

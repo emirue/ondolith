@@ -119,7 +119,9 @@ func (d *Deps) reconcilePage(w http.ResponseWriter, r *http.Request, c Caller,
 		// 3개월 버튼이 없다 — 상한이 31일이다.
 		"Quick": quickLinks("/admin/reconcile", nil, today, false),
 		// 「PG 결과로 반영」은 order.update 가 있을 때만 그린다 (D13).
-		"CanResolve": c.Can("order.update")}
+		"CanResolve": c.Can("order.update"),
+		// 저장값(toss)이 아니라 결제 설정 화면과 같은 이름으로 부른다.
+		"PGNames": pgProviders}
 	if msg != "" {
 		data["Error"] = msg
 	}
@@ -165,7 +167,7 @@ func (d *Deps) WebhookLog(w http.ResponseWriter, r *http.Request) {
 	page := pageOf(r)
 	p, perr := parsePeriod(q.Get("from"), q.Get("to"), time.Local)
 	data := map[string]any{"From": p.From, "To": p.To,
-		"Quick": quickLinks("/admin/webhooks", nil, time.Now(), true)}
+		"Quick": quickLinks("/admin/webhooks", nil, time.Now(), true), "PGNames": pgProviders}
 	if perr != nil {
 		data["Error"] = perr.Error()
 		d.Render(w, r, "admin/webhooks.html", http.StatusUnprocessableEntity, data)

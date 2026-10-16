@@ -329,3 +329,17 @@ func TestWebhookLogFiltersByPeriodAndCarriesIt(t *testing.T) {
 		t.Errorf("2쪽 %d건, 다음 %v — want 2건, 다음 없음", got, data["NextURL"])
 	}
 }
+
+// **결제 목록·웹훅 이력은 결제사를 이름으로 부른다.** 저장값 `toss` 를 그대로 그려,
+// 결제 설정 화면의 「토스페이먼츠」와 다른 이름이었다.
+func TestPaymentLogsNameTheProvider(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"payment.view": true}}
+	d, _ := fixture(t, caller)
+	for path, h := range map[string]http.HandlerFunc{"/admin/reconcile": d.Reconcile, "/admin/webhooks": d.WebhookLog} {
+		_, data := view(t, d, h, path)
+		names, _ := data["PGNames"].(map[string]string)
+		if names["toss"] != "토스페이먼츠" {
+			t.Errorf("%s: PGNames = %v — 결제사 코드가 화면에 그대로 나간다", path, data["PGNames"])
+		}
+	}
+}
