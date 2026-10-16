@@ -1235,12 +1235,15 @@ address + p { font-size: 14px; margin-top: 6px; }
   .board-list tbody tr:last-child,
   .order-list tbody tr:last-child { border-bottom: 0; }
   .board-list td,
-  .order-list td { padding: 0; border: 0; }
+  .order-list td { padding: 0; border: 0; white-space: normal; }
   .board-list td:first-child,
   .order-list td:first-child { flex-basis: 100%; white-space: normal; }
   /* 값이 없는 사용자 필드 칸이 빈 자리를 차지했다(「색상」). */
   .board-list td:empty,
   .order-list td:empty { display: none; }
+  .board-list td.empty,
+  .order-list td.empty { padding: 24px 0; }
+  .board-list td[data-label]::before,
   .order-list td[data-label]::before { content: attr(data-label) " "; opacity: .55; font-size: 12.5px; }
 }
 

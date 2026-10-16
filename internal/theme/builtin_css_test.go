@@ -370,10 +370,24 @@ func TestNarrowListTablesStackRows(t *testing.T) {
 		regexp.MustCompile(`\.board-list thead,\s*\.order-list thead\s*\{\s*display:\s*none`),
 		regexp.MustCompile(`\.board-list tr,\s*\.order-list tr\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap`),
 		regexp.MustCompile(`td:first-child[^{]*\{[^}]*flex-basis:\s*100%`),
-		regexp.MustCompile(`td\[data-label\]::before\s*\{[^}]*attr\(data-label\)`),
+		regexp.MustCompile(`\.board-list td\[data-label\]::before,\s*\.order-list td\[data-label\]::before\s*\{[^}]*attr\(data-label\)`),
+		// 카드 안의 칸은 줄을 바꾼다 — 긴 옵션 이름이 카드 밖으로 넘쳐 표가 다시 옆으로 밀렸다.
+		regexp.MustCompile(`\.board-list td,\s*\.order-list td\s*\{[^}]*white-space:\s*normal`),
+		// 빈 목록 문구는 칸 여백(0)을 받지 않는다 — 더 구체적인 규칙이 .empty 의 여백을 지웠다.
+		regexp.MustCompile(`\.board-list td\.empty,\s*\.order-list td\.empty\s*\{[^}]*padding:\s*[1-9]`),
 	} {
 		if !want.MatchString(block) {
 			t.Errorf("좁은 폭 블록에 %s 가 없다", want)
+		}
+	}
+
+	board, err := fs.ReadFile(Builtin(), "board/list.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`data-label="조회"`, `data-label="{{.Label}}"`} {
+		if !strings.Contains(string(board), want) {
+			t.Errorf("게시판 목록에 %s 가 없다 — 휴대폰에서 숫자·값만 남는다", want)
 		}
 	}
 

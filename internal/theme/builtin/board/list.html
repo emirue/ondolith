@@ -53,10 +53,10 @@
           {{if .HasAttachment}}<span class="clip" title="첨부 있음">📎</span>{{end}}
         </td>
         {{$p := .}}
-        {{range $cols}}<td class="meta">{{field $p.CustomFields .Key}}</td>{{end}}
+        {{range $cols}}<td class="meta" data-label="{{.Label}}">{{field $p.CustomFields .Key}}</td>{{end}}
         <td class="meta">{{if .AuthorName}}{{.AuthorName}}{{else}}(탈퇴){{end}}</td>
         <td class="meta">{{date .CreatedAt "2006-01-02"}}</td>
-        <td class="meta">{{number .ViewCount}}</td>
+        <td class="meta" data-label="조회">{{number .ViewCount}}</td>
       </tr>
     {{else}}
       <tr><td colspan="9" class="empty">{{if .Query.Search}}「{{.Query.Search}}」에 맞는 글이 없습니다. <a href="/board/{{.Board.Slug}}">검색 해제</a>{{else}}글이 없습니다.{{end}}</td></tr>
