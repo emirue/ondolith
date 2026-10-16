@@ -17,6 +17,12 @@ func TestPublicFormsDropHoneypotSubmissions(t *testing.T) {
 	srv, pool := liveSite(t)
 	ctx := context.Background()
 	mkBoard(t, pool, "free", content.PresetPublic)
+	// 재설정 폼은 메일을 보낼 수 있는 사이트에만 그려진다(P-104). 닿지 않는 주소라 실제로
+	// 나가는 메일은 없다.
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES
+		('mail.smtp_host', '127.0.0.1'), ('mail.smtp_port', '1'), ('mail.tls_mode', 'none')`); err != nil {
+		t.Fatal(err)
+	}
 	mkUser(t, pool, "m@example.com")
 	count := func(q string, args ...any) int {
 		t.Helper()
@@ -78,6 +84,12 @@ func TestTurnstileKeysTurnTheWidgetOn(t *testing.T) {
 	srv, pool := liveSite(t)
 	ctx := context.Background()
 	mkBoard(t, pool, "free", content.PresetPublic)
+	// 재설정 폼은 메일을 보낼 수 있는 사이트에만 그려진다(P-104). 닿지 않는 주소라 실제로
+	// 나가는 메일은 없다.
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES
+		('mail.smtp_host', '127.0.0.1'), ('mail.smtp_port', '1'), ('mail.tls_mode', 'none')`); err != nil {
+		t.Fatal(err)
+	}
 	mkUser(t, pool, "m@example.com")
 	c := client()
 	login(t, srv.URL, "m@example.com", c)

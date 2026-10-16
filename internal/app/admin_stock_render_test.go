@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
 )
@@ -449,5 +450,75 @@ func TestRefundRejectLooksDifferentFromExecute(t *testing.T) {
 		"RequestKey": "k", "NeedsReauth": false, "Approved": 1000, "Refunded": 0, "Remaining": 1000})
 	if !strings.Contains(out, `<button type="submit" class="adm-btn adm-btn--danger">거부</button>`) {
 		t.Error("「거부」가 「실행」과 같은 주 버튼이다")
+	}
+}
+
+// 비활성 계정의 상세에는 「활성화」가, 활성 계정에는 「비활성화」가 있다 — 이미 비활성인
+// 계정에 「비활성화」만 있던 화면이다.
+func TestUserDetailOffersTheOppositeState(t *testing.T) {
+	for _, tc := range []struct {
+		active    bool
+		want, not string
+	}{{false, "/activate", "/deactivate"}, {true, "/deactivate", "/activate"}} {
+		out := renderAdmin(t, "admin/user-detail.html", map[string]any{
+			"User": &auth.User{ID: "u1", Email: "a@example.com", IsActive: tc.active}})
+		if !strings.Contains(out, "/admin/users/u1"+tc.want) || strings.Contains(out, "/admin/users/u1"+tc.not+`"`) {
+			t.Errorf("활성 %v: %s 가 있고 %s 가 없어야 한다", tc.active, tc.want, tc.not)
+		}
+	}
+}
+
+// 역할·권한·게시판은 고르는 목록이고, 사용자는 이메일로 고른다 — 키와 UUID 를 직접 치던
+// 화면이다. 역할이 가진 권한도 보인다.
+func TestRolesScreenOffersChoices(t *testing.T) {
+	out := renderAdmin(t, "admin/roles.html", map[string]any{
+		"Roles":       []auth.Role{{Key: "editor", Permissions: []string{"post.moderate"}}, {Key: "admin", Superuser: true}},
+		"Permissions": []string{"post.moderate", "page.publish"},
+		"Boards":      []map[string]any{{"ID": "b1", "Name": "공지"}},
+		"NeedsReauth": false, "Error": ""})
+	for _, want := range []string{`<select name="role"`, `<select name="permission"`, `<select name="board_id"`,
+		`<option value="page.publish">`, `<option value="b1">공지</option>`, `name="email"`, "post.moderate"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("역할 화면에 %q 가 없다", want)
+		}
+	}
+	if strings.Contains(out, `name="user_id"`) {
+		t.Error("역할 화면이 아직 사용자 UUID 를 받는다")
+	}
+	detail := renderAdmin(t, "admin/user-detail.html", map[string]any{
+		"User": &auth.User{ID: "u1", Email: "a@example.com", IsActive: true}, "Roles": []auth.Role{{Key: "editor"}}})
+	if !strings.Contains(detail, `action="/admin/users/roles"`) || !strings.Contains(detail, `name="user_id" value="u1"`) {
+		t.Error("사용자 상세에서 역할을 줄 수 없다")
+	}
+}
+
+// 역할·권한 선택은 「선택하세요」로 시작한다 — 첫 항목이 기본값이면 아무것도 고르지 않은
+// 「부여」가 anonymous(모든 방문자)에게 admin.access 를 주는 조합이 됐다. 부여할 수 없는
+// 역할(anonymous·member)은 역할 부여 목록에 없다.
+func TestRoleFormsStartUnselected(t *testing.T) {
+	roles := []auth.Role{{Key: "anonymous"}, {Key: "editor", Assignable: true}, {Key: "member"}}
+	out := renderAdmin(t, "admin/roles.html", map[string]any{"Roles": roles,
+		"Permissions": []string{"admin.access"}, "Boards": nil, "NeedsReauth": false, "Error": ""})
+	if n := strings.Count(out, `required><option value="">선택하세요</option>`); n != 3 {
+		t.Errorf("「선택하세요」로 시작하는 선택칸 %d개, want 3 (역할·권한·부여할 역할)", n)
+	}
+	detail := renderAdmin(t, "admin/user-detail.html", map[string]any{
+		"User": &auth.User{ID: "u1", IsActive: true}, "Roles": roles})
+	if strings.Contains(detail, `<option value="member">`) || strings.Contains(detail, `<option value="anonymous">`) ||
+		!strings.Contains(detail, `<option value="editor">`) {
+		t.Error("사용자 상세의 역할 목록이 부여할 수 없는 역할을 보이거나 부여할 역할을 빠뜨린다")
+	}
+}
+
+// 사용자 목록: 검색칸이 있고 검색어가 쪽 넘김을 따라간다. 「N명」은 이 쪽의 인원이라고 말한다.
+func TestUserListScreenSearchAndCount(t *testing.T) {
+	out := renderAdmin(t, "admin/users.html", map[string]any{"Q": "kim", "Page": 1, "PageNo": 2,
+		"PrevPage": 0, "NextPage": 2, "HasNext": true,
+		"Users": []auth.UserRow{{ID: "u1", Email: "kim@example.com", IsActive: true, Verified: true}}})
+	for _, want := range []string{`name="q" value="kim"`, `href="/admin/users?q=kim&amp;page=2"`,
+		"2쪽 · 이 쪽 1명", "<th>표시 이름</th>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("사용자 목록에 %q 가 없다", want)
+		}
 	}
 }

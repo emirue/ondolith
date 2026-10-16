@@ -9,7 +9,21 @@ import (
 
 // P-104 GET — ask for the address.
 func (d *accountDeps) resetRequestForm(w http.ResponseWriter, r *http.Request) {
+	if !d.mailOK() {
+		d.renderNoMail(w, r)
+		return
+	}
 	d.render(w, r, "auth/password-reset-request.html", http.StatusOK, nil)
+}
+
+// renderNoMail tells the visitor reset cannot work here. **메일을 보낼 수 없는 사이트의
+// 성질이지 계정의 성질이 아니다** — 어느 주소에나 같은 답이라 FR-207 의 열거가 되지
+// 않는다. 「보냈습니다」라고 답하면 오지 않을 메일을 기다리게 한다(D19 P-104).
+// 일시적인 발송 실패는 여기 오지 않는다 — 그것은 여전히 성공과 같은 응답이다.
+func (d *accountDeps) renderNoMail(w http.ResponseWriter, r *http.Request) {
+	// 문구는 Error 로도 싣는다 — 이 화면을 덮어쓴 테마는 NoMail 을 모르지만 Error 는 그린다.
+	d.render(w, r, "auth/password-reset-request.html", http.StatusOK, map[string]any{"NoMail": true,
+		"Error": "이 사이트는 아직 메일을 보낼 수 없어 비밀번호 재설정을 쓸 수 없습니다. 사이트 관리자에게 문의해 주세요."})
 }
 
 // P-104 POST — send the link.
@@ -25,6 +39,10 @@ func (d *accountDeps) resetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if !d.mailOK() {
+		d.renderNoMail(w, r)
+		return
+	}
 
 	if !d.limiter.Allow("reset:ip:"+clientIP(r), d.limits.PasswordResetIP) {
 		w.Header().Set("Retry-After", "3600")
@@ -60,8 +78,9 @@ func (d *accountDeps) resetRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Mail failures land here too: SendAsync reports to the log, and D19 puts
-	// SMTP trouble in the "성공과 같은 응답" row — an unconfigured A-205 must not
-	// become a way to enumerate addresses.
+	// SMTP trouble in the "성공과 같은 응답" row — a failing relay must not become
+	// a way to enumerate addresses. (A-205 가 비어 있는 사이트는 위의 renderNoMail 이
+	// 먼저 답한다 — 어느 주소에나 같은 답이다.)
 	d.render(w, r, "auth/password-reset-sent.html", http.StatusOK, nil)
 }
 

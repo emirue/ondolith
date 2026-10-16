@@ -240,6 +240,8 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	// prove is running.
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/deactivate", Class: SC5,
 		Permission: "user.update", Handler: ad.UserDeactivate})
+	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/activate", Class: SC5,
+		Permission: "user.update", Handler: ad.UserActivate})
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/delete", Class: SC5,
 		Permission: "user.delete", Handler: ad.UserDelete})
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/reset-password", Class: SC5,

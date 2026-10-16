@@ -100,9 +100,11 @@ func (q *Queries) DBNow(ctx context.Context) (time.Time, error) {
 }
 
 const deactivateUser = `-- name: DeactivateUser :exec
-UPDATE users SET is_active = false, updated_at = now() WHERE id = $1
+UPDATE users SET is_active = false, sessions_valid_from = now(), updated_at = now() WHERE id = $1
 `
 
+// 세션 기준 시각도 옮긴다 — 그대로 두면 비활성 동안 쓰이지 않은 세션이 재활성화와 함께
+// 다시 통한다(미들웨어는 다음 요청에서야 비활성 세션을 지운다).
 func (q *Queries) DeactivateUser(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deactivateUser, id)
 	return err
@@ -232,15 +234,20 @@ SELECT u.id, u.email, u.display_name, u.is_active,
 FROM (
     SELECT uu.id, uu.email, uu.display_name, uu.is_active, uu.email_verified_at, uu.custom_fields, uu.created_at
     FROM users uu
+    -- A-401 검색: 이메일·표시 이름의 일부. 패턴 글자는 호출자가 이스케이프했다(\).
+    WHERE $1::text = ''
+       OR uu.email ILIKE '%' || $1::text || '%' ESCAPE '\'
+       OR uu.display_name ILIKE '%' || $1::text || '%' ESCAPE '\'
     ORDER BY uu.created_at DESC, uu.id
-    LIMIT $2::int OFFSET $1::int
+    LIMIT $3::int OFFSET $2::int
 ) u
 ORDER BY u.created_at DESC, u.id
 `
 
 type ListUsersParams struct {
-	Offset int32
-	Limit  int32
+	Pattern string
+	Offset  int32
+	Limit   int32
 }
 
 type ListUsersRow struct {
@@ -256,7 +263,7 @@ type ListUsersRow struct {
 // 쪽을 먼저 고르고(users_created_idx), 역할은 그 쪽의 회원에게만 모은다. 조인하고
 // GROUP BY 한 뒤 자르면 회원 전부의 역할을 모으고 나서 한 쪽만 남긴다.
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
-	rows, err := q.db.Query(ctx, listUsers, arg.Offset, arg.Limit)
+	rows, err := q.db.Query(ctx, listUsers, arg.Pattern, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -396,20 +403,21 @@ func (q *Queries) RoleByKey(ctx context.Context, key string) (RoleByKeyRow, erro
 }
 
 const roles = `-- name: Roles :many
-SELECT r.key, r.name, r.is_superuser,
+SELECT r.key, r.name, r.is_superuser, r.is_assignable,
        coalesce(array_agg(DISTINCT p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions
 FROM roles r
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
-GROUP BY r.id, r.key, r.name, r.is_superuser
+GROUP BY r.id, r.key, r.name, r.is_superuser, r.is_assignable
 ORDER BY r.key
 `
 
 type RolesRow struct {
-	Key         string
-	Name        string
-	IsSuperuser bool
-	Permissions []string
+	Key          string
+	Name         string
+	IsSuperuser  bool
+	IsAssignable bool
+	Permissions  []string
 }
 
 // DISTINCT: 게시판 범위 권한은 게시판마다 한 행이라, 없으면 같은 키가 게시판 수만큼
@@ -427,6 +435,7 @@ func (q *Queries) Roles(ctx context.Context) ([]RolesRow, error) {
 			&i.Key,
 			&i.Name,
 			&i.IsSuperuser,
+			&i.IsAssignable,
 			&i.Permissions,
 		); err != nil {
 			return nil, err

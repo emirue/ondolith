@@ -24,9 +24,14 @@ type accountDeps struct {
 	verifyRequired func() bool
 	// signupClosed mirrors auth.signup_closed (FR-217). 닫아도 A-401 의 「사용자 추가」는 된다.
 	signupClosed func() bool
-	baseURL      string
-	spam         spamGuard
+	// mailReady 는 A-205 에 SMTP 호스트가 있는지다. 요청마다 읽는다 — 설정은 언제든 바뀐다.
+	// nil 이면 있다고 본다(테스트·옛 조립이 재설정을 잃지 않게).
+	mailReady func() bool
+	baseURL   string
+	spam      spamGuard
 }
+
+func (d *accountDeps) mailOK() bool { return d.mailReady == nil || d.mailReady() }
 
 // signupForm is the whole of what P-103 accepts.
 //
@@ -87,6 +92,13 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 	if err := content.ValidatePassword(f.Password); err != nil {
 		d.render(w, r, "auth/signup.html", http.StatusBadRequest,
 			map[string]any{"Error": "비밀번호는 10자 이상이어야 합니다.", "Form": f})
+		return
+	}
+	// 확인 칸은 화면이 늘 싣는다. 싣지 않는 요청(옛 폼·스크립트)은 예전과 같다 — 오타 난
+	// 비밀번호로 생긴 계정은 재설정 메일로만 열린다.
+	if r.PostForm.Has("password_confirm") && r.PostFormValue("password_confirm") != f.Password {
+		d.render(w, r, "auth/signup.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": "비밀번호와 비밀번호 확인이 서로 다릅니다.", "Form": f})
 		return
 	}
 

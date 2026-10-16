@@ -26,7 +26,15 @@ const loginPath = "/login"
 //
 // This gate is about ENTERING the tree. Every screen inside still judges its
 // own resource — the middleware saw a prefix, not a target (D15 4.2).
-func withTreeGate(next http.Handler) http.Handler {
+//
+// forbid 가 403 을 그린다 — 사이트 레이아웃 안의 오류 화면이다. 평문(http.Error)이면
+// 회원은 24바이트 흰 화면을 봤다. nil 이면 평문이다(시험 조립).
+func withTreeGate(next http.Handler, forbid http.HandlerFunc) http.Handler {
+	if forbid == nil {
+		forbid = func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "권한이 없습니다.", http.StatusForbidden)
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isUnder(r.URL.Path, adminPrefix) {
 			next.ServeHTTP(w, r)
@@ -39,7 +47,7 @@ func withTreeGate(next http.Handler) http.Handler {
 			return
 		}
 		if !a.Can("admin.access") {
-			http.Error(w, "권한이 없습니다.", http.StatusForbidden)
+			forbid(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)

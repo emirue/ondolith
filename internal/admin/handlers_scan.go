@@ -148,7 +148,7 @@ func (d *Deps) renderStock(w http.ResponseWriter, r *http.Request, c Caller, cod
 	find.Q = strings.TrimSpace(find.Q)
 	found, err := d.Commerce.FindVariants(r.Context(), find)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	page := find.Page
@@ -187,7 +187,7 @@ func (d *Deps) StockReceive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	carry := stockCarry(r)
@@ -234,7 +234,7 @@ func (d *Deps) Stocktake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	carry := stockCarry(r)
@@ -321,7 +321,7 @@ func (d *Deps) PickCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 
@@ -350,7 +350,7 @@ func (d *Deps) PickCheck(w http.ResponseWriter, r *http.Request) {
 		// 식별은 A-517 과 같은 함수가 한다 (FR-627): QR·SKU·바코드.
 		found, err := d.Commerce.FindVariants(r.Context(), commerce.VariantQuery{Q: value})
 		if err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		v, err := found.One()
@@ -419,7 +419,7 @@ func (d *Deps) QRLabel(w http.ResponseWriter, r *http.Request) {
 	// 그 조합은 입고 스캔을 할 수 없어 영원히 품절로 남는다.
 	variants, err := d.Commerce.Variants(r.Context(), productID, false)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 
@@ -427,7 +427,7 @@ func (d *Deps) QRLabel(w http.ResponseWriter, r *http.Request) {
 	for _, v := range variants {
 		svg, err := qrSVG(v.ID, 128)
 		if err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		labels = append(labels, map[string]any{

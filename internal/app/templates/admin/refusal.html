@@ -1,0 +1,8 @@
+{{define "content"}}
+{{/* 관리자 화면 안의 거절 (Deps.refuse). 이유는 레이아웃의 알림(.Error)이 말한다 — 여기는
+     돌아갈 길이다. 흰 화면 한 줄(http.Error)이던 자리다. */}}
+<div class="adm-card">
+  <p>요청을 처리하지 않았습니다. 위의 이유를 확인하고, 브라우저의 뒤로 가기로 돌아가 다시 시도하세요.</p>
+  <div class="adm-actions"><a class="adm-btn" href="/admin/">관리자 홈</a></div>
+</div>
+{{end}}

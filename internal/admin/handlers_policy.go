@@ -48,7 +48,7 @@ func (d *Deps) PolicySave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 
@@ -103,7 +103,7 @@ func (d *Deps) PolicySave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// D15 7절: 정책 변경은 이후 모든 반품의 환불액을 가른다.
@@ -120,7 +120,7 @@ func (d *Deps) renderPolicy(w http.ResponseWriter, r *http.Request, code int,
 	if kv == nil {
 		stored, err := d.Content.Settings(r.Context(), policyKeys...)
 		if err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		kv = map[string]string{}

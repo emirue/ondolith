@@ -181,6 +181,7 @@ func TestEachHandlerChecksItsOwnPermission(t *testing.T) {
 		"페이지 발행":  d.PagePublish,
 		"페이지 삭제":  d.PageDelete,
 		"사용자 비활성": d.UserDeactivate,
+		"사용자 활성":  d.UserActivate,
 		"시스템 정보":  d.System,
 	}
 	for name, h := range cases {
@@ -799,6 +800,7 @@ func TestAllDestructiveAccountActionsRequireReauth(t *testing.T) {
 
 	for name, h := range map[string]http.HandlerFunc{
 		"비활성":      d.UserDeactivate,
+		"활성":       d.UserActivate, // 막아 둔 계정을 여는 것이다
 		"삭제":       d.UserDelete,
 		"비밀번호 재설정": d.UserResetPassword,
 	} {
@@ -1952,5 +1954,153 @@ func TestPaymentVerifyReportsWithoutRevealingTheKey(t *testing.T) {
 	rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil, url.Values{"action": {"verify"}})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("결제사 없음 → HTTP %d, want 422", rec.Code)
+	}
+}
+
+// **비활성 계정을 다시 살린다** (D19 A-402, FR-704). 비활성화만 있고 되돌릴 길이 없어,
+// 탈퇴 안내의 「다시 이용하시려면 관리자에게 문의」가 거짓이었다 — 관리자도 살릴 수
+// 없었다. 두 동작 모두 끝나면 상세 화면으로 돌아와 바뀐 상태를 보인다.
+func TestDeactivatedAccountCanBeReactivated(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}, id: "me"})
+	ctx := context.Background()
+	target, err := d.Auth.CreateUser(ctx, "back@example.com", "h", "돌아온 회원")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(h http.HandlerFunc, action string) {
+		req := httptest.NewRequest(http.MethodPost, "/admin/users/"+target+"/"+action, nil)
+		req.SetPathValue("id", target)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/users/"+target {
+			t.Fatalf("%s = HTTP %d → %q, want 303 → 상세", action, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+	active := func() bool {
+		u, err := d.Auth.FindUserByID(ctx, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.IsActive
+	}
+	run(d.UserDeactivate, "deactivate")
+	if active() {
+		t.Fatal("비활성화가 반영되지 않았다")
+	}
+	run(d.UserActivate, "activate")
+	if !active() {
+		t.Error("다시 활성화되지 않았다")
+	}
+}
+
+// R6 는 활성화에도 같다 — 비-superuser 가 비활성 superuser 보유자를 되살리지 못한다.
+func TestNonSuperuserCannotReactivateASuperuserHolder(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}, id: "me"})
+	ctx := context.Background()
+	target, err := d.Auth.CreateUser(ctx, "admin2@example.com", "h", "관리자")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET is_active = false WHERE id = $1`, target); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postID(d.UserActivate, target, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("비-superuser 가 superuser 보유자를 되살렸다: HTTP %d", rec.Code)
+	}
+	if u, _ := d.Auth.FindUserByID(ctx, target); u.IsActive {
+		t.Error("거부됐는데 계정이 활성화됐다")
+	}
+}
+
+// **계정 조작은 작업 로그에 남는다** (D15 7절, D19 A-402 「생성·비활성·삭제·재설정 성공 —
+// 남김」). 다섯 동작 모두 아무 기록도 남기지 않았다.
+func TestAccountOperationsAreLogged(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"user.create": true, "user.update": true,
+		"user.delete": true, "user.reset_password": true}, id: "me", email: "op@example.com", password: "pw"})
+	ctx := context.Background()
+	if rec := post(d.UserCreate, "/admin/users/new", url.Values{"email": {"new@example.com"},
+		"password": {"correct horse battery"}, "display_name": {"새 회원"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("생성 = HTTP %d (%s)", rec.Code, rec.Body.String())
+	}
+	u, _, err := d.Auth.FindActiveUserByEmail(ctx, "new@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []http.HandlerFunc{d.UserDeactivate, d.UserActivate, d.UserResetPassword, d.UserDelete} {
+		if rec := postID(h, u.ID, url.Values{"password": {"pw"}}); rec.Code != http.StatusSeeOther {
+			t.Fatalf("계정 조작 = HTTP %d (%s)", rec.Code, rec.Body.String())
+		}
+	}
+	rows, err := pool.Query(ctx, `SELECT summary FROM operation_logs WHERE target_type = 'user' ORDER BY created_at, id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, s)
+	}
+	want := []string{"사용자 생성: new@example.com", "사용자 비활성화", "사용자 활성화", "재설정 강제 (세션 종료·재설정 메일 발송)", "사용자 삭제"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("작업 로그 = %v, want %v", got, want)
+	}
+}
+
+// **사용자 목록에서 이메일·이름으로 찾는다** (D19 A-401). 50명씩 이전·다음뿐이라 고객이
+// 전화로 이메일을 불러 줘도 찾을 길이 넘기기뿐이었다. % 와 _ 는 글자 그대로 찾는다.
+func TestUserListSearchesByEmailOrName(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
+	ctx := context.Background()
+	for _, u := range [][2]string{{"kim@example.com", "김온돌"}, {"lee@example.com", "이바닥"}, {"under_score@example.com", "밑줄"}} {
+		if _, err := d.Auth.CreateUser(ctx, u[0], "h", u[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, v any) {
+		got = nil
+		for _, u := range v.(map[string]any)["Users"].([]auth.UserRow) {
+			got = append(got, u.Email)
+		}
+		w.WriteHeader(code)
+	}
+	for q, want := range map[string]string{"lee": "lee@example.com", "김온": "kim@example.com",
+		"_": "under_score@example.com", "%": ""} {
+		d.UserList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/users?q="+url.QueryEscape(q), nil))
+		if strings.Join(got, ",") != want {
+			t.Errorf("검색 %q = %v, want %q", q, got, want)
+		}
+	}
+}
+
+// **관리자 화면의 거절은 관리자 레이아웃 안에서 말한다.** http.Error 는 레이아웃 없는 흰
+// 화면 한 줄이라(「자기 계정에는 이 작업을 할 수 없습니다.」 등), 운영자는 어디서 무엇이
+// 거절됐는지 보고 돌아갈 길이 없었다.
+func TestAdminRefusalsRenderInsideTheLayout(t *testing.T) {
+	d, _ := fixture(t, nil)
+	ctx := context.Background()
+	me, err := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"user.update": true}, id: me}
+	}
+	rec := postID(d.UserDeactivate, me, nil)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "admin/refusal.html") ||
+		!strings.Contains(rec.Body.String(), "자기 계정에는 이 작업을 할 수 없습니다.") {
+		t.Errorf("자기 계정 비활성화 = HTTP %d %q — 관리자 거절 화면이어야 한다", rec.Code, rec.Body.String())
+	}
+	// 권한이 없을 때도 같다.
+	d.Caller = func(*http.Request) Caller { return &fakeCaller{perms: map[string]bool{}, id: me} }
+	if rec := postID(d.UserDeactivate, me, nil); !strings.Contains(rec.Body.String(), "admin/refusal.html") {
+		t.Errorf("권한 없음 = %q — 관리자 거절 화면이어야 한다", rec.Body.String())
 	}
 }
