@@ -48,6 +48,8 @@
       <label>
         <input type="checkbox" name="agreed_terms" value="{{.ID}}"{{if index $.Data.Agreed .ID}} checked{{end}}{{if .Required}} required{{end}}>
         {{.Kind}} ({{.Version}}){{if .Required}} <em>필수</em>{{end}}
+        {{/* 새 창이다 — 같은 창으로 가면 쓰던 주문서가 사라진다. */}}
+        <a href="/terms/{{.ID}}" target="_blank" rel="noopener">본문 보기</a>
       </label>
       {{end}}
     </fieldset>

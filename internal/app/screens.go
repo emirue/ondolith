@@ -57,6 +57,7 @@ var screenInventory = map[string]SecurityClass{
 	"P-408": SC6, // 결제 승인 (successUrl)
 	"P-409": SC6, // 결제 실패 (failUrl)
 	"P-410": SC3, // 주문 완료
+	"P-411": SC1, // 약관 보기
 	"P-501": SC3, // 내 주문 목록
 	"P-502": SC3, // 주문 상세
 	"P-503": SC2, // 비회원 주문 조회 폼

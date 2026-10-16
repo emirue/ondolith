@@ -190,6 +190,11 @@ func payloadFor(name string) any {
 			"Terms":  []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
 			"Error":  "필수 약관에 동의해야 합니다",
 		}
+	case "shop/terms.html":
+		return map[string]any{
+			"Terms": termLike{ID: "t1", Kind: "이용약관", Version: "1.0", Body: "제1조\n제2조",
+				EffectiveAt: time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)},
+		}
 	case "shop/pay.html", "shop/complete.html":
 		return map[string]any{
 			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "결제대기",
@@ -524,6 +529,7 @@ type cartItemLike struct {
 type termLike struct {
 	ID, Kind, Version, Body string
 	Required                bool
+	EffectiveAt             time.Time
 }
 
 // exchangeGroupLike mirrors the per-item group P-512 draws (handler_returns.go).

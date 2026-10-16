@@ -137,6 +137,7 @@
 | P-408 | 결제 승인 (successUrl) | `/checkout/success` | GET | 본인 | 있음 | SC-6 | FR-606, FR-607, FR-608, FR-609 |
 | P-409 | 결제 실패 (failUrl) | `/checkout/fail` | GET | 본인 | 있음 | SC-6 | FR-609 |
 | P-410 | 주문 완료 | `/checkout/complete` | GET | 본인 | 없음 | SC-3 | FR-604 |
+| P-411 | 약관 보기 | `/terms/{id}` | GET | 공개 | 없음 | SC-1 | FR-619 |
 
 ### P-5xx 주문조회·취소환불
 

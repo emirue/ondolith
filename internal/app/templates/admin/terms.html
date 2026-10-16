@@ -5,7 +5,7 @@
        깨진다. 개정은 새 행이다. */}}
   <div class="adm-table-wrap">
     <table class="adm-table">
-      <thead><tr><th>종류</th><th>버전</th><th>시행일</th><th>필수</th><th>동의 이력</th></tr></thead>
+      <thead><tr><th>종류</th><th>버전</th><th>시행일</th><th>필수</th><th>동의 이력</th><th>본문</th></tr></thead>
       <tbody>
       {{range .Terms}}
         <tr>
@@ -13,9 +13,11 @@
           <td>{{date .EffectiveAt "2006-01-02"}}</td>
           <td>{{if .Required}}필수{{else}}선택{{end}}</td>
           <td>{{if .InUse}}있음 — 수정 불가{{else}}없음{{end}}</td>
+          {{/* 쓰기만 되고 다시 볼 곳이 없던 본문이다. */}}
+          <td><details><summary>보기</summary><pre class="adm-pre">{{.Body}}</pre></details></td>
         </tr>
       {{else}}
-        <tr><td colspan="5" class="adm-empty">등록된 약관이 없습니다.</td></tr>
+        <tr><td colspan="6" class="adm-empty">등록된 약관이 없습니다.</td></tr>
       {{end}}
       </tbody>
     </table>
@@ -25,8 +27,10 @@
 <div class="adm-card">
   <h2>새 버전 추가</h2>
   <form method="post" action="/admin/terms">
-    <label class="adm-field"><span>종류 (예: service, privacy)</span>
-      <input type="text" name="kind" pattern="[a-z0-9-]+" maxlength="50" required></label>
+    {{/* 종류는 고객이 주문서에서 그대로 읽는 이름이다 — 영문 코드로 받으면
+         「service (1.0) 필수」가 나간다. 코드는 이 값으로 분기하지 않는다. */}}
+    <label class="adm-field"><span>종류 — 주문서에 이 이름으로 보입니다 (예: 이용약관, 개인정보 처리방침)</span>
+      <input type="text" name="kind" maxlength="50" required></label>
     <label class="adm-field"><span>버전</span>
       <input type="text" name="version" maxlength="20" required></label>
     <label class="adm-field"><span>시행일 — 오늘 이후만 가능합니다</span>

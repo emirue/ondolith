@@ -1,0 +1,11 @@
+{{define "body"}}
+<section class="page">
+  {{/* P-411 약관 보기 (FR-619). 주문서가 동의를 받는 약관의 본문이다. 시행된
+       버전만 온다 — 지난 버전도 열린다: 그 버전에 동의한 주문이 있다. */}}
+  {{with .Data}}{{with .Terms}}
+  <h1>{{.Kind}}</h1>
+  <p>버전 {{.Version}} · 시행일 {{date .EffectiveAt "2006-01-02"}}</p>
+  <div class="page-body">{{nl2br .Body}}</div>
+  {{end}}{{end}}
+</section>
+{{end}}

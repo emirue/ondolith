@@ -129,3 +129,34 @@ func TestSingleVariantProductCanBeAddedDirectly(t *testing.T) {
 		t.Errorf("담기 = HTTP %d, want 303", resp.StatusCode)
 	}
 }
+
+// **주문서에서 동의하는 약관은 본문을 읽을 수 있다** (P-411, FR-619). 전에는
+// 체크박스만 있고 본문으로 가는 길이 어디에도 없었다.
+func TestCheckoutTermsLinkToTheirText(t *testing.T) {
+	srv, pool, variant := shopSite(t)
+	ctx := context.Background()
+	var termID, futureID string
+	if err := pool.QueryRow(ctx, `INSERT INTO terms (kind, version, body, effective_at, is_required)
+		VALUES ('개인정보 처리방침','1.0','수집 항목: 이름, 연락처',now(),true) RETURNING id`).Scan(&termID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO terms (kind, version, body, effective_at, is_required)
+		VALUES ('개인정보 처리방침','2.0','개정안',now() + interval '2 days',true) RETURNING id`).Scan(&futureID); err != nil {
+		t.Fatal(err)
+	}
+	c := client()
+	resp := post(t, c, srv.URL+"/cart/items", url.Values{"variant_id": {variant}, "quantity": {"1"}})
+	resp.Body.Close()
+
+	_, _, checkout := getBody(t, c, srv.URL+"/checkout")
+	if !strings.Contains(checkout, `href="/terms/`+termID+`"`) {
+		t.Error("주문서의 약관에 본문 링크가 없다")
+	}
+	code, _, page := getBody(t, c, srv.URL+"/terms/"+termID)
+	if code != http.StatusOK || !strings.Contains(page, "수집 항목: 이름, 연락처") {
+		t.Errorf("약관 본문 = HTTP %d, 본문 포함 %v", code, strings.Contains(page, "수집 항목"))
+	}
+	if code, _, _ := getBody(t, c, srv.URL+"/terms/"+futureID); code != http.StatusNotFound {
+		t.Errorf("시행 전 약관 = HTTP %d, want 404", code)
+	}
+}

@@ -181,3 +181,16 @@ func TestAdminReturnsShowTheExchangeOption(t *testing.T) {
 		t.Error("반품·교환 처리 화면에 교환으로 보낼 옵션이 없다")
 	}
 }
+
+// 약관 「종류」는 고객이 주문서에서 읽는 이름이다. 영문 코드만 받는 입력 형식이면
+// 「service (1.0) 필수」가 나간다. 등록한 본문도 다시 볼 수 있어야 한다.
+func TestAdminTermsTakeAReadableKindAndShowTheBody(t *testing.T) {
+	out := renderAdmin(t, "admin/terms.html", map[string]any{
+		"Terms": []commerce.Terms{{Kind: "개인정보 처리방침", Version: "1.0", Body: "수집 항목: 이름"}}})
+	if strings.Contains(out, `pattern="[a-z0-9-]+"`) {
+		t.Error("종류 칸이 영문 코드만 받는다")
+	}
+	if !strings.Contains(out, "수집 항목: 이름") {
+		t.Error("약관 목록에서 본문을 볼 수 없다")
+	}
+}

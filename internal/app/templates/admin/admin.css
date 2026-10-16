@@ -881,3 +881,6 @@ dl { margin: 0 0 var(--s20); }
   .adm-sidebar a { min-height: 44px; display: flex; align-items: center; }
   .adm-filterbar a:not(.adm-btn) { min-height: 44px; display: inline-flex; align-items: center; }
 }
+
+/* 약관 본문처럼 줄바꿈이 뜻을 갖는 긴 글. <pre> 기본값은 줄을 접지 않아 표를 밀어낸다. */
+.adm-pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 60ch; margin: 8px 0 0; font: inherit; }

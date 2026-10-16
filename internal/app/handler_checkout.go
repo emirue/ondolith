@@ -334,3 +334,21 @@ func (d *shopDeps) checkoutComplete(w http.ResponseWriter, r *http.Request) {
 	d.renderPage(w, r, "shop/complete.html", http.StatusOK,
 		d.shopView(r, "주문 완료", map[string]any{"Order": order}))
 }
+
+// P-411 GET /terms/{id} — one terms version's text.
+//
+// 주문서가 동의를 받는 약관의 본문이다. 이 화면이 없을 때 주문서는 체크박스만
+// 그렸고, 구매자는 읽지 않은 것에 동의해야 했다.
+func (d *shopDeps) termsView(w http.ResponseWriter, r *http.Request) {
+	t, err := d.store.TermsForReading(r.Context(), r.PathValue("id"), time.Now())
+	if errors.Is(err, commerce.ErrNotFound) {
+		d.notFound(w, r)
+		return
+	}
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	d.renderPage(w, r, "shop/terms.html", http.StatusOK,
+		d.shopView(r, t.Kind, map[string]any{"Terms": t}))
+}

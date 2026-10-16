@@ -140,3 +140,35 @@ func TestMissingBusinessKeysNamesTheEmptyOnes(t *testing.T) {
 		t.Errorf("항목 이름이 아니라 키가 나온다: %v", got)
 	}
 }
+
+// 주문서에서 동의하는 약관은 본문을 읽을 수 있어야 한다(P-411). 시행된 버전만
+// 열린다 — 미래 시행 버전은 그날 전까지 없는 것이고, 지난 버전은 그 버전에 동의한
+// 주문이 있으므로 계속 열린다. 엉뚱한 주소는 500 이 아니라 없음이다.
+func TestTermsReadableOnceInForce(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	current, err := s.AddTerms(ctx, Terms{Kind: "이용약관", Version: "1.0", Body: "제1조 목적",
+		EffectiveAt: now, Required: true}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	future, err := s.AddTerms(ctx, Terms{Kind: "이용약관", Version: "2.0", Body: "개정안",
+		EffectiveAt: now.Add(48 * time.Hour), Required: true}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.TermsForReading(ctx, current, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "이용약관" || got.Version != "1.0" || got.Body != "제1조 목적" {
+		t.Errorf("= %+v", got)
+	}
+	for name, id := range map[string]string{"미래 시행": future, "uuid 아님": "x", "없는 uuid": "00000000-0000-0000-0000-000000000000"} {
+		if _, err := s.TermsForReading(ctx, id, time.Now()); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s = %v, want ErrNotFound", name, err)
+		}
+	}
+}

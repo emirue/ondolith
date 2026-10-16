@@ -22,3 +22,7 @@ ORDER BY t.kind;
 -- name: TermsByID :one
 SELECT id, kind, version, body, effective_at, is_required, created_at
 FROM terms WHERE id = $1;
+
+-- name: TermsInForceByID :one
+SELECT id, kind, version, body, effective_at, is_required, created_at
+FROM terms WHERE id = sqlc.arg('id') AND effective_at <= sqlc.arg('now');
