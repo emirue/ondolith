@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"text/template/parse"
@@ -846,5 +847,32 @@ func TestDarkPalettesDeclareColorScheme(t *testing.T) {
 		if !strings.Contains(body, "color-scheme: dark") {
 			t.Errorf("%s: color-scheme: dark 가 없다 — 체크박스가 흰 네모로 그려진다", name)
 		}
+	}
+}
+
+// **휴대폰에서 관리자 폼은 한 열이고, 기간 필터의 「~」는 날짜 칸과 붙어 다닌다.**
+//
+// `.adm-field-row` 의 최소 폭이 130px 라 375px 에서도 두 열이 서서 이메일·SMTP 호스트 칸이
+// 약 140px 이었다. 기간 필터는 줄이 바뀌면 「~」가 혼자 한 줄에 남았고, 제출 「조회」가
+// 「1주일」「1개월」 바로가기와 같은 모양이었다.
+func TestNarrowAdminFormsStackAndPeriodHoldsTogether(t *testing.T) {
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^\.adm-field-row\s*\{[^}]*minmax\(min\(100%,\s*(\d+)px\)`).FindSubmatch(css)
+	if m == nil {
+		t.Fatal(".adm-field-row 의 열 최소 폭이 min(100%, Npx) 가 아니다 — 좁은 화면에서 열이 쪼개진다")
+	}
+	if n, _ := strconv.Atoi(string(m[1])); n < 200 {
+		t.Errorf(".adm-field-row 최소 폭 %dpx — 375px 화면에 두 열이 선다", n)
+	}
+
+	html := renderAdmin(t, "admin/webhooks.html", map[string]any{"From": "2026-10-01", "To": "2026-10-16"})
+	if !regexp.MustCompile(`<span class="adm-range">\s*<input type="date"[^>]*>\s*<span>~</span>\s*<input type="date"`).MatchString(html) {
+		t.Error("기간의 「~」가 두 날짜 칸과 한 덩어리(.adm-range)가 아니다")
+	}
+	if !strings.Contains(html, `<button class="adm-btn adm-btn--primary">조회</button>`) {
+		t.Error("기간 필터의 「조회」가 바로가기 버튼과 같은 모양이다")
 	}
 }

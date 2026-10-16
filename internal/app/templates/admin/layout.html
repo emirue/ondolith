@@ -87,9 +87,11 @@
      상태 필터 같은 다른 조건이 같은 폼에 있어야 함께 실린다. */}}
 {{define "period-fields"}}
 <label for="from">기간</label>
-<input type="date" id="from" name="from" value="{{.From}}" aria-label="시작일">
-<span>~</span>
-<input type="date" name="to" value="{{.To}}" aria-label="종료일">
+<span class="adm-range">
+  <input type="date" id="from" name="from" value="{{.From}}" aria-label="시작일">
+  <span>~</span>
+  <input type="date" name="to" value="{{.To}}" aria-label="종료일">
+</span>
 {{range .Quick}}<a class="adm-btn" href="{{.URL}}">{{.Label}}</a>{{end}}
-<button class="adm-btn">조회</button>
+<button class="adm-btn adm-btn--primary">조회</button>
 {{end}}

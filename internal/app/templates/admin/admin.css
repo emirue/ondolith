@@ -512,9 +512,11 @@ input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width:
   resize: vertical;
 }
 
+/* 열은 220px 아래로 줄지 않는다 — 130px 이던 때 375px 화면에도 두 열이 서서 이메일·SMTP
+   호스트 칸이 140px 이었다. min(100%) 는 카드보다 좁은 화면에서 넘치지 않게 한다. */
 .adm-field-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: var(--s16);
 }
 
@@ -525,6 +527,10 @@ input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width:
 .adm-field + .adm-hint,
 .adm-field-row + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--s16); }
 .adm-card + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--gap); }
+
+/* 기간의 두 날짜와 「~」는 한 덩어리로 줄을 바꾼다 — 「~」만 혼자 한 줄에 남았다. */
+.adm-range { display: inline-flex; align-items: center; gap: var(--s6); flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+.adm-range input { min-width: 0; flex: 1 1 9rem; }
 
 /* 대시보드 위젯. `.adm-field-row` 와 같은 규칙이되 최소 폭만 다르다 —
    표가 들어가므로 130px 에서는 열이 겹친다. 좁은 화면에서는 한 줄로 떨어진다. */
