@@ -206,6 +206,8 @@ PUBLIC_URLS=$WORK/urls-public
 	printf '/board/notice/%s\n' "$POST_ID"
 	printf '/shop/p/%s\n' "$(sql "select slug from products limit 1")"
 	printf '/shop/c/%s\n' "$(sql "select slug from categories limit 1")"
+	# 약관 보기(P-411) — lib-seed 가 넣은 시행 중 약관
+	printf '/terms/%s\n' "$(sql "select id from terms where effective_at <= now() order by created_at limit 1")"
 } >"$PUBLIC_URLS"
 
 # 회원·익명만 볼 수 있는 화면이 있다 — 관리자 세션으로 열면 303 이라 재지 못한다.

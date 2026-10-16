@@ -1091,6 +1091,7 @@ address + p { font-size: 14px; margin-top: 6px; }
      줄 높이를 따라야 글이 읽힌다. */
   .account-nav a,
   .site-menu a,
+  .terms a,
   .card-list h2 a,
   .foot-links a,
   .crumb a {
