@@ -148,13 +148,27 @@ func (d *Deps) RoleList(w http.ResponseWriter, r *http.Request) {
 // renderRoles draws A-403, whose forms post to A-404·A-405. 재인증이 모자라면
 // 그 두 화면이 이것을 403 으로 다시 그린다 (D15 5.3-1, D19 C7).
 func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, code int, msg string) {
-	roles, err := d.Auth.Roles(r.Context())
+	ctx := r.Context()
+	roles, err := d.Auth.Roles(ctx)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// 고르는 목록이다 — 역할 키·권한 키·게시판 id 를 직접 치게 하던 칸들이다.
+	// 무엇을 줄 수 있는지는 여전히 서버가 판정한다 (R1~R5).
+	perms, err := d.Auth.PermissionKeys(ctx)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	boards, err := d.Content.Boards(ctx)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
 	d.Render(w, r, "admin/roles.html", code, map[string]any{
-		"Roles": roles, "NeedsReauth": c.NeedsReauth(), "Error": msg})
+		"Roles": roles, "Permissions": perms, "Boards": boards,
+		"NeedsReauth": c.NeedsReauth(), "Error": msg})
 }
 
 // RoleGrantPermission is A-404. R4 and R5 are enforced HERE, on the server —
@@ -248,6 +262,20 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 	// passes guardID.
 	targetUser := r.PostFormValue("user_id")
 	roleKey := r.PostFormValue("role")
+	// A-403 의 폼은 사용자를 **이메일**로 고른다 — UUID 는 화면 어디에도 보이지 않는다.
+	// 사용자 상세(A-402)의 폼은 그 사용자의 id 를 싣는다.
+	if targetUser == "" {
+		u, _, err := d.Auth.FindActiveUserByEmail(ctx, content.NormalizeEmail(r.PostFormValue("email")))
+		if errors.Is(err, auth.ErrNoUser) {
+			http.Error(w, "그 이메일을 쓰는 활성 회원이 없습니다.", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		targetUser = u.ID
+	}
 
 	role, err := d.Auth.RoleByKey(ctx, roleKey)
 	if errors.Is(err, auth.ErrNoRole) {
@@ -275,7 +303,7 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "role.assign", "user", targetUser, "역할 부여: "+role.Key)
-	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/users/"+targetUser, http.StatusSeeOther)
 }
 
 // ---- A-202 테마 -------------------------------------------------------------

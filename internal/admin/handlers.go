@@ -851,7 +851,12 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	// The hash is not in User, and nothing here puts it back: D19 lists it
 	// under "받지 않는 필드" in both directions.
-	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u})
+	roles, err := d.Auth.Roles(r.Context())
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u, "Roles": roles})
 }
 
 // guardAccountOp is the shared front door for the destructive A-402 actions —

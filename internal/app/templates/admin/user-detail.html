@@ -32,6 +32,14 @@
       <button class="adm-btn adm-btn--primary">활성화</button>
     </form>
     {{end}}
+    {{/* 역할 부여(A-405)를 사용자에게서 바로 한다 — 역할 화면에서는 이메일을 쳐야 한다. */}}
+    <form method="post" action="/admin/users/roles">
+      <input type="hidden" name="user_id" value="{{.ID}}">
+      <label class="adm-field"><span>역할 부여</span>
+        <select name="role" required>{{range $.Roles}}<option value="{{.Key}}">{{.Key}}</option>{{end}}</select></label>
+      {{template "reauth-field" .}}
+      <button class="adm-btn">역할 부여</button>
+    </form>
     <form method="post" action="/admin/users/{{.ID}}/reset-password">
       {{template "reauth-field" .}}
       <button class="adm-btn">비밀번호 재설정 강제</button>

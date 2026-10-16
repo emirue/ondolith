@@ -165,3 +165,27 @@ func TestUserDetailOffersTheOppositeState(t *testing.T) {
 		}
 	}
 }
+
+// 역할·권한·게시판은 고르는 목록이고, 사용자는 이메일로 고른다 — 키와 UUID 를 직접 치던
+// 화면이다. 역할이 가진 권한도 보인다.
+func TestRolesScreenOffersChoices(t *testing.T) {
+	out := renderAdmin(t, "admin/roles.html", map[string]any{
+		"Roles":       []auth.Role{{Key: "editor", Permissions: []string{"post.moderate"}}, {Key: "admin", Superuser: true}},
+		"Permissions": []string{"post.moderate", "page.publish"},
+		"Boards":      []map[string]any{{"ID": "b1", "Name": "공지"}},
+		"NeedsReauth": false, "Error": ""})
+	for _, want := range []string{`<select name="role"`, `<select name="permission"`, `<select name="board_id"`,
+		`<option value="page.publish">`, `<option value="b1">공지</option>`, `name="email"`, "post.moderate"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("역할 화면에 %q 가 없다", want)
+		}
+	}
+	if strings.Contains(out, `name="user_id"`) {
+		t.Error("역할 화면이 아직 사용자 UUID 를 받는다")
+	}
+	detail := renderAdmin(t, "admin/user-detail.html", map[string]any{
+		"User": &auth.User{ID: "u1", Email: "a@example.com", IsActive: true}, "Roles": []auth.Role{{Key: "editor"}}})
+	if !strings.Contains(detail, `action="/admin/users/roles"`) || !strings.Contains(detail, `name="user_id" value="u1"`) {
+		t.Error("사용자 상세에서 역할을 줄 수 없다")
+	}
+}

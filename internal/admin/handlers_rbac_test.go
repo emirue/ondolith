@@ -482,3 +482,34 @@ func TestRoleChangesAreReauthedAndLogged(t *testing.T) {
 		t.Errorf("작업 로그 %d건 (%v), want 3 — 부여 둘과 R1 위반", n, err)
 	}
 }
+
+// **역할은 이메일로 줄 수 있다** (D19 A-405). 화면에 어디에도 안 보이는 사용자 UUID 를
+// 쳐야 했다. 없는 이메일은 404 이고, 준 뒤에는 그 사용자의 상세로 간다.
+func TestRoleAssignTakesAnEmail(t *testing.T) {
+	d, pool := fixture(t, nil)
+	ctx := context.Background()
+	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	target, _ := d.Auth.CreateUser(ctx, "staff@example.com", "h", "직원")
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`, me); err != nil {
+		t.Fatal(err)
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"role.assign": true}, id: me, superuser: true}
+	}
+	if rec := post(d.RoleAssign, "/admin/users/roles", url.Values{
+		"email": {"nobody@example.com"}, "role": {"operator"}}); rec.Code != http.StatusNotFound {
+		t.Errorf("없는 이메일 = HTTP %d, want 404", rec.Code)
+	}
+	rec := post(d.RoleAssign, "/admin/users/roles", url.Values{"email": {" Staff@Example.com "}, "role": {"operator"}})
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/users/"+target {
+		t.Fatalf("이메일로 부여 = HTTP %d → %q", rec.Code, rec.Header().Get("Location"))
+	}
+	perms, err := d.Auth.LoadPermissions(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !perms.Can("admin.access") {
+		t.Error("이메일로 준 역할이 붙지 않았다")
+	}
+}
