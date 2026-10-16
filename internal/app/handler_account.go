@@ -86,28 +86,39 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// **가입할 때 받는 항목도 운영자가 정한다** (FR-215). 여기서 검증하지 않고
+	// 나중에 「내 정보」에서만 받으면, 필수로 지정한 항목이 필수가 아니게 된다.
+	fields, _, err := d.profileFields(r, "")
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// 거절은 적은 값을 칸에 남긴 채 다시 그린다 — 항목 칸이 빠지면 고쳐 낸 뒤에야 「필수 항목」
+	// 거절로 다시 나타났다.
+	refuse := func(code int, msg string) {
+		d.render(w, r, "auth/signup.html", code,
+			map[string]any{"Error": msg, "Form": f, "Inputs": submittedInputs(fields, r)})
+	}
+
 	email, err := content.ValidateEmail(f.Email)
 	if err != nil {
-		d.render(w, r, "auth/signup.html", http.StatusBadRequest,
-			map[string]any{"Error": "이메일 형식이 올바르지 않습니다.", "Form": f})
+		refuse(http.StatusBadRequest, "이메일 형식이 올바르지 않습니다.")
 		return
 	}
 	if err := content.ValidatePassword(f.Password); err != nil {
-		d.render(w, r, "auth/signup.html", http.StatusBadRequest,
-			map[string]any{"Error": "비밀번호는 10자 이상이어야 합니다.", "Form": f})
+		refuse(http.StatusBadRequest, "비밀번호는 10자 이상이어야 합니다.")
 		return
 	}
 	// 확인 칸은 화면이 늘 싣는다. 싣지 않는 요청(옛 폼·스크립트)은 예전과 같다 — 오타 난
 	// 비밀번호로 생긴 계정은 재설정 메일로만 열린다.
 	if r.PostForm.Has("password_confirm") && r.PostFormValue("password_confirm") != f.Password {
-		d.render(w, r, "auth/signup.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "비밀번호와 비밀번호 확인이 서로 다릅니다.", "Form": f})
+		refuse(http.StatusUnprocessableEntity, "비밀번호와 비밀번호 확인이 서로 다릅니다.")
 		return
 	}
 
 	// 해시보다 먼저 본다 — 봇의 제출마다 비밀번호 해시(CPU)를 치르지 않는다.
 	if code, msg := d.spam.check(r); code != 0 {
-		d.render(w, r, "auth/signup.html", code, map[string]any{"Error": msg, "Form": f})
+		refuse(code, msg)
 		return
 	}
 
@@ -117,18 +128,9 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// **가입할 때 받는 항목도 운영자가 정한다** (FR-215). 여기서 검증하지 않고
-	// 나중에 「내 정보」에서만 받으면, 필수로 지정한 항목이 필수가 아니게 된다.
-	fields, _, err := d.profileFields(r, "")
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-		return
-	}
 	custom, err := content.ValidateCustomFields(fields, accountCustomValues(r, fields), nil)
 	if err != nil {
-		d.render(w, r, "auth/signup.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": fieldsMessage(err), "Form": f,
-				"Inputs": content.FieldInputs(fields, nil)})
+		refuse(http.StatusUnprocessableEntity, fieldsMessage(err))
 		return
 	}
 
@@ -405,6 +407,24 @@ func (d *accountDeps) profileFields(r *http.Request, userID string) (
 //
 // 계정 자신의 필드는 애초에 스키마에 없으므로 여기서 따로 거를 필요가 없다:
 // A-406 이 `email` 같은 예약 키를 거부한다.
+// submittedInputs 는 거절된 가입 폼의 항목 칸에 적은 값을 되살린다. 값이 여럿이면(다중
+// 선택) FieldInput.Has 가 읽는 []any 로 넘긴다.
+func submittedInputs(fields []content.FieldSchema, r *http.Request) []content.FieldInput {
+	vals := map[string]any{}
+	for k, v := range accountCustomValues(r, fields) {
+		if len(v) == 1 {
+			vals[k] = v[0]
+			continue
+		}
+		items := make([]any, len(v))
+		for i, x := range v {
+			items[i] = x
+		}
+		vals[k] = items
+	}
+	return content.FieldInputs(fields, vals)
+}
+
 func accountCustomValues(r *http.Request, fields []content.FieldSchema) url.Values {
 	out := url.Values{}
 	for _, f := range fields {
