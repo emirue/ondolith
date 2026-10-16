@@ -206,7 +206,36 @@ func (s *Store) SetPageStatus(ctx context.Context, id string, to PageStatus) err
 }
 
 func (s *Store) DeletePage(ctx context.Context, id string) error {
-	return affected(s.q.DeletePage(ctx, id))
+	return s.deleteWithMenus(ctx, func(q *contentq.Queries) (string, error) {
+		slug, err := q.DeletePage(ctx, id)
+		return "/" + slug, err
+	})
+}
+
+// deleteWithMenus deletes a board or page and, in the same transaction, the menu
+// entries that pointed at it. 남기면 머리글·홈의 링크가 404 로 간다. 그 메뉴의 하위
+// 메뉴는 한 단계 올린다 — 함께 지우면 상관없는 메뉴까지 사라진다.
+func (s *Store) deleteWithMenus(ctx context.Context, del func(*contentq.Queries) (string, error)) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // 커밋됐으면 무의미하다
+	q := s.q.WithTx(tx)
+	url, err := del(q)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := q.LiftMenuChildren(ctx, url); err != nil {
+		return err
+	}
+	if err := q.DeleteMenusFor(ctx, url); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // Settings are key/value. The caller names the keys it wants; there is no

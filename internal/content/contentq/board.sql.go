@@ -205,16 +205,15 @@ func (q *Queries) CreateBoard(ctx context.Context, arg CreateBoardParams) (strin
 	return id, err
 }
 
-const deleteBoard = `-- name: DeleteBoard :execrows
-DELETE FROM boards WHERE id = $1
+const deleteBoard = `-- name: DeleteBoard :one
+DELETE FROM boards WHERE id = $1 RETURNING slug
 `
 
-func (q *Queries) DeleteBoard(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteBoard, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) DeleteBoard(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, deleteBoard, id)
+	var slug string
+	err := row.Scan(&slug)
+	return slug, err
 }
 
 const deleteBoardField = `-- name: DeleteBoardField :execrows

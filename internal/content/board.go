@@ -161,7 +161,10 @@ func (s *Store) DeleteBoard(ctx context.Context, id string, force bool) error {
 			return fmt.Errorf("%w: 글 %d건", ErrBoardInUse, posts)
 		}
 	}
-	return affected(s.q.DeleteBoard(ctx, id))
+	return s.deleteWithMenus(ctx, func(q *contentq.Queries) (string, error) {
+		slug, err := q.DeleteBoard(ctx, id)
+		return "/board/" + slug, err
+	})
 }
 
 // fieldRow is the shape board_fields and user_fields share. sqlc 는 질의마다

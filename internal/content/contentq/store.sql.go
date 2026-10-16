@@ -71,16 +71,24 @@ func (q *Queries) DeleteMenuItem(ctx context.Context, id string) (int64, error) 
 	return result.RowsAffected(), nil
 }
 
-const deletePage = `-- name: DeletePage :execrows
-DELETE FROM pages WHERE id = $1
+const deleteMenusFor = `-- name: DeleteMenusFor :exec
+DELETE FROM menus WHERE url IN ($1::text, $1::text || '/')
 `
 
-func (q *Queries) DeletePage(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.Exec(ctx, deletePage, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) DeleteMenusFor(ctx context.Context, url string) error {
+	_, err := q.db.Exec(ctx, deleteMenusFor, url)
+	return err
+}
+
+const deletePage = `-- name: DeletePage :one
+DELETE FROM pages WHERE id = $1 RETURNING slug
+`
+
+func (q *Queries) DeletePage(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, deletePage, id)
+	var slug string
+	err := row.Scan(&slug)
+	return slug, err
 }
 
 const legacySecretSettings = `-- name: LegacySecretSettings :many
@@ -112,6 +120,19 @@ func (q *Queries) LegacySecretSettings(ctx context.Context) ([]LegacySecretSetti
 		return nil, err
 	}
 	return items, nil
+}
+
+const liftMenuChildren = `-- name: LiftMenuChildren :exec
+UPDATE menus m SET parent_id = d.parent_id, updated_at = now()
+FROM menus d
+WHERE m.parent_id = d.id AND d.url IN ($1::text, $1::text || '/')
+`
+
+// 지운 게시판·페이지를 가리키던 메뉴 (dropMenusFor). 하위 메뉴는 함께 사라지지 않게
+// 먼저 한 단계 올린다 — parent_id 는 ON DELETE CASCADE 다.
+func (q *Queries) LiftMenuChildren(ctx context.Context, url string) error {
+	_, err := q.db.Exec(ctx, liftMenuChildren, url)
+	return err
 }
 
 const menuItems = `-- name: MenuItems :many

@@ -33,8 +33,18 @@ SELECT status FROM pages WHERE id = $1;
 UPDATE pages SET status = sqlc.arg('to'), updated_at = now()
 WHERE id = $1 AND status = sqlc.arg('from');
 
--- name: DeletePage :execrows
-DELETE FROM pages WHERE id = $1;
+-- name: DeletePage :one
+DELETE FROM pages WHERE id = $1 RETURNING slug;
+
+-- 지운 게시판·페이지를 가리키던 메뉴 (dropMenusFor). 하위 메뉴는 함께 사라지지 않게
+-- 먼저 한 단계 올린다 — parent_id 는 ON DELETE CASCADE 다.
+-- name: LiftMenuChildren :exec
+UPDATE menus m SET parent_id = d.parent_id, updated_at = now()
+FROM menus d
+WHERE m.parent_id = d.id AND d.url IN (sqlc.arg('url')::text, sqlc.arg('url')::text || '/');
+
+-- name: DeleteMenusFor :exec
+DELETE FROM menus WHERE url IN (sqlc.arg('url')::text, sqlc.arg('url')::text || '/');
 
 -- name: Settings :many
 SELECT key, value FROM settings WHERE key = ANY(sqlc.arg('keys')::text[]);

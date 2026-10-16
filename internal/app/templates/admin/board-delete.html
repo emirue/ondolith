@@ -4,6 +4,7 @@
 <div class="adm-card">
   {{with .Board}}<h2>「{{.Name}}」 게시판을 삭제할까요?</h2>{{end}}
   <p>이 게시판의 <strong>글 {{.Posts}}건</strong>과 그 글의 댓글·첨부 파일이 <strong>모두 함께 삭제됩니다.</strong>
+     이 게시판을 가리키는 메뉴도 지워집니다(그 밑의 하위 메뉴는 한 단계 올라갑니다).
      되돌릴 수 없습니다. 글을 남기려면 게시판을 지우지 말고 권한을 거두세요.</p>
   <form method="post" action="/admin/boards/{{.Board.ID}}/delete" class="adm-form">
     {{template "reauth-field" .}}
