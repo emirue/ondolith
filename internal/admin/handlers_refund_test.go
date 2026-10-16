@@ -1975,3 +1975,45 @@ func TestReconcileResolveNeedsOrderUpdateAndAnAnswer(t *testing.T) {
 		t.Errorf("깨진 결제 id = HTTP %d, want 404", rec.Code)
 	}
 }
+
+// **이름이 길면 이유를 말하고 거절한다** (D19 A-305·A-502·A-509·A-202). 앱이 길이를 보지
+// 않아 카테고리·상품 이름은 DB CHECK 위반으로 500, 게시판 이름은 이유 없는 「저장하지
+// 못했습니다」였다. 메뉴 제목은 상한이 없어 300자가 저장되고 모든 머리글이 깨졌다.
+func TestOverlongNamesAreRefusedWithAReason(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true, "board.manage": true,
+		"menu.manage": true}, id: "u1", email: "op@example.com", superuser: true}
+	d, pool := fixture(t, caller)
+	var body string
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
+		body, _ = data.(map[string]any)["Error"].(string)
+		w.WriteHeader(code)
+	}
+	for _, tc := range []struct {
+		name string
+		h    http.HandlerFunc
+		path string
+		form url.Values
+		want string
+	}{
+		{"카테고리 101자", d.CategoryCreate, "/admin/categories",
+			url.Values{"name": {strings.Repeat("가", 101)}, "slug": {"cat"}}, "100자"},
+		{"상품 201자", d.ProductSave, "/admin/products/new",
+			url.Values{"name": {strings.Repeat("가", 201)}, "slug": {"p"}, "base_price": {"1000"}}, "200자"},
+		{"게시판 101자", d.BoardSave, "/admin/boards/new",
+			url.Values{"name": {strings.Repeat("가", 101)}, "slug": {"b"}, "preset": {"공개"}}, "100자"},
+		{"메뉴 51자", d.MenuCreate, "/admin/menus",
+			url.Values{"title": {strings.Repeat("가", 51)}, "url": {"/"}}, "50자"},
+	} {
+		body = ""
+		pv := map[string]string{"id": "new"}
+		rec := postAdmin(t, tc.h, tc.path, pv, tc.form)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, tc.want) {
+			t.Errorf("%s = HTTP %d %q, want 422 + %q", tc.name, rec.Code, body, tc.want)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM categories) +
+		(SELECT count(*) FROM products) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM menus)`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("거절됐는데 %d행이 저장됐다 (%v)", n, err)
+	}
+}

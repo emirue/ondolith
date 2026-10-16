@@ -14,7 +14,7 @@
             <form id="menu-del-{{.ID}}" method="post" action="/admin/menus/{{.ID}}/delete"></form>
             <form method="post" action="/admin/menus/{{.ID}}"
                   style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;padding:12px 22px;align-items:center">
-              <input type="text" name="title" value="{{.Title}}" aria-label="제목">
+              <input type="text" name="title" maxlength="50" value="{{.Title}}" aria-label="제목">
               <input type="text" name="url" value="{{.URL}}" aria-label="URL">
               <input type="text" name="parent_id" value="{{.ParentID}}" placeholder="(최상위)" aria-label="부모">
               <span class="adm-actions">
@@ -36,7 +36,7 @@
   <h2>메뉴 추가</h2>
   <form method="post" action="/admin/menus">
     <div class="adm-field-row">
-      <label class="adm-field"><span>제목</span><input type="text" name="title" required></label>
+      <label class="adm-field"><span>제목</span><input type="text" name="title" maxlength="50" required></label>
       <label class="adm-field"><span>URL</span><input type="text" name="url"></label>
       <label class="adm-field"><span>부모 ID</span><input type="text" name="parent_id" placeholder="(최상위)"></label>
     </div>

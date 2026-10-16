@@ -81,6 +81,14 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/board/"+b.Slug+"/"+p.ID, http.StatusSeeOther)
 		return
 	}
+	// 입력칸의 maxlength 가 브라우저에서 먼저 막는다. 여기 닿는 것은 그것을 넘긴
+	// 요청뿐이라 글 화면을 다시 그리지 않고 이유만 말한다 — DB 에 맡기면 500 이다.
+	if content.TooLong(body, content.MaxCommentLen) {
+		v := d.view(r, "댓글을 저장하지 않았습니다", "")
+		v.Data = map[string]string{"Detail": "댓글은 2,000자까지 쓸 수 있습니다."}
+		d.renderPage(w, r, "error.html", http.StatusUnprocessableEntity, v)
+		return
+	}
 	// parent_id is accepted but verified: a reply must belong to THIS post, or
 	// a comment tree could be grafted onto another post's thread.
 	parent := r.PostFormValue("parent_id")
@@ -136,9 +144,14 @@ func (d *boardDeps) commentUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := strings.TrimSpace(r.PostFormValue("body"))
-	if body == "" {
+	if body == "" || content.TooLong(body, content.MaxCommentLen) {
+		msg := "내용을 입력하세요."
+		if body != "" {
+			msg = "댓글은 2,000자까지 쓸 수 있습니다."
+			c.Body = body // 쓴 것을 되돌려 보인다
+		}
 		v := d.view(r, "댓글 수정", "")
-		v.Data = map[string]any{"Comment": c, "Board": b, "Error": "내용을 입력하세요."}
+		v.Data = map[string]any{"Comment": c, "Board": b, "Error": msg}
 		d.renderPage(w, r, "comment/form.html", http.StatusUnprocessableEntity, v)
 		return
 	}

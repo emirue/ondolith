@@ -3,7 +3,7 @@
   <form method="post" action="/admin/boards/{{if .Board}}{{.Board.ID}}{{else}}new{{end}}">
     <div class="adm-field-row">
       <label class="adm-field"><span>이름</span>
-        <input type="text" name="name" value="{{with .Board}}{{.Name}}{{end}}" required></label>
+        <input type="text" name="name" maxlength="100" value="{{with .Board}}{{.Name}}{{end}}" required></label>
       {{if .Board}}
         <label class="adm-field"><span>주소</span>
           <input type="text" value="{{.Board.Slug}}" disabled></label>

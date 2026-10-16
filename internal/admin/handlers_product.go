@@ -76,6 +76,12 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, "이름과 주소를 입력하세요.")
 		return
 	}
+	// DB CHECK 에 맡기면 500 흰 화면이다 (상품 이름 200자 · 설명 20,000자).
+	if content.TooLong(p.Name, content.MaxTitleLen) || content.TooLong(p.Description, content.MaxDescLen) {
+		d.renderProduct(w, r, p, http.StatusUnprocessableEntity,
+			"이름은 200자, 설명은 20,000자까지 쓸 수 있습니다.")
+		return
+	}
 	// 상한(commerce.MaxAmount)은 저장 계층이 본다 — 아래 두 switch 가 그 오류를
 	// 같은 422 로 옮긴다. 여기서 한 번 더 재면 같은 규칙이 두 곳에 생긴다.
 	price, err := strconv.Atoi(strings.TrimSpace(r.PostFormValue("base_price")))

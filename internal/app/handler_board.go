@@ -431,6 +431,16 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, "제목을 입력하세요.")
 		return content.Post{}, nil, false
 	}
+	// DB CHECK 에 맡기면 500 이고 쓴 글이 사라진다. 여기서 막으면 폼이 그대로 돌아온다.
+	if content.TooLong(p.Title, content.MaxTitleLen) {
+		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, "제목은 200자까지 쓸 수 있습니다.")
+		return content.Post{}, nil, false
+	}
+	if content.TooLong(p.Body, content.MaxPostBodyLen) || content.TooLong(p.BodyHTML, content.MaxBodyHTMLLen) {
+		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity,
+			"본문이 너무 깁니다. 글자 50,000자(서식 포함 200,000자)까지 쓸 수 있습니다.")
+		return content.Post{}, nil, false
+	}
 	return p, fields, true
 }
 

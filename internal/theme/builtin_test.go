@@ -938,3 +938,22 @@ func pagerFixture(base string, cur int) map[string]any {
 		"Capped": base == "/search", "CapTotal": int64(10000),
 	}
 }
+
+// 글 제목·댓글 칸에 글자 수 상한이 있다 — 없으면 붙여넣기 한 번에 서버 거절까지 간다.
+func TestWritingInputsCarryTheirLimits(t *testing.T) {
+	l := newBuiltinLoader()
+	for name, want := range map[string]string{
+		"board/form.html":   `maxlength="200"`,
+		"comment/form.html": `name="body" maxlength="2000"`,
+	} {
+		v := fullView()
+		v.Data = payloadFor(name)
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("%s 에 %s 가 없다", name, want)
+		}
+	}
+}

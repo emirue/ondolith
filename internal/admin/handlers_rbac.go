@@ -46,9 +46,9 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 		URL:      r.PostFormValue("url"),
 		ParentID: r.PostFormValue("parent_id"),
 	}
-	if item.Title == "" {
+	if item.Title == "" || content.TooLong(item.Title, content.MaxMenuTitleLen) {
 		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "제목을 입력하세요."})
+			map[string]any{"Error": "메뉴 제목은 1~50자입니다."})
 		return
 	}
 
@@ -86,9 +86,9 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		URL:      r.PostFormValue("url"),
 		ParentID: r.PostFormValue("parent_id"),
 	}
-	if item.Title == "" {
+	if item.Title == "" || content.TooLong(item.Title, content.MaxMenuTitleLen) {
 		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "제목을 입력하세요."})
+			map[string]any{"Error": "메뉴 제목은 1~50자입니다."})
 		return
 	}
 

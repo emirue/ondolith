@@ -670,7 +670,7 @@
 | 필드 | 타입 | 필수 | 검증 | 비고 |
 |---|---|:---:|---|---|
 | `title` | text | ✔ | 공백만 불가, **200자 이하** | [D30](30-data-model.md) 3-2 |
-| `body` | textarea | ✔ | 공백만 불가 | 출력은 기본 이스케이프. `template.HTML`은 코어만 쓴다 (NFR-203) |
+| `body` | textarea | ✔ | 공백만 불가, **글자 50,000자 · 서식 포함 200,000자 이하** (`posts.body`·`body_html` CHECK 와 같다 — 앱이 먼저 422 로 막고 폼을 되돌린다) | 출력은 기본 이스케이프. `template.HTML`은 코어만 쓴다 (NFR-203) |
 | `custom_fields[<key>]` | 스키마별 | 스키마별 | **`board_fields`에 정의된 key만.** 타입·필수·선택지를 스키마대로 검증 | 폼 자체를 스키마에서 생성한다 ([D14](14-screen-flows.md) 3절) |
 | `is_secret` | checkbox | | 게시판이 비밀글을 허용할 때만 | 열람은 `post.read_secret` 또는 작성자 본인 (FR-512) |
 | `attachments[]` | file | | **4중 검증 전부** (확장자 허용목록 / MIME+매직바이트 / 웹루트 밖 저장 + 파일명 재생성 / `0644`) | 게시판 `allow_attachments`가 false면 첨부 자체를 거부 (NFR-206) |
@@ -1989,7 +1989,7 @@ D15 7절 표를 고친다 — 화면마다 즉석에서 정하면 이 문서가 
 
 | 필드 | 타입 | 필수 | 검증 | 비고 |
 |---|---|:---:|---|---|
-| 제목 | text | ✔ | 공백만 거부 | `menus.제목` (D30 Phase 1) |
+| 제목 | text | ✔ | 공백만 거부, **50자 이하** — DB 에는 상한이 없다. 앱이 막는다(300자 제목이 모든 머리글을 깨뜨렸다) | `menus.제목` (D30 Phase 1) |
 | 링크 대상 | text | ✔ | **내부 경로**(`/`로 시작) 또는 **검증된 외부 URL**. 스킴 허용목록 `http`/`https`. `javascript:` 거부 | D13 명시 |
 | `parent_id` | uuid | | 존재하는 메뉴. 자기 자신 금지 | D30 `menus.parent_id` |
 | `sort_order` | integer | ✔ | 정수 | D30 |
@@ -2381,7 +2381,7 @@ D15 7절 표를 고친다 — 화면마다 즉석에서 정하면 이 문서가 
 
 | 필드 | 타입 | 필수 | 검증 | 비고 |
 |---|---|:---:|---|---|
-| 이름 | text | ✔ | 공백만 거부 | `boards.name` |
+| 이름 | text | ✔ | 공백만 거부, **100자 이하** (어기면 그 이유로 422) | `boards.name` |
 | 슬러그 | text | ✔ | 예약어·경로 문자 검증 + **UNIQUE** (D30 `boards.slug UNIQUE`) | URL이 된다 (P-203 `/board/{slug}`) |
 | 첨부 허용 | boolean | ✔ | — | `allow_attachments`. **첨부 권한의 진실의 출처**다 (D15 2.3) |
 | 댓글 허용 | boolean | ✔ | — | `allow_comments` |
@@ -2968,8 +2968,8 @@ P-214 와 같은 입력·응답이다(같은 함수). 다른 것은 권한뿐이
 
 | 필드 | 타입 | 필수 | 검증 | 비고 |
 |---|---|:---:|---|---|
-| 이름 | text | ✔ | 공백만 거부 | `products.이름` |
-| 설명 | text | | `template.HTML`을 쓴다면 저장 시점 정화 (NFR-203) | |
+| 이름 | text | ✔ | 공백만 거부, **200자 이하** | `products.이름` |
+| 설명 | text | | **20,000자 이하**. `template.HTML`을 쓴다면 저장 시점 정화 (NFR-203) | |
 | 기본가 | integer | ✔ | **정수 minor unit(원)**, 음수 거부. 부동소수점 금지 | D30, D50 |
 | 이미지 | multipart 파일 (`image`, 여러 장) | | **D60 4중 검증 전부**: ① 확장자 허용목록 ② MIME + 매직바이트(`http.DetectContentType`, 클라이언트 `Content-Type` 불신) ③ 웹루트 밖 저장 + 파일명 UUID 재생성 ④ 0644. 허용 형식은 **jpg·jpeg·png·gif·webp** — 첨부의 허용목록을 이미지로 좁힌 것이다. 파일당 크기는 A-309의 `upload.max_bytes`, 상품당 10장 | NFR-206, D15 SC-7 1항. `product_images` (D30). **상품 폼과 다른 폼이다**: `POST /admin/products/{id}/images`. 삭제는 `POST /admin/product-images/{id}/delete` (id는 이미지의 것) |
 | 노출 여부 | boolean | ✔ | — | P-301·P-303 노출 |
@@ -3271,7 +3271,7 @@ P-214 와 같은 입력·응답이다(같은 함수). 다른 것은 권한뿐이
 
 | 필드 | 타입 | 필수 | 검증 | 비고 |
 |---|---|:---:|---|---|
-| 이름 | text | ✔ | 공백만 거부 | `categories.이름` |
+| 이름 | text | ✔ | 공백만 거부, **100자 이하** | `categories.이름` |
 | 슬러그 | text | ✔ | 예약어·경로 문자 검증 + **`UNIQUE`** (D30 `categories.슬러그 UNIQUE`) | URL이 된다 (P-302 `/shop/c/{slug}`) |
 | 순서 | integer | ✔ | 정수 | `sort_order` |
 | 상위 카테고리 | uuid | | 존재 확인. 자기 자신·자손 금지(재귀 CTE로 조상 집합 조회) | **깊이 무제한 트리**, 안전 상한 10단계 ([D13](13-screens-admin.md) A-509) |

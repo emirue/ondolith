@@ -30,6 +30,24 @@ const (
 	MaxPasswordByte = 72
 )
 
+// 화면이 받는 글자 수 상한. 메뉴 제목만 빼고 DB CHECK 와 같은 값이다(00007·00011·
+// 00026) — 앱이 먼저 보지 않으면 제약 위반이 500 이 되고 쓴 내용이 사라진다.
+// Postgres length() 와 같게 글자(rune)로 센다.
+const (
+	MaxTitleLen    = 200    // posts.title, products.name
+	MaxPostBodyLen = 50000  // posts.body (평문)
+	MaxBodyHTMLLen = 200000 // posts.body_html
+	MaxCommentLen  = 2000   // comments.body
+	MaxNameLen     = 100    // boards.name, categories.name
+	MaxDescLen     = 20000  // products.description
+	// menus.title 에는 CHECK 가 없다. 머리글 한 줄에 들어갈 길이로 앱이 막는다 —
+	// 300자 제목이 저장되자 모든 화면의 머리글이 글자 하나씩 쪼개졌다.
+	MaxMenuTitleLen = 50
+)
+
+// TooLong reports whether s is longer than max characters.
+func TooLong(s string, max int) bool { return utf8.RuneCountInString(s) > max }
+
 // NormalizeEmail lowercases and trims. Storage and comparison both go through
 // here because the schema has no citext: the invariant "emails are stored
 // lower-cased" only holds if one function owns it (D30 3절).

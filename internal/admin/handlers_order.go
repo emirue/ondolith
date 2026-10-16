@@ -258,6 +258,10 @@ func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
 		d.categoryError(w, r, http.StatusUnprocessableEntity, "이름을 입력하세요.")
 		return
 	}
+	if content.TooLong(cat.Name, content.MaxNameLen) {
+		d.categoryError(w, r, http.StatusUnprocessableEntity, "이름은 100자까지 쓸 수 있습니다.")
+		return
+	}
 	// 슬러그는 URL 이 된다 — 형식과 예약어를 게시판·페이지와 **같은 함수**로
 	// 검사한다 (D19 A-509). 여기서 따로 정규식을 쓰면 그 둘과 갈라진다.
 	if err := content.ValidateSlug(cat.Slug); err != nil {

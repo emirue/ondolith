@@ -92,6 +92,11 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(r.PostFormValue("per_page")); err == nil && n > 0 {
 		b.PerPage = n
 	}
+	// 이유 없는 「저장하지 못했습니다」로 끝나던 자리다 — DB CHECK 가 거부했다.
+	if b.Name == "" || content.TooLong(b.Name, content.MaxNameLen) {
+		d.boardFormError(w, r, b, "게시판 이름은 1~100자입니다.", http.StatusUnprocessableEntity)
+		return
+	}
 
 	id := r.PathValue("id")
 	if isCreate(id) {

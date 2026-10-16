@@ -3,7 +3,7 @@
 <form class="form" method="post" action="{{$c.Action}}">
   {{if $c.ParentID}}<input type="hidden" name="parent_id" value="{{$c.ParentID}}">{{end}}
   <label for="comment-body">댓글</label>
-  <textarea id="comment-body" name="body" required>{{$c.Body}}</textarea>
+  <textarea id="comment-body" name="body" maxlength="2000" required>{{$c.Body}}</textarea>
   {{/* 새 댓글에만 (FR-216). 수정 화면은 Body 가 있다. */}}
   {{if not $c.Body}}{{template "partials/spam.html" $c.Turnstile}}{{end}}
   <button>{{if $c.Body}}수정{{else}}등록{{end}}</button>

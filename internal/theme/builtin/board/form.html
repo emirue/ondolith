@@ -11,7 +11,7 @@
         {{if .Board.AllowAttachments}}enctype="multipart/form-data"{{end}}
         action="/board/{{.Board.Slug}}{{if .Post.ID}}/{{.Post.ID}}/edit{{else}}/write{{end}}">
     <label for="title">제목</label>
-    <input type="text" id="title" name="title" value="{{.Post.Title}}" required>
+    <input type="text" id="title" name="title" value="{{.Post.Title}}" maxlength="200" required>
 
     {{/* 폼은 스키마에서 생성된다. 필드 목록이 코드에 없다 (D14 3절 규칙 1).
          타입별 분기는 partials/field.html 한 곳에만 있다 (D17). */}}
