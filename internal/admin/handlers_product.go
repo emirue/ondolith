@@ -156,7 +156,7 @@ func (d *Deps) ProductDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	case errors.Is(err, commerce.ErrProductInUse):
 		d.renderProduct(w, r, nil, http.StatusConflict,
-			"주문 내역이 있어 삭제할 수 없습니다. 노출을 끄세요.")
+			"주문 내역이 있어 삭제할 수 없습니다. 「공개」를 끄세요.")
 	case err != nil:
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	default:

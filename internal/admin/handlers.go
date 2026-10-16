@@ -764,7 +764,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 		_, err = d.Content.CreatePage(r.Context(), p)
 	}
 	if errors.Is(err, content.ErrSlugTaken) {
-		d.renderPageEdit(w, r, http.StatusConflict, map[string]any{"Error": "이미 사용 중인 슬러그입니다."})
+		d.renderPageEdit(w, r, http.StatusConflict, map[string]any{"Error": "이미 사용 중인 주소입니다. 다른 주소를 입력해 주세요."})
 		return
 	}
 	// **없는 페이지를 고치려 한 것은 404 다.** `d.fail` 이 그 판정을 갖고 있는데

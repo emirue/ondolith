@@ -182,3 +182,30 @@ func TestAdminRefusalsReachTheirScreens(t *testing.T) {
 	}
 	refusalShown(t, rec.Body.String(), "글이 남아 있는 게시판입니다.")
 }
+
+// **관리자에게 보이는 문구는 화면과 같은 말을 쓴다.** 템플릿은 「주소」·「공개」로 맞췄는데,
+// 페이지 저장 거부가 「이미 사용 중인 슬러그입니다.」, 상품 삭제 거부가 「노출을 끄세요.」였다.
+func TestAdminMessagesUseScreenWords(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal := regexp.MustCompile(`"[^"\n]*(슬러그|노출을)[^"\n]*"`)
+	scanned := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanned++
+		for _, m := range literal.FindAll(b, -1) {
+			t.Errorf("%s: %s — 화면은 「주소」·「공개」라고 부른다", f, m)
+		}
+	}
+	if scanned < 10 {
+		t.Fatalf("소스를 %d 개밖에 못 읽었다 — 검사가 헛돌았다", scanned)
+	}
+}
