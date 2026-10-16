@@ -300,3 +300,16 @@ func TestCategoryRowsCanBeEdited(t *testing.T) {
 		}
 	}
 }
+
+// 대시보드 「최근 글」: 제목은 글로 가는 링크이고, 옆 링크는 글 관리다(게시판 관리가 아니다).
+// 긴 제목은 칸 안에서 접힌다 — 작성자·작성일 열을 카드 밖으로 밀어냈다.
+func TestDashboardRecentPostsLinkAndWrap(t *testing.T) {
+	out := renderAdmin(t, "admin/dashboard.html", map[string]any{
+		"Posts":      []content.Post{{ID: "p1", BoardID: "b1", Title: strings.Repeat("긴제목", 30)}},
+		"BoardSlugs": map[string]string{"b1": "notice"}})
+	for _, want := range []string{`href="/board/notice/p1"`, `href="/admin/posts">글 관리 →</a>`, `class="adm-wrap"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("대시보드에 %q 가 없다", want)
+		}
+	}
+}

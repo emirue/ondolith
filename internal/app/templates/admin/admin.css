@@ -833,6 +833,10 @@ dl { margin: 0 0 var(--s20); }
 .adm-menu-grid + form + .adm-menu-grid { border-top: 1px solid var(--line); }
 .adm-menu-grid--head { font-size: 12.5px; font-weight: 600; opacity: .7; }
 
+/* 좁은 위젯 표의 긴 글(대시보드 「최근 글」 제목). keep-all 은 공백 없는 긴 제목을 꺾지
+   못해 옆 열을 카드 밖으로 밀어낸다 — 어디서든 꺾는다. */
+.adm-wrap { overflow-wrap: anywhere; word-break: normal; }
+
 @media print {
   .adm-header, .adm-sidebar { display: none; }
   .qr-label { break-inside: avoid; }

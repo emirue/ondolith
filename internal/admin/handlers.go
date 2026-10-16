@@ -653,9 +653,12 @@ func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
 	if c.Can("post.view") {
 		if boards, err := d.Content.Boards(r.Context()); err == nil {
 			ids := make([]string, 0, len(boards))
+			slugs := make(map[string]string, len(boards)) // 제목을 글로 잇는다
 			for _, b := range boards {
 				ids = append(ids, b.ID)
+				slugs[b.ID] = b.Slug
 			}
+			data["BoardSlugs"] = slugs
 			// **비밀글은 넣지 않는다.** 관리자 화면이라도 목록 요약에 남의
 			// 비밀글 제목이 뜨면 그 글은 비밀이 아니다 — 여는 것은 게시판
 			// 화면에서 권한을 다시 보고 한다. secretIn 을 비워 넘긴다.
