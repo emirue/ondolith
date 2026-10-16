@@ -74,6 +74,10 @@ SELECT id, COALESCE(parent_id::text, '')::text AS parent_id FROM categories;
 -- name: AdvisoryXactLock :exec
 SELECT pg_advisory_xact_lock(sqlc.arg('key'));
 
+-- name: UpdateCategoryNameOrder :execrows
+UPDATE categories SET name = sqlc.arg('name'), sort_order = sqlc.arg('sort_order'), updated_at = now()
+WHERE id = sqlc.arg('id');
+
 -- name: SetCategoryParent :exec
 UPDATE categories SET parent_id = sqlc.narg('parent_id'), updated_at = now() WHERE id = sqlc.arg('id');
 

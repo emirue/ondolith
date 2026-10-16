@@ -416,6 +416,25 @@ func (q *Queries) SetCategoryParent(ctx context.Context, arg SetCategoryParentPa
 	return err
 }
 
+const updateCategoryNameOrder = `-- name: UpdateCategoryNameOrder :execrows
+UPDATE categories SET name = $1, sort_order = $2, updated_at = now()
+WHERE id = $3
+`
+
+type UpdateCategoryNameOrderParams struct {
+	Name      string
+	SortOrder int32
+	ID        string
+}
+
+func (q *Queries) UpdateCategoryNameOrder(ctx context.Context, arg UpdateCategoryNameOrderParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateCategoryNameOrder, arg.Name, arg.SortOrder, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const variantForPurchase = `-- name: VariantForPurchase :one
 SELECT v.id, v.product_id, v.option_values, COALESCE(v.sku, '')::text AS sku, v.price_delta,
        v.stock, v.is_visible, p.is_visible AS product_visible, p.base_price

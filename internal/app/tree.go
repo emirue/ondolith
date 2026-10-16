@@ -452,6 +452,8 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "product.manage", Handler: ad.CategoryCreate})
 		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories/{id}/delete",
 			Class: SC5, Permission: "product.manage", Handler: ad.CategoryDelete})
+		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories/{id}",
+			Class: SC5, Permission: "product.manage", Handler: ad.CategoryUpdate})
 		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories", Class: SC5,
 			Permission: "product.manage", Handler: ad.CategoryReparent})
 		r.Add(Route{Screen: "A-504", Method: "GET", Pattern: "/admin/orders", Class: SC4,

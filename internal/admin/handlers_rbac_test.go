@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/theme"
 )
@@ -611,5 +612,33 @@ func TestFieldEditorsLoadTheFieldToEdit(t *testing.T) {
 	d.UserFieldList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/user-fields?edit=nope", nil))
 	if _, ok := data["Edit"]; ok {
 		t.Error("없는 키인데 수정 폼이 채워졌다")
+	}
+}
+
+// **카테고리 이름·순서를 고친다** (D19 A-509). 라우트가 만들기·지우기·상위 바꾸기뿐이라
+// 오타 하나도 지우고 다시 만들어야 했다 — 그 카테고리에 묶인 상품의 연결까지 끊긴다.
+func TestCategoryNameAndOrderCanBeEdited(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"product.manage": true}})
+	ctx := context.Background()
+	id, err := d.Commerce.CreateCategory(ctx, commerce.Category{Name: "매뜨", Slug: "mat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit := func(form url.Values) int { return postID(d.CategoryUpdate, id, form).Code }
+	if code := edit(url.Values{"name": {"매트"}, "sort_order": {"3"}}); code != http.StatusSeeOther {
+		t.Fatalf("고치기 = HTTP %d", code)
+	}
+	cats, err := d.Commerce.Categories(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cats) != 1 || cats[0].Name != "매트" || cats[0].SortOrder != 3 || cats[0].Slug != "mat" {
+		t.Errorf("= %+v, want 매트 / 순서 3 / 주소 그대로", cats)
+	}
+	for _, bad := range []url.Values{{"name": {""}, "sort_order": {"0"}}, {"name": {strings.Repeat("가", 101)}},
+		{"name": {"매트"}, "sort_order": {"셋"}}} {
+		if code := edit(bad); code != http.StatusUnprocessableEntity {
+			t.Errorf("%v = HTTP %d, want 422", bad, code)
+		}
 	}
 }

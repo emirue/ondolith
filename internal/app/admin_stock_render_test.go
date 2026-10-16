@@ -289,3 +289,14 @@ func TestFieldEditorsPrefillAndNameTypes(t *testing.T) {
 		}
 	}
 }
+
+// 카테고리 줄마다 이름·순서를 고치는 폼이 있다.
+func TestCategoryRowsCanBeEdited(t *testing.T) {
+	out := renderAdmin(t, "admin/categories.html", map[string]any{"Categories": []commerce.Category{
+		{ID: "c1", Name: "매트", Slug: "mat", SortOrder: 2}}})
+	for _, want := range []string{`action="/admin/categories/c1"`, `name="name" value="매트"`, `name="sort_order" value="2"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("카테고리 줄에 %q 가 없다", want)
+		}
+	}
+}

@@ -280,6 +280,46 @@ func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
 }
 
+// CategoryUpdate is A-509 POST /admin/categories/{id} — 이름·순서를 고친다.
+//
+// 라우트가 만들기·지우기·상위 바꾸기뿐이라 오타 하나도 지우고 다시 만들어야 했고, 그때
+// 상품과의 연결이 끊겼다. 주소(slug)는 받지 않는다 — 공개 URL 이다.
+func (d *Deps) CategoryUpdate(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "product.manage")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if name == "" || content.TooLong(name, content.MaxNameLen) {
+		d.categoryError(w, r, http.StatusUnprocessableEntity, "이름은 1~100자입니다.")
+		return
+	}
+	sortOrder := 0
+	if v := strings.TrimSpace(r.PostFormValue("sort_order")); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil {
+			d.categoryError(w, r, http.StatusUnprocessableEntity, "순서는 정수로 입력하세요.")
+			return
+		}
+		sortOrder = int(n)
+	}
+	id := r.PathValue("id")
+	switch err := d.Commerce.RenameCategory(r.Context(), id, name, sortOrder); {
+	case errors.Is(err, commerce.ErrNotFound):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	d.log(r, c, "category.update", "category", id, "카테고리 이름·순서 변경: "+name)
+	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
+}
+
 // CategoryDelete is A-509 POST /admin/categories/{id}/delete.
 //
 // 브라우저 폼은 DELETE 를 보낼 수 없다 — 메뉴·페이지 삭제와 같은 규약이다.
