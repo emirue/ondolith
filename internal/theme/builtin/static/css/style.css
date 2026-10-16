@@ -426,7 +426,11 @@ body { overflow-x: hidden; word-break: keep-all; }
 .page,
 .card-list li,
 .product-list li,
-.cart > li { overflow-wrap: anywhere; }
+.cart > li,
+.comments li,
+.hero,
+.auth,
+.flash li { overflow-wrap: anywhere; }
 
 /* ---- 상호작용 ------------------------------------------------------------
  * 「부드럽다」는 모서리와 그림자만으로 만들어지지 않는다. 상태가 순간이동하면

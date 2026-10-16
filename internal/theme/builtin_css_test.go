@@ -486,3 +486,25 @@ func TestLinksShareTheAccentHueInBothSchemes(t *testing.T) {
 		}
 	}
 }
+
+// **한 줄에 안 들어가는 긴 낱말은 꺾인다.** 본문 전체가 낱말 단위 줄바꿈(keep-all)이라,
+// `overflow-wrap: anywhere` 가 없는 상자에서는 띄어쓰기 없는 긴 글(「ㅋㅋㅋ…」 댓글, 긴 사이트
+// 이름)이 상자 밖으로 넘쳐 `body { overflow-x: hidden }` 에 소리 없이 잘린다.
+func TestLongWordsWrapWhereUsersWrite(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?s)\n((?:[^{}\n]+,\n)*[^{}\n]+)\{\s*overflow-wrap:\s*anywhere;\s*\}`).FindAllStringSubmatch(stripComments(string(b)), -1)
+	covered := map[string]bool{}
+	for _, r := range m {
+		for _, sel := range strings.Split(r[1], ",") {
+			covered[strings.TrimSpace(sel)] = true
+		}
+	}
+	for _, want := range []string{".page", ".comments li", ".hero", ".auth", ".flash li"} {
+		if !covered[want] {
+			t.Errorf("%s 에 overflow-wrap: anywhere 가 없다 — 긴 낱말이 넘쳐 잘린다 (있는 것: %v)", want, sortedKeys(covered))
+		}
+	}
+}
