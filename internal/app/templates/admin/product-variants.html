@@ -37,8 +37,8 @@
     </div>
     <p class="adm-hint">
       저장하면 <strong>값의 모든 조합</strong>이 만들어집니다. 이미 있는 조합은
-      그대로 둡니다 — 재고와 SKU 가 거기 붙어 있습니다. 값을 지워도 그 조합은
-      남습니다(주문이 가리킬 수 있습니다). 재고를 0 으로 두면 팔리지 않습니다.
+      그대로 둡니다 — 재고와 SKU 가 거기 붙어 있습니다. 값을 지운 조합은 행이 남은 채
+      (주문이 가리킬 수 있습니다) <strong>판매 중지</strong>가 됩니다 — 다시 팔려면 아래 표에서 체크를 푸세요.
       옵션이 없는 상품은 칸을 비운 채 저장하면 <strong>옵션 없는 조합 하나</strong>가 만들어집니다.
     </p>
   </form>
@@ -48,10 +48,10 @@
     <div class="adm-table-wrap">
       <table class="adm-table">
         <thead>
-          <tr><th>조합</th><th>SKU</th><th>바코드</th><th>가격 차액 (원)</th><th>현재 재고</th><th>증감</th></tr>
+          <tr><th>조합</th><th>SKU</th><th>바코드</th><th>가격 차액 (원)</th><th>현재 재고</th><th>증감</th><th>판매 중지</th></tr>
         </thead>
         <tbody>
-        {{if not .Variants}}<tr><td colspan="6">옵션을 저장하면 조합이 만들어집니다. 옵션이 없는 상품은 비운 채 저장하세요.</td></tr>{{end}}
+        {{if not .Variants}}<tr><td colspan="7">옵션을 저장하면 조합이 만들어집니다. 옵션이 없는 상품은 비운 채 저장하세요.</td></tr>{{end}}
         {{range .Variants}}
           <tr>
             <td class="adm-nw">
@@ -66,9 +66,12 @@
             <td><input type="number" name="price_delta_{{.ID}}" step="1" value="{{.PriceDelta}}" required></td>
             <td>{{.Stock}}</td>
             <td><input type="number" name="delta_{{.ID}}" step="1" value="0" required></td>
+            {{/* 단종된 색·사이즈를 내린다. 재고 0 과 다르다 — 품절은 「품절」로 보이고,
+                 판매 중지는 상품 화면에 없다. */}}
+            <td><input type="checkbox" name="hidden_{{.ID}}" value="1"{{if not .Visible}} checked{{end}} aria-label="판매 중지"></td>
           </tr>
         {{else}}
-          <tr><td colspan="6" class="adm-empty">조합이 없습니다.</td></tr>
+          <tr><td colspan="7" class="adm-empty">조합이 없습니다.</td></tr>
         {{end}}
         </tbody>
       </table>

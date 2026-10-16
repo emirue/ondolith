@@ -150,6 +150,7 @@ func (d *shopDeps) productDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	variants = onSale(variants)
 	images, err := d.images.List(ctx, p.ID)
 	if err != nil {
 		d.serverError(w, r, err)
@@ -237,6 +238,7 @@ func (d *shopDeps) variantPick(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	variants = onSale(variants)
 	// 선택값은 폼에서 온다. 조합 ID 를 받지 않는 이유: ID 를 받으면 다른 상품의
 	// 조합 ID 를 넣어 그 가격을 이 상품에 붙일 수 있다.
 	picked := map[string]string{}
@@ -448,4 +450,16 @@ func hasUnsellable(items []commerce.CartItem) bool {
 		}
 	}
 	return false
+}
+
+// onSale drops combinations the operator stopped selling (A-503 「판매 중지」).
+// 품절(재고 0)은 남긴다 — 「품절」로 보여야 하고, 판매 중지는 없는 것이다.
+func onSale(vs []commerce.Variant) []commerce.Variant {
+	out := vs[:0:0]
+	for _, v := range vs {
+		if v.Visible {
+			out = append(out, v)
+		}
+	}
+	return out
 }

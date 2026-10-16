@@ -160,3 +160,24 @@ func TestCheckoutTermsLinkToTheirText(t *testing.T) {
 		t.Errorf("시행 전 약관 = HTTP %d, want 404", code)
 	}
 }
+
+// 판매를 멈춘 조합은 상품 화면의 선택지에 나오지 않는다. 품절과 다르다 — 품절은
+// 「품절」로 보이고, 판매 중지는 없는 것이다.
+func TestStoppedVariantIsNotOffered(t *testing.T) {
+	srv, pool, _ := shopSite(t)
+	ctx := context.Background()
+	var pid string
+	if err := pool.QueryRow(ctx, `INSERT INTO products (slug,name,base_price,is_visible)
+		VALUES ('cover','베개 커버',9000,true) RETURNING id`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO product_variants (product_id,option_values,price_delta,stock,is_visible)
+		VALUES ($1,'{"크기":"소"}',0,3,true), ($1,'{"크기":"대형단종"}',0,3,false)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	_, _, page := getBody(t, client(), srv.URL+"/shop/p/cover")
+	if !strings.Contains(page, "소") || strings.Contains(page, "대형단종") {
+		t.Errorf("판매 중지 조합이 선택지에 있다 (소 %v, 대형단종 %v)",
+			strings.Contains(page, "소"), strings.Contains(page, "대형단종"))
+	}
+}

@@ -151,6 +151,59 @@ func TestSetOptionsWithoutGroupsMakesOneVariant(t *testing.T) {
 	}
 }
 
+// **옵션에서 뺀 값의 조합은 판매를 멈춘다.** 행은 남긴다(주문·재고가 가리킨다).
+// 전에는 「대」를 빼도 그 조합이 그대로 매장에 나와, 정의와 화면이 어긋났다.
+func TestRemovedOptionValueStopsItsVariants(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	pid := mkProduct(t, s, "cover", 10000)
+	if err := s.SetOptions(ctx, pid, []Option{{Name: "크기", Values: []string{"소", "대"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetOptions(ctx, pid, []Option{{Name: "크기", Values: []string{"소"}}}); err != nil {
+		t.Fatal(err)
+	}
+	vs, err := s.Variants(ctx, pid, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vs) != 2 {
+		t.Fatalf("조합 %d개 — 뺀 값의 조합도 행은 남아야 한다", len(vs))
+	}
+	for _, v := range vs {
+		if want := v.OptionValues["크기"] == "소"; v.Visible != want {
+			t.Errorf("「%s」 판매 %v, want %v", v.OptionValues["크기"], v.Visible, want)
+		}
+	}
+}
+
+// 조합마다 판매를 멈추고 다시 연다 (A-503). 단종된 색 하나를 내릴 방법이 재고 0
+// 밖에 없었다.
+func TestEditVariantsStopsAndResumesSelling(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	productID, variantID := seedProduct(t, pool, "tee-stop", 12000, 0, 5)
+	visible := func() bool {
+		var v bool
+		if err := pool.QueryRow(ctx, `SELECT is_visible FROM product_variants WHERE id = $1`, variantID).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if err := s.EditVariants(ctx, productID, []VariantEdit{{ID: variantID, Hidden: true, Version: -1}}); err != nil {
+		t.Fatal(err)
+	}
+	if visible() {
+		t.Error("판매 중지가 반영되지 않았다")
+	}
+	if err := s.EditVariants(ctx, productID, []VariantEdit{{ID: variantID, Version: -1}}); err != nil {
+		t.Fatal(err)
+	}
+	if !visible() {
+		t.Error("판매 재개가 반영되지 않았다")
+	}
+}
+
 // mkProduct 는 조합을 붙일 상품 한 건을 만든다.
 func mkProduct(t *testing.T, s *Store, slug string, price int) string {
 	t.Helper()

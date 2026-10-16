@@ -1196,6 +1196,43 @@ func TestPolicyChangeDoesNotApplyRetroactively(t *testing.T) {
 	}
 }
 
+// A-503 의 「판매 중지」 칸이 조합을 내리고, 칸을 풀면 다시 연다.
+func TestVariantSaveStopsAndResumesSelling(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+	var productID, variantID string
+	if err := pool.QueryRow(ctx, `INSERT INTO products (slug,name,base_price,is_visible)
+		VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"L"}',0,7) RETURNING id`, productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		hidden string
+		want   bool
+	}{{"1", false}, {"", true}} {
+		form := url.Values{"variant_id": {variantID}, "delta_" + variantID: {"0"}, "price_delta_" + variantID: {"0"}}
+		if tc.hidden != "" {
+			form.Set("hidden_"+variantID, tc.hidden)
+		}
+		if rec := postAdmin(t, d.VariantSave, "/admin/products/"+productID+"/variants",
+			map[string]string{"id": productID}, form); rec.Code != http.StatusSeeOther {
+			t.Fatalf("저장 = HTTP %d", rec.Code)
+		}
+		var visible bool
+		if err := pool.QueryRow(ctx, `SELECT is_visible FROM product_variants WHERE id = $1`, variantID).Scan(&visible); err != nil {
+			t.Fatal(err)
+		}
+		if visible != tc.want {
+			t.Errorf("판매 중지 %q → 판매 %v, want %v", tc.hidden, visible, tc.want)
+		}
+	}
+}
+
 // **A-503 은 재고 절대값을 조용히 무시하지 않고 거부한다** (D19 A-503).
 //
 // 무시하면 운영자는 재고가 자기 입력대로 됐다고 믿는다. 절대값 덮어쓰기는

@@ -143,6 +143,9 @@ type VariantEdit struct {
 	// Version 은 낙관적 잠금이다. 화면이 읽은 시점의 재고이고, 그 사이 누가
 	// 바꿨으면 409 다 — 조정값이라도 화면이 보여준 결과와 달라지기 때문이다.
 	Version int
+	// Hidden 은 「판매 중지」다. 거꾸로(Visible 이 아니라) 둔 이유: 칸을 싣지 않는
+	// 호출(옛 폼·스크립트)이 조합을 몰래 내리지 않게, 비어 있으면 판매 중이다.
+	Hidden bool
 }
 
 // EditVariants applies A-503's edits in one transaction.
@@ -193,7 +196,7 @@ func (s *Store) EditVariants(ctx context.Context, productID string, edits []Vari
 		// 질의가 자리 인자($3·$4)라 생성 이름이 Stock·Column4 다 — 조정값과 SKU.
 		n, err := q.EditVariant(ctx, commerceq.EditVariantParams{
 			ID: e.ID, ProductID: productID, Stock: int32(e.StockDelta),
-			Column4: e.SKU, PriceDelta: int32(e.PriceDelta), Barcode: e.Barcode})
+			Column4: e.SKU, PriceDelta: int32(e.PriceDelta), Barcode: e.Barcode, Hidden: e.Hidden})
 		var pgErr *pgconn.PgError
 		switch {
 		case errors.As(err, &pgErr) && pgErr.Code == "23505":
@@ -362,9 +365,39 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 		}
 	}
 
+	// **곱에 없는 조합은 판매를 멈춘다.** 지우지는 않는다(주문·재고가 가리킨다).
+	// 그대로 두면 옵션에서 뺀 값이 상품 화면 선택지로 계속 나온다 — 화면은
+	// 정의가 아니라 조합에서 선택지를 만든다 (OptionGroups). 곱에 다시 들어온
+	// 조합을 되살리지는 않는다: 운영자가 따로 판매를 멈춘 조합까지 옵션을 저장할
+	// 때마다 다시 열리게 된다. 되살리는 것은 A-503 의 「판매 중지」 칸이다.
+	combos := optionProduct(opts)
+	keep := make(map[string]bool, len(combos))
+	for _, c := range combos {
+		keep[OptionLabel(c)] = true
+	}
+	existing, err := q.Variants(ctx, commerceq.VariantsParams{ProductID: productID})
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for _, v := range existing {
+		var vals map[string]string
+		if err := unmarshalOptions(v.OptionValues, &vals); err != nil {
+			return err
+		}
+		if v.IsVisible && !keep[OptionLabel(vals)] {
+			stale = append(stale, v.ID)
+		}
+	}
+	if len(stale) > 0 {
+		if err := q.HideVariants(ctx, commerceq.HideVariantsParams{ProductID: productID, Ids: stale}); err != nil {
+			return err
+		}
+	}
+
 	// 곱을 만든다. `ON CONFLICT DO NOTHING` 이 이미 있는 조합을 지켜 준다 —
 	// UNIQUE (product_id, option_values) 가 그 열쇠다.
-	for _, combo := range optionProduct(opts) {
+	for _, combo := range combos {
 		raw, err := json.Marshal(combo)
 		if err != nil {
 			return err

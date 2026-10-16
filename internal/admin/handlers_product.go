@@ -363,7 +363,7 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 			// 앞뒤 공백을 자른다 (D19 A-503). 스캐너가 붙인 공백 하나로 같은
 			// 바코드가 다른 값이 되면 유일 제약을 지나간다.
 			Barcode: strings.TrimSpace(r.PostFormValue("barcode_" + id)),
-			Version: version})
+			Version: version, Hidden: r.PostFormValue("hidden_"+id) != ""})
 	}
 	if len(edits) == 0 {
 		d.renderVariants(w, r, http.StatusUnprocessableEntity, "바꿀 조합을 고르세요.")

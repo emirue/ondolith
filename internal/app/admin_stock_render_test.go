@@ -194,3 +194,20 @@ func TestAdminTermsTakeAReadableKindAndShowTheBody(t *testing.T) {
 		t.Error("약관 목록에서 본문을 볼 수 없다")
 	}
 }
+
+// 조합마다 「판매 중지」 칸이 있고, 멈춘 조합은 체크된 채로 그려진다 — 체크가
+// 풀린 채 그려지면 다음 저장이 조합을 몰래 다시 연다.
+func TestVariantRowsCarryTheStopSellingBox(t *testing.T) {
+	out := renderAdmin(t, "admin/product-variants.html", map[string]any{
+		"Product": &commerce.Product{ID: "p1", Name: "베개 커버"},
+		"Variants": []commerce.Variant{
+			{ID: "v1", OptionValues: map[string]string{"크기": "소"}, Visible: true},
+			{ID: "v2", OptionValues: map[string]string{"크기": "대"}, Visible: false}},
+		"Options": nil, "Error": ""})
+	if !strings.Contains(out, `name="hidden_v2" value="1" checked`) {
+		t.Error("멈춘 조합의 「판매 중지」가 체크돼 있지 않다")
+	}
+	if !strings.Contains(out, `name="hidden_v1"`) || strings.Contains(out, `name="hidden_v1" value="1" checked`) {
+		t.Error("파는 조합에 「판매 중지」 칸이 없거나 체크돼 있다")
+	}
+}
