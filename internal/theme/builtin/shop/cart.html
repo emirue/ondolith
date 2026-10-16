@@ -22,7 +22,7 @@
       <form method="post" action="/cart/items/{{.ID}}" class="inline"
             onsubmit="return confirm('장바구니에서 뺄까요?')">
         <input type="hidden" name="_method" value="DELETE">
-        <button type="submit" class="btn btn--sm btn--danger">빼기</button>
+        <button type="submit" class="btn btn--danger">빼기</button>
       </form>
     </li>
     {{else}}

@@ -280,7 +280,8 @@ main { max-width: var(--shell); margin: 0 auto; padding: 32px var(--pad) 64px; }
 input,
 select,
 textarea {
-  min-height: 42px;
+  /* 버튼(44px)과 같다 — 검색칸·수량칸 옆에 버튼이 붙는다. */
+  min-height: 44px;
   padding: 0 14px;
   border: 1px solid var(--line);
   border-radius: var(--chip-radius);
@@ -1181,6 +1182,8 @@ address + p { font-size: 14px; margin-top: 6px; }
   .cart > li,
     .refunds > li,
   .returns > li { gap: 8px 14px; }
+  /* 가격까지가 한 줄, 수량·빼기는 다음 줄 — 상품명 길이에 따라 행마다 버튼 자리가 달랐다. */
+  .cart > li > .price { flex-basis: 100%; }
 
   /* 답글 들여쓰기를 줄인다. 화면이 좁으면 들여쓴 만큼 본문이 사라진다. */
   .comments li.reply { margin-left: 14px; }

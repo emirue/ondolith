@@ -386,3 +386,45 @@ func TestNarrowListTablesStackRows(t *testing.T) {
 		}
 	}
 }
+
+// **나란히 서는 입력칸과 버튼은 같은 높이다.**
+//
+// 입력칸 42px 옆에 버튼 44px 이 붙어 아랫변이 어긋났고(머리글·게시판 검색), 장바구니
+// 한 행에 수량칸 42·「변경」 44·「빼기」 34px 이 섰다. 같은 「검색」 버튼이 화면에 따라
+// 흰 버튼이거나 초록 주 버튼이었다.
+func TestSideBySideControlsShareAHeight(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := stripComments(string(b))
+	minH := func(sel string) string {
+		m := regexp.MustCompile(`(?m)^` + sel + `\s*\{[^}]*?min-height:\s*([0-9a-z]+)`).FindStringSubmatch(css)
+		if m == nil {
+			t.Fatalf("%s 규칙에서 min-height 를 못 찾았다", sel)
+		}
+		return m[1]
+	}
+	if in, btn := minH(`input,\s*select,\s*textarea`), minH(`button`); in != btn {
+		t.Errorf("입력칸 %s · 버튼 %s — 한 줄에 서면 아랫변이 어긋난다", in, btn)
+	}
+
+	cart, err := fs.ReadFile(Builtin(), "shop/cart.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cart), "btn--sm") {
+		t.Error("장바구니 행의 버튼이 작은 변형이다 — 옆의 「변경」·수량칸과 높이가 다르다")
+	}
+
+	primarySearch := regexp.MustCompile(`<button[^>]*btn--primary[^>]*>검색</button>`)
+	for _, name := range []string{"search.html", "board/list.html", "shop/list.html", "shop/search.html", "partials/header.html"} {
+		src, err := fs.ReadFile(Builtin(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if primarySearch.Match(src) {
+			t.Errorf("%s: 「검색」만 주 버튼이다 — 다른 화면의 같은 버튼과 모양이 다르다", name)
+		}
+	}
+}
