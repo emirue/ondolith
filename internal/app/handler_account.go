@@ -24,9 +24,14 @@ type accountDeps struct {
 	verifyRequired func() bool
 	// signupClosed mirrors auth.signup_closed (FR-217). 닫아도 A-401 의 「사용자 추가」는 된다.
 	signupClosed func() bool
-	baseURL      string
-	spam         spamGuard
+	// mailReady 는 A-205 에 SMTP 호스트가 있는지다. 요청마다 읽는다 — 설정은 언제든 바뀐다.
+	// nil 이면 있다고 본다(테스트·옛 조립이 재설정을 잃지 않게).
+	mailReady func() bool
+	baseURL   string
+	spam      spamGuard
 }
+
+func (d *accountDeps) mailOK() bool { return d.mailReady == nil || d.mailReady() }
 
 // signupForm is the whole of what P-103 accepts.
 //

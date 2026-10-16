@@ -9,7 +9,19 @@ import (
 
 // P-104 GET — ask for the address.
 func (d *accountDeps) resetRequestForm(w http.ResponseWriter, r *http.Request) {
+	if !d.mailOK() {
+		d.renderNoMail(w, r)
+		return
+	}
 	d.render(w, r, "auth/password-reset-request.html", http.StatusOK, nil)
+}
+
+// renderNoMail tells the visitor reset cannot work here. **메일을 보낼 수 없는 사이트의
+// 성질이지 계정의 성질이 아니다** — 어느 주소에나 같은 답이라 FR-207 의 열거가 되지
+// 않는다. 「보냈습니다」라고 답하면 오지 않을 메일을 기다리게 한다(D19 P-104).
+// 일시적인 발송 실패는 여기 오지 않는다 — 그것은 여전히 성공과 같은 응답이다.
+func (d *accountDeps) renderNoMail(w http.ResponseWriter, r *http.Request) {
+	d.render(w, r, "auth/password-reset-request.html", http.StatusOK, map[string]any{"NoMail": true})
 }
 
 // P-104 POST — send the link.
@@ -25,6 +37,10 @@ func (d *accountDeps) resetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if !d.mailOK() {
+		d.renderNoMail(w, r)
+		return
+	}
 
 	if !d.limiter.Allow("reset:ip:"+clientIP(r), d.limits.PasswordResetIP) {
 		w.Header().Set("Retry-After", "3600")

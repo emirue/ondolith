@@ -82,6 +82,9 @@ func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handl
 					if nv, ok := mm["NoVerify"].(bool); ok && nv {
 						_, _ = w.Write([]byte("|noverify"))
 					}
+					if nm, ok := mm["NoMail"].(bool); ok && nm {
+						_, _ = w.Write([]byte("|nomail"))
+					}
 				}
 			},
 		},

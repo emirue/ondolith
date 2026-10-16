@@ -348,7 +348,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	turnstile := auth.Turnstile{Client: &http.Client{Timeout: 10 * time.Second}, URL: auth.TurnstileVerifyURL}
 	spam := spamGuard{keys: turnstileKeys, verify: turnstile.Verify, log: log}
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
-		userFields: contentStore.UserFields, verifyRequired: verifyRequired, signupClosed: signupClosed, spam: spam}
+		userFields: contentStore.UserFields, verifyRequired: verifyRequired, signupClosed: signupClosed, spam: spam,
+		mailReady: func() bool { return setting("mail.smtp_host")["mail.smtp_host"] != "" }}
 	// 로그인·소셜 로그인의 미인증 판정은 가입 쪽이 안다(인증 설정·재발송) (FR-214).
 	lg.unverified = acc.refuseUnverified
 

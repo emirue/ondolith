@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -261,4 +262,31 @@ func mustHash(t *testing.T, pw string) string {
 		t.Fatal(err)
 	}
 	return h
+}
+
+// **메일을 보낼 수 없는 사이트는 재설정이 안 된다고 말한다** (FR-207, D19 P-104). SMTP 가
+// 비어 있는데 「보냈습니다」라고 답해, 사용자는 오지 않을 메일을 기다렸다. 이 답은 주소와
+// 무관하게 같다 — 사이트의 성질이지 계정의 성질이 아니라 열거가 되지 않는다.
+func TestResetSaysSoWhenTheSiteCannotSendMail(t *testing.T) {
+	d, h, store, sender := accountFixture(t, true)
+	mkAccount(t, store, "known@example.com", "correct-horse-battery")
+	d.mailReady = func() bool { return false }
+
+	get := httptest.NewRecorder()
+	h.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/password/reset", nil))
+	form := get.Body.String()
+	known := postForm(h, "/password/reset", url.Values{"email": {"known@example.com"}}, nil)
+	unknown := postForm(h, "/password/reset", url.Values{"email": {"nobody@example.com"}}, nil)
+	for name, rec := range map[string]string{"폼": form, "가입": known.Body.String(), "미가입": unknown.Body.String()} {
+		if !strings.Contains(rec, "|nomail") {
+			t.Errorf("%s: 메일을 보낼 수 없다는 안내가 없다 (%q)", name, rec)
+		}
+	}
+	if known.Code != unknown.Code || known.Body.String() != unknown.Body.String() {
+		t.Error("메일 미설정 답이 계정 유무로 갈린다")
+	}
+	// 「오지 않았다」는 기다려서 본다 — 발송은 고루틴이라 바로 찍으면 늘 비어 있다.
+	if _, got := waitMail(t, sender, func(capturedMail) bool { return true }); got {
+		t.Error("메일을 보낼 수 없는데 재설정 메일을 보내려 했다")
+	}
 }
