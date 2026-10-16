@@ -272,7 +272,10 @@ func TestEveryCSSTokenIsDefined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	def := regexp.MustCompile(`(--[a-z0-9-]+)\s*:`)
+	// 정의는 선언 자리(줄 머리·`{`·`;` 뒤)에서만 센다. 앞 판은 아무 데서나 세서
+	// `.btn--danger:hover` 를 `--danger` 의 정의로 읽었고, 정의 없는 `var(--danger)` 가
+	// 이 검사를 지나갔다 — 위험 버튼의 테두리·글자색이 빈 값이었다.
+	def := regexp.MustCompile(`(?:^|[{;\s])(--[a-z0-9-]+)\s*:`)
 	use := regexp.MustCompile(`var\((--[a-z0-9-]+)`)
 
 	for name, src := range map[string]string{

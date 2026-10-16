@@ -1006,10 +1006,10 @@ a:focus-visible {
  * 삭제·탈퇴처럼 되돌릴 수 없는 것. 채우지 않고 테두리로만 표시한다 — 빨간
  * 덩어리가 화면에 있으면 눈이 먼저 그리로 가고, 그것은 주된 동작이 아니다. */
 .btn--danger {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--err) 45%, var(--line));
+  color: var(--err);
 }
-.btn--danger:hover { background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.btn--danger:hover { background: color-mix(in srgb, var(--err) 8%, transparent); }
 
 /* ═══ 간격·정렬 정리 ═══════════════════════════════════════════════════════
  *
