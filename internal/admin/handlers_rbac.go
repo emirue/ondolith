@@ -287,8 +287,10 @@ func (d *Deps) themeChanged(name string) {
 	}
 }
 
-// ThemeList is A-202's read. It shows which theme is active; discovering what
-// is installed is A-203's job (Phase 2), so this does not walk the disk.
+// ThemeList is A-202's read: the active theme and what is installed.
+//
+// 설치된 테마를 나열한다 — 디렉터리 이름을 직접 쳐야 했고, 업로드 화면(A-203)으로 가는
+// 길도 없어 런타임 테마 교체를 운영자가 찾을 수 없었다.
 func (d *Deps) ThemeList(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "theme.view"); !ok {
 		return
@@ -298,8 +300,15 @@ func (d *Deps) ThemeList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	var installed []string
+	if d.InstalledThemes != nil {
+		if installed, err = d.InstalledThemes(); err != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+	}
 	d.Render(w, r, "admin/themes.html", http.StatusOK,
-		map[string]any{"Active": kv["theme.active"]})
+		map[string]any{"Active": kv["theme.active"], "Installed": installed})
 }
 
 // ThemeActivate switches the active theme.

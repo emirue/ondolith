@@ -274,6 +274,26 @@ func entryName(name string) (string, error) {
 
 // validThemeName bounds the directory a theme lands in. It is the same shape
 // D30 gives boards.skin, and it is what keeps the name from being a path.
+// Installed lists the themes under root, by directory name (A-202). 테마 이름 규칙에
+// 맞는 디렉터리만 센다 — 설치 중의 임시 디렉터리(.install-…)와 파일은 테마가 아니다.
+// root 가 없으면 설치된 테마가 없는 것이다.
+func Installed(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries { // ReadDir 은 이름순이다
+		if e.IsDir() && validThemeName(e.Name()) == nil {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
+}
+
 func validThemeName(name string) error {
 	if name == "" || len(name) > 64 || name != path.Base(name) {
 		return ErrThemeBadName

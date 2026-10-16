@@ -158,3 +158,17 @@ func TestBoardListDeleteDoesNotPreConfirm(t *testing.T) {
 		t.Error("게시판 목록의 삭제 폼이 확인 값을 미리 싣는다")
 	}
 }
+
+// 테마 화면이 설치된 테마를 나열하고 업로드 화면으로 가는 길을 둔다 — 디렉터리 이름을
+// 직접 쳐야 했고, 업로드 화면은 주소를 아는 사람만 닿았다.
+func TestThemesScreenListsInstalledThemes(t *testing.T) {
+	out := renderAdmin(t, "admin/themes.html", map[string]any{"Active": "warm", "Installed": []string{"dark", "warm"}})
+	for _, want := range []string{`href="/admin/themes/upload"`, `name="theme" value="dark"`, `name="theme" value=""`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("테마 화면에 %q 가 없다", want)
+		}
+	}
+	if strings.Contains(out, `name="theme" value="warm"`) {
+		t.Error("이미 쓰는 테마에 「활성화」가 있다")
+	}
+}

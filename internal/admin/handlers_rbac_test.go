@@ -482,3 +482,18 @@ func TestRoleChangesAreReauthedAndLogged(t *testing.T) {
 		t.Errorf("작업 로그 %d건 (%v), want 3 — 부여 둘과 R1 위반", n, err)
 	}
 }
+
+// A-202 은 설치된 테마를 화면에 넘긴다.
+func TestThemeListPassesInstalledThemes(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"theme.view": true}})
+	d.InstalledThemes = func() ([]string, error) { return []string{"warm"}, nil }
+	var got any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
+		got = data.(map[string]any)["Installed"]
+		w.WriteHeader(code)
+	}
+	d.ThemeList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/themes", nil))
+	if names, _ := got.([]string); len(names) != 1 || names[0] != "warm" {
+		t.Errorf("설치된 테마 = %v, want [warm]", got)
+	}
+}

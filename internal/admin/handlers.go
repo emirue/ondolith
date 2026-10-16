@@ -93,6 +93,8 @@ type Deps struct {
 	// replace 는 같은 이름의 테마를 덮어쓸지다. 활성 테마면 A-203 이 409 로
 	// 거부하므로 여기까지 오지 않는다 (OPEN-42 결정).
 	InstallTheme func(name string, r io.ReaderAt, size int64, replace bool) error
+	// InstalledThemes lists what A-203 put in the theme directory (A-202 이 나열한다).
+	InstalledThemes func() ([]string, error)
 	// Gateway 는 A-508 이 PG 에 실제 상태를 물을 때 쓴다. nil 이면 대사가
 	// 우리 기록만 보여준다 — 조회 없이 「일치」로 그리지 않는다.
 	Gateway func() commerce.Gateway
