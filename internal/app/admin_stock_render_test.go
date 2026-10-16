@@ -211,3 +211,32 @@ func TestModerationScreensPickABoard(t *testing.T) {
 		}
 	}
 }
+
+// 글 관리의 동작은 그 글의 상태에 맞는 것만, 「삭제」를 맨 뒤에 둔다 — 다섯 개가 상태와
+// 무관하게 다 나왔고(공개 글에도 「공개」, 고정·고정 해제 동시) 순서가 영문 키의
+// 알파벳순이라 「삭제」가 맨 앞이었다. 제목은 글로 가는 링크다.
+func TestPostRowsOfferOnlyTheirActions(t *testing.T) {
+	out := renderAdmin(t, "admin/posts.html", map[string]any{"BoardSlug": "free", "PageNo": 1,
+		"Posts": []content.Post{
+			{ID: "p1", Title: "고정 공지", IsPinned: true, Status: "published"},
+			{ID: "p2", Title: "숨긴 글", Status: "hidden"}}})
+	row := func(id string) string {
+		i := strings.Index(out, `value="`+id+`"`)
+		j := strings.Index(out[i:], "</tr>")
+		return out[i : i+j]
+	}
+	p1, p2 := row("p1"), row("p2")
+	for _, c := range []struct {
+		row, want, not string
+	}{{p1, ">고정 해제<", ">고정<"}, {p1, ">숨김<", ">공개<"}, {p2, ">고정<", ">고정 해제<"}, {p2, ">공개<", ">숨김<"}} {
+		if !strings.Contains(c.row, c.want) || strings.Contains(c.row, c.not) {
+			t.Errorf("행에 %s 가 있고 %s 가 없어야 한다", c.want, c.not)
+		}
+	}
+	if strings.Index(p1, ">삭제<") < strings.Index(p1, ">숨김<") {
+		t.Error("「삭제」가 맨 뒤가 아니다")
+	}
+	if !strings.Contains(out, `href="/board/free/p1"`) {
+		t.Error("제목이 글로 가는 링크가 아니다")
+	}
+}

@@ -405,9 +405,6 @@ func (d *Deps) PostList(w http.ResponseWriter, r *http.Request) {
 	slug := r.URL.Query().Get("board")
 	data := map[string]any{
 		"BoardSlug": slug,
-		"Actions": map[string]string{
-			"pin": "고정", "unpin": "고정 해제", "hide": "숨김", "show": "공개", "delete": "삭제",
-		},
 	}
 	if slug == "" {
 		d.renderModeration(w, r, "admin/posts.html", http.StatusOK, data)
