@@ -32,6 +32,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* 체크박스·스크롤 막대처럼 브라우저가 그리는 것도 어둡게 — 흰 네모로 남았다. */
+    color-scheme: dark;
     --bg: #101317;        --panel: #1b1f25;     --ink: #e5e9ee;      --line: #2b313a;
     --accent: #4fbf94;    --accent-ink: #0d1214;
     --hero-bg: #1b1f25;   --hero-ink: #e5e9ee;  --hero-line: #2b313a;

@@ -819,3 +819,32 @@ func TestAccountScreensHaveTabTitles(t *testing.T) {
 		t.Fatalf("화면을 %d 개밖에 못 찾았다 — 검사가 헛돌았다", scanned)
 	}
 }
+
+// **어두운 팔레트는 `color-scheme: dark` 를 함께 선언한다.** 체크박스·선택 상자의 펼친 목록·
+// 스크롤 막대는 브라우저가 그리고, 색 토큰을 따르지 않는다. 선언이 없으면 어두운 주문서에
+// 약관 체크박스만 흰 네모로 남았다.
+func TestDarkPalettesDeclareColorScheme(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ css, block string }{
+		"builtin/style.css 다크 선호":    {string(themeCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root \{`},
+		"admin/admin.css 다크 선호":      {string(adminCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-admin-theme\]\) \{`},
+		"admin/admin.css 1c 다크 콘솔": {string(adminCSS), `(?m)^:root\[data-admin-theme="1c"\] \{`},
+	} {
+		loc := regexp.MustCompile(c.block).FindStringIndex(c.css)
+		if loc == nil {
+			t.Fatalf("%s 블록을 못 찾았다", name)
+		}
+		body := c.css[loc[1]:]
+		body = body[:strings.Index(body, "}")]
+		if !strings.Contains(body, "color-scheme: dark") {
+			t.Errorf("%s: color-scheme: dark 가 없다 — 체크박스가 흰 네모로 그려진다", name)
+		}
+	}
+}
