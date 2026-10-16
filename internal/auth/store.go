@@ -79,7 +79,7 @@ func parseGrants(rows []string) []Grant {
 // that the anonymous path is a query, not an empty set assumed in a handler —
 // an installation may grant permissions to `anonymous` (D15 2.5).
 func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, error) {
-	keys, err := s.q.LoadAnonymousPermissions(ctx)
+	keys, err := s.q.LoadRolePermissions(ctx, RoleAnonymous)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, err
 // role). 로그인하지 않은 방문자에게 「로그인하면 쓸 수 있다」고 말해도 되는지를 이것으로
 // 판정한다 — 운영진만 쓰는 게시판에서 그렇게 말하면 거짓이다.
 func (s *Store) LoadMemberPermissions(ctx context.Context) (*Permissions, error) {
-	keys, err := s.q.LoadMemberPermissions(ctx)
+	keys, err := s.q.LoadRolePermissions(ctx, RoleMember)
 	if err != nil {
 		return nil, err
 	}

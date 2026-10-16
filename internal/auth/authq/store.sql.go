@@ -290,42 +290,6 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 	return items, nil
 }
 
-const loadAnonymousPermissions = `-- name: LoadAnonymousPermissions :one
-SELECT coalesce(
-    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
-        FILTER (WHERE p.key IS NOT NULL),
-    '{}')::text[] AS perms
-FROM roles r
-LEFT JOIN role_permissions rp ON rp.role_id = r.id
-LEFT JOIN permissions p       ON p.id = rp.permission_id
-WHERE r.key = 'anonymous'
-`
-
-func (q *Queries) LoadAnonymousPermissions(ctx context.Context) ([]string, error) {
-	row := q.db.QueryRow(ctx, loadAnonymousPermissions)
-	var perms []string
-	err := row.Scan(&perms)
-	return perms, err
-}
-
-const loadMemberPermissions = `-- name: LoadMemberPermissions :one
-SELECT coalesce(
-    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
-        FILTER (WHERE p.key IS NOT NULL),
-    '{}')::text[] AS perms
-FROM roles r
-LEFT JOIN role_permissions rp ON rp.role_id = r.id
-LEFT JOIN permissions p       ON p.id = rp.permission_id
-WHERE r.key = 'member'
-`
-
-func (q *Queries) LoadMemberPermissions(ctx context.Context) ([]string, error) {
-	row := q.db.QueryRow(ctx, loadMemberPermissions)
-	var perms []string
-	err := row.Scan(&perms)
-	return perms, err
-}
-
 const loadPermissions = `-- name: LoadPermissions :one
 WITH effective AS (
     SELECT r.id, r.is_superuser
@@ -355,6 +319,25 @@ func (q *Queries) LoadPermissions(ctx context.Context, userID string) (LoadPermi
 	var i LoadPermissionsRow
 	err := row.Scan(&i.Superuser, &i.Perms)
 	return i, err
+}
+
+const loadRolePermissions = `-- name: LoadRolePermissions :one
+SELECT coalesce(
+    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+        FILTER (WHERE p.key IS NOT NULL),
+    '{}')::text[] AS perms
+FROM roles r
+LEFT JOIN role_permissions rp ON rp.role_id = r.id
+LEFT JOIN permissions p       ON p.id = rp.permission_id
+WHERE r.key = $1
+`
+
+// 한 역할(anonymous·member)이 가진 권한 — 사용자가 아니라 역할을 묻는다.
+func (q *Queries) LoadRolePermissions(ctx context.Context, key string) ([]string, error) {
+	row := q.db.QueryRow(ctx, loadRolePermissions, key)
+	var perms []string
+	err := row.Scan(&perms)
+	return perms, err
 }
 
 const lockSuperuserHolders = `-- name: LockSuperuserHolders :many

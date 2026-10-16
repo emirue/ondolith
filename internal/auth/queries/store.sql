@@ -16,7 +16,8 @@ FROM effective e
 LEFT JOIN role_permissions rp ON rp.role_id = e.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id;
 
--- name: LoadAnonymousPermissions :one
+-- name: LoadRolePermissions :one
+-- 한 역할(anonymous·member)이 가진 권한 — 사용자가 아니라 역할을 묻는다.
 SELECT coalesce(
     array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
         FILTER (WHERE p.key IS NOT NULL),
@@ -24,17 +25,7 @@ SELECT coalesce(
 FROM roles r
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
-WHERE r.key = 'anonymous';
-
--- name: LoadMemberPermissions :one
-SELECT coalesce(
-    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
-        FILTER (WHERE p.key IS NOT NULL),
-    '{}')::text[] AS perms
-FROM roles r
-LEFT JOIN role_permissions rp ON rp.role_id = r.id
-LEFT JOIN permissions p       ON p.id = rp.permission_id
-WHERE r.key = 'member';
+WHERE r.key = $1;
 
 -- name: FindActiveUserByEmail :one
 SELECT id, email, display_name, is_active, sessions_valid_from,
