@@ -216,6 +216,14 @@ func (d *publicDeps) renderNamed(w http.ResponseWriter, r *http.Request, name st
 	d.renderPage(w, r, name, code, v)
 }
 
+// forbidden is the 403 a logged-in visitor without admin.access gets at /admin —
+// 사이트 레이아웃 안에서 말한다.
+func (d *publicDeps) forbidden(w http.ResponseWriter, r *http.Request) {
+	v := d.view(r, "권한이 없습니다", "")
+	v.Data = map[string]string{"Detail": "이 화면에 들어갈 권한이 없습니다. 필요하면 사이트 관리자에게 문의하세요."}
+	d.renderPage(w, r, "error.html", http.StatusForbidden, v)
+}
+
 func (d *publicDeps) notFound(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, "찾을 수 없습니다", "")
 	d.renderPage(w, r, "error.html", http.StatusNotFound, v)

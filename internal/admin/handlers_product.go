@@ -48,7 +48,7 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 
@@ -98,7 +98,7 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 			d.renderProduct(w, r, p, http.StatusUnprocessableEntity, categoryMissingMessage)
 			return
 		case err != nil:
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		d.log(r, c, "product.manage", "product", id, "상품 '"+p.Name+"' 생성")
@@ -117,7 +117,7 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrCategoryMissing):
 		d.renderProduct(w, r, p, http.StatusUnprocessableEntity, categoryMissingMessage)
 	case err != nil:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	default:
 		// D15 7절: 가격은 P-406 금액 계산의 입력이다.
 		d.log(r, c, "product.manage", "product", p.ID, "상품 '"+p.Name+"' 수정")
@@ -152,7 +152,7 @@ func (d *Deps) ProductDelete(w http.ResponseWriter, r *http.Request) {
 		d.renderProduct(w, r, nil, http.StatusConflict,
 			"주문 내역이 있어 삭제할 수 없습니다. 노출을 끄세요.")
 	case err != nil:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	default:
 		d.log(r, c, "product.manage", "product", id, "상품 삭제")
 		http.Redirect(w, r, "/admin/products", http.StatusSeeOther)
@@ -180,7 +180,7 @@ func (d *Deps) renderProduct(w http.ResponseWriter, r *http.Request,
 	if !isCreate(id) {
 		got, err := d.Images.List(ctx, id)
 		if err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		images = got
@@ -189,7 +189,7 @@ func (d *Deps) renderProduct(w http.ResponseWriter, r *http.Request,
 	// 그린다 — 저장된 값으로 되돌리면 고른 것이 사라진다.
 	cats, err := d.Commerce.Categories(ctx)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	picked := map[string]bool{}
@@ -236,7 +236,7 @@ func (d *Deps) ProductImageUpload(w http.ResponseWriter, r *http.Request) {
 	// 크기 상한과 운영자가 뺀 확장자는 첨부와 같은 설정을 쓴다 (A-309).
 	limits, err := d.Attachments.Limits(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	saved := 0
@@ -269,7 +269,7 @@ func (d *Deps) ProductImageUpload(w http.ResponseWriter, r *http.Request) {
 		d.renderProduct(w, r, nil, http.StatusUnprocessableEntity,
 			"이미지는 상품당 "+strconv.Itoa(commerce.MaxProductImages)+"장까지입니다.")
 	case err != nil:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	case saved == 0:
 		d.renderProduct(w, r, nil, http.StatusUnprocessableEntity, "파일을 고르세요.")
 	default:
@@ -294,7 +294,7 @@ func (d *Deps) ProductImageDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil && productID == "" {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if err != nil && d.Logger != nil {
@@ -324,7 +324,7 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	productID := r.PathValue("id")
@@ -394,7 +394,7 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"재고 증감과 가격 차액은 ±20억 이내여야 합니다.")
 	case err != nil:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	default:
 		d.log(r, c, "product.manage", "product", productID, "옵션·재고 수정")
 		http.Redirect(w, r, "/admin/products/"+productID+"/variants", http.StatusSeeOther)
@@ -410,12 +410,12 @@ func (d *Deps) renderVariants(w http.ResponseWriter, r *http.Request, code int, 
 	// sellableOnly=false — 관리자는 품절 조합도 봐야 재고를 채운다.
 	variants, err := d.Commerce.Variants(r.Context(), productID, false)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	opts, err := d.Commerce.Options(r.Context(), productID)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// 값을 미리 이어서 넘긴다. 관리자 템플릿에는 함수맵이 없고, `join` 하나를
@@ -443,7 +443,7 @@ func (d *Deps) OptionsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	names := r.PostForm["option_name"]
@@ -478,7 +478,7 @@ func (d *Deps) OptionsSave(w http.ResponseWriter, r *http.Request) {
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"그룹 이름과 값을 확인하세요. 빈 값이나 그룹 안의 중복은 저장하지 않습니다.")
 	case err != nil:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	default:
 		d.log(r, c, "product.manage", "product", productID, "옵션 저장·조합 생성")
 		http.Redirect(w, r, "/admin/products/"+productID+"/variants", http.StatusSeeOther)

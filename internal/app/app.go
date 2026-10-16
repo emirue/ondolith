@@ -529,7 +529,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// to sit INSIDE the loader — outside it, every request looks anonymous and
 	// the gate sends a logged-in administrator to the login form.
 	h := withActor(sessions, authStore)(
-		withAdminRateLimit(limiter, limits.AdminTreeIP)(withTreeGate(mux)))
+		withAdminRateLimit(limiter, limits.AdminTreeIP)(withTreeGate(mux, pub.forbidden)))
 	h = withMiddleware(h, sessions)
 
 	// **P-905 는 본 트리 밖이다** (D15 SC-8 1항). 세션도 CSRF 도 액터도 붙지

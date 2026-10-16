@@ -145,3 +145,19 @@ func CurrentGroup(groups []NavGroup, path string) string {
 func Forbidden(w http.ResponseWriter) {
 	http.Error(w, "권한이 없습니다.", http.StatusForbidden)
 }
+
+// forbid is Forbidden inside the admin layout — 관리자 화면 안의 거절이다.
+func (d *Deps) forbid(w http.ResponseWriter, r *http.Request) {
+	d.refuse(w, r, http.StatusForbidden, "권한이 없습니다.")
+}
+
+// refuse answers a refused admin request inside the admin layout (admin/refusal.html).
+// http.Error 는 레이아웃 없는 흰 화면 한 줄이라 운영자가 어디서 무엇이 거절됐는지 보고
+// 돌아갈 길이 없었다. 렌더러가 없는 조립(일부 시험)은 예전처럼 평문이다.
+func (d *Deps) refuse(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	if d.Render == nil {
+		http.Error(w, msg, code)
+		return
+	}
+	d.Render(w, r, "admin/refusal.html", code, map[string]any{"Error": msg})
+}

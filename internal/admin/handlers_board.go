@@ -25,12 +25,12 @@ func (d *Deps) BoardList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	boards, err := d.Content.Boards(ctx)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	granted, err := d.Auth.BoardsWithGrants(ctx)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	type row struct {
@@ -56,11 +56,11 @@ func (d *Deps) BoardForm(w http.ResponseWriter, r *http.Request) {
 	if !isCreate(id) {
 		b, err := d.Content.BoardByID(r.Context(), id)
 		if errors.Is(err, content.ErrNotFound) {
-			http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
+			d.refuse(w, r, http.StatusNotFound, "게시판을 찾을 수 없습니다.")
 			return
 		}
 		if err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		data["Board"] = b
@@ -75,7 +75,7 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	ctx := r.Context()
@@ -138,7 +138,7 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !reauthOK(c, r) {
-		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
+		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
 	}
 	id := r.PathValue("id")
@@ -146,11 +146,11 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 	err := d.Content.DeleteBoard(r.Context(), id, force)
 	switch {
 	case errors.Is(err, content.ErrBoardInUse):
-		http.Error(w, msgBoardInUse, http.StatusConflict)
+		d.refuse(w, r, http.StatusConflict, msgBoardInUse)
 	case errors.Is(err, content.ErrNotFound):
-		http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "게시판을 찾을 수 없습니다.")
 	case err != nil:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	default:
 		d.log(r, c, "board.manage", "board", id, "게시판 삭제")
 		http.Redirect(w, r, "/admin/boards", http.StatusSeeOther)
@@ -166,16 +166,16 @@ func (d *Deps) BoardFields(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	b, err := d.Content.BoardByID(ctx, r.PathValue("id"))
 	if errors.Is(err, content.ErrNotFound) {
-		http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "게시판을 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	fields, err := d.Content.BoardFields(ctx, b.ID)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.Render(w, r, "admin/board-fields.html", http.StatusOK, map[string]any{
@@ -189,7 +189,7 @@ func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	ctx := r.Context()
@@ -197,7 +197,7 @@ func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {
 
 	if key := r.PostFormValue("delete"); key != "" {
 		if err := d.Content.DeleteBoardField(ctx, boardID, key); err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		// The stored values survive (D14 3절 규칙 4) — say so, because the
@@ -224,7 +224,7 @@ func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {
 		// 목록이 사라지고 폼이 `/admin/boards//fields` 로 보낸다.
 		b, berr := d.Content.BoardByID(ctx, boardID)
 		if errors.Is(berr, content.ErrNotFound) {
-			http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
+			d.refuse(w, r, http.StatusNotFound, "게시판을 찾을 수 없습니다.")
 			return
 		}
 		fields, ferr := d.Content.BoardFields(ctx, boardID)
@@ -233,7 +233,7 @@ func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {
 			if d.Logger != nil {
 				d.Logger.Error("필드 저장 실패", "board", boardID, "err", errors.Join(err, berr, ferr))
 			}
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		d.Render(w, r, "admin/board-fields.html", http.StatusUnprocessableEntity, map[string]any{
@@ -269,7 +269,7 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	ctx := r.Context()
@@ -282,15 +282,15 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 
 	b, err := d.Content.BoardByPost(ctx, postID)
 	if errors.Is(err, content.ErrNotFound) {
-		http.Error(w, "글을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "글을 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if !c.CanOn("post.moderate", auth.BoardID(b.ID)) {
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 
@@ -299,7 +299,7 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 		// 첨부 실물까지 지운다 (OPEN-40). 행만 지우면 파일이 남는데,
 		// 글이 사라졌으니 A-309 목록에도 안 나와 아무도 찾지 못한다.
 		if err := d.Attachments.DeletePost(ctx, postID); err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		// D15 7절: 남의 글 삭제는 분쟁의 근거가 된다.
@@ -311,12 +311,12 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 			status = "hidden"
 		}
 		if err := d.Content.SetPostFlags(ctx, postID, act == "pin", status); err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		d.log(r, c, "post.moderate", "post", postID, "게시판 '"+b.Slug+"' 의 글 "+act)
 	default:
-		http.Error(w, "알 수 없는 동작입니다.", http.StatusUnprocessableEntity)
+		d.refuse(w, r, http.StatusUnprocessableEntity, "알 수 없는 동작입니다.")
 		return
 	}
 	// 조작한 그 쪽으로 돌아간다 — 2쪽에서 숨김을 풀 때마다 1쪽으로 튕기면 쪽 넘김이 무의미하다.
@@ -330,7 +330,7 @@ func (d *Deps) CommentModerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	ctx := r.Context()
@@ -342,24 +342,24 @@ func (d *Deps) CommentModerate(w http.ResponseWriter, r *http.Request) {
 
 	cm, err := d.Content.CommentByID(ctx, commentID)
 	if errors.Is(err, content.ErrNotFound) {
-		http.Error(w, "댓글을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "댓글을 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	b, err := d.Content.BoardByPost(ctx, cm.PostID)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if !c.CanOn("comment.moderate", auth.BoardID(b.ID)) {
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 	if err := d.Content.DeleteComment(ctx, commentID); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.log(r, c, "comment.moderate", "comment", commentID, "게시판 '"+b.Slug+"' 의 댓글 삭제")
@@ -392,11 +392,11 @@ func (d *Deps) PostList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if !c.CanOn("post.moderate", auth.BoardID(b.ID)) {
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 	// The moderator sees hidden and secret posts — that is what moderating is.
@@ -405,7 +405,7 @@ func (d *Deps) PostList(w http.ResponseWriter, r *http.Request) {
 	page := pageOf(r)
 	posts, err := d.Content.ModeratePosts(ctx, b.ID, moderationPage+1, (page-1)*moderationPage)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	more := len(posts) > moderationPage
@@ -434,17 +434,17 @@ func (d *Deps) CommentList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if !c.CanOn("comment.moderate", auth.BoardID(b.ID)) {
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 	page := pageOf(r)
 	comments, err := d.Content.ModerateComments(ctx, b.ID, moderationPage+1, (page-1)*moderationPage)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	data := map[string]any{"BoardSlug": slug, "Board": b,
@@ -478,17 +478,17 @@ func (d *Deps) AttachmentList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if !c.CanOn("post.moderate", auth.BoardID(b.ID)) {
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 	page := pageOf(r)
 	files, err := d.Content.BoardAttachments(ctx, b.ID, attachmentPage+1, (page-1)*attachmentPage)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	data := map[string]any{"BoardSlug": slug, "Board": b,
@@ -508,11 +508,11 @@ func (d *Deps) AttachmentDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	if d.Attachments == nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	ctx := r.Context()
@@ -524,20 +524,20 @@ func (d *Deps) AttachmentDelete(w http.ResponseWriter, r *http.Request) {
 
 	at, err := d.Attachments.ByID(ctx, id)
 	if errors.Is(err, content.ErrNotFound) {
-		http.Error(w, "첨부를 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "첨부를 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	b, err := d.Content.BoardByPost(ctx, at.PostID)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if !c.CanOn("post.moderate", auth.BoardID(b.ID)) {
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 

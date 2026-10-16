@@ -2079,3 +2079,28 @@ func TestUserListSearchesByEmailOrName(t *testing.T) {
 		}
 	}
 }
+
+// **관리자 화면의 거절은 관리자 레이아웃 안에서 말한다.** http.Error 는 레이아웃 없는 흰
+// 화면 한 줄이라(「자기 계정에는 이 작업을 할 수 없습니다.」 등), 운영자는 어디서 무엇이
+// 거절됐는지 보고 돌아갈 길이 없었다.
+func TestAdminRefusalsRenderInsideTheLayout(t *testing.T) {
+	d, _ := fixture(t, nil)
+	ctx := context.Background()
+	me, err := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"user.update": true}, id: me}
+	}
+	rec := postID(d.UserDeactivate, me, nil)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "admin/refusal.html") ||
+		!strings.Contains(rec.Body.String(), "자기 계정에는 이 작업을 할 수 없습니다.") {
+		t.Errorf("자기 계정 비활성화 = HTTP %d %q — 관리자 거절 화면이어야 한다", rec.Code, rec.Body.String())
+	}
+	// 권한이 없을 때도 같다.
+	d.Caller = func(*http.Request) Caller { return &fakeCaller{perms: map[string]bool{}, id: me} }
+	if rec := postID(d.UserDeactivate, me, nil); !strings.Contains(rec.Body.String(), "admin/refusal.html") {
+		t.Errorf("권한 없음 = %q — 관리자 거절 화면이어야 한다", rec.Body.String())
+	}
+}

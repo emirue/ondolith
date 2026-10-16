@@ -130,7 +130,7 @@ type Deps struct {
 func (d *Deps) require(w http.ResponseWriter, r *http.Request, perm string) (Caller, bool) {
 	c := d.Caller(r)
 	if !c.Can(perm) {
-		Forbidden(w)
+		d.forbid(w, r)
 		return nil, false
 	}
 	return c, true
@@ -170,7 +170,7 @@ func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 		errors.Is(err, auth.ErrNoUser):
 		http.NotFound(w, r)
 	default:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	}
 	return true
 }
@@ -239,7 +239,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	kv := map[string]string{}
@@ -295,7 +295,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	prev, err := d.Content.Settings(r.Context(), append([]string{"turnstile.site_key"}, assemblyKeys...)...)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	typeChanged := changed(kv, prev, "site.type")
@@ -307,7 +307,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		if kv["site.type"] == "cms" && d.Commerce != nil {
 			n, err := d.Commerce.OpenOrders(r.Context())
 			if err != nil {
-				http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+				d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 				return
 			}
 			if n > 0 {
@@ -326,7 +326,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if typeChanged {
@@ -396,7 +396,7 @@ func (d *Deps) renderSettingsNotice(w http.ResponseWriter, r *http.Request,
 ) {
 	kv, err := d.Content.Settings(r.Context(), keys...)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	shown := map[string]string{}
@@ -442,7 +442,7 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	kv := map[string]string{}
@@ -469,7 +469,7 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// 값은 남기지 않는다 — 비밀번호가 섞여 있고 로그는 지워지지 않는다 (D15 7절).
@@ -501,7 +501,7 @@ func (d *Deps) MailTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if d.SendMailTest == nil {
-		http.Error(w, "시험 발송을 쓸 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "시험 발송을 쓸 수 없습니다.")
 		return
 	}
 	if d.Limiter != nil && !d.Limiter.Allow("mail-test:acct:"+c.Email(), d.Limits.MailTestAccount) {
@@ -585,7 +585,7 @@ func (d *Deps) PageList(w http.ResponseWriter, r *http.Request) {
 	}
 	pages, err := d.Content.Pages(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.Render(w, r, "admin/pages.html", http.StatusOK, map[string]any{"Pages": pages})
@@ -611,11 +611,11 @@ func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := d.Content.PageByID(r.Context(), id)
 	if errors.Is(err, content.ErrNotFound) {
-		http.Error(w, "페이지를 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "페이지를 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.renderPageEdit(w, r, http.StatusOK, map[string]any{"Page": p})
@@ -710,7 +710,7 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	slug := strings.TrimSpace(r.PostFormValue("slug"))
@@ -755,7 +755,7 @@ func (d *Deps) PagePublish(w http.ResponseWriter, r *http.Request) {
 	to := content.PageStatus(r.PostFormValue("status"))
 	if err := d.Content.SetPageStatus(r.Context(), r.PathValue("id"), to); err != nil {
 		if errors.Is(err, content.ErrTransitionBase) || errors.Is(err, content.ErrStatusUnknown) {
-			http.Error(w, "허용되지 않는 상태 전이입니다.", http.StatusUnprocessableEntity)
+			d.refuse(w, r, http.StatusUnprocessableEntity, "허용되지 않는 상태 전이입니다.")
 			return
 		}
 		d.fail(w, r, err)
@@ -798,7 +798,7 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	users, err := d.Auth.SearchUsers(r.Context(), q, userPageSize+1, page*userPageSize)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// **자르는 조건은 길이로 판단한다.** `if hasNext` 로 자르면 그 판정이
@@ -817,7 +817,7 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	// 없는 동안 그 체크박스는 아무 일도 하지 않는 스위치였다.
 	fields, err := d.Content.UserFields(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	var columns []content.FieldSchema
@@ -843,18 +843,18 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := d.Auth.FindUserByID(r.Context(), r.PathValue("id"))
 	if errors.Is(err, auth.ErrNoUser) {
-		http.Error(w, "사용자를 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "사용자를 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// The hash is not in User, and nothing here puts it back: D19 lists it
 	// under "받지 않는 필드" in both directions.
 	roles, err := d.Auth.Roles(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u, "Roles": roles})
@@ -869,22 +869,22 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 // is what keeps a later fourth action from getting two of the three.
 func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, target string) bool {
 	if !reauthOK(c, r) {
-		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
+		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return false
 	}
 	if target == c.UserID() {
 		// Locking yourself out, or deleting the actor the log points at.
-		http.Error(w, "자기 계정에는 이 작업을 할 수 없습니다.", http.StatusForbidden)
+		d.refuse(w, r, http.StatusForbidden, "자기 계정에는 이 작업을 할 수 없습니다.")
 		return false
 	}
 	holds, err := d.Auth.HoldsSuperuser(r.Context(), target)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return false
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: auth.NewPermissions(c.IsSuperuser(), nil)}
 	if err := auth.CanOperateOnAccount(actor, holds); err != nil {
-		Forbidden(w)
+		d.forbid(w, r)
 		return false
 	}
 	return true
@@ -904,10 +904,10 @@ func (d *Deps) UserDeactivate(w http.ResponseWriter, r *http.Request) {
 	// doing it at once must not both succeed. The store serialises.
 	if err := d.Auth.SetActive(r.Context(), target, false); err != nil {
 		if errors.Is(err, auth.ErrLastSuperuser) {
-			http.Error(w, "마지막 관리자는 비활성화할 수 없습니다.", http.StatusConflict)
+			d.refuse(w, r, http.StatusConflict, "마지막 관리자는 비활성화할 수 없습니다.")
 			return
 		}
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// D15 7절·D19 A-402: 사용자 생성·비활성·삭제·재설정은 작업 로그에 남긴다.
@@ -930,7 +930,7 @@ func (d *Deps) UserActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.Auth.SetActive(r.Context(), target, true); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.log(r, c, "user.update", "user", target, "사용자 활성화")
@@ -951,15 +951,15 @@ func (d *Deps) UserDelete(w http.ResponseWriter, r *http.Request) {
 	err := d.Auth.DeleteUser(r.Context(), target)
 	switch {
 	case errors.Is(err, auth.ErrLastSuperuser):
-		http.Error(w, "마지막 관리자는 삭제할 수 없습니다.", http.StatusConflict)
+		d.refuse(w, r, http.StatusConflict, "마지막 관리자는 삭제할 수 없습니다.")
 	case errors.Is(err, auth.ErrUserInUse):
 		// FR-212: an order needs its buyer to exist for settlement and disputes.
 		// Deactivation is the answer, which is why D15 5.3 makes it the default.
-		http.Error(w, "기록이 남아 있어 삭제할 수 없습니다. 비활성화하세요.", http.StatusConflict)
+		d.refuse(w, r, http.StatusConflict, "기록이 남아 있어 삭제할 수 없습니다. 비활성화하세요.")
 	case errors.Is(err, auth.ErrNoUser):
-		http.Error(w, "사용자를 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "사용자를 찾을 수 없습니다.")
 	case err != nil:
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 	default:
 		d.log(r, c, "user.delete", "user", target, "사용자 삭제")
 		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
@@ -983,22 +983,22 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u, err := d.Auth.FindUserByID(ctx, target)
 	if errors.Is(err, auth.ErrNoUser) {
-		http.Error(w, "사용자를 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "사용자를 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// Sessions end first. Issuing the token first would leave a window where
 	// the takeover being undone is still logged in (D15 5.4).
 	if err := d.Auth.InvalidateSessions(ctx, target); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	raw, err := d.Auth.IssueToken(ctx, auth.KindPasswordReset, target)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if d.SendReset != nil {
@@ -1017,7 +1017,7 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	// 문구는 가입(P-103)과 같다. err.Error() 는 `content: …` 접두어가 붙은 내부 문자열이다.
@@ -1041,7 +1041,7 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// No role is assigned here. Handing user.create the ability to pick a role
@@ -1053,13 +1053,13 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 				map[string]any{"Error": "이미 사용 중인 이메일입니다."})
 			return
 		}
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// 관리자가 만든 계정은 인증된 채로 둔다 (FR-214) — 관리자가 보증한 주소이고, 인증을
 	// 켠 사이트는 미인증 계정의 로그인을 막으므로 그대로 두면 만든 계정이 들어오지 못한다.
 	if err := d.Auth.MarkEmailVerified(r.Context(), id); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.log(r, c, "user.create", "user", id, "사용자 생성: "+email)
@@ -1117,7 +1117,7 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if d.OpLog == nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	page := 0
@@ -1139,12 +1139,12 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	entries, err := d.OpLog.RecentBetween(ctx, p.Since, p.Until, oplogPageSize, page*oplogPageSize)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	total, err := d.OpLog.Count(ctx, p.Since, p.Until)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// `Total` 이 아니라 `Count` 다 — 이 화면의 숫자는 금액이 아니라 건수이고,
@@ -1184,7 +1184,7 @@ func (d *Deps) UserFieldList(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := d.Content.UserFields(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.Render(w, r, "admin/user-fields.html", http.StatusOK, map[string]any{
@@ -1199,14 +1199,14 @@ func (d *Deps) UserFieldSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	ctx := r.Context()
 
 	if key := r.PostFormValue("delete"); key != "" {
 		if err := d.Content.DeleteUserField(ctx, key); err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		// 값은 남는다 (D14 3절 규칙 4) — 운영자가 곧 궁금해할 것이므로 적어 둔다.

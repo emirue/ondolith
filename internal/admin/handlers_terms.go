@@ -28,7 +28,7 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 
@@ -75,7 +75,7 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) renderTerms(w http.ResponseWriter, r *http.Request, code int, msg string) {
 	list, err := d.Commerce.ListTerms(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	data := map[string]any{"Terms": list, "Error": msg}
@@ -112,7 +112,7 @@ func (d *Deps) BusinessSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	kv := map[string]string{}
@@ -120,7 +120,7 @@ func (d *Deps) BusinessSave(w http.ResponseWriter, r *http.Request) {
 		kv[k] = strings.TrimSpace(r.PostFormValue(k))
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.log(r, c, "settings.update", "settings", "business", "사업자 정보 수정")
@@ -134,7 +134,7 @@ func (d *Deps) renderBusiness(w http.ResponseWriter, r *http.Request, code int,
 	if kv == nil {
 		stored, err := d.Content.Settings(r.Context(), commerce.BusinessKeys...)
 		if err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		kv = stored
@@ -229,7 +229,7 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 
@@ -260,7 +260,7 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// D15 7절: 자격증명 변경은 분쟁의 근거가 된다. **값은 남기지 않는다.**
@@ -275,7 +275,7 @@ func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, m
 func (d *Deps) renderPaymentWith(w http.ResponseWriter, r *http.Request, code int, msg, notice string) {
 	kv, err := d.Content.Settings(r.Context(), paymentSettingKeys...)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	shown := map[string]string{}
