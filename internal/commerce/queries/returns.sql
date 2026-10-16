@@ -74,11 +74,13 @@ UPDATE returns SET status = '거부', reject_reason = $2, updated_at = now()
 WHERE id = $1;
 
 -- name: Returns :many
-SELECT id, return_no, kind, status, reason, reject_reason,
-       COALESCE(fault, '')::text AS fault, COALESCE(shipping_fee_policy, '')::text AS fee_policy,
-       COALESCE(shipping_fee_amount, 0)::int AS fee_amount, COALESCE(new_variant_id::text, '')::text AS new_variant_id,
-       COALESCE(price_difference, 0)::int AS price_difference, created_at
-FROM returns WHERE order_id = $1 ORDER BY created_at DESC, id;
+SELECT r.id, r.return_no, r.kind, r.status, r.reason, r.reject_reason,
+       COALESCE(r.fault, '')::text AS fault, COALESCE(r.shipping_fee_policy, '')::text AS fee_policy,
+       COALESCE(r.shipping_fee_amount, 0)::int AS fee_amount, COALESCE(r.new_variant_id::text, '')::text AS new_variant_id,
+       COALESCE(r.price_difference, 0)::int AS price_difference, r.created_at,
+       COALESCE(nv.option_values, '{}'::jsonb) AS new_option_values
+FROM returns r LEFT JOIN product_variants nv ON nv.id = r.new_variant_id
+WHERE r.order_id = $1 ORDER BY r.created_at DESC, r.id;
 
 -- name: ReturnItemsOf :many
 SELECT ri.return_id, ri.order_item_id, oi.product_name, oi.option_label, ri.quantity, ri.is_open
@@ -91,11 +93,13 @@ FROM return_items ri JOIN order_items oi ON oi.id = ri.order_item_id
 WHERE ri.return_id = $1 ORDER BY oi.created_at, oi.id;
 
 -- name: ReturnByNo :one
-SELECT id, return_no, kind, status, reason, reject_reason,
-       COALESCE(fault, '')::text AS fault, COALESCE(shipping_fee_policy, '')::text AS fee_policy,
-       COALESCE(shipping_fee_amount, 0)::int AS fee_amount, COALESCE(new_variant_id::text, '')::text AS new_variant_id,
-       COALESCE(price_difference, 0)::int AS price_difference, created_at
-FROM returns WHERE return_no = $1;
+SELECT r.id, r.return_no, r.kind, r.status, r.reason, r.reject_reason,
+       COALESCE(r.fault, '')::text AS fault, COALESCE(r.shipping_fee_policy, '')::text AS fee_policy,
+       COALESCE(r.shipping_fee_amount, 0)::int AS fee_amount, COALESCE(r.new_variant_id::text, '')::text AS new_variant_id,
+       COALESCE(r.price_difference, 0)::int AS price_difference, r.created_at,
+       COALESCE(nv.option_values, '{}'::jsonb) AS new_option_values
+FROM returns r LEFT JOIN product_variants nv ON nv.id = r.new_variant_id
+WHERE r.return_no = $1;
 
 -- name: VariantsForExchange :many
 SELECT v.id, v.product_id, v.option_values, COALESCE(v.sku, '')::text AS sku,
@@ -104,6 +108,8 @@ FROM product_variants v
 WHERE v.product_id = (SELECT oi.product_id FROM order_items oi WHERE oi.id = sqlc.arg('order_item_id'))
   AND v.id <> (SELECT oi.variant_id FROM order_items oi WHERE oi.id = sqlc.arg('order_item_id'))
   AND v.is_visible AND v.stock > 0
+  -- 숨긴 상품의 조합은 고르게 하지 않는다 — 서버(ExchangeTarget)가 거절하는 선택지다.
+  AND EXISTS (SELECT 1 FROM products p WHERE p.id = v.product_id AND p.is_visible)
 ORDER BY v.price_delta, v.id;
 
 -- name: LockReturnForExchange :one

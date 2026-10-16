@@ -21,6 +21,11 @@
   {{/* **금액 입력란이 없다.** 품목과 수량만 고르고 금액은 서버가 스냅샷에서
        계산한다 (FR-617, FR-625) — 여러 개 산 것 중 하나만 취소하는 경우가
        정상이고, 그때 할인이 붙어 있으면 단가 × 수량은 틀린 답이다. */}}
+  {{/* 할 수 있는 것만 낸다 — 남은 금액이 0원이면 요청할 것이 없고, 취소는 상태 기계가
+       허락할 때만이다(CanCancel). 남은 0개에도 두 버튼이 눌려 누를 때마다 거절됐다. */}}
+  {{if le .Remaining 0}}
+  <p class="notice">환불할 수 있는 금액이 남아 있지 않습니다.</p>
+  {{else}}
   <form method="post" action="/orders/{{.Order.OrderNo}}/refund" class="form">
     <fieldset>
       <legend>환불할 품목</legend>
@@ -41,9 +46,12 @@
     <input id="reason" name="reason" maxlength="500">
     <button type="submit">환불 요청</button>
   </form>
+  {{end}}
+  {{if .CanCancel}}
   <form method="post" action="/orders/{{.Order.OrderNo}}/cancel" class="form">
     <button type="submit">주문 취소</button>
   </form>
+  {{end}}
   {{end}}
 </section>
 {{end}}

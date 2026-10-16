@@ -837,6 +837,9 @@ dl { margin: 0 0 var(--s20); }
    못해 옆 열을 카드 밖으로 밀어낸다 — 어디서든 꺾는다. */
 .adm-wrap { overflow-wrap: anywhere; word-break: normal; }
 
+/* 약관 본문처럼 줄바꿈이 뜻을 갖는 긴 글. <pre> 기본값은 줄을 접지 않아 표를 밀어낸다. */
+.adm-pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 60ch; margin: 8px 0 0; font: inherit; }
+
 @media print {
   .adm-header, .adm-sidebar { display: none; }
   .qr-label { break-inside: avoid; }

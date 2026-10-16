@@ -369,6 +369,9 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.checkoutFail})
 		r.Add(Route{Screen: "P-410", Method: "GET", Pattern: "/checkout/complete", Class: SC3,
 			Handler: sh.checkoutComplete})
+		// 시행된 약관의 본문은 누구나 읽는다 — 주문서가 동의를 받기 전에 보여 줄 것이다.
+		r.Add(Route{Screen: "P-411", Method: "GET", Pattern: "/terms/{id}", Class: SC1,
+			Handler: sh.termsView})
 
 		// ---- 주문 조회 (SC-3: 소유자는 세션이 정한다) ----------------------
 		r.Add(Route{Screen: "P-501", Method: "GET", Pattern: "/orders", Class: SC3,

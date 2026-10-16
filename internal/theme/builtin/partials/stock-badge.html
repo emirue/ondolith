@@ -1,0 +1,4 @@
+{{/* 상품의 판매 상태 배지. 목록·검색·홈이 같은 것을 쓰고, 상품 화면과 같은 말을 쓴다 —
+     조합이 없으면 「판매 준비 중」, 있는데 재고가 없으면 「품절」. 기대하는 데이터: 상품
+     {HasVariants, InStock}. 파는 중이면 아무것도 그리지 않는다. */}}
+{{if not .HasVariants}}<span class="badge badge--outline">판매 준비 중</span>{{else if not .InStock}}<span class="badge badge--soldout">품절</span>{{end}}

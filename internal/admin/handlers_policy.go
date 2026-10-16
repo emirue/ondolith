@@ -20,10 +20,14 @@ var policyDefaults = map[string]string{
 	settingConfirmDays:              "8",
 	commerce.SettingReturnFeePolicy: commerce.FeePolicyDeduct,
 	commerce.SettingReturnFeeAmount: "0",
+	// 0 원·기준 없음 — 이 화면이 생기기 전 모든 사이트가 그렇게 계산해 왔다.
+	commerce.SettingShippingFlatFee:       "0",
+	commerce.SettingShippingFreeThreshold: "0",
 }
 
 var policyKeys = []string{settingReturnDays, settingConfirmDays,
-	commerce.SettingReturnFeePolicy, commerce.SettingReturnFeeAmount}
+	commerce.SettingReturnFeePolicy, commerce.SettingReturnFeeAmount,
+	commerce.SettingShippingFlatFee, commerce.SettingShippingFreeThreshold}
 
 // PolicyForm is A-512 GET.
 func (d *Deps) PolicyForm(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +87,18 @@ func (d *Deps) PolicySave(w http.ResponseWriter, r *http.Request) {
 	if err != nil || fee < 0 {
 		d.renderPolicy(w, r, http.StatusUnprocessableEntity,
 			"배송비는 0 이상의 정수입니다.", kv)
+		return
+	}
+	// 주문 배송비 (D50). 음수가 새면 Shipping.Fee 가 모든 주문을 거부하고, 금액 상한을
+	// 넘으면 그 뒤 모든 주문이 상한에 걸린다 — 저장 단계에서 막는다.
+	if n, err := strconv.Atoi(kv[commerce.SettingShippingFlatFee]); err != nil || n < 0 || n > commerce.MaxAmount {
+		d.renderPolicy(w, r, http.StatusUnprocessableEntity,
+			"주문 배송비는 0원부터 20억 원까지의 정수입니다.", kv)
+		return
+	}
+	if n, err := strconv.Atoi(kv[commerce.SettingShippingFreeThreshold]); err != nil || n < 0 || n > commerce.MaxAmount {
+		d.renderPolicy(w, r, http.StatusUnprocessableEntity,
+			"무료배송 기준액은 0원부터 20억 원까지의 정수입니다.", kv)
 		return
 	}
 

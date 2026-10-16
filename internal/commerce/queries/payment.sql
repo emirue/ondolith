@@ -31,3 +31,10 @@ SELECT p.status, p.kind, p.payment_key, o.id AS order_id, o.order_no,
        o.status AS order_status, o.total_amount
 FROM payments p JOIN orders o ON o.id = p.order_id
 WHERE p.id = $1 FOR UPDATE OF p;
+
+-- name: OrderPaymentMethod :one
+-- 영수증(P-509)의 결제수단. 결제사 응답 원문의 method 다 — 따로 열을 두지 않는다.
+SELECT COALESCE(raw_response->>'method', '')::text AS method
+FROM payments
+WHERE order_id = $1 AND kind = '주문결제' AND status <> '실패'
+ORDER BY created_at DESC LIMIT 1;

@@ -74,6 +74,25 @@ func termsFromRow(r commerceq.Term) Terms {
 		EffectiveAt: r.EffectiveAt, Required: r.IsRequired, CreatedAt: r.CreatedAt}
 }
 
+// TermsForReading is P-411: one version's text, once it is in force.
+//
+// 미래 시행 버전은 그날 전까지 없는 것이다 — 공개 전 문안이 주소 하나로 새지
+// 않게. 지난 버전은 계속 열린다: 그 버전에 동의한 주문이 있다 (FR-619).
+func (s *Store) TermsForReading(ctx context.Context, id string, now time.Time) (*Terms, error) {
+	if !looksLikeUUID(id) {
+		return nil, ErrNotFound
+	}
+	r, err := s.q.TermsInForceByID(ctx, commerceq.TermsInForceByIDParams{ID: id, Now: now})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	t := termsFromRow(r)
+	return &t, nil
+}
+
 // AddTerms writes a new version.
 //
 // **기존 버전을 고치는 경로는 없다.** `order_agreements` 가 가리키는 본문이

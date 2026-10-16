@@ -85,7 +85,8 @@ func (q *Queries) DeleteProductOptions(ctx context.Context, productID string) er
 const editVariant = `-- name: EditVariant :execrows
 UPDATE product_variants
 SET stock = stock + $3, sku = NULLIF($4::text, ''), price_delta = $5,
-    barcode = NULLIF($6::text, ''), updated_at = now()
+    barcode = NULLIF($6::text, ''), is_visible = NOT $7::boolean,
+    updated_at = now()
 WHERE id = $1 AND product_id = $2
 `
 
@@ -96,6 +97,7 @@ type EditVariantParams struct {
 	Column4    string
 	PriceDelta int32
 	Barcode    string
+	Hidden     bool
 }
 
 func (q *Queries) EditVariant(ctx context.Context, arg EditVariantParams) (int64, error) {
@@ -106,11 +108,27 @@ func (q *Queries) EditVariant(ctx context.Context, arg EditVariantParams) (int64
 		arg.Column4,
 		arg.PriceDelta,
 		arg.Barcode,
+		arg.Hidden,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const hideVariants = `-- name: HideVariants :exec
+UPDATE product_variants SET is_visible = false, updated_at = now()
+WHERE product_id = $1 AND id = ANY($2::uuid[])
+`
+
+type HideVariantsParams struct {
+	ProductID string
+	Ids       []string
+}
+
+func (q *Queries) HideVariants(ctx context.Context, arg HideVariantsParams) error {
+	_, err := q.db.Exec(ctx, hideVariants, arg.ProductID, arg.Ids)
+	return err
 }
 
 const insertProductOption = `-- name: InsertProductOption :exec

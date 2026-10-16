@@ -6,7 +6,8 @@
 -- name: ListProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
-       COALESCE(i.id::text, '')::text AS image_id
+       COALESCE(i.id::text, '')::text AS image_id,
+       (v.min_delta IS NOT NULL)::boolean AS has_variants
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible, p.created_at
     FROM products p
@@ -99,7 +100,8 @@ DELETE FROM categories WHERE id = $1;
 -- name: SearchProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
-       COALESCE(i.id::text, '')::text AS image_id
+       COALESCE(i.id::text, '')::text AS image_id,
+       (v.min_delta IS NOT NULL)::boolean AS has_variants
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
            ts_rank(p.search_tsv, to_tsquery('simple', sqlc.arg('query'))) AS rank

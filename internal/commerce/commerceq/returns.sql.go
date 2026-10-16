@@ -481,11 +481,13 @@ func (q *Queries) ReserveExchangePayment(ctx context.Context, arg ReserveExchang
 }
 
 const returnByNo = `-- name: ReturnByNo :one
-SELECT id, return_no, kind, status, reason, reject_reason,
-       COALESCE(fault, '')::text AS fault, COALESCE(shipping_fee_policy, '')::text AS fee_policy,
-       COALESCE(shipping_fee_amount, 0)::int AS fee_amount, COALESCE(new_variant_id::text, '')::text AS new_variant_id,
-       COALESCE(price_difference, 0)::int AS price_difference, created_at
-FROM returns WHERE return_no = $1
+SELECT r.id, r.return_no, r.kind, r.status, r.reason, r.reject_reason,
+       COALESCE(r.fault, '')::text AS fault, COALESCE(r.shipping_fee_policy, '')::text AS fee_policy,
+       COALESCE(r.shipping_fee_amount, 0)::int AS fee_amount, COALESCE(r.new_variant_id::text, '')::text AS new_variant_id,
+       COALESCE(r.price_difference, 0)::int AS price_difference, r.created_at,
+       COALESCE(nv.option_values, '{}'::jsonb) AS new_option_values
+FROM returns r LEFT JOIN product_variants nv ON nv.id = r.new_variant_id
+WHERE r.return_no = $1
 `
 
 type ReturnByNoRow struct {
@@ -501,6 +503,7 @@ type ReturnByNoRow struct {
 	NewVariantID    string
 	PriceDifference int32
 	CreatedAt       time.Time
+	NewOptionValues []byte
 }
 
 func (q *Queries) ReturnByNo(ctx context.Context, returnNo string) (ReturnByNoRow, error) {
@@ -519,6 +522,7 @@ func (q *Queries) ReturnByNo(ctx context.Context, returnNo string) (ReturnByNoRo
 		&i.NewVariantID,
 		&i.PriceDifference,
 		&i.CreatedAt,
+		&i.NewOptionValues,
 	)
 	return i, err
 }
@@ -648,11 +652,13 @@ func (q *Queries) ReturnItemsOf(ctx context.Context, returnIds []string) ([]Retu
 }
 
 const returns = `-- name: Returns :many
-SELECT id, return_no, kind, status, reason, reject_reason,
-       COALESCE(fault, '')::text AS fault, COALESCE(shipping_fee_policy, '')::text AS fee_policy,
-       COALESCE(shipping_fee_amount, 0)::int AS fee_amount, COALESCE(new_variant_id::text, '')::text AS new_variant_id,
-       COALESCE(price_difference, 0)::int AS price_difference, created_at
-FROM returns WHERE order_id = $1 ORDER BY created_at DESC, id
+SELECT r.id, r.return_no, r.kind, r.status, r.reason, r.reject_reason,
+       COALESCE(r.fault, '')::text AS fault, COALESCE(r.shipping_fee_policy, '')::text AS fee_policy,
+       COALESCE(r.shipping_fee_amount, 0)::int AS fee_amount, COALESCE(r.new_variant_id::text, '')::text AS new_variant_id,
+       COALESCE(r.price_difference, 0)::int AS price_difference, r.created_at,
+       COALESCE(nv.option_values, '{}'::jsonb) AS new_option_values
+FROM returns r LEFT JOIN product_variants nv ON nv.id = r.new_variant_id
+WHERE r.order_id = $1 ORDER BY r.created_at DESC, r.id
 `
 
 type ReturnsRow struct {
@@ -668,6 +674,7 @@ type ReturnsRow struct {
 	NewVariantID    string
 	PriceDifference int32
 	CreatedAt       time.Time
+	NewOptionValues []byte
 }
 
 func (q *Queries) Returns(ctx context.Context, orderID string) ([]ReturnsRow, error) {
@@ -692,6 +699,7 @@ func (q *Queries) Returns(ctx context.Context, orderID string) ([]ReturnsRow, er
 			&i.NewVariantID,
 			&i.PriceDifference,
 			&i.CreatedAt,
+			&i.NewOptionValues,
 		); err != nil {
 			return nil, err
 		}
@@ -724,6 +732,8 @@ FROM product_variants v
 WHERE v.product_id = (SELECT oi.product_id FROM order_items oi WHERE oi.id = $1)
   AND v.id <> (SELECT oi.variant_id FROM order_items oi WHERE oi.id = $1)
   AND v.is_visible AND v.stock > 0
+  -- 숨긴 상품의 조합은 고르게 하지 않는다 — 서버(ExchangeTarget)가 거절하는 선택지다.
+  AND EXISTS (SELECT 1 FROM products p WHERE p.id = v.product_id AND p.is_visible)
 ORDER BY v.price_delta, v.id
 `
 

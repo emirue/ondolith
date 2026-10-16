@@ -112,6 +112,46 @@ func TestCreateOrderSnapshotsAndTakesStock(t *testing.T) {
 	}
 }
 
+// 주문서가 받은 배송 메모는 주문을 다시 읽는 세 길 모두에서 돌아온다 — 운영자가
+// 「부재 시 경비실」 같은 요청을 볼 수 있어야 한다. 배송비도 저장된 값에서
+// 결제한 그대로 풀린다.
+func TestOrderReadsCarryDeliveryMemoAndFee(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	_, variant := seedProduct(t, pool, "tee", 12000, 1000, 5)
+	owner := CartOwner{GuestKey: "guest-0123456789abc"}
+	if err := s.AddToCart(ctx, owner, variant, 2); err != nil {
+		t.Fatal(err)
+	}
+	form := testForm()
+	form.DeliveryMemo = "부재 시 경비실"
+	order, err := s.CreateOrder(ctx, owner, "", form, testShipping, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unscoped, err := s.OrderByNoUnscoped(ctx, order.OrderNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := s.OrderByNo(ctx, order.OrderNo, "", form.OrdererPhone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guest, err := s.GuestOrder(ctx, order.OrderNo, form.OrdererPhone, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, o := range map[string]*OrderDetail{"Unscoped": unscoped, "OrderByNo": scoped, "Guest": guest} {
+		if o.DeliveryMemo != "부재 시 경비실" {
+			t.Errorf("%s: 배송 메모 %q", name, o.DeliveryMemo)
+		}
+		if o.ShippingFee() != 3000 {
+			t.Errorf("%s: 배송비 %d, want 3000", name, o.ShippingFee())
+		}
+	}
+}
+
 // 어느 단계가 실패해도 재고가 줄지 않는다.
 func TestFailedOrderLeavesStockUntouched(t *testing.T) {
 	s, pool := testStore(t)

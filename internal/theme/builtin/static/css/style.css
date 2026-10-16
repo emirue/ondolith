@@ -382,9 +382,15 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 
 .site-footer p { margin: 0 0 8px; }
-.business { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
-.business dt { opacity: .7; }
-.business dd { margin: 0; }
+/* 「라벨 · 값」 목록. 바닥글의 사업자 정보와 영수증의 받는 분·판매자 칸이 같은 모양이다. */
+.business,
+.receipt-info { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+.totals + .receipt-info,
+h2 + .receipt-info { margin-top: 16px; }
+.business dt,
+.receipt-info dt { opacity: .7; }
+.business dd,
+.receipt-info dd { margin: 0; }
 
 .dev-detail {
   background: var(--thead-bg);
@@ -555,6 +561,11 @@ a:focus-visible {
   background: transparent;
   border: 1px solid currentColor;
   opacity: .7;
+}
+/* 「품절」은 좋은 소식이 아니다 — 강조색(초록) 배지면 판매 중처럼 읽혔다. */
+.badge--soldout {
+  background: var(--line);
+  color: inherit;
 }
 
 /* ═══ 필터·정렬 줄 ══════════════════════════════════════════════════════════ */
@@ -1161,4 +1172,10 @@ address + p { font-size: 14px; margin-top: 6px; }
 
   /* 답글 들여쓰기를 줄인다. 화면이 좁으면 들여쓴 만큼 본문이 사라진다. */
   .comments li.reply { margin-left: 14px; }
+}
+
+/* 인쇄: 영수증(P-509)을 종이로 낼 때 머리글 메뉴·검색칸·바닥글·동작 버튼이 같이 찍혔다. */
+@media print {
+  .site-header, .site-footer, .flash, .order-actions { display: none; }
+  main { padding: 0; }
 }

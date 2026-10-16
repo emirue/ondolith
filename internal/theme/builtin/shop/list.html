@@ -33,7 +33,7 @@
       {{if .ImageID}}<img class="product-thumb" src="/shop/images/{{.ImageID}}" alt="{{.Name}}" width="400" height="400" loading="lazy">{{end}}
       <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
       <span class="price">{{money .BasePrice}}{{if .MinDelta}}~{{end}}</span>
-      {{if not .InStock}}<span class="badge">품절</span>{{end}}
+      {{template "partials/stock-badge.html" .}}
     </li>
     {{else}}
     <li class="empty">등록된 상품이 없습니다.</li>

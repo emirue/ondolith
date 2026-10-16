@@ -369,7 +369,7 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 			// 앞뒤 공백을 자른다 (D19 A-503). 스캐너가 붙인 공백 하나로 같은
 			// 바코드가 다른 값이 되면 유일 제약을 지나간다.
 			Barcode: strings.TrimSpace(r.PostFormValue("barcode_" + id)),
-			Version: version})
+			Version: version, Hidden: r.PostFormValue("hidden_"+id) != ""})
 	}
 	if len(edits) == 0 {
 		d.renderVariants(w, r, http.StatusUnprocessableEntity, "바꿀 조합을 고르세요.")
@@ -469,12 +469,6 @@ func (d *Deps) OptionsSave(w http.ResponseWriter, r *http.Request) {
 			Name: n, Values: strings.Split(values[i], ","),
 		})
 	}
-	if len(opts) == 0 {
-		d.renderVariants(w, r, http.StatusUnprocessableEntity,
-			"옵션 그룹과 값을 하나 이상 입력하세요.")
-		return
-	}
-
 	productID := r.PathValue("id")
 	err := d.Commerce.SetOptions(r.Context(), productID, opts)
 	switch {
@@ -483,6 +477,12 @@ func (d *Deps) OptionsSave(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrOptionDuplicate):
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"그룹 이름과 값을 확인하세요. 빈 값이나 그룹 안의 중복은 저장하지 않습니다.")
+	case errors.Is(err, commerce.ErrTooManyVariants):
+		d.renderVariants(w, r, http.StatusUnprocessableEntity,
+			"옵션 조합이 500개를 넘습니다. 옵션 값을 줄이세요 — 아무것도 저장하지 않았습니다.")
+	case errors.Is(err, commerce.ErrOptionsRequired):
+		d.renderVariants(w, r, http.StatusUnprocessableEntity,
+			"옵션 그룹이 있는 상품입니다. 옵션 그룹과 값을 하나 이상 입력하세요.")
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 	default:

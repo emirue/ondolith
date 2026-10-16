@@ -477,10 +477,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
 		// 부팅 때 붙잡아 두면 재시작 전까지 옛 값으로 계산한다.
 		shipping: func() commerce.Shipping {
-			kv := setting("shipping.flat_fee", "shipping.free_threshold")
+			kv := setting(commerce.SettingShippingFlatFee, commerce.SettingShippingFreeThreshold)
 			return commerce.Shipping{
-				FlatFee:       atoiOr(kv["shipping.flat_fee"], 0),
-				FreeThreshold: atoiOr(kv["shipping.free_threshold"], 0),
+				FlatFee:       atoiOr(kv[commerce.SettingShippingFlatFee], 0),
+				FreeThreshold: atoiOr(kv[commerce.SettingShippingFreeThreshold], 0),
 			}
 		},
 		pgName: func() string { n, _ := pgAdapter(); return n },

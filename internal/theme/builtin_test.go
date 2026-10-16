@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -184,9 +185,15 @@ func payloadFor(name string) any {
 			"Items": []cartItemLike{{ID: "ci1", Name: "티셔츠",
 				Option: map[string]string{"크기": "L"}, UnitPrice: 13000, Quantity: 2}},
 			"Goods": 26000, "Fee": 3000, "Total": 29000,
-			"Email": "a@example.com",
-			"Terms": []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
-			"Error": "필수 약관에 동의해야 합니다",
+			"Form":   url.Values{"orderer_email": {"a@example.com"}},
+			"Agreed": map[string]bool{},
+			"Terms":  []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
+			"Error":  "필수 약관에 동의해야 합니다",
+		}
+	case "shop/terms.html":
+		return map[string]any{
+			"Terms": termLike{ID: "t1", Kind: "이용약관", Version: "1.0", Body: "제1조\n제2조",
+				EffectiveAt: time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)},
 		}
 	case "shop/pay.html", "shop/complete.html":
 		return map[string]any{
@@ -227,7 +234,7 @@ func payloadFor(name string) any {
 					UnitPrice: 13000, Quantity: 3, LineAmount: 39000, Discount: 1000, Settled: 1}}},
 			"Refunds": []refundLike{{Status: "요청", Requester: "구매자", Amount: 5000,
 				Reason: "단순 변심", CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
-			"Approved": 29000, "Refunded": 5000, "Remaining": 24000,
+			"Approved": 29000, "Refunded": 5000, "Remaining": 24000, "CanCancel": true,
 			"Error": "환불 가능 금액을 넘었습니다.",
 		}
 	case "order/receipt.html":
@@ -246,8 +253,10 @@ func payloadFor(name string) any {
 			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "배송완료",
 				Items: []orderItemLike{{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L",
 					UnitPrice: 13000, Quantity: 2, LineAmount: 26000, Settled: 1}}},
-			"Variants": []variantLike{{ID: "v2",
-				OptionValues: map[string]string{"크기": "M"}, PriceDelta: 1000, Stock: 3}},
+			"Exchange": []exchangeGroupLike{{
+				Item: orderItemLike{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L"},
+				Variants: []variantLike{{ID: "v2",
+					OptionValues: map[string]string{"크기": "M"}, PriceDelta: 1000, Stock: 3}}}},
 			"Error": "이미 처리 중인 요청이 있습니다.",
 		}
 	case "order/returns.html":
@@ -283,7 +292,7 @@ func payloadFor(name string) any {
 		return map[string]any{
 			"Items": []cartItemLike{{ID: "ci1", VariantID: "v1", ProductID: "p1",
 				Slug: "tee", Name: "티셔츠", Option: map[string]string{"크기": "L"},
-				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true}},
+				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true, ProductVisible: true}},
 			"Goods": 26000, "Fee": 3000, "Total": 29000,
 			"Error": "수량이 재고를 넘습니다",
 		}
@@ -492,7 +501,7 @@ func (in inputLike) Has(opt string) bool {
 type productLike struct {
 	ID, Slug, Name, Description string
 	BasePrice, MinDelta         int
-	InStock                     bool
+	InStock, HasVariants        bool
 	// ImageID 가 빈 것과 있는 것을 둘 다 그려 본다 (P-306).
 	ImageID string
 }
@@ -519,12 +528,19 @@ type cartItemLike struct {
 	ID, VariantID, ProductID, Slug, Name string
 	Option                               map[string]string
 	UnitPrice, Quantity, Stock           int
-	Sellable                             bool
+	Sellable, ProductVisible             bool
 }
 
 type termLike struct {
 	ID, Kind, Version, Body string
 	Required                bool
+	EffectiveAt             time.Time
+}
+
+// exchangeGroupLike mirrors the per-item group P-512 draws (handler_returns.go).
+type exchangeGroupLike struct {
+	Item     orderItemLike
+	Variants []variantLike
 }
 
 type orderItemLike struct {
@@ -539,12 +555,23 @@ type orderItemLike struct {
 // 실물과 다르면 그 경로는 렌더링되지 않고, 검사는 통과한다** (M14).
 func (it orderItemLike) RemainingQty() int { return it.Quantity - it.Settled }
 
+// Goods·ShippingFee mirror commerce.OrderDetail's — 주문 뒤 화면이 부른다.
+func (o orderLike) Goods() int {
+	n := 0
+	for _, it := range o.Items {
+		n += it.LineAmount
+	}
+	return n
+}
+func (o orderLike) ShippingFee() int { return o.Total + o.Discount - o.Goods() }
+
 type orderLike struct {
 	OrderNo, Status                                           string
 	Total                                                     int
 	ReceiverName, ReceiverPhone, Postcode, Address1, Address2 string
 	CreatedAt                                                 time.Time
 	OrdererEmail, OrdererPhone                                string
+	DeliveryMemo                                              string
 	Discount                                                  int
 	Items                                                     []orderItemLike
 }
@@ -574,6 +601,7 @@ type returnLike struct {
 	ReturnNo, Kind, Status string
 	Reason, RejectReason   string
 	Fault, FeePolicy       string
+	NewOption              string
 	FeeAmount, PriceDiff   int
 	CreatedAt              time.Time
 	Items                  []returnItemLike
@@ -994,5 +1022,184 @@ func TestHeaderLinksToProfileOnce(t *testing.T) {
 	}
 	if n := strings.Count(header, `href="/me"`); n != 1 {
 		t.Errorf("머리글의 내 정보 링크 %d개, want 1", n)
+	}
+}
+
+// 주문 뒤 화면은 배송비를 따로 보인다. 결제 금액만 있으면 품목 합계와 결제
+// 금액이 맞지 않는데 왜 다른지 화면 어디에도 없다.
+func TestOrderPagesShowShippingFee(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, name := range []string{"order/view.html", "order/receipt.html"} {
+		v := fullView()
+		v.Data = payloadFor(name) // 품목 26,000원 · 결제 29,000원
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		for _, want := range []string{"<dt>상품 합계</dt><dd>26,000원</dd>", "<dt>배송비</dt><dd>3,000원</dd>"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s 에 %q 가 없다", name, want)
+			}
+		}
+	}
+}
+
+// 주문서가 받은 배송 메모를 구매자도 다시 본다 — 무엇을 요청했는지 확인할 곳이
+// 없으면 받기만 하는 칸이다. 메모가 없으면 줄도 없다.
+func TestOrderPagesShowDeliveryMemo(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, name := range []string{"order/view.html", "order/receipt.html"} {
+		for _, memo := range []string{"부재 시 경비실", ""} {
+			v := fullView()
+			data := payloadFor(name).(map[string]any)
+			o := data["Order"].(orderLike)
+			o.DeliveryMemo = memo
+			data["Order"] = o
+			v.Data = data
+			var b bytes.Buffer
+			if err := l.Render(&b, name, v); err != nil {
+				t.Fatal(err)
+			}
+			has := strings.Contains(b.String(), "배송 메모")
+			if memo != "" && (!has || !strings.Contains(b.String(), memo)) {
+				t.Errorf("%s 에 배송 메모 %q 가 없다", name, memo)
+			}
+			if memo == "" && has {
+				t.Errorf("%s: 메모가 없는데 「배송 메모」 줄이 있다", name)
+			}
+		}
+	}
+}
+
+// 바꿀 옵션이 하나도 없는 교환 폼은 이유를 말하고 보낼 버튼을 그리지 않는다 —
+// 전에는 선택칸만 조용히 사라지고 버튼은 남아, 누르면 422 였다.
+func TestExchangeFormWithoutOptionsSaysWhy(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("order/return-form.html").(map[string]any)
+	data["Exchange"] = nil
+	data["Error"] = ""
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/return-form.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "교환할 수 있는 다른 옵션이 없습니다") {
+		t.Error("옵션 없는 교환 폼이 이유를 말하지 않는다")
+	}
+	if strings.Contains(out, `교환 요청</button>`) {
+		t.Error("옵션 없는 교환 폼에 보내기 버튼이 있다")
+	}
+}
+
+// 교환 건은 무엇으로 바꿔 받는지 보인다 — 구매자가 요청한 것을 다시 확인할 곳이다.
+func TestReturnsPageShowsTheExchangeOption(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("order/returns.html").(map[string]any)
+	rets := data["Returns"].([]returnLike)
+	rets[0].Kind, rets[0].NewOption = "교환", "색상: 흰색"
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/returns.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "색상: 흰색") {
+		t.Error("반품·교환 내역에 교환으로 받을 옵션이 없다")
+	}
+}
+
+// 상품 설명의 줄바꿈이 살아 있다 — 관리자는 여러 줄 칸에 쓰는데 상품 화면이 그대로
+// 찍어 한 문단으로 붙었다(게시판 본문·댓글·페이지는 줄바꿈을 살린다).
+func TestProductDescriptionKeepsLineBreaks(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/product.html").(map[string]any)
+	p := data["Product"].(productLike)
+	p.Description = "첫 줄\n둘째 줄"
+	data["Product"] = p
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/product.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "첫 줄<br>둘째 줄") {
+		t.Error("상품 설명의 줄바꿈이 사라졌다")
+	}
+}
+
+// 상품 목록은 상세와 같은 말을 쓴다 — 조합이 없으면 「판매 준비 중」, 있는데 재고가
+// 없으면 「품절」. 조합 없는 상품을 목록은 「품절」, 상세는 「판매 준비 중」이라 했다.
+func TestProductListNamesStockStateLikeTheDetail(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/list.html").(map[string]any)
+	data["Products"] = []productLike{
+		{ID: "p1", Slug: "ready", Name: "준비중", HasVariants: false},
+		{ID: "p2", Slug: "out", Name: "품절품", HasVariants: true, InStock: false},
+		{ID: "p3", Slug: "on", Name: "판매품", HasVariants: true, InStock: true}}
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/list.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.Count(out, "판매 준비 중") != 1 || strings.Count(out, ">품절<") != 1 {
+		t.Errorf("판매 준비 중 %d개·품절 %d개, want 1·1", strings.Count(out, "판매 준비 중"), strings.Count(out, ">품절<"))
+	}
+}
+
+// 영수증은 증빙에 필요한 칸을 갖는다 — 결제수단, 판매자(사업자 정보), 받는 분·연락처
+// 라벨. 주문 상세와 거의 같은 표뿐이라 영수증이라 부르기에 모자랐다.
+func TestReceiptCarriesWhatAReceiptNeeds(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView() // Site.Business = {상호: 온돌}
+	data := payloadFor("order/receipt.html").(map[string]any)
+	data["PayMethod"] = "카드"
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/receipt.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	main := out[strings.Index(out, "<h1>주문서·영수증</h1>"):]
+	if i := strings.Index(main, "</section>"); i > 0 {
+		main = main[:i]
+	}
+	for _, want := range []string{"<dt>결제수단</dt><dd>카드</dd>", "<dt>상호</dt><dd>온돌</dd>",
+		"<dt>받는 분</dt>", "<dt>연락처</dt>", "<dt>주문자</dt>"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("영수증 본문에 %q 가 없다", want)
+		}
+	}
+}
+
+// 취소·환불 화면은 할 수 있는 것만 낸다 — 남은 금액이 0원이면 환불 요청 폼이 없고,
+// 상태 기계가 취소를 허락하지 않으면 「주문 취소」가 없다. 남은 0개에도 두 버튼이 눌렸다.
+func TestRefundsPageOffersOnlyWhatIsPossible(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(remaining int, canCancel bool) string {
+		v := fullView()
+		data := payloadFor("order/refunds.html").(map[string]any)
+		data["Remaining"], data["CanCancel"] = remaining, canCancel
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "order/refunds.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	done := render(0, false)
+	if strings.Contains(done, "환불 요청</button>") || strings.Contains(done, "주문 취소</button>") {
+		t.Error("남은 금액 0원·취소 불가인데 요청 버튼이 있다")
+	}
+	if !strings.Contains(done, "환불할 수 있는 금액이 남아 있지 않습니다") {
+		t.Error("왜 요청할 수 없는지 말하지 않는다")
+	}
+	open := render(24000, true)
+	if !strings.Contains(open, "환불 요청</button>") || !strings.Contains(open, "주문 취소</button>") {
+		t.Error("남은 금액이 있고 취소할 수 있는데 버튼이 없다")
 	}
 }

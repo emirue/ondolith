@@ -6,7 +6,7 @@
   <ul class="cart">
     {{range .Items}}
     <li>
-      <a href="/shop/p/{{.Slug}}">{{.Name}}</a>
+      {{if .ProductVisible}}<a href="/shop/p/{{.Slug}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}
       <span class="option">{{range $k, $v := .Option}}{{$k}}: {{$v}} {{end}}</span>
       <span class="price">{{money .UnitPrice}} × {{.Quantity}}</span>
       {{if not .Sellable}}<span class="badge">구매 불가</span>{{end}}
@@ -38,7 +38,13 @@
   {{/* 이 화면에서 다음으로 갈 유일한 길이다. 밑줄 친 링크로 두면 상품 화면의
        「장바구니에 담기」·결제 화면의 「결제하기」와 모양이 달라, 같은 흐름의
        한 걸음인데 혼자 눈에 띄지 않는다. */}}
+  {{/* 살 수 없는 상품이 있으면 여기서 멈춘다. 주문서로 보내면 받는 분·주소를
+       다 쓴 뒤 「결제하기」에서야 거절된다. */}}
+  {{if .Blocked}}
+  <p class="error" role="alert">구매할 수 없는 상품이 있습니다. 「구매 불가」 상품을 빼거나 수량을 줄여야 주문할 수 있습니다.</p>
+  {{else}}
   <p class="actions"><a class="btn btn--primary" href="/checkout">주문하기</a></p>
+  {{end}}
   {{end}}
   {{end}}
 </section>

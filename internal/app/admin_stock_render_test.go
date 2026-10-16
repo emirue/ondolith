@@ -365,3 +365,89 @@ func TestBoardCreateRefusalStaysACreateForm(t *testing.T) {
 		}
 	}
 }
+
+// 주문서가 받은 배송 메모와 주문자 연락처를 운영자가 본다. 주문 상세와 송장
+// 입력 어디에도 없어서, 「부재 시 경비실」은 DB 에만 있었다.
+func TestAdminOrderScreensShowDeliveryMemo(t *testing.T) {
+	order := &commerce.OrderDetail{OrderNo: "20261016-ABCDEFGHJK", Status: commerce.StatusPaid,
+		Total: 29000, ReceiverName: "받는이", ReceiverPhone: "010-0000-0000",
+		Postcode: "12345", Address1: "서울시 어딘가", DeliveryMemo: "부재 시 경비실",
+		OrdererEmail: "buyer@example.com", OrdererPhone: "010-1111-1111",
+		Items: []commerce.OrderItem{{ProductName: "티셔츠", UnitPrice: 13000, Quantity: 2, LineAmount: 26000}}}
+
+	detail := renderAdmin(t, "admin/order.html", map[string]any{"Order": order})
+	for _, want := range []string{"부재 시 경비실", "buyer@example.com", "010-1111-1111"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("관리자 주문 상세에 %q 가 없다", want)
+		}
+	}
+	if ship := renderAdmin(t, "admin/shipping.html", map[string]any{"Order": order}); !strings.Contains(ship, "부재 시 경비실") {
+		t.Error("송장 입력 화면에 배송 메모가 없다")
+	}
+}
+
+// 운영자는 교환 건마다 무엇을 보내야 하는지 본다. 조합 ID 만 저장돼 있고 화면에
+// 없어서, 교환을 받고도 보낼 물건을 알 수 없었다.
+func TestAdminReturnsShowTheExchangeOption(t *testing.T) {
+	data := map[string]any{"Order": &commerce.OrderDetail{OrderNo: "N1"},
+		"Returns": []commerce.Return{{ReturnNo: "R1", Kind: commerce.KindExchange,
+			Status: commerce.StatusExchangeOpen, NewOption: "색상: 흰색",
+			Items: []commerce.ReturnItem{{ProductName: "베개", OptionLabel: "색상: 회색", Quantity: 1}}}}}
+	if out := renderAdmin(t, "admin/returns.html", data); !strings.Contains(out, "색상: 흰색") {
+		t.Error("반품·교환 처리 화면에 교환으로 보낼 옵션이 없다")
+	}
+}
+
+// 약관 「종류」는 고객이 주문서에서 읽는 이름이다. 영문 코드만 받는 입력 형식이면
+// 「service (1.0) 필수」가 나간다. 등록한 본문도 다시 볼 수 있어야 한다.
+func TestAdminTermsTakeAReadableKindAndShowTheBody(t *testing.T) {
+	out := renderAdmin(t, "admin/terms.html", map[string]any{
+		"Terms": []commerce.Terms{{Kind: "개인정보 처리방침", Version: "1.0", Body: "수집 항목: 이름"}}})
+	if strings.Contains(out, `pattern="[a-z0-9-]+"`) {
+		t.Error("종류 칸이 영문 코드만 받는다")
+	}
+	if !strings.Contains(out, "수집 항목: 이름") {
+		t.Error("약관 목록에서 본문을 볼 수 없다")
+	}
+}
+
+// 조합마다 「판매 중지」 칸이 있고, 멈춘 조합은 체크된 채로 그려진다 — 체크가
+// 풀린 채 그려지면 다음 저장이 조합을 몰래 다시 연다.
+func TestVariantRowsCarryTheStopSellingBox(t *testing.T) {
+	out := renderAdmin(t, "admin/product-variants.html", map[string]any{
+		"Product": &commerce.Product{ID: "p1", Name: "베개 커버"},
+		"Variants": []commerce.Variant{
+			{ID: "v1", OptionValues: map[string]string{"크기": "소"}, Visible: true},
+			{ID: "v2", OptionValues: map[string]string{"크기": "대"}, Visible: false}},
+		"Options": nil, "Error": ""})
+	if !strings.Contains(out, `name="hidden_v2" value="1" checked`) {
+		t.Error("멈춘 조합의 「판매 중지」가 체크돼 있지 않다")
+	}
+	if !strings.Contains(out, `name="hidden_v1"`) || strings.Contains(out, `name="hidden_v1" value="1" checked`) {
+		t.Error("파는 조합에 「판매 중지」 칸이 없거나 체크돼 있다")
+	}
+}
+
+// 관리자 주문 상세에 주문번호가 있다 — 제목은 「주문 상세」이고 본문에도 번호가 없어,
+// 고객이 불러 준 번호와 맞는지 볼 수 없었다(송장·환불 등 하위 화면에는 있었다).
+func TestAdminOrderDetailShowsTheOrderNumber(t *testing.T) {
+	out := renderAdmin(t, "admin/order.html", map[string]any{"Order": &commerce.OrderDetail{
+		OrderNo: "20261016-NUMBERSHOW", Status: commerce.StatusPaid, Total: 1000,
+		Items: []commerce.OrderItem{{ProductName: "티", UnitPrice: 1000, Quantity: 1, LineAmount: 1000}}}})
+	// 링크 주소(/admin/orders/{번호}/…)에는 원래 있었다 — 화면에 보이는 글자로 본다.
+	if !strings.Contains(out, "<dt>주문번호</dt><dd><strong>20261016-NUMBERSHOW</strong></dd>") {
+		t.Error("관리자 주문 상세에 주문번호가 보이지 않는다")
+	}
+}
+
+// 환불 처리의 「거부」는 「실행」과 다른 모양이다 — 둘 다 같은 초록 주 버튼이라 돈을
+// 내보내는 동작과 막는 동작이 구별되지 않았다.
+func TestRefundRejectLooksDifferentFromExecute(t *testing.T) {
+	out := renderAdmin(t, "admin/refund.html", map[string]any{
+		"Order":      &commerce.OrderDetail{OrderNo: "N1"},
+		"Refunds":    []commerce.Refund{{ID: "r1", Status: "요청", Amount: 1000}},
+		"RequestKey": "k", "NeedsReauth": false, "Approved": 1000, "Refunded": 0, "Remaining": 1000})
+	if !strings.Contains(out, `<button type="submit" class="adm-btn adm-btn--danger">거부</button>`) {
+		t.Error("「거부」가 「실행」과 같은 주 버튼이다")
+	}
+}

@@ -232,6 +232,50 @@ func TestRejectingReturnReleasesEverything(t *testing.T) {
 	}
 }
 
+// 교환 건을 읽으면 **무엇으로 바꿔 보낼지**가 함께 온다. 조합 ID 만 있으면
+// 운영자는 어떤 물건을 보내야 하는지, 구매자는 무엇을 요청했는지 화면에서 알 수 없다.
+func TestExchangeReadsCarryTheNewOption(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 1)
+	items := itemsOf(t, s, orderNo)
+	var productID, newVariant string
+	if err := pool.QueryRow(ctx,
+		`SELECT product_id FROM order_items WHERE id = $1`, items[0].ID).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"M","색상":"흰색"}',0,5) RETURNING id`, productID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{
+		Kind: KindExchange, NewVariantID: newVariant,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+	}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byNo, err := s.ReturnByNo(ctx, ret.ReturnNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var orderID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM orders WHERE order_no = $1`, orderNo).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.Returns(ctx, orderID)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("교환 목록 %d건 (%v)", len(list), err)
+	}
+	for name, got := range map[string]string{"ReturnByNo": byNo.NewOption, "Returns": list[0].NewOption} {
+		if got != "색상: 흰색 / 크기: M" {
+			t.Errorf("%s: 교환으로 받을 옵션 %q, want %q", name, got, "색상: 흰색 / 크기: M")
+		}
+	}
+}
+
 // 교환 대상은 **같은 상품의 다른 조합**이다 (FR-618). 다른 상품을 허용하면
 // 교환이 곧 교환 가장한 재주문이 되고, 차액 계산의 근거가 사라진다.
 func TestExchangeMustStayWithinTheSameProduct(t *testing.T) {

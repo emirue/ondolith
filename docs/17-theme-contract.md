@@ -134,6 +134,7 @@ themes/{이름}/
 | `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508). 전체 건수를 세는 게시판(P-203)·통합 검색(P-212). 데이터 `{Total, Capped, CapTotal, LastPage, Pages[{No, URL, Current}], FirstURL, PrevURL, NextURL, LastURL}` — 번호는 열 개씩, 빈 주소는 링크 없음, 주소에 정렬·검색어가 실려 있다. 검색은 맞는 글을 `CapTotal`(10,000)까지만 센다 — 넘으면 `Capped` 가 참이고 `Total` 은 `CapTotal`+1 이다(「10,000건 이상」으로 그린다). 앞 판의 `{Base, Query, PageNo, PrevPage, NextPage, HasPrev, HasNext}` 도 함께 들어온다 |
 | `partials/pager.html` | P-301, P-302, P-305, P-501 | 폴백 | 「이전·다음」. 건수를 세지 않고 한 행 더 읽는 목록. 데이터 `{PageNo, PrevURL, NextURL}` — 빈 주소는 링크 없음 |
 | `partials/flash.html` | (전체) | 폴백 | 성공·오류 메시지 |
+| `partials/stock-badge.html` | P-301, P-302, P-305, P-201 | 폴백 | **상품의 판매 상태 배지** — 조합이 없으면 「판매 준비 중」, 재고가 없으면 「품절」(상품 화면과 같은 말). 데이터 상품 `{HasVariants, InStock}` |
 | `partials/field.html` | P-203, P-204, P-205 | 폴백 | **커스텀 필드 하나를 그린다** (FR-503). 타입별 분기가 여기 있다. 데이터 `{Field, Value, Has}` — `Has "값"` 이 저장된 선택인지 답한다(여러 개 선택을 되살릴 때) |
 | `partials/variant.html` | P-303, P-304 | 폴백 | 고른 옵션 조합의 가격·재고·hidden `variant_id` (FR-602). **상품 화면이 처음 그릴 때와 htmx 가 갈아 끼울 때가 같은 조각을 쓴다** — 두 벌이면 「고르기 전」과 「고른 뒤」가 갈라진다 |
 
@@ -185,6 +186,7 @@ themes/{이름}/
 | `shop/checkout.html` | P-405 | 폴백 |
 | `shop/pay.html` | P-407 | 폴백 |
 | `shop/complete.html` | P-410 | 폴백 |
+| `shop/terms.html` | P-411 | 폴백 |
 
 > **P-408 이 `fail.html` 을 쓰는 이유.** 승인에 성공하면 P-410 으로 리다이렉트하므로
 > 자기 템플릿이 없다. 실패·만료·금액 불일치만 화면을 그리고, 그 화면이 P-409 와 같다 —

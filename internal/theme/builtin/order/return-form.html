@@ -23,23 +23,35 @@
       {{end}}
     </fieldset>
 
-    {{if .Variants}}
-    {{/* 교환은 **같은 상품의 다른 조합**만 고를 수 있다 (FR-618). 목록이 그것만
-         보여주고, 거부하는 것은 여전히 서버다. */}}
+    {{if eq (print .Kind) "교환"}}
+    {{/* 교환은 **같은 상품의 다른 조합**만 고를 수 있다 (FR-618). 품목마다 그
+         상품의 조합을 묶어 보이고, 거부하는 것은 여전히 서버다. */}}
+    {{with .Exchange}}
     <label for="new_variant_id">교환할 옵션</label>
     <select id="new_variant_id" name="new_variant_id" required>
-      {{range .Variants}}
-      <option value="{{.ID}}">
-        {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
-        {{if .PriceDelta}}({{money .PriceDelta}} 차액){{end}}
-      </option>
+      {{range .}}
+      <optgroup label="{{.Item.ProductName}} — 지금 {{.Item.OptionLabel}}">
+        {{range .Variants}}
+        <option value="{{.ID}}">
+          {{range $k, $v := .OptionValues}}{{$k}}: {{$v}} {{end}}
+          {{if .PriceDelta}}({{money .PriceDelta}} 차액){{end}}
+        </option>
+        {{end}}
+      </optgroup>
       {{end}}
     </select>
+    <p class="hint">한 번에 한 상품만 교환할 수 있습니다. 위에서 고른 품목과 같은 상품의 옵션을 고르세요.</p>
+    {{else}}
+    <p class="error" role="alert">교환할 수 있는 다른 옵션이 없습니다 — 재고가 있는 다른 옵션이 없거나 남은 수량이 없습니다. 반품을 요청하거나 판매자에게 문의하세요.</p>
+    {{end}}
     {{end}}
 
+    {{/* 고를 옵션이 없는 교환은 보낼 것이 없다 — 버튼을 두면 누를 때마다 422 다. */}}
+    {{if or (ne (print .Kind) "교환") .Exchange}}
     <label for="reason">사유</label>
     <input id="reason" name="reason" maxlength="500" required>
     <button type="submit">{{.Kind}} 요청</button>
+    {{end}}
   </form>
   {{end}}
 </section>

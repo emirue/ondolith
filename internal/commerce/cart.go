@@ -38,6 +38,8 @@ type CartItem struct {
 	Quantity  int
 	Stock     int
 	Sellable  bool
+	// ProductVisible 가 거짓이면 상품 화면이 404 다 — 이름에 링크를 걸지 않는다.
+	ProductVisible bool
 }
 
 // cartID finds or creates the owner's cart.
@@ -122,7 +124,8 @@ func (s *Store) CartItems(ctx context.Context, o CartOwner) ([]CartItem, error) 
 	var out []CartItem
 	for _, r := range rows {
 		it := CartItem{ID: r.ID, VariantID: r.VariantID, ProductID: r.ProductID, Slug: r.Slug, Name: r.Name,
-			UnitPrice: int(r.UnitPrice), Quantity: int(r.Quantity), Stock: int(r.Stock), Sellable: r.Sellable}
+			UnitPrice: int(r.UnitPrice), Quantity: int(r.Quantity), Stock: int(r.Stock), Sellable: r.Sellable,
+			ProductVisible: r.ProductVisible}
 		if err := unmarshalOptions(r.OptionValues, &it.Option); err != nil {
 			return nil, err
 		}

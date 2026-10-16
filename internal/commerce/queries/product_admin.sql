@@ -18,8 +18,13 @@ SELECT stock FROM product_variants WHERE id = $1 AND product_id = $2 FOR NO KEY 
 -- name: EditVariant :execrows
 UPDATE product_variants
 SET stock = stock + $3, sku = NULLIF($4::text, ''), price_delta = $5,
-    barcode = NULLIF(sqlc.arg('barcode')::text, ''), updated_at = now()
+    barcode = NULLIF(sqlc.arg('barcode')::text, ''), is_visible = NOT sqlc.arg('hidden')::boolean,
+    updated_at = now()
 WHERE id = $1 AND product_id = $2;
+
+-- name: HideVariants :exec
+UPDATE product_variants SET is_visible = false, updated_at = now()
+WHERE product_id = sqlc.arg('product_id') AND id = ANY(sqlc.arg('ids')::uuid[]);
 
 -- name: AddVariant :one
 INSERT INTO product_variants (product_id, option_values, price_delta, stock, sku)

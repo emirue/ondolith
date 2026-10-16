@@ -150,15 +150,26 @@ func (d *shopDeps) productDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	variants = onSale(variants)
 	images, err := d.images.List(ctx, p.ID)
 	if err != nil {
 		d.serverError(w, r, err)
 		return
 	}
-	d.renderPage(w, r, "shop/product.html", http.StatusOK, d.shopView(r, p.Name, map[string]any{
-		"Product": p, "Variants": variants, "Options": commerce.OptionGroups(variants),
-		"Images": images,
-	}))
+	// 선택지는 실제 조합에서 만들고, 순서는 관리자가 넣은 정의를 따른다 (A-503).
+	defined, err := d.store.Options(ctx, p.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	groups := commerce.InDefinedOrder(commerce.OptionGroups(variants), defined)
+	data := map[string]any{"Product": p, "Variants": variants, "Options": groups, "Images": images}
+	// 옵션 없는 상품(조합 하나, 그룹 없음)은 고를 것이 없다 — 그 조합을 미리
+	// 고른다. 고르지 않으면 선택칸도 없이 「옵션을 모두 선택하세요」에서 멈춘다.
+	if len(groups) == 0 && len(variants) == 1 {
+		data["Variant"] = &variants[0]
+	}
+	d.renderPage(w, r, "shop/product.html", http.StatusOK, d.shopView(r, p.Name, data))
 }
 
 // P-306 GET /shop/images/{id} — one product image.
@@ -233,6 +244,7 @@ func (d *shopDeps) variantPick(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	variants = onSale(variants)
 	// 선택값은 폼에서 온다. 조합 ID 를 받지 않는 이유: ID 를 받으면 다른 상품의
 	// 조합 ID 를 넣어 그 가격을 이 상품에 붙일 수 있다.
 	picked := map[string]string{}
@@ -305,6 +317,7 @@ func (d *shopDeps) cartView(w http.ResponseWriter, r *http.Request) {
 	fee, _ := d.shipping().Fee(goods)
 	d.renderPage(w, r, "shop/cart.html", http.StatusOK, d.shopView(r, "장바구니", map[string]any{
 		"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee,
+		"Blocked": hasUnsellable(items),
 	}))
 }
 
@@ -432,4 +445,27 @@ func pgAdapterFor(provider, secret string) (string, commerce.Gateway) {
 	default:
 		return "", nil
 	}
+}
+
+// hasUnsellable reports a cart item that P-406 would refuse. 장바구니에서 멈춘다 —
+// 주문서까지 보내면 받는 분·주소를 다 쓴 뒤에야 거절된다.
+func hasUnsellable(items []commerce.CartItem) bool {
+	for _, it := range items {
+		if !it.Sellable {
+			return true
+		}
+	}
+	return false
+}
+
+// onSale drops combinations the operator stopped selling (A-503 「판매 중지」).
+// 품절(재고 0)은 남긴다 — 「품절」로 보여야 하고, 판매 중지는 없는 것이다.
+func onSale(vs []commerce.Variant) []commerce.Variant {
+	out := vs[:0:0]
+	for _, v := range vs {
+		if v.Visible {
+			out = append(out, v)
+		}
+	}
+	return out
 }
