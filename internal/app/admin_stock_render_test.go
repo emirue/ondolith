@@ -2,10 +2,10 @@ package app
 
 import (
 	"log/slog"
-	"os"
-	"path/filepath"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -268,5 +268,24 @@ func TestAdminDeleteButtonsAsk(t *testing.T) {
 	}
 	if n < 12 {
 		t.Errorf("삭제 버튼 %d개 — 검사가 버튼을 다 찾지 못했다", n)
+	}
+}
+
+// 필드 편집기(A-306·A-406)는 타입을 한국어로 부르고, 줄마다 「수정」이 있어 고르면 폼이
+// 그 필드 값으로 채워진다 — 「같은 키로 저장하면 갱신」이라 키·라벨·선택지를 처음부터
+// 다시 쳐야 했다.
+func TestFieldEditorsPrefillAndNameTypes(t *testing.T) {
+	f := content.FieldSchema{Key: "color", Label: "색상", Type: content.FieldMultiselect,
+		Options: []string{"빨강", "파랑"}, Required: true, Sort: 2}
+	for _, name := range []string{"admin/board-fields.html", "admin/user-fields.html"} {
+		out := renderAdmin(t, name, map[string]any{"Board": &content.Board{ID: "b1", Name: "공지", Slug: "notice"},
+			"Fields": []content.FieldSchema{f}, "Types": content.FieldTypes(), "Edit": &f, "EditOptions": "빨강\n파랑"})
+		for _, want := range []string{"<td>여러 개 선택</td>", `href="?edit=color#field-form"`,
+			`name="key" value="color"`, `name="label" value="색상"`, `<option value="multiselect" selected>여러 개 선택</option>`,
+			">빨강\n파랑</textarea>", `name="sort_order" value="2"`} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s 에 %q 가 없다", name, want)
+			}
+		}
 	}
 }

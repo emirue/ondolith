@@ -1159,9 +1159,9 @@ func (d *Deps) UserFieldList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/user-fields.html", http.StatusOK, map[string]any{
-		"Fields": fields, "Types": content.FieldTypes(),
-	})
+	data := map[string]any{"Fields": fields, "Types": content.FieldTypes()}
+	fieldToEdit(r, fields, data)
+	d.Render(w, r, "admin/user-fields.html", http.StatusOK, data)
 }
 
 // UserFieldSave is A-406 POST — 저장과 삭제가 한 화면이다.

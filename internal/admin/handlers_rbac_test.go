@@ -590,3 +590,26 @@ func TestModerationScreensReceiveBoards(t *testing.T) {
 		}
 	}
 }
+
+// 「수정」(?edit=키)은 그 필드를 폼에 넘긴다. 없는 키면 빈 폼이다.
+func TestFieldEditorsLoadTheFieldToEdit(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}})
+	ctx := context.Background()
+	if err := d.Content.SaveUserField(ctx, content.FieldSchema{Key: "color", Label: "색상",
+		Type: content.FieldSelect, Options: []string{"빨강", "파랑"}}); err != nil {
+		t.Fatal(err)
+	}
+	var data map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, v any) {
+		data, _ = v.(map[string]any)
+		w.WriteHeader(code)
+	}
+	d.UserFieldList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/user-fields?edit=color", nil))
+	if f, _ := data["Edit"].(*content.FieldSchema); f == nil || f.Label != "색상" || data["EditOptions"] != "빨강\n파랑" {
+		t.Errorf("수정할 필드 %v / 선택지 %q", data["Edit"], data["EditOptions"])
+	}
+	d.UserFieldList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/user-fields?edit=nope", nil))
+	if _, ok := data["Edit"]; ok {
+		t.Error("없는 키인데 수정 폼이 채워졌다")
+	}
+}

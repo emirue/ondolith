@@ -9,9 +9,12 @@
       <tbody>
       {{range .Fields}}
         <tr>
-          <td class="muted">{{.Key}}</td><td>{{.Label}}</td><td>{{.Type}}</td>
+          <td class="muted">{{.Key}}</td><td>{{.Label}}</td><td>{{.Type.Label}}</td>
           <td>{{if .Required}}✔{{end}}</td><td>{{if .ShowInList}}✔{{end}}</td><td>{{.Sort}}</td>
           <td>
+            {{/* 아래 폼을 이 필드 값으로 채운다 — 「같은 키로 저장하면 갱신」이라 키·라벨·선택지를
+                 처음부터 다시 쳐야 했다. */}}
+            <a class="adm-btn adm-btn--sm" href="?edit={{.Key}}#field-form">수정</a>
             <form method="post" action="/admin/user-fields">
               <input type="hidden" name="delete" value="{{.Key}}">
               <button onclick="return confirm('이 회원 항목을 삭제할까요?')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
@@ -27,23 +30,23 @@
 </div>
 
 <div class="adm-card">
-  <h2>항목 추가 · 수정</h2>
+  <h2 id="field-form">항목 {{with .Edit}}수정 — {{.Key}}{{else}}추가{{end}}</h2>
   <form method="post" action="/admin/user-fields">
     <div class="adm-field-row">
       <label class="adm-field"><span>키 (영문 소문자)</span>
-        <input type="text" name="key" pattern="[a-z][a-z0-9_]*" required></label>
-      <label class="adm-field"><span>라벨</span><input type="text" name="label" required></label>
+        <input type="text" name="key"{{with .Edit}} value="{{.Key}}" readonly{{end}} pattern="[a-z][a-z0-9_]*" required></label>
+      <label class="adm-field"><span>라벨</span><input type="text" name="label"{{with .Edit}} value="{{.Label}}"{{end}} required></label>
       <label class="adm-field"><span>타입</span>
-        <select name="field_type">{{range .Types}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
-      <label class="adm-field"><span>순서</span><input type="number" name="sort_order" value="0"></label>
+        <select name="field_type">{{range $t := .Types}}<option value="{{$t}}"{{with $.Edit}}{{if eq .Type $t}} selected{{end}}{{end}}>{{$t.Label}}</option>{{end}}</select></label>
+      <label class="adm-field"><span>순서</span><input type="number" name="sort_order" value="{{with .Edit}}{{.Sort}}{{else}}0{{end}}"></label>
     </div>
-    <label class="adm-field"><span>선택지 (select · multiselect, 한 줄에 하나)</span>
-      <textarea name="options" style="min-height:6rem"></textarea></label>
+    <label class="adm-field"><span>선택지 (하나 선택·여러 개 선택일 때, 한 줄에 하나)</span>
+      <textarea name="options" style="min-height:6rem">{{.EditOptions}}</textarea></label>
     <div class="adm-field-row">
       <label class="adm-field"><span>필수</span>
-        <select name="is_required"><option value="">아니오</option><option value="1">예</option></select></label>
+        <select name="is_required"><option value="">아니오</option><option value="1"{{with .Edit}}{{if .Required}} selected{{end}}{{end}}>예</option></select></label>
       <label class="adm-field"><span>사용자 목록에 표시</span>
-        <select name="show_in_list"><option value="">아니오</option><option value="1">예</option></select></label>
+        <select name="show_in_list"><option value="">아니오</option><option value="1"{{with .Edit}}{{if .ShowInList}} selected{{end}}{{end}}>예</option></select></label>
     </div>
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">저장</button>

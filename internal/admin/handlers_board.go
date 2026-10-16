@@ -194,9 +194,23 @@ func (d *Deps) BoardFields(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	d.Render(w, r, "admin/board-fields.html", http.StatusOK, map[string]any{
-		"Board": b, "Fields": fields, "Types": content.FieldTypes(),
-	})
+	data := map[string]any{"Board": b, "Fields": fields, "Types": content.FieldTypes()}
+	fieldToEdit(r, fields, data)
+	d.Render(w, r, "admin/board-fields.html", http.StatusOK, data)
+}
+
+// fieldToEdit puts the field named by ?edit= into the form (A-306·A-406). 「같은 키로
+// 저장하면 갱신」이라, 이것이 없으면 고칠 때 키·라벨·선택지를 처음부터 다시 쳐야 했다.
+// 없는 키는 빈 폼이다.
+func fieldToEdit(r *http.Request, fields []content.FieldSchema, data map[string]any) {
+	key := r.URL.Query().Get("edit")
+	for i := range fields {
+		if key != "" && fields[i].Key == key {
+			data["Edit"] = &fields[i]
+			data["EditOptions"] = strings.Join(fields[i].Options, "\n")
+			return
+		}
+	}
 }
 
 func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {

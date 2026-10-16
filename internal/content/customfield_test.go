@@ -306,3 +306,12 @@ func TestFieldInputHas(t *testing.T) {
 		}
 	}
 }
+
+// 필드 편집기는 타입을 한국어로 부른다 — 고를 수 있는 타입 모두에 이름이 있다.
+func TestEveryFieldTypeHasALabel(t *testing.T) {
+	for _, ft := range FieldTypes() {
+		if ft.Label() == string(ft) {
+			t.Errorf("%s 에 한국어 이름이 없다", ft)
+		}
+	}
+}
