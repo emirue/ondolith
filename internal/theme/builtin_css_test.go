@@ -431,3 +431,58 @@ func TestSideBySideControlsShareAHeight(t *testing.T) {
 		}
 	}
 }
+
+// **링크는 버튼과 같은 색 계열이다 — 밝게도 어둡게도.** 밝은 테마는 링크와 버튼이 같은 초록인데
+// 어두운 테마만 링크가 #7aa7f0 파랑이었다(버튼은 초록 그대로). 색상각이 강조색에서 40° 안이어야 한다.
+func TestLinksShareTheAccentHueInBothSchemes(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := stripComments(string(b))
+	dark := css[strings.Index(css, "@media (prefers-color-scheme: dark)"):]
+	dark = dark[:strings.Index(dark, "\n}")]
+	light := css[:strings.Index(css, "@media (prefers-color-scheme: dark)")]
+	token := func(block, name string) string {
+		m := regexp.MustCompile(name + `:\s*(#[0-9a-fA-F]{6})`).FindStringSubmatch(block)
+		if m == nil {
+			t.Fatalf("%s 가 없다", name)
+		}
+		return m[1]
+	}
+	hue := func(hex string) float64 {
+		v, _ := strconv.ParseUint(hex[1:], 16, 32)
+		r, g, b := float64(v>>16&255)/255, float64(v>>8&255)/255, float64(v&255)/255
+		mx, mn := max(r, g, b), min(r, g, b)
+		d := mx - mn
+		var h float64
+		switch {
+		case d == 0:
+			return 0
+		case mx == r:
+			h = (g - b) / d
+		case mx == g:
+			h = (b-r)/d + 2
+		default:
+			h = (r-g)/d + 4
+		}
+		h *= 60
+		if h < 0 {
+			h += 360
+		}
+		return h
+	}
+	for name, block := range map[string]string{"밝게": light, "어둡게": dark} {
+		a, l := token(block, "--accent"), token(block, "--link")
+		diff := hue(a) - hue(l)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 180 {
+			diff = 360 - diff
+		}
+		if diff > 40 {
+			t.Errorf("%s: 링크 %s 와 강조색 %s 의 색상각이 %.0f° 다르다 — 링크만 다른 색이다", name, l, a, diff)
+		}
+	}
+}
