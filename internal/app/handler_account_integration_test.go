@@ -472,3 +472,13 @@ func TestAccountTabTitleOnTheLiveSite(t *testing.T) {
 		t.Error("소셜 로그인이 꺼진 사이트의 내 정보에 「소셜 계정 연결」이 있다")
 	}
 }
+
+// 없는 주소는 서버 오류와 다른 말을 한다 — 404 와 500 이 같은 문구였다.
+func TestNotFoundPageSaysNotFound(t *testing.T) {
+	srv, _ := liveSite(t)
+	code, body := mustGet(t, client(), srv.URL+"/no-such-page-xyz")
+	if code != http.StatusNotFound || !strings.Contains(body, "없는 페이지이거나 주소가 바뀌었습니다") ||
+		strings.Contains(body, "요청을 처리하지 못했습니다") {
+		t.Errorf("없는 주소 = HTTP %d, 404 문구가 아니다", code)
+	}
+}

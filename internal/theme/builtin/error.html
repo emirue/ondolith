@@ -1,7 +1,10 @@
 {{define "body"}}
 <div class="error-page">
   <h1>{{.Meta.Title}}</h1>
-  <p>요청을 처리하지 못했습니다. 주소를 확인하거나 잠시 후 다시 시도하세요.</p>
+  {{/* 화면이 준 문구(Message)를 쓴다 — 404 와 500 이 같은 일반 문구였다. Detail 은 개발 모드의 원인이다. */}}
+  {{$msg := "요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요."}}
+  {{with .Data}}{{with .Message}}{{$msg = .}}{{end}}{{end}}
+  <p>{{$msg}}</p>
   {{with .Data}}{{with .Detail}}<pre class="dev-detail">{{.}}</pre>{{end}}{{end}}
   <p><a href="/">홈으로</a></p>
 </div>

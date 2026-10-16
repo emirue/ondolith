@@ -235,12 +235,13 @@ func (d *publicDeps) renderNamed(w http.ResponseWriter, r *http.Request, name st
 // 사이트 레이아웃 안에서 말한다.
 func (d *publicDeps) forbidden(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, "권한이 없습니다", "")
-	v.Data = map[string]string{"Detail": "이 화면에 들어갈 권한이 없습니다. 필요하면 사이트 관리자에게 문의하세요."}
+	v.Data = map[string]string{"Message": "이 화면에 들어갈 권한이 없습니다. 필요하면 사이트 관리자에게 문의하세요."}
 	d.renderPage(w, r, "error.html", http.StatusForbidden, v)
 }
 
 func (d *publicDeps) notFound(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, "찾을 수 없습니다", "")
+	v.Data = map[string]string{"Message": "없는 페이지이거나 주소가 바뀌었습니다. 주소를 확인하세요."}
 	d.renderPage(w, r, "error.html", http.StatusNotFound, v)
 }
 
@@ -256,7 +257,7 @@ func (d *publicDeps) unverified(a *Actor) bool {
 // unverified account: the reason and where to get the mail again (P-113).
 func (d *publicDeps) refuseUnverified(w http.ResponseWriter, r *http.Request, what string) {
 	v := d.view(r, "이메일 인증이 필요합니다", "")
-	v.Data = map[string]string{"Detail": "이메일 인증 후 " + what +
+	v.Data = map[string]string{"Message": "이메일 인증 후 " + what +
 		" 인증 메일을 다시 받으려면 계정 화면에서 「인증 메일 재발송」을 누르세요."}
 	d.renderPage(w, r, "error.html", http.StatusBadRequest, v)
 }

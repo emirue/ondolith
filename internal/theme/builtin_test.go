@@ -1385,3 +1385,28 @@ func TestEmptyProductSearchSaysWhatWasSearched(t *testing.T) {
 		t.Error("상품 검색 0건이 검색어를 말하지 않는다")
 	}
 }
+
+// **오류 화면은 그 오류의 말을 한다.** 404 와 500 이 같은 「요청을 처리하지 못했습니다. 주소를
+// 확인하거나 잠시 후 다시 시도하세요.」였다. 화면이 `Message` 를 주면 그것을, 안 주면 일반 문구를
+// 쓴다. `Detail` 은 개발 모드의 원인(회색 상자)이다.
+func TestErrorPageSaysWhatWentWrong(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(data any) string {
+		v := fullView()
+		v.Meta.Title = "찾을 수 없습니다"
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "error.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	const generic = "요청을 처리하지 못했습니다"
+	out := render(map[string]string{"Message": "없는 페이지입니다."})
+	if !strings.Contains(out, "<p>없는 페이지입니다.</p>") || strings.Contains(out, generic) {
+		t.Error("오류 화면이 받은 문구 대신 일반 문구를 쓴다")
+	}
+	if !strings.Contains(render(nil), generic) {
+		t.Error("문구를 받지 않은 오류 화면에 일반 문구가 없다")
+	}
+}

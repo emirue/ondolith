@@ -87,7 +87,7 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 	// 요청뿐이라 글 화면을 다시 그리지 않고 이유만 말한다 — DB 에 맡기면 500 이다.
 	if content.TooLong(body, content.MaxCommentLen) {
 		v := d.view(r, "댓글을 저장하지 않았습니다", "")
-		v.Data = map[string]string{"Detail": "댓글은 2,000자까지 쓸 수 있습니다."}
+		v.Data = map[string]string{"Message": "댓글은 2,000자까지 쓸 수 있습니다."}
 		d.renderPage(w, r, "error.html", http.StatusUnprocessableEntity, v)
 		return
 	}
@@ -101,7 +101,7 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 
 	if code, msg := d.spam.check(r); code != 0 {
 		v := d.view(r, "댓글을 저장하지 않았습니다", "")
-		v.Data = map[string]string{"Detail": msg}
+		v.Data = map[string]string{"Message": msg}
 		d.renderPage(w, r, "error.html", code, v)
 		return
 	}

@@ -145,7 +145,7 @@ themes/{이름}/
 | `home.html` | P-201 | 폴백 |
 | `page.html` | P-202 | 폴백 |
 | `search.html` | P-212 | 폴백 |
-| `error.html` | P-903, P-904 | 폴백 |
+| `error.html` | P-903, P-904 | 폴백 · 데이터 `{Message, Detail}` — `Message` 는 화면이 주는 문구(없으면 일반 문구), `Detail` 은 개발 모드의 원인 |
 | `sitemap.xml` | P-901 | **코어 생성** |
 | `robots.txt` | P-902 | **코어 생성** |
 
