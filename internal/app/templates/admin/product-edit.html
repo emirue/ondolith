@@ -20,7 +20,7 @@
     {{/* 정수 minor unit 이다 (D50). step="1" 이 소수 입력을 막지만 거부하는
          것은 서버다 — 브라우저는 건너뛸 수 있다. */}}
     <label class="adm-field">
-      <span>기본가 (원){{if .BasePrice}} — 지금 {{money .BasePrice}}{{end}}</span>
+      <span>기본가 (원){{if .BasePrice}} — {{money .BasePrice}}{{end}}</span>
       <input type="number" name="base_price" min="0" step="1" value="{{.BasePrice}}" required>
     </label>
     <label class="adm-field adm-field--check">

@@ -1410,3 +1410,18 @@ func TestErrorPageSaysWhatWentWrong(t *testing.T) {
 		t.Error("문구를 받지 않은 오류 화면에 일반 문구가 없다")
 	}
 }
+
+// 회원 탈퇴의 비밀번호 칸은 라벨 밖에 있다 — `.form label` 의 흐린 라벨 모양(opacity .6·12.5px)이
+// 감싼 입력칸까지 흐리게 해, 입력한 값이 placeholder 처럼 보였다(관리자 .adm-field 와 같은 결함).
+func TestDeleteFormPasswordIsNotInsideALabel(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	v.Data = payloadFor("account/delete.html")
+	var b bytes.Buffer
+	if err := l.Render(&b, "account/delete.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`<label for="password">[^<]*</label>\s*<input id="password"`).MatchString(b.String()) {
+		t.Error("탈퇴 화면의 비밀번호 칸이 라벨 안에 있다 — 입력값이 흐리게 보인다")
+	}
+}
