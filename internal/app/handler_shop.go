@@ -155,10 +155,14 @@ func (d *shopDeps) productDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
-	d.renderPage(w, r, "shop/product.html", http.StatusOK, d.shopView(r, p.Name, map[string]any{
-		"Product": p, "Variants": variants, "Options": commerce.OptionGroups(variants),
-		"Images": images,
-	}))
+	groups := commerce.OptionGroups(variants)
+	data := map[string]any{"Product": p, "Variants": variants, "Options": groups, "Images": images}
+	// 옵션 없는 상품(조합 하나, 그룹 없음)은 고를 것이 없다 — 그 조합을 미리
+	// 고른다. 고르지 않으면 선택칸도 없이 「옵션을 모두 선택하세요」에서 멈춘다.
+	if len(groups) == 0 && len(variants) == 1 {
+		data["Variant"] = &variants[0]
+	}
+	d.renderPage(w, r, "shop/product.html", http.StatusOK, d.shopView(r, p.Name, data))
 }
 
 // P-306 GET /shop/images/{id} — one product image.

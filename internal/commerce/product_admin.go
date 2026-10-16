@@ -22,6 +22,8 @@ var (
 	ErrSkuTaken = errors.New("commerce: 이미 쓰이는 SKU 입니다")
 	// ErrOptionDuplicate 는 한 그룹 안에서 옵션 값이 겹친 경우다.
 	ErrOptionDuplicate = errors.New("commerce: 같은 그룹에 중복된 옵션 값이 있습니다")
+	// ErrOptionsRequired 는 옵션 그룹이 있는 상품을 빈 옵션으로 저장하려 한 경우다.
+	ErrOptionsRequired = errors.New("commerce: 옵션 그룹이 있는 상품은 옵션을 비울 수 없습니다")
 	// ErrStockVersion 은 낙관적 잠금 버전이 어긋난 경우다 (409).
 	ErrStockVersion = errors.New("commerce: 다른 사람이 먼저 바꿨습니다")
 	// ErrSkuLength 는 SKU 가 64자를 넘은 경우다 (D30). 막는 것은 DB 의 CHECK
@@ -315,9 +317,6 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 		}
 		opts[i].Values = vals
 	}
-	if len(opts) == 0 {
-		return ErrOptionDuplicate
-	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -331,6 +330,18 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 			return ErrNotFound
 		}
 		return err
+	}
+	// **그룹이 없으면 옵션 없는 조합 하나다** — 단일 상품(텀블러 등)에 가짜 옵션을
+	// 만들지 않게 한다. 아래 곱이 빈 그룹 목록에서 빈 조합 하나를 낸다. 다만 이미
+	// 그룹이 있는 상품은 비우지 않는다: 빈 줄만 보낸 저장 한 번에 그룹이 사라진다.
+	if len(opts) == 0 {
+		existing, err := q.Options(ctx, productID)
+		if err != nil {
+			return err
+		}
+		if len(existing) > 0 {
+			return ErrOptionsRequired
+		}
 	}
 
 	if err := q.DeleteProductOptions(ctx, productID); err != nil {

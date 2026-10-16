@@ -102,3 +102,30 @@ func TestRejectedCheckoutKeepsWhatWasTyped(t *testing.T) {
 		t.Error("동의하지 않은 약관이 체크돼 있다")
 	}
 }
+
+// **옵션 없는 상품은 고를 것 없이 바로 담긴다.** 그 상품의 유일한 조합을 화면이
+// 미리 골라 둔다 — 고를 선택칸이 없는데 「옵션을 모두 선택하세요」에서 멈추면
+// 담을 수 없다.
+func TestSingleVariantProductCanBeAddedDirectly(t *testing.T) {
+	srv, pool, _ := shopSite(t)
+	ctx := context.Background()
+	var pid, vid string
+	if err := pool.QueryRow(ctx, `INSERT INTO products (slug,name,base_price,is_visible)
+		VALUES ('tumbler','텀블러',15000,true) RETURNING id`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{}',0,4) RETURNING id`, pid).Scan(&vid); err != nil {
+		t.Fatal(err)
+	}
+	c := client()
+	_, _, page := getBody(t, c, srv.URL+"/shop/p/tumbler")
+	if !strings.Contains(page, `name="variant_id" value="`+vid+`"`) {
+		t.Fatal("옵션 없는 상품의 조합이 미리 골라져 있지 않다")
+	}
+	resp := post(t, c, srv.URL+"/cart/items", url.Values{"variant_id": {vid}, "quantity": {"1"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("담기 = HTTP %d, want 303", resp.StatusCode)
+	}
+}

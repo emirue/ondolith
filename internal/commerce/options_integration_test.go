@@ -103,7 +103,6 @@ func TestSetOptionsRefusesEmptyAndDuplicateValues(t *testing.T) {
 		{"그룹 이름이 공백", []Option{{Name: "  ", Values: []string{"빨강"}}}},
 		{"값이 전부 공백", []Option{{Name: "색상", Values: []string{" ", ""}}}},
 		{"그룹 안 중복", []Option{{Name: "색상", Values: []string{"빨강", "빨강"}}}},
-		{"그룹이 없음", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := s.SetOptions(ctx, pid, tc.opts); !errors.Is(err, ErrOptionDuplicate) {
@@ -117,6 +116,38 @@ func TestSetOptionsRefusesEmptyAndDuplicateValues(t *testing.T) {
 				t.Errorf("거부됐는데 조합 %d개가 생겼다", len(vs))
 			}
 		})
+	}
+}
+
+// **옵션이 없는 상품도 팔 수 있다.** 그룹 없이 저장하면 옵션 없는 조합 하나를
+// 만든다 — 텀블러 같은 단일 상품에 가짜 옵션을 만들지 않아도 된다. 이미 조합이
+// 있는 상품을 빈 옵션으로 덮지는 않는다: 실수 한 번에 옵션 그룹이 사라진다.
+func TestSetOptionsWithoutGroupsMakesOneVariant(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	single := mkProduct(t, s, "tumbler", 15000)
+	for range 2 { // 두 번 저장해도 하나다
+		if err := s.SetOptions(ctx, single, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vs, err := s.Variants(ctx, single, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vs) != 1 || len(vs[0].OptionValues) != 0 {
+		t.Fatalf("조합 %v — 옵션 없는 조합 하나여야 한다", vs)
+	}
+
+	optioned := mkProduct(t, s, "mat", 10000)
+	if err := s.SetOptions(ctx, optioned, []Option{{Name: "색상", Values: []string{"빨강"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetOptions(ctx, optioned, nil); !errors.Is(err, ErrOptionsRequired) {
+		t.Errorf("조합이 있는 상품을 빈 옵션으로 저장 = %v, want ErrOptionsRequired", err)
+	}
+	if opts, _ := s.Options(ctx, optioned); len(opts) != 1 {
+		t.Errorf("거부됐는데 옵션 그룹이 %d개다", len(opts))
 	}
 }
 
