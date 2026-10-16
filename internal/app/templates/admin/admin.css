@@ -910,6 +910,9 @@ dl { margin: 0 0 var(--s20); }
 
 @media (max-width: 767px) {
   :root { --pad: 16px; --gap: 14px; }
+  /* iOS Safari 는 글자가 16px 미만인 칸에 초점이 가면 화면을 확대한다(14px 였다). 플랫폼의
+     문턱이라 더 구체적인 규칙(필터줄 13px 등)도 이기도록 !important 다. */
+  input, select, textarea { font-size: 16px !important; }
   .adm-gnb { display: none; }
   /* 로고와 오른쪽 사이의 26px 은 좁은 화면에서 통째로 밀어내는 크기다. */
   .adm-header { gap: var(--s12); }

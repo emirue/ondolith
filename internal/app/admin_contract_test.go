@@ -720,3 +720,31 @@ func TestNarrowAdminMenuIsCollapsed(t *testing.T) {
 		}
 	}
 }
+
+// **휴대폰에서 입력칸 글자는 16px 이상이다.**
+//
+// iOS Safari 는 글자가 16px 미만인 칸에 초점이 가면 화면을 확대한다 — 53개 화면의 입력칸이
+// 14px 였고, 확대된 머리글에서 「장바구니」가 「바구니」로 잘렸다(iPhone 시뮬레이터). 관리자
+// 화면은 필터줄 13px 처럼 더 구체적인 규칙이 있어, 좁은 폭 블록이 그것들을 이겨야 한다.
+func TestNarrowInputsDoNotTriggerZoom(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := regexp.MustCompile(`input,\s*select,\s*textarea\s*\{\s*font-size:\s*16px\s*!important`)
+	for name, css := range map[string]string{"admin/admin.css": string(adminCSS), "builtin/style.css": string(themeCSS)} {
+		at := strings.Index(css, "@media (max-width: 767px)")
+		if at < 0 {
+			t.Fatalf("%s: 767px 블록이 없다", name)
+		}
+		block := css[at:]
+		block = block[:strings.Index(block, "\n}")]
+		if !rule.MatchString(block) {
+			t.Errorf("%s: 767px 블록에서 입력칸 글자를 16px 로 올리지 않는다 — iPhone 이 초점마다 확대한다", name)
+		}
+	}
+}

@@ -1243,3 +1243,28 @@ func TestSignupKeepsWhatWasTyped(t *testing.T) {
 		t.Error("가입 화면이 비밀번호를 되살렸다")
 	}
 }
+
+// **통합 검색은 검색어가 없을 때만 입력칸에 초점을 준다.**
+//
+// 결과 화면에서도 초점이 걸려, 휴대폰에서는 들어가자마자 키보드가 올라와 결과를
+// 가렸다(iPhone Safari). 검색어를 고치려는 사람은 칸을 누르면 된다.
+func TestSearchFocusesOnlyWithoutQuery(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(q string) string {
+		v := fullView()
+		data := payloadFor("search.html").(map[string]any)
+		data["Query"] = struct{ Search string }{Search: q}
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "search.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	if strings.Contains(render("검색어"), "autofocus") {
+		t.Error("결과 화면의 검색칸에 autofocus 가 있다 — 휴대폰 키보드가 결과를 가린다")
+	}
+	if !strings.Contains(render(""), "autofocus") {
+		t.Error("빈 검색 화면에 autofocus 가 없다 — 칸을 한 번 더 눌러야 한다")
+	}
+}
