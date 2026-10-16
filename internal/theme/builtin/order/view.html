@@ -11,7 +11,7 @@
     <tbody>
       {{range .Items}}
       <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-          <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
+          <td data-label="단가">{{money .UnitPrice}}</td><td data-label="수량">{{.Quantity}}</td><td data-label="금액">{{money .LineAmount}}</td></tr>
       {{end}}
     </tbody>
   </table>

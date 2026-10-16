@@ -630,3 +630,34 @@ func TestPaymentTemplateHasVerifyForm(t *testing.T) {
 		t.Fatal("payment.html 에 연결 확인 폼(action=verify)이 없다 — 핸들러 분기에 닿을 버튼이 없다")
 	}
 }
+
+// **가로로 밀리는 표는 밀린다는 것을 보인다.**
+//
+// 표 감싸미는 `overflow-x: auto` 라 넘쳐도 페이지가 흔들리지 않지만, 휴대폰에는 스크롤
+// 막대가 없다. 재고 입고칸·주문 금액·게시판의 동작 버튼이 화면 밖에 있는데 표시가 없어
+// 기능이 없는 것처럼 보였다. 가장자리 그림자(`background-attachment: local` 덮개 +
+// `scroll` 그림자)는 더 밀 것이 있는 쪽에만 남는다. 두 스타일시트가 같은 문제를 가진다.
+func TestTableScrollersShowTheyScroll(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ css, sel string }{
+		"admin/admin.css":   {string(adminCSS), ".adm-table-wrap"},
+		"builtin/style.css": {string(themeCSS), ".table-wrap"},
+	} {
+		rule := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(c.sel) + `\s*\{([^}]*)\}`).FindStringSubmatch(c.css)
+		if rule == nil {
+			t.Errorf("%s: %s 규칙이 없다", name, c.sel)
+			continue
+		}
+		body := rule[1]
+		if !strings.Contains(body, "overflow-x: auto") || strings.Count(body, " local") < 2 || strings.Count(body, " scroll") < 2 {
+			t.Errorf("%s: %s 가 넘칠 때 가장자리 그림자를 그리지 않는다 — 밀 수 있는지 모른다:\n%s", name, c.sel, body)
+		}
+	}
+}

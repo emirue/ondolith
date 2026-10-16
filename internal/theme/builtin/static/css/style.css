@@ -478,7 +478,17 @@ a:focus-visible {
 
 /* 좁은 화면에서 표는 **자기 안에서** 가로 스크롤한다. 페이지가 통째로
  * 흔들리면 나머지 화면까지 못 쓰게 된다. */
-.table-wrap { overflow-x: auto; margin: 0 0 18px; }
+.table-wrap {
+  overflow-x: auto;
+  margin: 0 0 18px;
+  /* 밀 수 있다는 표시: 덮개(local)는 내용과 함께 움직이고 그림자(scroll)는 가장자리에
+   * 머문다 — 더 밀 것이 남은 쪽에만 그림자가 보인다. 휴대폰에는 스크롤 막대가 없다. */
+  background:
+    linear-gradient(to right, var(--panel) 30%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--panel) 30%, transparent) right / 32px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 12px 100% no-repeat scroll;
+}
 
 .board-list,
 .order-list {
@@ -1172,6 +1182,39 @@ address + p { font-size: 14px; margin-top: 6px; }
 
   /* 답글 들여쓰기를 줄인다. 화면이 좁으면 들여쓴 만큼 본문이 사라진다. */
   .comments li.reply { margin-left: 14px; }
+}
+
+/* **목록 표는 행마다 한 덩어리로 쌓는다.** 칸을 옆으로 늘어놓으면 줄바꿈하지 않는
+ * 작성자·작성일·금액이 자리를 먼저 차지해, 390px 에서 글 제목이 낱말마다 꺾였고
+ * 주문 내역의 378,000원은 칸 밖으로 밀려 「378」로 보였다. 첫 칸(제목·주문번호·상품)이
+ * 한 줄을 다 쓰고 나머지는 그 아래에 잇는다. 머리줄이 숨으니 숫자 칸은 `data-label` 을 단다.
+ * `screen` 인 까닭: A4 인쇄 폭(약 720px)도 767px 에 걸려 영수증이 카드로 풀린다. */
+@media screen and (max-width: 767px) {
+  .board-list,
+  .order-list,
+  .board-list tbody,
+  .order-list tbody { display: block; }
+  .board-list thead,
+  .order-list thead { display: none; }
+  .board-list tr,
+  .order-list tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .board-list tbody tr:last-child,
+  .order-list tbody tr:last-child { border-bottom: 0; }
+  .board-list td,
+  .order-list td { padding: 0; border: 0; }
+  .board-list td:first-child,
+  .order-list td:first-child { flex-basis: 100%; white-space: normal; }
+  /* 값이 없는 사용자 필드 칸이 빈 자리를 차지했다(「색상」). */
+  .board-list td:empty,
+  .order-list td:empty { display: none; }
+  .order-list td[data-label]::before { content: attr(data-label) " "; opacity: .55; font-size: 12.5px; }
 }
 
 /* 인쇄: 영수증(P-509)을 종이로 낼 때 머리글 메뉴·검색칸·바닥글·동작 버튼이 같이 찍혔다. */

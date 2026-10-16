@@ -339,3 +339,50 @@ func TestSingletonBlocksAppearOnce(t *testing.T) {
 		t.Errorf("한 번만 나와야 하는 블록이 여러 번 있다: %v", dup)
 	}
 }
+
+// **휴대폰에서 목록 표는 행마다 한 덩어리로 쌓인다.**
+//
+// 칸을 옆으로 늘어놓으면 줄바꿈하지 않는 작성자·작성일·금액이 자리를 먼저 차지한다.
+// 390px 에서 글 제목이 낱말마다 꺾였고(「3월/배송/일정」), 주문 내역은 금액이 칸 밖으로
+// 밀려 378,000원이 「378」로 보였다 — 표는 옆으로 밀리지만 밀 수 있다는 표시가 없다.
+//
+// **`screen` 으로 한정한다.** A4 인쇄 폭(약 720px)도 `max-width: 767px` 에 걸려, 영수증을
+// 인쇄하면 표가 카드로 풀린다. 머리줄이 숨으므로 숫자 칸(단가·수량·금액)은 `data-label` 로
+// 무엇의 숫자인지 단다.
+func TestNarrowListTablesStackRows(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := stripComments(string(b))
+	at := strings.Index(css, "@media screen and (max-width: 767px)")
+	if at < 0 {
+		t.Fatal("화면 전용 좁은 폭 블록이 없다 — 표가 휴대폰에서도 옆으로 늘어선다")
+	}
+	block := css[at:]
+	if end := strings.Index(block, "\n}"); end > 0 {
+		block = block[:end]
+	}
+	for _, want := range []*regexp.Regexp{
+		regexp.MustCompile(`\.board-list thead,\s*\.order-list thead\s*\{\s*display:\s*none`),
+		regexp.MustCompile(`\.board-list tr,\s*\.order-list tr\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap`),
+		regexp.MustCompile(`td:first-child[^{]*\{[^}]*flex-basis:\s*100%`),
+		regexp.MustCompile(`td\[data-label\]::before\s*\{[^}]*attr\(data-label\)`),
+	} {
+		if !want.MatchString(block) {
+			t.Errorf("좁은 폭 블록에 %s 가 없다", want)
+		}
+	}
+
+	for _, name := range []string{"order/view.html", "order/receipt.html", "shop/complete.html"} {
+		src, err := fs.ReadFile(Builtin(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, label := range []string{"단가", "수량", "금액"} {
+			if !strings.Contains(string(src), `data-label="`+label+`"`) {
+				t.Errorf("%s: 품목 표의 %s 칸에 data-label 이 없다 — 휴대폰에서 숫자만 남는다", name, label)
+			}
+		}
+	}
+}

@@ -328,7 +328,16 @@ a:hover { color: var(--link-hover); }
 
 /* ---- 표 ----------------------------------------------------------------- */
 /* 래퍼가 가로 스크롤을 갖는다. 표가 그리드를 밀면 사이드바가 잘린다. */
-.adm-table-wrap { overflow-x: auto; }
+.adm-table-wrap {
+  overflow-x: auto;
+  /* 밀 수 있다는 표시: 덮개(local)는 내용과 함께 움직이고 그림자(scroll)는 가장자리에
+   * 머문다 — 더 밀 것이 남은 쪽에만 그림자가 보인다. 휴대폰에는 스크롤 막대가 없다. */
+  background:
+    linear-gradient(to right, var(--panel) 30%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--panel) 30%, transparent) right / 32px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 12px 100% no-repeat scroll;
+}
 
 .adm-table {
   width: 100%;
