@@ -57,8 +57,13 @@
 {{else}}
 <p>발송 정보가 없습니다.</p>
 {{end}}
+</div>
+
 {{/* 환불(A-507)·반품 처리(A-511) 화면은 만들어져 있었지만 관리자 주문 상세가
-     송장만 가리켜, 나머지 둘은 주소를 직접 쳐야 닿았다. */}}
+     송장만 가리켜, 나머지 둘은 주소를 직접 쳐야 닿았다. 「배송」 카드 안에 섞여 있던
+     것을 따로 둔다 — 넷 다 배송만의 일이 아니다. */}}
+<div class="adm-card">
+<h2>처리</h2>
 <div class="adm-actions">
   <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/shipping">송장 입력</a>
   <a class="adm-btn" href="/admin/orders/{{.Order.OrderNo}}/refund">환불 처리</a>

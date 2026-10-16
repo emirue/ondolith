@@ -534,3 +534,26 @@ func TestProductFormHasCancelAndReadablePrice(t *testing.T) {
 		}
 	}
 }
+
+// **주문의 하위 화면에는 주문 상세로 돌아가는 링크가 있다.** 송장 입력·환불·반품·피킹 화면은
+// 주문 상세에서 들어가는데 돌아갈 길이 브라우저 뒤로 가기뿐이었다. 주문 상세에서는 그 네
+// 화면으로 가는 버튼이 「배송」 카드 안에 섞여 있었다 — 따로 「처리」 카드다.
+func TestOrderSubScreensLinkBackToTheOrder(t *testing.T) {
+	order := &commerce.OrderDetail{OrderNo: "ORD-1", Status: "배송준비"}
+	back := `href="/admin/orders/ORD-1">← 주문 상세</a>`
+	for name, data := range map[string]map[string]any{
+		"admin/shipping.html": {"Order": order},
+		"admin/refund.html":   {"Order": order, "Approved": 1000, "Refunded": 0, "Remaining": 1000},
+		"admin/returns.html":  {"Order": order},
+		"admin/pick.html":     {"OrderNo": "ORD-1"},
+	} {
+		if html := renderAdmin(t, name, data); !strings.Contains(html, back) {
+			t.Errorf("%s 에 주문 상세로 돌아가는 링크가 없다", name)
+		}
+	}
+	html := renderAdmin(t, "admin/order.html", map[string]any{"Order": order})
+	ship, act := strings.Index(html, "<h2>배송</h2>"), strings.Index(html, "<h2>처리</h2>")
+	if act < 0 || ship < 0 || strings.Contains(html[ship:act], "/shipping\"") {
+		t.Error("주문 상세의 처리 버튼이 「배송」 카드 안에 있다")
+	}
+}

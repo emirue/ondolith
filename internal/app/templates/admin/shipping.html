@@ -1,3 +1,5 @@
+{{/* 주문 상세에서 들어오는 화면이다 — 돌아갈 길이 뒤로 가기뿐이었다. */}}
+{{define "pageactions"}}{{with .Order}}<a class="adm-btn" href="/admin/orders/{{.OrderNo}}">← 주문 상세</a>{{end}}{{end}}
 {{define "content"}}
 <div class="adm-card">
 {{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>
