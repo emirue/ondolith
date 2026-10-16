@@ -142,7 +142,7 @@ func (d *Deps) renderBusiness(w http.ResponseWriter, r *http.Request, code int,
 	data := map[string]any{"Business": kv, "Keys": commerce.BusinessKeys,
 		"Labels": commerce.BusinessLabels, "Error": msg}
 	if missing := commerce.MissingBusinessKeys(kv); len(missing) > 0 {
-		data["Warning"] = "shop 모드에서 표시 의무 항목이 비어 있습니다: " +
+		data["Warning"] = "쇼핑몰로 운영 중인데 표시 의무 항목이 비어 있습니다: " +
 			strings.Join(missing, ", ")
 	}
 	d.Render(w, r, "admin/business.html", code, data)

@@ -123,6 +123,22 @@ type Deps struct {
 	BackupDir string
 }
 
+// actionLabels names operation-log actions for A-603. 코드(<자원>.<동사>)를 그대로
+// 보이면 운영자가 「settings.update」가 무엇인지 따로 알아야 했다. 이름표에 없는 새
+// 동작은 화면이 코드 그대로 보인다.
+var actionLabels = map[string]string{
+	"settings.update": "설정 변경", "backup.download": "백업 내려받기", "backup.settings": "자동 백업 설정",
+	"backup.auto": "자동 백업", "mail.failed": "메일 발송 실패", "theme.upload": "테마 업로드",
+	"board.manage": "게시판 관리", "post.moderate": "글 관리", "comment.moderate": "댓글 관리",
+	"user.create": "사용자 생성", "user.update": "사용자 변경", "user.delete": "사용자 삭제",
+	"user.reset_password": "재설정 강제", "role.manage": "역할 권한", "role.assign": "역할 부여",
+	"product.manage": "상품 관리", "category.create": "카테고리 생성", "category.update": "카테고리 변경",
+	"category.reparent": "카테고리 이동", "category.delete": "카테고리 삭제",
+	"order.update": "주문 변경", "order.transition": "주문 상태 변경", "order.shipment": "송장 입력",
+	"order.refund": "환불", "return.pickup": "반품 수거", "return.settle": "반품 환불 확정",
+	"return.reject": "반품 거부", "return.exchange": "교환 처리", "payment.reconcile": "결제 대사",
+}
+
 // require is the per-handler permission check.
 //
 // Every screen calls it even though the tree gate already ran: the gate saw
@@ -1128,6 +1144,7 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 	// 검사는 다음 화면에서 진짜 금액을 놓친다.
 	data["Entries"] = entries
 	data["Count"] = total
+	data["ActionLabels"] = actionLabels
 	// **쪽 이동 링크가 기간을 싣는다.** 이 화면의 쪽 번호는 0 부터라 pager 를 쓰지
 	// 않고 직접 만든다 (`?page=1` 이 둘째 쪽이다).
 	link := func(n int) string {

@@ -313,3 +313,26 @@ func TestDashboardRecentPostsLinkAndWrap(t *testing.T) {
 		}
 	}
 }
+
+// 운영자 화면에 내부 문서·화면 번호와 권한 키를 보이지 않는다 — 「(D15 7절)」 「회원가입
+// (P-103)」 「(page.publish)」 「shop 모드」. 작업 로그의 동작은 한국어 이름이다(코드는 title).
+func TestAdminTextHidesInternalCodes(t *testing.T) {
+	pages := map[string]map[string]any{
+		"admin/oplog.html": {"Entries": []content.LogEntry{{Action: "settings.update", Summary: "설정"}},
+			"ActionLabels": map[string]string{"settings.update": "설정 변경"}, "Count": int64(1), "PageNo": 1},
+		"admin/user-fields.html": {"Fields": nil, "Types": content.FieldTypes()},
+		"admin/page-edit.html":   {"Page": &content.Page{ID: "p1", Title: "소개", Slug: "about"}},
+		"admin/business.html":    {"Business": map[string]string{}},
+	}
+	for name, data := range pages {
+		out := renderAdmin(t, name, data)
+		for _, leak := range []string{"(D15", "(P-103)", "(P-109)", "(page.publish)", "shop 모드"} {
+			if strings.Contains(out, leak) {
+				t.Errorf("%s 에 내부 표기 %q 가 보인다", name, leak)
+			}
+		}
+	}
+	if out := renderAdmin(t, "admin/oplog.html", pages["admin/oplog.html"]); !strings.Contains(out, `title="settings.update">설정 변경</span>`) {
+		t.Error("작업 로그의 동작이 한국어 이름이 아니다")
+	}
+}
