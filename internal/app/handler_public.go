@@ -206,12 +206,27 @@ func (d *publicDeps) renderPartial(w http.ResponseWriter, r *http.Request, name 
 	}
 }
 
+// publicTitles 는 renderNamed 로 그리는 화면의 탭 제목이다. 비워 두면 탭이 사이트 이름뿐이다 —
+// 내 정보·비밀번호 변경·회원 탈퇴가 그랬다.
+var publicTitles = map[string]string{
+	"auth/login.html":                  "로그인",
+	"auth/signup.html":                 "회원가입",
+	"auth/signup-sent.html":            "가입 신청",
+	"auth/verify.html":                 "이메일 인증",
+	"auth/password-reset-request.html": "비밀번호 재설정",
+	"auth/password-reset-sent.html":    "비밀번호 재설정",
+	"auth/password-reset.html":         "새 비밀번호 설정",
+	"account/profile.html":             "내 정보",
+	"account/password.html":            "비밀번호 변경",
+	"account/delete.html":              "회원 탈퇴",
+}
+
 // P-903 — not found.
 // renderNamed is the render func the auth and account screens use: they build
 // a plain map, and the view model wraps it so the theme still gets .Site, .Menu
 // and .User (D17 뷰 모델 규약).
 func (d *publicDeps) renderNamed(w http.ResponseWriter, r *http.Request, name string, code int, data any) {
-	v := d.view(r, "", "")
+	v := d.view(r, publicTitles[name], "")
 	v.Data = data
 	d.renderPage(w, r, name, code, v)
 }

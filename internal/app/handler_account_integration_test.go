@@ -452,3 +452,12 @@ func TestSignupChecksThePasswordConfirmation(t *testing.T) {
 		t.Errorf("확인 일치 = HTTP %d, want 200", rec.Code)
 	}
 }
+
+// 회원 화면의 탭 제목이 운영 트리에서 실제로 그려진다 — publicTitles 표만 있고 renderNamed 가
+// 읽지 않으면 TestAccountScreensHaveTabTitles 는 초록이다.
+func TestAccountTabTitleOnTheLiveSite(t *testing.T) {
+	srv, _ := liveSite(t)
+	if code, body := mustGet(t, client(), srv.URL+"/login"); code != http.StatusOK || !strings.Contains(body, "<title>로그인 · ") {
+		t.Errorf("GET /login = HTTP %d, 탭 제목에 「로그인」이 없다", code)
+	}
+}

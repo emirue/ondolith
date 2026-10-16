@@ -793,3 +793,29 @@ func TestAdminVocabularyIsConsistent(t *testing.T) {
 		t.Error("웹훅 이력이 결제사를 코드(toss)로 그린다")
 	}
 }
+
+// **회원·계정 화면은 탭 제목이 있다.** 이 화면들은 renderNamed 로 그려지는데 그것이 제목을
+// 비워, 내 정보·비밀번호 변경·회원 탈퇴의 탭이 사이트 이름뿐이었다. 연결된 계정(socialView)만
+// 제목을 따로 넣고 있었다. 새 화면을 만들고 제목을 빠뜨리면 여기서 걸린다.
+func TestAccountScreensHaveTabTitles(t *testing.T) {
+	scanned := 0
+	for _, dir := range []string{"auth", "account"} {
+		entries, err := fs.ReadDir(theme.Builtin(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			name := dir + "/" + e.Name()
+			if name == "account/connections.html" { // socialView 가 제목을 넣는다
+				continue
+			}
+			scanned++
+			if publicTitles[name] == "" {
+				t.Errorf("%s 의 탭 제목이 없다 — 사이트 이름만 보인다", name)
+			}
+		}
+	}
+	if scanned < 8 {
+		t.Fatalf("화면을 %d 개밖에 못 찾았다 — 검사가 헛돌았다", scanned)
+	}
+}
