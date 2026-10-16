@@ -310,7 +310,7 @@ func (d *Deps) CategoryUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	switch err := d.Commerce.RenameCategory(r.Context(), id, name, sortOrder); {
 	case errors.Is(err, commerce.ErrNotFound):
-		http.NotFound(w, r)
+		d.categoryError(w, r, http.StatusNotFound, "없는 카테고리입니다.")
 		return
 	case err != nil:
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")

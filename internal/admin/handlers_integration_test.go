@@ -2054,11 +2054,11 @@ func TestAccountOperationsAreLogged(t *testing.T) {
 }
 
 // **사용자 목록에서 이메일·이름으로 찾는다** (D19 A-401). 50명씩 이전·다음뿐이라 고객이
-// 전화로 이메일을 불러 줘도 찾을 길이 넘기기뿐이었다. % 와 _ 는 글자 그대로 찾는다.
+// 전화로 이메일을 불러 줘도 찾을 길이 넘기기뿐이었다. % · _ · \ 는 글자 그대로 찾는다.
 func TestUserListSearchesByEmailOrName(t *testing.T) {
 	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.view": true}})
 	ctx := context.Background()
-	for _, u := range [][2]string{{"kim@example.com", "김온돌"}, {"lee@example.com", "이바닥"}, {"under_score@example.com", "밑줄"}} {
+	for _, u := range [][2]string{{"kim@example.com", "김온돌"}, {"lee@example.com", "이바닥"}, {"under_score@example.com", "밑줄"}, {"back@example.com", `역\슬래시`}} {
 		if _, err := d.Auth.CreateUser(ctx, u[0], "h", u[1]); err != nil {
 			t.Fatal(err)
 		}
@@ -2072,7 +2072,7 @@ func TestUserListSearchesByEmailOrName(t *testing.T) {
 		w.WriteHeader(code)
 	}
 	for q, want := range map[string]string{"lee": "lee@example.com", "김온": "kim@example.com",
-		"_": "under_score@example.com", "%": ""} {
+		"_": "under_score@example.com", "%": "", `\`: "back@example.com"} {
 		d.UserList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/users?q="+url.QueryEscape(q), nil))
 		if strings.Join(got, ",") != want {
 			t.Errorf("검색 %q = %v, want %q", q, got, want)

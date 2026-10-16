@@ -128,7 +128,7 @@ FROM menus d
 WHERE m.parent_id = d.id AND d.url IN ($1::text, $1::text || '/')
 `
 
-// 지운 게시판·페이지를 가리키던 메뉴 (dropMenusFor). 하위 메뉴는 함께 사라지지 않게
+// 지운 게시판·페이지를 가리키던 메뉴 (deleteWithMenus). 하위 메뉴는 함께 사라지지 않게
 // 먼저 한 단계 올린다 — parent_id 는 ON DELETE CASCADE 다.
 func (q *Queries) LiftMenuChildren(ctx context.Context, url string) error {
 	_, err := q.db.Exec(ctx, liftMenuChildren, url)

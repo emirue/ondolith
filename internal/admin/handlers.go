@@ -95,7 +95,7 @@ type Deps struct {
 	InstallTheme func(name string, r io.ReaderAt, size int64, replace bool) error
 	// InstalledThemes lists what A-203 put in the theme directory (A-202 이 나열한다).
 	InstalledThemes func() ([]string, error)
-	// BoardSkins lists the skins the active theme offers (A-305 의 선택칸).
+	// BoardSkins lists the board skins the built-in theme carries (A-305 의 선택칸, theme.Loader.BoardSkins).
 	BoardSkins func() []string
 	// Gateway 는 A-508 이 PG 에 실제 상태를 물을 때 쓴다. nil 이면 대사가
 	// 우리 기록만 보여준다 — 조회 없이 「일치」로 그리지 않는다.

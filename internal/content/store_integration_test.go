@@ -280,12 +280,18 @@ func TestDeletingBoardOrPageDropsItsMenus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	toBoard, _ := s.CreateMenuItem(ctx, MenuItem{Title: "빈게시판", URL: "/board/empty"})
-	child, _ := s.CreateMenuItem(ctx, MenuItem{Title: "하위", URL: "/help", ParentID: toBoard})
-	if _, err := s.CreateMenuItem(ctx, MenuItem{Title: "소개", URL: "/about"}); err != nil {
-		t.Fatal(err)
+	mkItem := func(m MenuItem) string {
+		t.Helper()
+		id, err := s.CreateMenuItem(ctx, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
 	}
-	keep, _ := s.CreateMenuItem(ctx, MenuItem{Title: "상품", URL: "/shop"})
+	toBoard := mkItem(MenuItem{Title: "빈게시판", URL: "/board/empty"})
+	child := mkItem(MenuItem{Title: "하위", URL: "/help", ParentID: toBoard})
+	mkItem(MenuItem{Title: "소개", URL: "/about"})
+	keep := mkItem(MenuItem{Title: "상품", URL: "/shop"})
 
 	if err := s.DeleteBoard(ctx, board, true); err != nil {
 		t.Fatal(err)

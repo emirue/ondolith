@@ -409,14 +409,6 @@ func (s *Store) CategoryBySlug(ctx context.Context, slug string) (*Category, err
 	return &c, nil
 }
 
-// CreateCategory is A-509's write (D19 A-509 「입력 필드」).
-//
-// **이것이 없어서 카테고리를 만들 방법이 없었다.** A-509 는 「이동」만 구현돼
-// 있었고, 그래서 P-302 `/shop/c/{slug}` 는 어떤 주소로도 열 수 없는 화면이었다.
-// 카테고리가 하나도 없으니 P-301 의 카테고리 줄도 영영 그려지지 않았다.
-//
-// 상위는 여기서 검사하지 않는다 — 새로 만드는 행은 자손이 없으므로 순환이
-// 성립하지 않고, 존재 확인은 FK 가 한다.
 // RenameCategory changes a category's name and display order (A-509). 주소(slug)는
 // 바꾸지 않는다 — 누가 저장해 둔 링크다(게시판 주소와 같은 규칙).
 func (s *Store) RenameCategory(ctx context.Context, id, name string, sortOrder int) error {
@@ -431,6 +423,14 @@ func (s *Store) RenameCategory(ctx context.Context, id, name string, sortOrder i
 	return nil
 }
 
+// CreateCategory is A-509's write (D19 A-509 「입력 필드」).
+//
+// **이것이 없어서 카테고리를 만들 방법이 없었다.** A-509 는 「이동」만 구현돼
+// 있었고, 그래서 P-302 `/shop/c/{slug}` 는 어떤 주소로도 열 수 없는 화면이었다.
+// 카테고리가 하나도 없으니 P-301 의 카테고리 줄도 영영 그려지지 않았다.
+//
+// 상위는 여기서 검사하지 않는다 — 새로 만드는 행은 자손이 없으므로 순환이
+// 성립하지 않고, 존재 확인은 FK 가 한다.
 func (s *Store) CreateCategory(ctx context.Context, c Category) (string, error) {
 	id, err := s.q.CreateCategory(ctx, commerceq.CreateCategoryParams{
 		ParentID: c.ParentID, Name: c.Name, Slug: c.Slug, SortOrder: int32(c.SortOrder)})
