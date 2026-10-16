@@ -64,6 +64,8 @@ func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
 		"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee, "Terms": terms,
 		"Form": form, "Agreed": map[string]bool{},
+		// 옛 키 — 내장 테마를 복사한 테마가 아직 {{.Email}} 을 쓴다.
+		"Email": form.Get("orderer_email"),
 	}
 	d.renderPage(w, r, "shop/checkout.html", http.StatusOK, d.shopView(r, "주문서", data))
 }
@@ -126,7 +128,7 @@ func (d *shopDeps) checkoutCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, commerce.ErrTermsRequired), errors.Is(err, commerce.ErrOrdererContact),
 		errors.Is(err, commerce.ErrOutOfStock), errors.Is(err, commerce.ErrNotSellable),
-		errors.Is(err, commerce.ErrQuantityRange):
+		errors.Is(err, commerce.ErrQuantityRange), errors.Is(err, commerce.ErrAmountTooBig):
 		d.checkoutError(w, r, err)
 		return
 	case err != nil:
@@ -159,7 +161,7 @@ func (d *shopDeps) checkoutError(w http.ResponseWriter, r *http.Request, cause e
 		d.shopView(r, "주문서", map[string]any{
 			"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee,
 			"Terms": terms, "Error": cartMessage(cause),
-			"Form": r.PostForm, "Agreed": agreed,
+			"Form": r.PostForm, "Agreed": agreed, "Email": r.PostForm.Get("orderer_email"),
 		}))
 }
 

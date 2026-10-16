@@ -74,6 +74,23 @@ func TestExchangeFormOffersOptionsForEveryItem(t *testing.T) {
 		}
 	}
 
+	// 숨긴 상품의 조합은 선택지에 없다 — 서버가 거절하는 선택지다.
+	if _, err := pool.Exec(ctx, `UPDATE products SET is_visible = false WHERE id = $1`, matP); err != nil {
+		t.Fatal(err)
+	}
+	got, err = c.Get(srv.URL + "/orders/EX0002/exchange")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(got.Body)
+	got.Body.Close()
+	if strings.Contains(string(b), `value="`+matOther+`"`) {
+		t.Error("숨긴 상품의 조합이 교환 선택지에 있다")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE products SET is_visible = true WHERE id = $1`, matP); err != nil {
+		t.Fatal(err)
+	}
+
 	// 두 번째 품목(베개)을 제 옵션으로 바꾼다.
 	resp := post(t, c, srv.URL+"/orders/EX0002/exchange", url.Values{
 		"item_id": {pilItem}, "qty_" + pilItem: {"1"}, "new_variant_id": {pilOther}, "reason": {"색이 다름"}})

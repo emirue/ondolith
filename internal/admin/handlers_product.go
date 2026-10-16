@@ -471,6 +471,9 @@ func (d *Deps) OptionsSave(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, commerce.ErrOptionDuplicate):
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"그룹 이름과 값을 확인하세요. 빈 값이나 그룹 안의 중복은 저장하지 않습니다.")
+	case errors.Is(err, commerce.ErrTooManyVariants):
+		d.renderVariants(w, r, http.StatusUnprocessableEntity,
+			"옵션 조합이 500개를 넘습니다. 옵션 값을 줄이세요 — 아무것도 저장하지 않았습니다.")
 	case errors.Is(err, commerce.ErrOptionsRequired):
 		d.renderVariants(w, r, http.StatusUnprocessableEntity,
 			"옵션 그룹이 있는 상품입니다. 옵션 그룹과 값을 하나 이상 입력하세요.")

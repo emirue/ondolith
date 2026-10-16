@@ -29,7 +29,7 @@
   <form method="post" action="/admin/terms">
     {{/* 종류는 고객이 주문서에서 그대로 읽는 이름이다 — 영문 코드로 받으면
          「service (1.0) 필수」가 나간다. 코드는 이 값으로 분기하지 않는다. */}}
-    <label class="adm-field"><span>종류 — 주문서에 이 이름으로 보입니다 (예: 이용약관, 개인정보 처리방침)</span>
+    <label class="adm-field"><span>종류 — 주문서에 이 이름으로 보입니다 (예: 이용약관, 개인정보 처리방침). 개정은 <strong>같은 이름</strong>으로 새 버전을 더합니다 — 이름이 다르면 별개 약관이 되어 둘 다 동의를 받습니다</span>
       <input type="text" name="kind" maxlength="50" required></label>
     <label class="adm-field"><span>버전</span>
       <input type="text" name="version" maxlength="20" required></label>

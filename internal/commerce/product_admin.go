@@ -22,6 +22,8 @@ var (
 	ErrSkuTaken = errors.New("commerce: 이미 쓰이는 SKU 입니다")
 	// ErrOptionDuplicate 는 한 그룹 안에서 옵션 값이 겹친 경우다.
 	ErrOptionDuplicate = errors.New("commerce: 같은 그룹에 중복된 옵션 값이 있습니다")
+	// ErrTooManyVariants 는 옵션 값의 곱이 상한(maxVariants)을 넘는 경우다.
+	ErrTooManyVariants = errors.New("commerce: 옵션 조합이 너무 많습니다")
 	// ErrOptionsRequired 는 옵션 그룹이 있는 상품을 빈 옵션으로 저장하려 한 경우다.
 	ErrOptionsRequired = errors.New("commerce: 옵션 그룹이 있는 상품은 옵션을 비울 수 없습니다")
 	// ErrStockVersion 은 낙관적 잠금 버전이 어긋난 경우다 (409).
@@ -320,6 +322,14 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 		}
 		opts[i].Values = vals
 	}
+	// **곱이 상한을 넘으면 아무것도 쓰지 않는다.** 잘라서 만들면 잘린 목록 밖의 조합이
+	// 아래 판매 중지로 내려간다 — 팔던 조합과 재고가 저장 한 번에 조용히 사라진다.
+	combos := 1
+	for _, o := range opts {
+		if combos *= len(o.Values); combos > maxVariants {
+			return fmt.Errorf("%w: %d개 넘음", ErrTooManyVariants, maxVariants)
+		}
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -370,9 +380,9 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 	// 정의가 아니라 조합에서 선택지를 만든다 (OptionGroups). 곱에 다시 들어온
 	// 조합을 되살리지는 않는다: 운영자가 따로 판매를 멈춘 조합까지 옵션을 저장할
 	// 때마다 다시 열리게 된다. 되살리는 것은 A-503 의 「판매 중지」 칸이다.
-	combos := optionProduct(opts)
-	keep := make(map[string]bool, len(combos))
-	for _, c := range combos {
+	product := optionProduct(opts)
+	keep := make(map[string]bool, len(product))
+	for _, c := range product {
 		keep[OptionLabel(c)] = true
 	}
 	existing, err := q.Variants(ctx, commerceq.VariantsParams{ProductID: productID})
@@ -397,7 +407,7 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 
 	// 곱을 만든다. `ON CONFLICT DO NOTHING` 이 이미 있는 조합을 지켜 준다 —
 	// UNIQUE (product_id, option_values) 가 그 열쇠다.
-	for _, combo := range combos {
+	for _, combo := range product {
 		raw, err := json.Marshal(combo)
 		if err != nil {
 			return err
@@ -410,22 +420,19 @@ func (s *Store) SetOptions(ctx context.Context, productID string, opts []Option)
 	return tx.Commit(ctx)
 }
 
-// optionProduct 는 옵션 값의 곱(데카르트 곱)을 낸다.
-//
-// 조합 수는 값 개수의 곱이라 금방 커진다. 스키마가 그룹당 값을 50개로 막지만
-// 그룹이 여럿이면 그것만으로는 부족하므로 여기서 상한을 둔다 — 옵션 몇 줄로
-// 수만 행을 만들어 데이터베이스를 채우는 것을 막는다.
+// maxVariants 는 한 상품의 조합 수 상한이다. 조합 수는 값 개수의 곱이라 금방
+// 커진다. 스키마가 그룹당 값을 50개로 막지만 그룹이 여럿이면 그것만으로는 부족하다 —
+// 옵션 몇 줄로 수만 행을 만들어 데이터베이스를 채우는 것을 막는다. SetOptions 가
+// 곱을 만들기 **전에** 세어 거절한다.
 const maxVariants = 500
 
+// optionProduct 는 옵션 값의 곱(데카르트 곱)을 낸다. 크기 검사는 호출자(SetOptions)가 했다.
 func optionProduct(opts []Option) []map[string]string {
 	out := []map[string]string{{}}
 	for _, o := range opts {
 		var next []map[string]string
 		for _, base := range out {
 			for _, v := range o.Values {
-				if len(next) >= maxVariants {
-					return next
-				}
 				m := make(map[string]string, len(base)+1)
 				for k, vv := range base {
 					m[k] = vv

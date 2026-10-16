@@ -1129,7 +1129,9 @@ func TestPolicySavesShippingPolicy(t *testing.T) {
 			"shipping.flat_fee": {flat}, "shipping.free_threshold": {free}}
 	}
 
-	for _, tc := range [][2]string{{"-1", "0"}, {"3000", "-1"}, {"삼천", "0"}, {"", "0"}, {"3000", ""}} {
+	for _, tc := range [][2]string{{"-1", "0"}, {"3000", "-1"}, {"삼천", "0"}, {"", "0"}, {"3000", ""},
+		// 상한(20억)을 넘으면 그 뒤 모든 주문이 금액 상한에 걸린다 — 저장하지 않는다.
+		{"2000000001", "0"}, {"0", "2000000001"}} {
 		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, form(tc[0], tc[1]))
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("배송비 %q / 기준액 %q = HTTP %d, want 422", tc[0], tc[1], rec.Code)

@@ -108,6 +108,8 @@ FROM product_variants v
 WHERE v.product_id = (SELECT oi.product_id FROM order_items oi WHERE oi.id = sqlc.arg('order_item_id'))
   AND v.id <> (SELECT oi.variant_id FROM order_items oi WHERE oi.id = sqlc.arg('order_item_id'))
   AND v.is_visible AND v.stock > 0
+  -- 숨긴 상품의 조합은 고르게 하지 않는다 — 서버(ExchangeTarget)가 거절하는 선택지다.
+  AND EXISTS (SELECT 1 FROM products p WHERE p.id = v.product_id AND p.is_visible)
 ORDER BY v.price_delta, v.id;
 
 -- name: LockReturnForExchange :one

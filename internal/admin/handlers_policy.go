@@ -89,16 +89,17 @@ func (d *Deps) PolicySave(w http.ResponseWriter, r *http.Request) {
 			"배송비는 0 이상의 정수입니다.", kv)
 		return
 	}
-	// 주문 배송비 (D50). 음수가 새면 Shipping.Fee 가 모든 주문을 거부한다.
-	for k, label := range map[string]string{
-		commerce.SettingShippingFlatFee:       "기본 배송비",
-		commerce.SettingShippingFreeThreshold: "무료배송 기준액",
-	} {
-		if n, err := strconv.Atoi(kv[k]); err != nil || n < 0 {
-			d.renderPolicy(w, r, http.StatusUnprocessableEntity,
-				label+"는 0 이상의 정수입니다.", kv)
-			return
-		}
+	// 주문 배송비 (D50). 음수가 새면 Shipping.Fee 가 모든 주문을 거부하고, 금액 상한을
+	// 넘으면 그 뒤 모든 주문이 상한에 걸린다 — 저장 단계에서 막는다.
+	if n, err := strconv.Atoi(kv[commerce.SettingShippingFlatFee]); err != nil || n < 0 || n > commerce.MaxAmount {
+		d.renderPolicy(w, r, http.StatusUnprocessableEntity,
+			"주문 배송비는 0원부터 20억 원까지의 정수입니다.", kv)
+		return
+	}
+	if n, err := strconv.Atoi(kv[commerce.SettingShippingFreeThreshold]); err != nil || n < 0 || n > commerce.MaxAmount {
+		d.renderPolicy(w, r, http.StatusUnprocessableEntity,
+			"무료배송 기준액은 0원부터 20억 원까지의 정수입니다.", kv)
+		return
 	}
 
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {

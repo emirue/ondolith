@@ -181,3 +181,31 @@ func TestStoppedVariantIsNotOffered(t *testing.T) {
 			strings.Contains(page, "소"), strings.Contains(page, "대형단종"))
 	}
 }
+
+// 주문 총액이 결제 상한(20억)을 넘으면 500 이 아니라 422 다 — 무엇을 하면 되는지
+// 말한다. 배송비가 더해져 상한을 넘는 경우가 이 길이다.
+func TestCheckoutOverTheAmountCapIs422(t *testing.T) {
+	srv, pool, _ := shopSite(t)
+	ctx := context.Background()
+	var vid string
+	if err := pool.QueryRow(ctx, `WITH p AS (INSERT INTO products (slug,name,base_price,is_visible)
+		VALUES ('gold','금괴',2000000000,true) RETURNING id)
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		SELECT id,'{}',0,5 FROM p RETURNING id`).Scan(&vid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key,value) VALUES ('shipping.flat_fee','3000')`); err != nil {
+		t.Fatal(err)
+	}
+	c := client()
+	resp := post(t, c, srv.URL+"/cart/items", url.Values{"variant_id": {vid}, "quantity": {"1"}})
+	resp.Body.Close()
+	resp = post(t, c, srv.URL+"/checkout", url.Values{
+		"receiver_name": {"받는이"}, "receiver_phone": {"010-0000-0000"}, "postcode": {"12345"},
+		"address1": {"서울"}, "orderer_email": {"a@example.com"}, "orderer_phone": {"010-1111-1111"}})
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(b), "20억") {
+		t.Errorf("상한을 넘는 주문 = HTTP %d (이유 포함 %v), want 422", resp.StatusCode, strings.Contains(string(b), "20억"))
+	}
+}

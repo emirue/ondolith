@@ -89,8 +89,8 @@ func (s *Store) TermsForReading(ctx context.Context, id string, now time.Time) (
 	if err != nil {
 		return nil, err
 	}
-	return &Terms{ID: r.ID, Kind: r.Kind, Version: r.Version, Body: r.Body,
-		EffectiveAt: r.EffectiveAt, Required: r.IsRequired, CreatedAt: r.CreatedAt}, nil
+	t := termsFromRow(r)
+	return &t, nil
 }
 
 // AddTerms writes a new version.

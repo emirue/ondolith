@@ -3,6 +3,7 @@ package commerce
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 )
 
@@ -201,6 +202,41 @@ func TestEditVariantsStopsAndResumesSelling(t *testing.T) {
 	}
 	if !visible() {
 		t.Error("판매 재개가 반영되지 않았다")
+	}
+}
+
+// **조합이 상한(500)을 넘는 옵션은 저장하지 않는다.** 전에는 곱을 500에서 잘라
+// 만들었고, 그 잘린 목록 밖의 조합을 판매 중지로 돌리면서 팔던 조합과 재고가 조용히
+// 내려갔다(중간 그룹에서 잘리면 키가 모자란 조합까지 생겼다).
+func TestSetOptionsRefusesTooManyCombinations(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	pid := mkProduct(t, s, "many", 10000)
+	values := func(n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = strconv.Itoa(i)
+		}
+		return out
+	}
+	if err := s.SetOptions(ctx, pid, []Option{{Name: "가", Values: values(25)}, {Name: "나", Values: values(20)}}); err != nil {
+		t.Fatal(err) // 정확히 500 은 된다
+	}
+	err := s.SetOptions(ctx, pid, []Option{{Name: "가", Values: values(25)}, {Name: "나", Values: values(21)}})
+	if !errors.Is(err, ErrTooManyVariants) {
+		t.Fatalf("525 조합 = %v, want ErrTooManyVariants", err)
+	}
+	vs, err := s.Variants(ctx, pid, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vs {
+		if !v.Visible {
+			t.Fatalf("거절된 저장이 조합 %v 를 내렸다", v.OptionValues)
+		}
+	}
+	if len(vs) != 500 {
+		t.Errorf("조합 %d개, want 500", len(vs))
 	}
 }
 
