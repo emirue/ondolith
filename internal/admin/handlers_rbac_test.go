@@ -678,3 +678,31 @@ func TestRoleAssignTakesAnEmail(t *testing.T) {
 		t.Error("이메일로 준 역할이 붙지 않았다")
 	}
 }
+
+// **게시판 고르기에는 그 관리를 할 수 있는 게시판만 나온다.** 「공지」 한 곳의 글만 관리하는
+// 편집자에게 운영진 전용 게시판의 이름·주소까지 목록에 보였다 — 고르면 403 이었다.
+func TestModerationPickerListsOnlyModeratableBoards(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"admin.access": true}}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+	notice, err := d.Content.CreateBoard(ctx, content.Board{Slug: "notice", Name: "공지", PerPage: 20}, content.PresetPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Content.CreateBoard(ctx, content.Board{Slug: "staff", Name: "운영진", PerPage: 20}, content.PresetPrivate); err != nil {
+		t.Fatal(err)
+	}
+	caller.scoped = map[string]map[string]bool{notice: {"post.moderate": true, "comment.moderate": true}}
+	for name, h := range map[string]http.HandlerFunc{"글": d.PostList, "댓글": d.CommentList, "첨부": d.AttachmentList} {
+		var got any
+		d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, v any) {
+			got = v.(map[string]any)["Boards"]
+			w.WriteHeader(code)
+		}
+		h(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/x", nil))
+		bs, _ := got.([]content.Board)
+		if len(bs) != 1 || bs[0].Slug != "notice" {
+			t.Errorf("%s 관리: 게시판 목록 %v, want [notice] 하나", name, bs)
+		}
+	}
+}
