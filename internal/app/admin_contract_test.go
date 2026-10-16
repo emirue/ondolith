@@ -908,6 +908,20 @@ func TestAdminFieldValuesAreNotFaded(t *testing.T) {
 	}
 }
 
+// **이름-값 목록의 값은 칸 안에서 꺾인다.** 주문 상세의 「주문자 member@example.com · 010…」
+// 처럼 공백 없는 이메일은 꺾을 자리가 없어, 좁은 화면에서 dd 밖으로 나가 문서가 옆으로
+// 밀렸다(CI 의 Linux 글꼴·다크 375px 에서 13px). 값 칸은 minmax(0, 1fr) 라 줄어들 뿐 글을
+// 꺾지 않는다.
+func TestAdminDetailValuesWrap(t *testing.T) {
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^\.adm-detail dd\s*\{[^}]*overflow-wrap:\s*anywhere`).Match(css) {
+		t.Error(".adm-detail dd 가 긴 값(이메일·키)을 꺾지 않는다 — 좁은 화면에서 문서가 옆으로 밀린다")
+	}
+}
+
 // **파비콘이 있다.** 없으면 브라우저가 첫 방문마다 `/favicon.ico` 를 요청해 콘솔에 404 가
 // 찍히고 탭에 아이콘이 없다(헤드리스 점검은 그 요청을 하지 않아 보이지 않았다). 파일이 아니라
 // data: 주소인 까닭: 디스크 테마가 정적 파일을 빠뜨려도, 라우트를 하나 늘리지 않아도 된다.

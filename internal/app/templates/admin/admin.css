@@ -783,7 +783,8 @@ dl { margin: 0 0 var(--s20); }
 }
 
 .adm-detail dt { opacity: .6; }
-.adm-detail dd { margin: 0; }
+/* 공백 없는 이메일·키는 꺾을 자리가 없어 좁은 화면에서 칸 밖으로 나갔다. */
+.adm-detail dd { margin: 0; overflow-wrap: anywhere; }
 
 /* ═══ 폼 · 패널 ════════════════════════════════════════════════════════════ */
 /* 칸이 화면 폭을 다 쓰면 「택배사」 한 단어를 치는 칸이 980px 가 된다. */
