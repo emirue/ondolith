@@ -283,3 +283,15 @@ func TestValidateThemeDirChecksTheContract(t *testing.T) {
 		t.Errorf("코어가 아는 이름에 경고가 붙었다: warn=%q err=%v", warn, err)
 	}
 }
+
+// 게시판 스킨은 테마의 board/<스킨>-list.html 이다. 내장 테마에는 없다.
+func TestBoardSkinsListsThemeSkins(t *testing.T) {
+	if got := New(Builtin(), "", false, nil).BoardSkins(); len(got) != 0 {
+		t.Errorf("내장 테마의 스킨 = %v, want 없음", got)
+	}
+	fsys := fstest.MapFS{"base.html": {Data: []byte("x")}, "board/list.html": {Data: []byte("x")},
+		"board/card-list.html": {Data: []byte("x")}, "board/card-view.html": {Data: []byte("x")}}
+	if got := New(fsys, "", false, nil).BoardSkins(); len(got) != 1 || got[0] != "card" {
+		t.Errorf("= %v, want [card]", got)
+	}
+}

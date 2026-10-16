@@ -336,3 +336,32 @@ func TestAdminTextHidesInternalCodes(t *testing.T) {
 		t.Error("작업 로그의 동작이 한국어 이름이 아니다")
 	}
 }
+
+// 게시판 만들기 화면: 개발 용어(「권한 부여 행이 한 트랜잭션에」) 대신 운영자의 말로 프리셋을
+// 설명하고, 프리셋의 첫 선택지는 빈칸이 아니다. 고를 스킨이 없으면 스킨 칸을 그리지 않는다
+// — 무엇을 쳐야 하는지 알 수 없는 자유 입력칸이었다.
+func TestBoardEditSpeaksPlainly(t *testing.T) {
+	out := renderAdmin(t, "admin/board-edit.html", map[string]any{"Presets": content.Presets(), "Skins": nil})
+	if strings.Contains(out, "트랜잭션") || strings.Contains(out, `<option value=""></option>`) {
+		t.Error("개발 용어나 빈 선택지가 남아 있다")
+	}
+	if !strings.Contains(out, "프리셋을 고르세요") || strings.Contains(out, `name="skin" value=""`) && strings.Contains(out, `placeholder="(기본)"`) {
+		t.Error("프리셋 안내가 없거나 고를 스킨이 없는데 스킨 입력칸이 있다")
+	}
+	withSkins := renderAdmin(t, "admin/board-edit.html", map[string]any{"Presets": content.Presets(), "Skins": []string{"card"}})
+	if !strings.Contains(withSkins, `<option value="card">card</option>`) {
+		t.Error("고를 스킨이 있는데 목록이 없다")
+	}
+}
+
+// 게시판 만들기가 거절돼 다시 그려져도 만들기 화면이다 — 주소 칸이 열려 있고 프리셋이 있다.
+// .Board(id 없음)가 있다고 편집으로 그려 다시 보낼 수 없었다.
+func TestBoardCreateRefusalStaysACreateForm(t *testing.T) {
+	out := renderAdmin(t, "admin/board-edit.html", map[string]any{"Presets": content.Presets(),
+		"Board": &content.Board{Name: strings.Repeat("가", 101), Slug: "free"}, "Error": "게시판 이름은 1~100자입니다."})
+	for _, want := range []string{`action="/admin/boards/new"`, `name="slug" placeholder="free" required value="free"`, `name="preset"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("거절된 만들기 화면에 %q 가 없다", want)
+		}
+	}
+}

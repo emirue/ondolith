@@ -418,6 +418,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			return theme.Install(cfg.Themes(), name, rd, size, replace)
 		},
 		InstalledThemes: func() ([]string, error) { return theme.Installed(cfg.Themes()) },
+		BoardSkins:      func() []string { return loaderRef.Load().BoardSkins() },
 		SendReset: func(email, token string) {
 			mailer.SendAsync(email, "비밀번호 재설정",
 				"아래 링크로 재설정하세요:\n"+strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token)

@@ -52,7 +52,7 @@ func (d *Deps) BoardForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	data := map[string]any{"Presets": content.Presets()}
+	data := map[string]any{"Presets": content.Presets(), "Skins": d.skins()}
 	if !isCreate(id) {
 		b, err := d.Content.BoardByID(r.Context(), id)
 		if errors.Is(err, content.ErrNotFound) {
@@ -131,8 +131,15 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 
 func (d *Deps) boardFormError(w http.ResponseWriter, r *http.Request, b content.Board, msg string, code int) {
 	d.Render(w, r, "admin/board-edit.html", code, map[string]any{
-		"Board": &b, "Presets": content.Presets(), "Error": msg,
+		"Board": &b, "Presets": content.Presets(), "Skins": d.skins(), "Error": msg,
 	})
+}
+
+func (d *Deps) skins() []string {
+	if d.BoardSkins == nil {
+		return nil
+	}
+	return d.BoardSkins()
 }
 
 // BoardDelete removes a board and everything under it.

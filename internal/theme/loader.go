@@ -243,6 +243,23 @@ func (l *Loader) RenderPartial(w io.Writer, name string, data any) error {
 // HasBuiltin reports whether the built-in theme carries name. A-202 uses this
 // before activating a theme: a name the built-in lacks can never be a fallback,
 // so requesting it is a core bug rather than a theme error.
+// BoardSkins lists the board skins this theme offers (A-305): every
+// board/<skin>-list.html. 게시판이 스킨을 고르는 규칙(boardTemplate → HasBuiltin)과
+// 같은 곳을 본다 — 거기서 안 쓰이는 이름을 고르게 하면 고른 것이 아무 일도 하지 않는다.
+func (l *Loader) BoardSkins() []string {
+	entries, err := fs.ReadDir(l.builtin, "board")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if name, ok := strings.CutSuffix(e.Name(), "-list.html"); ok && !e.IsDir() {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func (l *Loader) HasBuiltin(name string) bool {
 	if err := validName(name); err != nil {
 		return false
