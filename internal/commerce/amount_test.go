@@ -208,3 +208,23 @@ func TestOrderDetailRecoversShippingFee(t *testing.T) {
 		}
 	}
 }
+
+// 상품 화면의 옵션은 관리자가 넣은 순서대로다 — OptionGroups 가 사전순으로 정렬해
+// 「5mm, 10mm」가 「10mm, 5mm」로, S·M·L 이 L·M·S 로 나왔다. 정의에 없는 값(옛 조합)은
+// 뒤에 남는다.
+func TestOptionGroupsFollowTheDefinedOrder(t *testing.T) {
+	vs := []Variant{
+		{OptionValues: map[string]string{"두께": "10mm", "크기": "L"}},
+		{OptionValues: map[string]string{"두께": "5mm", "크기": "S"}},
+		{OptionValues: map[string]string{"두께": "5mm", "크기": "M"}},
+		{OptionValues: map[string]string{"두께": "20mm", "크기": "M"}}, // 정의에서 빠진 값
+	}
+	defined := []Option{{Name: "크기", Values: []string{"S", "M", "L"}}, {Name: "두께", Values: []string{"5mm", "10mm"}}}
+	got := InDefinedOrder(OptionGroups(vs), defined)
+	if len(got) != 2 || got[0].Name != "크기" || got[1].Name != "두께" {
+		t.Fatalf("그룹 순서 = %+v, want 크기, 두께", got)
+	}
+	if strings.Join(got[0].Values, ",") != "S,M,L" || strings.Join(got[1].Values, ",") != "5mm,10mm,20mm" {
+		t.Errorf("값 순서 = %v / %v, want S,M,L / 5mm,10mm,20mm", got[0].Values, got[1].Values)
+	}
+}

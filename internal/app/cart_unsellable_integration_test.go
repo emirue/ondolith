@@ -238,3 +238,27 @@ func TestMemberCheckoutStartsFromTheLastAddress(t *testing.T) {
 		t.Error("회원에게 비회원 조회 안내가 보인다")
 	}
 }
+
+// 상품 화면의 옵션 값은 관리자가 넣은 순서대로다 — 사전순이라 「5mm, 10mm」가 뒤집혔다.
+func TestProductOptionsKeepTheTypedOrder(t *testing.T) {
+	srv, pool, _ := shopSite(t)
+	ctx := context.Background()
+	var pid string
+	if err := pool.QueryRow(ctx, `INSERT INTO products (slug,name,base_price,is_visible)
+		VALUES ('mat2','매트',10000,true) RETURNING id`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO product_options (product_id,name,values,sort_order)
+		VALUES ($1,'두께','["5mm","10mm"]',0)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"두께":"10mm"}',0,3), ($1,'{"두께":"5mm"}',0,3)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	_, _, page := getBody(t, client(), srv.URL+"/shop/p/mat2")
+	five, ten := strings.Index(page, `<option value="5mm">`), strings.Index(page, `<option value="10mm">`)
+	if five < 0 || ten < 0 || five > ten {
+		t.Errorf("옵션 순서: 5mm@%d 10mm@%d — 넣은 순서(5mm, 10mm)가 아니다", five, ten)
+	}
+}

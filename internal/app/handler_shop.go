@@ -156,7 +156,13 @@ func (d *shopDeps) productDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
-	groups := commerce.OptionGroups(variants)
+	// 선택지는 실제 조합에서 만들고, 순서는 관리자가 넣은 정의를 따른다 (A-503).
+	defined, err := d.store.Options(ctx, p.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	groups := commerce.InDefinedOrder(commerce.OptionGroups(variants), defined)
 	data := map[string]any{"Product": p, "Variants": variants, "Options": groups, "Images": images}
 	// 옵션 없는 상품(조합 하나, 그룹 없음)은 고를 것이 없다 — 그 조합을 미리
 	// 고른다. 고르지 않으면 선택칸도 없이 「옵션을 모두 선택하세요」에서 멈춘다.

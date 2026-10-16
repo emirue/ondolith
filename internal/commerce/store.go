@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
@@ -543,6 +544,37 @@ func OptionGroups(variants []Variant) []OptionGroup {
 		}
 		insertionSort(vals)
 		out = append(out, OptionGroup{Name: name, Values: vals})
+	}
+	return out
+}
+
+// InDefinedOrder puts groups and their values in the order A-503 saved them
+// (product_options.sort_order, values as typed). OptionGroups 는 조합에서 선택지를
+// 만들어 사전순으로 정렬한다 — 「5mm, 10mm」가 「10mm, 5mm」로, S·M·L 이 L·M·S 로
+// 나왔다. 정의에 없는 그룹·값(옛 조합)은 뒤에 사전순으로 남는다.
+func InDefinedOrder(groups []OptionGroup, defined []Option) []OptionGroup {
+	gi := map[string]int{}
+	vi := map[string]map[string]int{}
+	for i, o := range defined {
+		gi[o.Name] = i
+		vi[o.Name] = map[string]int{}
+		for j, v := range o.Values {
+			vi[o.Name][v] = j
+		}
+	}
+	rank := func(m map[string]int, k string) int {
+		if i, ok := m[k]; ok {
+			return i
+		}
+		return len(m) // 정의에 없는 것은 뒤로
+	}
+	out := slices.Clone(groups)
+	slices.SortStableFunc(out, func(a, b OptionGroup) int { return rank(gi, a.Name) - rank(gi, b.Name) })
+	for i := range out {
+		vals := slices.Clone(out[i].Values)
+		order := vi[out[i].Name]
+		slices.SortStableFunc(vals, func(a, b string) int { return rank(order, a) - rank(order, b) })
+		out[i].Values = vals
 	}
 	return out
 }
