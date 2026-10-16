@@ -2,6 +2,9 @@
      바꾸고 싶을 때 레이아웃 전체를 복사하지 않아도 되게 하기 위해서다. */}}
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{{/* 파비콘 — 없으면 브라우저가 첫 방문마다 /favicon.ico 를 찾다 404 를 받는다. 파일이 아니라
+     data: 주소라 라우트도 정적 파일도 늘지 않는다. 테마가 head 를 덮으면 자기 것을 둔다. */}}
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f7a63'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23fff' stroke-width='4'/%3E%3C/svg%3E">
 {{/* 방문 통계 (FR-714). A-201 에 GA4 측정 ID 가 있을 때만 — Google 의 gtag.js 스니펫 그대로다
      (developers.google.com/tag-platform/gtagjs/install). 관리자 화면에는 붙지 않는다. */}}
 {{with .Site.Analytics}}<script async src="https://www.googletagmanager.com/gtag/js?id={{.}}"></script>

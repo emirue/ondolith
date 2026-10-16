@@ -898,3 +898,26 @@ func TestAdminFieldValuesAreNotFaded(t *testing.T) {
 		t.Error(".adm-stat-value 가 긴 값(버전 dev+012f0b846e)을 꺾지 않는다 — 카드 밖으로 넘친다")
 	}
 }
+
+// **파비콘이 있다.** 없으면 브라우저가 첫 방문마다 `/favicon.ico` 를 요청해 콘솔에 404 가
+// 찍히고 탭에 아이콘이 없다(헤드리스 점검은 그 요청을 하지 않아 보이지 않았다). 파일이 아니라
+// data: 주소인 까닭: 디스크 테마가 정적 파일을 빠뜨려도, 라우트를 하나 늘리지 않아도 된다.
+func TestPagesDeclareAFavicon(t *testing.T) {
+	head, err := fs.ReadFile(theme.Builtin(), "partials/head.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := adminFS.ReadFile("templates/admin/layout.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, src := range map[string][]byte{"partials/head.html": head, "admin/layout.html": layout} {
+		if !strings.Contains(string(src), `<link rel="icon" href="data:image/svg+xml,`) {
+			t.Errorf("%s 에 파비콘이 없다 — 브라우저가 /favicon.ico 를 찾다 404 를 받는다", name)
+		}
+	}
+	// html/template 이 data: 주소를 #ZgotmplZ 로 바꾸지 않았는지 — 그려진 결과로 본다.
+	if html := renderAdmin(t, "admin/refusal.html", map[string]any{"Error": "x"}); !strings.Contains(html, `<link rel="icon" href="data:image/svg+xml,`) {
+		t.Error("그려진 관리자 화면에 파비콘이 없다")
+	}
+}
