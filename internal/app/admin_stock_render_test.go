@@ -211,3 +211,15 @@ func TestVariantRowsCarryTheStopSellingBox(t *testing.T) {
 		t.Error("파는 조합에 「판매 중지」 칸이 없거나 체크돼 있다")
 	}
 }
+
+// 관리자 주문 상세에 주문번호가 있다 — 제목은 「주문 상세」이고 본문에도 번호가 없어,
+// 고객이 불러 준 번호와 맞는지 볼 수 없었다(송장·환불 등 하위 화면에는 있었다).
+func TestAdminOrderDetailShowsTheOrderNumber(t *testing.T) {
+	out := renderAdmin(t, "admin/order.html", map[string]any{"Order": &commerce.OrderDetail{
+		OrderNo: "20261016-NUMBERSHOW", Status: commerce.StatusPaid, Total: 1000,
+		Items: []commerce.OrderItem{{ProductName: "티", UnitPrice: 1000, Quantity: 1, LineAmount: 1000}}}})
+	// 링크 주소(/admin/orders/{번호}/…)에는 원래 있었다 — 화면에 보이는 글자로 본다.
+	if !strings.Contains(out, "<dt>주문번호</dt><dd><strong>20261016-NUMBERSHOW</strong></dd>") {
+		t.Error("관리자 주문 상세에 주문번호가 보이지 않는다")
+	}
+}

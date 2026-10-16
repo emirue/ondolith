@@ -2,6 +2,7 @@
 {{with .Order}}
 <div class="adm-card">
   <dl class="adm-detail">
+    <dt>주문번호</dt><dd><strong>{{.OrderNo}}</strong></dd>
     <dt>상태</dt><dd><strong>{{.Status}}</strong></dd>
     <dt>주문일</dt><dd>{{date .CreatedAt "2006-01-02 15:04"}}</dd>
     <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
