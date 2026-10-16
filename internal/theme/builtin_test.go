@@ -1316,3 +1316,20 @@ func TestEmptySearchSaysWhatWasSearched(t *testing.T) {
 		t.Error("통합 검색 0건에 쪽 이동(전체 0건·1)이 그려진다")
 	}
 }
+
+// 홈 상단 표시만 영어(SHOP·WELCOME)였다 — 나머지 화면은 모두 한국어다 (NFR-403 한국어 우선).
+func TestHomeEyebrowIsKorean(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, typ := range []string{"shop", "cms"} {
+		v := fullView()
+		v.Site.Type = typ
+		v.Data = payloadFor("home.html")
+		var b bytes.Buffer
+		if err := l.Render(&b, "home.html", v); err != nil {
+			t.Fatal(err)
+		}
+		if out := b.String(); strings.Contains(out, "SHOP") || strings.Contains(out, "WELCOME") {
+			t.Errorf("%s 홈에 영어 표시가 있다", typ)
+		}
+	}
+}

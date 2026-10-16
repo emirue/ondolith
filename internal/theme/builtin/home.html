@@ -8,7 +8,7 @@
      사이트를 굴리므로 첫 화면이 그 성격을 말해야 한다. 분기는 여기 하나뿐이고,
      핸들러는 그 유형에 맞는 데이터만 넘긴다. */}}
 <section class="hero">
-  <p class="hero-eyebrow">{{if eq .Site.Type "shop"}}SHOP{{else}}WELCOME{{end}}</p>
+  <p class="hero-eyebrow">{{if eq .Site.Type "shop"}}쇼핑몰{{else}}어서 오세요{{end}}</p>
   <h1>{{.Site.Name}}</h1>
   {{if .Site.MetaDescription}}<p class="lede">{{.Site.MetaDescription}}</p>{{end}}
   {{if .Menu}}
