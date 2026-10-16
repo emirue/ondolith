@@ -1,18 +1,43 @@
+{{/* A-203 으로 가는 길이 여기 하나다 — 없을 때 테마 업로드는 주소를 아는 사람만 닿았다. */}}
+{{define "pageactions"}}
+<div class="adm-actions"><a class="adm-btn adm-btn--primary" href="/admin/themes/upload">테마 올리기</a></div>
+{{end}}
 {{define "content"}}
+<div class="adm-card adm-card--flush">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>테마</th><th>상태</th><th>동작</th></tr></thead>
+      <tbody>
+        {{/* 내장 테마는 늘 있고 늘 그려진다 — 설치한 테마가 깨졌을 때 돌아올 자리다. */}}
+        <tr>
+          <td>내장 테마</td>
+          <td>{{if not .Active}}<span class="adm-badge">사용 중</span>{{end}}</td>
+          <td>{{if .Active}}
+            <form method="post" action="/admin/themes">
+              <input type="hidden" name="theme" value="">
+              <button class="adm-btn adm-btn--sm">활성화</button>
+            </form>{{end}}</td>
+        </tr>
+        {{range .Installed}}
+        <tr>
+          <td>{{.}}</td>
+          <td>{{if eq . $.Active}}<span class="adm-badge">사용 중</span>{{end}}</td>
+          <td>{{if ne . $.Active}}
+            <form method="post" action="/admin/themes">
+              <input type="hidden" name="theme" value="{{.}}">
+              <button class="adm-btn adm-btn--sm">활성화</button>
+            </form>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
 <div class="adm-card">
-  <p>현재 테마: <strong>{{if .Active}}{{.Active}}{{else}}(내장){{end}}</strong></p>
-  <form method="post" action="/admin/themes">
-    <label class="adm-field">
-      <span>테마 디렉터리 이름</span>
-      <input type="text" name="theme" value="{{.Active}}" placeholder="(비우면 내장 테마)">
-    </label>
-    <div class="adm-actions adm-actions--end">
-      <button class="adm-btn adm-btn--primary">활성화</button>
-    </div>
-  </form>
+  {{with .Active}}<p>현재 테마: <strong>{{.}}</strong></p>{{end}}
   <p class="adm-hint">
-    base.html 이 없거나 요구 버전이 현재 버전보다 높으면 거부됩니다.
-    개발 빌드에서는 버전 검사를 건너뛰고 경고만 합니다.
+    테마는 「테마 올리기」로 설치합니다. base.html 이 없거나 요구 버전이 현재 버전보다 높으면
+    활성화가 거부됩니다. 개발 빌드에서는 버전 검사를 건너뛰고 경고만 합니다.
   </p>
 </div>
 {{end}}

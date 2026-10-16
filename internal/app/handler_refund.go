@@ -129,7 +129,15 @@ func (d *shopDeps) refundStatus(w http.ResponseWriter, r *http.Request) {
 		d.shopView(r, "취소·환불", map[string]any{
 			"Order": order, "Refunds": refunds,
 			"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
+			"CanCancel": canCancel(order),
 		}))
+}
+
+// canCancel 은 「주문 취소」를 그릴지다 — 상태 기계가 허락할 때만 낸다 (D14 5절). 눌러서 422 를
+// 받는 버튼을 그리지 않는다. 판정은 P-506 이 다시 한다. 정상 화면과 거절 화면이 같이 쓴다 —
+// 거절 화면만 빠뜨려 버튼이 사라졌었다.
+func canCancel(order *commerce.OrderDetail) bool {
+	return commerce.CanTransition(order.Status, commerce.StatusCancelled, "P-506") == nil
 }
 
 func (d *shopDeps) refundError(w http.ResponseWriter, r *http.Request, orderNo, msg string) {
@@ -144,6 +152,7 @@ func (d *shopDeps) refundError(w http.ResponseWriter, r *http.Request, orderNo, 
 		d.shopView(r, "취소·환불", map[string]any{
 			"Order": order, "Refunds": refunds, "Error": msg,
 			"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
+			"CanCancel": canCancel(order),
 		}))
 }
 
@@ -157,8 +166,14 @@ func (d *shopDeps) orderReceipt(w http.ResponseWriter, r *http.Request) {
 		d.notFound(w, r)
 		return
 	}
+	// 결제수단은 결제사 응답에서 온다. 소유권은 위에서 판정했다.
+	method, err := d.store.PaymentMethod(r.Context(), order.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 	d.renderPage(w, r, "order/receipt.html", http.StatusOK,
-		d.shopView(r, "주문서·영수증", map[string]any{"Order": order}))
+		d.shopView(r, "주문서·영수증", map[string]any{"Order": order, "PayMethod": method}))
 }
 
 // P-510 POST /orders/{orderNo}/confirm — the buyer confirms.

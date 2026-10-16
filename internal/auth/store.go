@@ -79,7 +79,18 @@ func parseGrants(rows []string) []Grant {
 // that the anonymous path is a query, not an empty set assumed in a handler —
 // an installation may grant permissions to `anonymous` (D15 2.5).
 func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, error) {
-	keys, err := s.q.LoadAnonymousPermissions(ctx)
+	keys, err := s.q.LoadRolePermissions(ctx, RoleAnonymous)
+	if err != nil {
+		return nil, err
+	}
+	return NewPermissions(false, parseGrants(keys)), nil
+}
+
+// LoadMemberPermissions is what a freshly signed-up account holds (the `member`
+// role). 로그인하지 않은 방문자에게 「로그인하면 쓸 수 있다」고 말해도 되는지를 이것으로
+// 판정한다 — 운영진만 쓰는 게시판에서 그렇게 말하면 거짓이다.
+func (s *Store) LoadMemberPermissions(ctx context.Context) (*Permissions, error) {
+	keys, err := s.q.LoadRolePermissions(ctx, RoleMember)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +154,15 @@ type UserRow struct {
 // the screen most likely to grow, and a per-row query turns it into N+1 the
 // moment it does.
 func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]UserRow, error) {
-	rows, err := s.q.ListUsers(ctx, authq.ListUsersParams{Limit: int32(limit), Offset: int32(offset)})
+	return s.SearchUsers(ctx, "", limit, offset)
+}
+
+// SearchUsers is ListUsers narrowed to accounts whose email or display name
+// contains q (A-401). LIKE 의 % 와 _ 는 글자 그대로 찾는다 — 그렇지 않으면 「_」 하나로
+// 모든 사용자가 나온다.
+func (s *Store) SearchUsers(ctx context.Context, q string, limit, offset int) ([]UserRow, error) {
+	pattern := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(q))
+	rows, err := s.q.ListUsers(ctx, authq.ListUsersParams{Pattern: pattern, Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +368,8 @@ func (s *Store) Roles(ctx context.Context) ([]Role, error) {
 	}
 	var out []Role
 	for _, r := range rows {
-		out = append(out, Role{Key: r.Key, Superuser: r.IsSuperuser, Permissions: r.Permissions})
+		out = append(out, Role{Key: r.Key, Superuser: r.IsSuperuser, Permissions: r.Permissions,
+			Assignable: r.IsAssignable})
 	}
 	return out, nil
 }

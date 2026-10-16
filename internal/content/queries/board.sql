@@ -32,8 +32,8 @@ WHERE id = $1;
 -- name: CountBoardPosts :one
 SELECT count(*) FROM posts WHERE board_id = $1;
 
--- name: DeleteBoard :execrows
-DELETE FROM boards WHERE id = $1;
+-- name: DeleteBoard :one
+DELETE FROM boards WHERE id = $1 RETURNING slug;
 
 -- name: BoardFields :many
 SELECT key, label, field_type, is_required, show_in_list, options, sort_order

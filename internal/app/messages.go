@@ -87,6 +87,8 @@ func cartMessage(err error) string {
 		return "현재 판매하지 않는 상품입니다."
 	case errors.Is(err, commerce.ErrQuantityRange):
 		return fmt.Sprintf("수량은 1개부터 %d개까지 선택할 수 있습니다.", commerce.MaxQuantity)
+	case errors.Is(err, commerce.ErrAmountTooBig):
+		return "한 번에 결제할 수 있는 금액(20억 원)을 넘습니다. 수량을 줄여 나눠 주문하세요."
 	case errors.Is(err, commerce.ErrTermsRequired):
 		return "필수 약관에 동의해 주세요."
 	case errors.Is(err, commerce.ErrOrdererContact):

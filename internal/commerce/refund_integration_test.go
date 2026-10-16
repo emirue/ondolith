@@ -671,3 +671,28 @@ func TestConcurrentRefundsDoNotDeadlockOnLineOrder(t *testing.T) {
 		}
 	}
 }
+
+// 영수증이 결제수단을 말한다 — 결제사 응답의 method 다(카드·가상계좌·간편결제 …).
+// 결제가 없는 주문은 빈 값이다.
+func TestPaymentMethodForTheReceipt(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _, _ := paidOrder(t, s, pool, "tee", 1)
+	var orderID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM orders WHERE order_no = $1`, orderNo).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE payments SET raw_response = '{"method":"카드"}' WHERE order_id = $1`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.PaymentMethod(ctx, orderID); err != nil || got != "카드" {
+		t.Errorf("결제수단 = %q, %v — want 카드", got, err)
+	}
+	unpaid, _ := seedOrder(t, s, pool, "cap", 1)
+	if err := pool.QueryRow(ctx, `SELECT id FROM orders WHERE order_no = $1`, unpaid).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.PaymentMethod(ctx, orderID); err != nil || got != "" {
+		t.Errorf("결제 없는 주문의 결제수단 = %q, %v — want 빈 값", got, err)
+	}
+}

@@ -11,14 +11,34 @@
     <tbody>
       {{range .Items}}
       <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-          <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
+          <td data-label="단가">{{money .UnitPrice}}</td><td data-label="수량">{{.Quantity}}</td><td data-label="금액">{{money .LineAmount}}</td></tr>
       {{end}}
     </tbody>
   </table>
   </div>
-  <dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
-  <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
-  <p>{{.OrdererEmail}} · {{.OrdererPhone}}</p>
+  {{/* 배송비는 저장된 총액에서 거꾸로 푼다 (OrderDetail.ShippingFee). 결제 금액만
+       보이면 품목 합계와 왜 다른지 화면 어디에도 없다. */}}
+  <dl class="totals">
+    <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
+    <dt>배송비</dt><dd>{{money .ShippingFee}}</dd>
+    {{if .Discount}}<dt>할인</dt><dd>-{{money .Discount}}</dd>{{end}}
+    <dt>결제 금액</dt><dd>{{money .Total}}</dd>
+    {{with $.Data.PayMethod}}<dt>결제수단</dt><dd>{{.}}</dd>{{end}}
+  </dl>
+  {{/* 라벨 없이 「받는이 · 010…」만 있던 자리다. */}}
+  <dl class="receipt-info">
+    <dt>받는 분</dt><dd>{{.ReceiverName}}</dd>
+    <dt>연락처</dt><dd>{{.ReceiverPhone}}</dd>
+    <dt>배송지</dt><dd>({{.Postcode}}) {{.Address1}} {{.Address2}}</dd>
+    {{with .DeliveryMemo}}<dt>배송 메모</dt><dd>{{.}}</dd>{{end}}
+    <dt>주문자</dt><dd>{{.OrdererEmail}} · {{.OrdererPhone}}</dd>
+  </dl>
   {{end}}{{end}}
+  {{/* 판매자. 전자상거래 증빙에 들어가는 사업자 정보다 (FR-711) — 인쇄하면 바닥글은
+       빠지므로(@media print) 영수증 안에 따로 둔다. 비어 있으면 절째 없다. */}}
+  {{with .Site.Business}}
+  <h2>판매자</h2>
+  <dl class="receipt-info">{{range $label, $v := .}}<dt>{{$label}}</dt><dd>{{$v}}</dd>{{end}}</dl>
+  {{end}}
 </section>
 {{end}}

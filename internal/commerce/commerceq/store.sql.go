@@ -192,7 +192,8 @@ const listProducts = `-- name: ListProducts :many
 
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
-       COALESCE(i.id::text, '')::text AS image_id
+       COALESCE(i.id::text, '')::text AS image_id,
+       (v.min_delta IS NOT NULL)::boolean AS has_variants
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible, p.created_at
     FROM products p
@@ -242,6 +243,7 @@ type ListProductsRow struct {
 	MinDelta    int32
 	InStock     bool
 	ImageID     string
+	HasVariants bool
 }
 
 // 상품·조합·카테고리·검색 (store.go). 정렬 키는 CASE 로 한 질의에 담는다 (D22 6절).
@@ -274,6 +276,7 @@ func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]L
 			&i.MinDelta,
 			&i.InStock,
 			&i.ImageID,
+			&i.HasVariants,
 		); err != nil {
 			return nil, err
 		}
@@ -335,7 +338,8 @@ func (q *Queries) ProductBySlug(ctx context.Context, arg ProductBySlugParams) (P
 const searchProducts = `-- name: SearchProducts :many
 SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
        COALESCE(v.min_delta, 0)::int AS min_delta, COALESCE(v.in_stock, false)::boolean AS in_stock,
-       COALESCE(i.id::text, '')::text AS image_id
+       COALESCE(i.id::text, '')::text AS image_id,
+       (v.min_delta IS NOT NULL)::boolean AS has_variants
 FROM (
     SELECT p.id, p.slug, p.name, p.description, p.base_price, p.is_visible,
            ts_rank(p.search_tsv, to_tsquery('simple', $1)) AS rank
@@ -370,6 +374,7 @@ type SearchProductsRow struct {
 	MinDelta    int32
 	InStock     bool
 	ImageID     string
+	HasVariants bool
 }
 
 func (q *Queries) SearchProducts(ctx context.Context, arg SearchProductsParams) ([]SearchProductsRow, error) {
@@ -391,6 +396,7 @@ func (q *Queries) SearchProducts(ctx context.Context, arg SearchProductsParams) 
 			&i.MinDelta,
 			&i.InStock,
 			&i.ImageID,
+			&i.HasVariants,
 		); err != nil {
 			return nil, err
 		}
@@ -414,6 +420,25 @@ type SetCategoryParentParams struct {
 func (q *Queries) SetCategoryParent(ctx context.Context, arg SetCategoryParentParams) error {
 	_, err := q.db.Exec(ctx, setCategoryParent, arg.ParentID, arg.ID)
 	return err
+}
+
+const updateCategoryNameOrder = `-- name: UpdateCategoryNameOrder :execrows
+UPDATE categories SET name = $1, sort_order = $2, updated_at = now()
+WHERE id = $3
+`
+
+type UpdateCategoryNameOrderParams struct {
+	Name      string
+	SortOrder int32
+	ID        string
+}
+
+func (q *Queries) UpdateCategoryNameOrder(ctx context.Context, arg UpdateCategoryNameOrderParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateCategoryNameOrder, arg.Name, arg.SortOrder, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const variantForPurchase = `-- name: VariantForPurchase :one

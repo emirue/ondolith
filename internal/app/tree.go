@@ -240,6 +240,8 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	// prove is running.
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/deactivate", Class: SC5,
 		Permission: "user.update", Handler: ad.UserDeactivate})
+	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/activate", Class: SC5,
+		Permission: "user.update", Handler: ad.UserActivate})
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/delete", Class: SC5,
 		Permission: "user.delete", Handler: ad.UserDelete})
 	r.Add(Route{Screen: "A-402", Method: "POST", Pattern: "/admin/users/{id}/reset-password", Class: SC5,
@@ -369,6 +371,9 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Handler: sh.checkoutFail})
 		r.Add(Route{Screen: "P-410", Method: "GET", Pattern: "/checkout/complete", Class: SC3,
 			Handler: sh.checkoutComplete})
+		// 시행된 약관의 본문은 누구나 읽는다 — 주문서가 동의를 받기 전에 보여 줄 것이다.
+		r.Add(Route{Screen: "P-411", Method: "GET", Pattern: "/terms/{id}", Class: SC1,
+			Handler: sh.termsView})
 
 		// ---- 주문 조회 (SC-3: 소유자는 세션이 정한다) ----------------------
 		r.Add(Route{Screen: "P-501", Method: "GET", Pattern: "/orders", Class: SC3,
@@ -452,6 +457,8 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 			Permission: "product.manage", Handler: ad.CategoryCreate})
 		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories/{id}/delete",
 			Class: SC5, Permission: "product.manage", Handler: ad.CategoryDelete})
+		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories/{id}",
+			Class: SC5, Permission: "product.manage", Handler: ad.CategoryUpdate})
 		r.Add(Route{Screen: "A-509", Method: "POST", Pattern: "/admin/categories", Class: SC5,
 			Permission: "product.manage", Handler: ad.CategoryReparent})
 		r.Add(Route{Screen: "A-504", Method: "GET", Pattern: "/admin/orders", Class: SC4,

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net"
 	"net/mail"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/emirue/ondolith/internal/auth"
 )
 
 func TestBlockMetadataAddr(t *testing.T) {
@@ -227,5 +230,89 @@ func TestMailFailureEntrySkipsUnconfiguredSMTP(t *testing.T) {
 	if e.ActorEmail != "system" || e.Action != "mail.failed" || e.TargetID != "비밀번호 재설정" ||
 		!strings.Contains(e.Summary, "a@example.com") || !strings.Contains(e.Summary, "connection refused") {
 		t.Errorf("작업 로그 항목 = %+v", e)
+	}
+}
+
+// **같은 메일은 어느 경로로 나가든 같은 문구다** (FR-207, FR-214, FR-210).
+//
+// 사용자가 요청한 재설정은 「30분 뒤 만료됩니다」, 관리자가 강제한 재설정은 「아래 링크로
+// 재설정하세요:」뿐이었다. 인증 메일에는 24시간 만료 안내가 없었고, 제목에 사이트 이름이
+// 없었다. 「가입 시도 알림」은 「본인이 아니라면 무시하세요」뿐이라 본인이면 할 일이 없었다.
+func TestMailCopyCarriesExpiryAndSiteName(t *testing.T) {
+	link := "https://example.com/password/reset/abc"
+	if b := resetMailBody(link); !strings.Contains(b, "30분") || !strings.Contains(b, link) {
+		t.Errorf("재설정 메일에 만료 시간이나 링크가 없다: %q", b)
+	}
+	vlink := "https://example.com/verify/abc"
+	if b := verifyMailBody(vlink); !strings.Contains(b, "24시간") || !strings.Contains(b, vlink) {
+		t.Errorf("인증 메일에 만료 시간이나 링크가 없다: %q", b)
+	}
+	b := signupAttemptBody("https://example.com")
+	for _, want := range []string{"https://example.com/login", "https://example.com/password/reset", "무시"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("가입 시도 알림에 %q 가 없다: %q", want, b)
+		}
+	}
+	if got := mailSubject("온돌샵", "이메일 인증"); got != "[온돌샵] 이메일 인증" {
+		t.Errorf("제목 = %q — 어느 사이트의 메일인지 모른다", got)
+	}
+	if got := mailSubject("", "이메일 인증"); got != "이메일 인증" {
+		t.Errorf("사이트 이름이 없을 때 제목 = %q", got)
+	}
+}
+
+// 사이트 이름이 제목에 실려 실제로 나간다 — mailSubject 만 시험하면 Send 의 적용 줄을 지워도
+// 초록이다. SMTP 서버까지 보낸 원문의 Subject 를 풀어 본다.
+func TestSettingsSenderPutsSiteNameInSubject(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	got := make(chan string, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			got <- ""
+			return
+		}
+		defer conn.Close()
+		got <- fakeSMTP(conn)
+	}()
+	host, port, _ := net.SplitHostPort(ln.Addr().String())
+	s := settingsSender{log: slog.New(slog.DiscardHandler), site: func() string { return "온돌샵" },
+		settings: func(...string) map[string]string {
+			return map[string]string{"mail.smtp_host": host, "mail.smtp_port": port,
+				"mail.tls_mode": "none", "mail.from_address": "noreply@example.com"}
+		}}
+	if err := s.Send(context.Background(), "to@example.com", "이메일 인증", "본문"); err != nil {
+		t.Fatal(err)
+	}
+	var subject string
+	for _, line := range strings.Split(<-got, "\n") {
+		if v, ok := strings.CutPrefix(line, "Subject: "); ok {
+			subject, _ = new(mime.WordDecoder).DecodeHeader(v)
+		}
+	}
+	if subject != "[온돌샵] 이메일 인증" {
+		t.Errorf("보낸 메일의 제목 = %q, want %q", subject, "[온돌샵] 이메일 인증")
+	}
+}
+
+// 켜진 소셜 로그인이 있으면 내 정보에 「소셜 계정 연결」이 나온다 — 통합 테스트는 꺼진 쪽만
+// 보므로, 늘 false 를 돌려줘도 초록이다(그러면 P-111 의 유일한 진입점이 사라진다).
+func TestSocialEnabledFollowsTheEnabledProviders(t *testing.T) {
+	on := &accountDeps{loginDeps: loginDeps{social: func() []auth.SocialConfig { return []auth.SocialConfig{{}} }}}
+	off := &accountDeps{loginDeps: loginDeps{social: func() []auth.SocialConfig { return nil }}}
+	if !on.socialEnabled() || off.socialEnabled() || (&accountDeps{}).socialEnabled() {
+		t.Errorf("socialEnabled = 켜짐 %v · 꺼짐 %v — want true · false", on.socialEnabled(), off.socialEnabled())
+	}
+}
+
+// 탈퇴·중지된 계정 주소로 다시 가입하면 이 메일만 간다. 로그인도 재설정도 막혀 있으므로
+// 그 경우 어디로 가야 하는지(관리자 문의)를 함께 적는다.
+func TestSignupAttemptMailCoversInactiveAccounts(t *testing.T) {
+	if b := signupAttemptBody("https://example.com"); !strings.Contains(b, "관리자에게 문의") {
+		t.Errorf("가입 시도 알림이 탈퇴·중지 계정의 길을 말하지 않는다: %q", b)
 	}
 }

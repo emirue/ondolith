@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -394,5 +395,34 @@ func TestUserFieldKeysCannotShadowAccountColumns(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("멀쩡한 이름이 저장되지 않았다 (%d개) — 위 단언들이 헛돌았다", n)
+	}
+}
+
+// **가입이 거절돼 다시 그린 폼에도 운영자가 정한 항목이 있고, 적은 값이 남는다.** 비밀번호
+// 확인이 틀리면 항목 칸이 통째로 사라졌다가, 고쳐 다시 내면 「필수 항목」 거절이 나서야 다시
+// 나타났다. 이메일 형식·비밀번호 길이·스팸 거절도 같았다.
+func TestRefusedSignupKeepsOperatorFields(t *testing.T) {
+	srv, pool := liveSite(t)
+	_, post := adminSession(t, srv, pool)
+	defineUserField(t, post, url.Values{
+		"key": {"nickname"}, "label": {"별명"}, "field_type": {"text"}, "sort_order": {"0"},
+	})
+	for name, form := range map[string]url.Values{
+		"비밀번호 확인 불일치": {"email": {"m@example.com"}, "password": {"user-integration-passphrase"},
+			"password_confirm": {"different-passphrase"}, "nickname": {"온돌이"}},
+		"이메일 형식": {"email": {"not-an-email"}, "password": {"user-integration-passphrase"}, "nickname": {"온돌이"}},
+	} {
+		resp, err := client().PostForm(srv.URL+"/signup", form)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Fatalf("%s: 가입이 거절되지 않았다", name)
+		}
+		if !strings.Contains(string(b), `name="nickname"`) || !strings.Contains(string(b), `value="온돌이"`) {
+			t.Errorf("%s: 다시 그린 가입 폼에 항목 칸이나 적은 값이 없다", name)
+		}
 	}
 }

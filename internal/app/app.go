@@ -324,7 +324,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
 		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
-	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
+	siteName := func() string { return site().Name }
+	mailer := auth.NewMailer(settingsSender{settings: setting, log: log, site: siteName}, log)
 	// D13: 끝내 나가지 못한 메일은 작업 로그에 남긴다. 화면은 실패를 말할 수
 	// 없어서(FR-207) 여기가 아니면 운영자가 알 곳이 없다. 자동 백업과 같이 주체는
 	// system 이다 (D15 7절). 본문은 받지 않는다 — 재설정 링크가 곧 토큰이다.
@@ -348,7 +349,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	turnstile := auth.Turnstile{Client: &http.Client{Timeout: 10 * time.Second}, URL: auth.TurnstileVerifyURL}
 	spam := spamGuard{keys: turnstileKeys, verify: turnstile.Verify, log: log}
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
-		userFields: contentStore.UserFields, verifyRequired: verifyRequired, signupClosed: signupClosed, spam: spam}
+		userFields: contentStore.UserFields, verifyRequired: verifyRequired, signupClosed: signupClosed, spam: spam,
+		mailReady: func() bool { return setting("mail.smtp_host")["mail.smtp_host"] != "" }}
 	// 로그인·소셜 로그인의 미인증 판정은 가입 쪽이 안다(인증 설정·재발송) (FR-214).
 	lg.unverified = acc.refuseUnverified
 
@@ -417,13 +419,15 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		InstallTheme: func(name string, rd io.ReaderAt, size int64, replace bool) error {
 			return theme.Install(cfg.Themes(), name, rd, size, replace)
 		},
+		InstalledThemes: func() ([]string, error) { return theme.Installed(cfg.Themes()) },
+		BoardSkins:      func() []string { return loaderRef.Load().BoardSkins() },
 		SendReset: func(email, token string) {
 			mailer.SendAsync(email, "비밀번호 재설정",
-				"아래 링크로 재설정하세요:\n"+strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token)
+				resetMailBody(strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token))
 		},
 		// 시험 발송은 기다려서 결과를 본다 — 재시도 큐(mailer)를 거치지 않는다.
 		SendMailTest: func(ctx context.Context, to string) error {
-			return settingsSender{settings: setting, log: log}.Send(ctx, to, "메일 설정 시험",
+			return settingsSender{settings: setting, log: log, site: siteName}.Send(ctx, to, "메일 설정 시험",
 				"관리자 화면에서 보낸 메일 설정 시험입니다. 이 메일을 받으셨다면 SMTP 설정이 맞습니다.")
 		},
 		Limiter: limiter, Limits: limits,
@@ -475,10 +479,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
 		// 부팅 때 붙잡아 두면 재시작 전까지 옛 값으로 계산한다.
 		shipping: func() commerce.Shipping {
-			kv := setting("shipping.flat_fee", "shipping.free_threshold")
+			kv := setting(commerce.SettingShippingFlatFee, commerce.SettingShippingFreeThreshold)
 			return commerce.Shipping{
-				FlatFee:       atoiOr(kv["shipping.flat_fee"], 0),
-				FreeThreshold: atoiOr(kv["shipping.free_threshold"], 0),
+				FlatFee:       atoiOr(kv[commerce.SettingShippingFlatFee], 0),
+				FreeThreshold: atoiOr(kv[commerce.SettingShippingFreeThreshold], 0),
 			}
 		},
 		pgName: func() string { n, _ := pgAdapter(); return n },
@@ -528,7 +532,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// to sit INSIDE the loader — outside it, every request looks anonymous and
 	// the gate sends a logged-in administrator to the login form.
 	h := withActor(sessions, authStore)(
-		withAdminRateLimit(limiter, limits.AdminTreeIP)(withTreeGate(mux)))
+		withAdminRateLimit(limiter, limits.AdminTreeIP)(withTreeGate(mux, pub.forbidden)))
 	h = withMiddleware(h, sessions)
 
 	// **P-905 는 본 트리 밖이다** (D15 SC-8 1항). 세션도 CSRF 도 액터도 붙지

@@ -19,9 +19,26 @@
 <div class="adm-card">
   <h2>동작</h2>
   <div class="adm-actions" style="flex-direction:column;align-items:flex-start">
+    {{/* 지금 상태의 반대만 낸다. 비활성 계정에 「비활성화」만 있던 화면이다 — 탈퇴한
+         회원도 여기서 「활성화」로 돌아온다. */}}
+    {{if .IsActive}}
     <form method="post" action="/admin/users/{{.ID}}/deactivate">
       {{template "reauth-field" .}}
       <button class="adm-btn">비활성화</button>
+    </form>
+    {{else}}
+    <form method="post" action="/admin/users/{{.ID}}/activate">
+      {{template "reauth-field" .}}
+      <button class="adm-btn adm-btn--primary">활성화</button>
+    </form>
+    {{end}}
+    {{/* 역할 부여(A-405)를 사용자에게서 바로 한다 — 역할 화면에서는 이메일을 쳐야 한다. */}}
+    <form method="post" action="/admin/users/roles">
+      <input type="hidden" name="user_id" value="{{.ID}}">
+      <label class="adm-field"><span>역할 부여</span>
+        <select name="role" required><option value="">선택하세요</option>{{range $.Roles}}{{if .Assignable}}<option value="{{.Key}}">{{.Key}}</option>{{end}}{{end}}</select></label>
+      {{template "reauth-field" .}}
+      <button class="adm-btn">역할 부여</button>
     </form>
     <form method="post" action="/admin/users/{{.ID}}/reset-password">
       {{template "reauth-field" .}}
@@ -29,7 +46,7 @@
     </form>
     <form method="post" action="/admin/users/{{.ID}}/delete">
       {{template "reauth-field" .}}
-      <button class="adm-btn adm-btn--danger">삭제</button>
+      <button onclick="return confirm('이 사용자를 삭제할까요? 되돌릴 수 없습니다. 기록이 남아 있으면 비활성화하세요.')" class="adm-btn adm-btn--danger">삭제</button>
     </form>
   </div>
   <p class="adm-hint">

@@ -1,5 +1,10 @@
 {{define "content"}}
 <div class="adm-card adm-card--flush">
+  <form class="adm-filterbar" method="get" action="/admin/comments">
+    <h2>댓글 관리</h2>
+    {{template "board-picker" .}}
+    <button class="adm-btn adm-btn--sm adm-btn--primary">보기</button>
+  </form>
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead><tr><th>내용</th><th>작성자</th><th>작성일</th><th>동작</th></tr></thead>
@@ -14,7 +19,7 @@
             <form method="post" action="/admin/comments">
               <input type="hidden" name="comment_id" value="{{.ID}}">
               <input type="hidden" name="page" value="{{$.PageNo}}">
-              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+              <button onclick="return confirm('이 댓글을 삭제할까요? 되돌릴 수 없습니다.')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
             </form>
             {{end}}
           </td>
@@ -22,10 +27,9 @@
       {{else}}
         {{/* **「고르지 않았다」와 「없다」는 다르다.** 게시판을 고르기 전에도
              「댓글이 없습니다」라고 말하면 운영자는 그 게시판에 댓글이 없다고
-             믿는다 — 형제 화면(A-307·A-309)은 「게시판 주소를 입력하세요」라고
-             한다. 셋이 같은 말을 해야 한다. */}}
+             믿는다. 셋(A-307~309)이 같은 말을 한다. */}}
         <tr><td colspan="4" class="adm-empty">
-          {{if .BoardSlug}}댓글이 없습니다.{{else}}게시판 주소를 입력하세요.{{end}}
+          {{if .BoardSlug}}이 게시판에 댓글이 없습니다.{{else}}게시판을 고르세요.{{end}}
         </td></tr>
       {{end}}
       </tbody>

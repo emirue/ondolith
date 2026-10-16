@@ -179,3 +179,52 @@ func TestNoFloatingPointInTheMoneyPath(t *testing.T) {
 		t.Fatal("패키지를 하나도 읽지 못했다 — 검사가 헛돌았다")
 	}
 }
+
+// 주문 뒤 화면(주문 상세·영수증)은 배송비를 저장된 값에서 거꾸로 푼다 — orders
+// 에 배송비 열이 없다. 주문을 만들 때의 식(총액 = 상품합계 + 배송비 − 할인)과
+// 어긋나면 화면의 배송비가 결제한 배송비와 달라진다.
+func TestOrderDetailRecoversShippingFee(t *testing.T) {
+	ship := Shipping{FlatFee: 3000, FreeThreshold: 50000}
+	for _, tc := range []struct {
+		lines    []Line
+		discount int
+	}{
+		{[]Line{{12000, 1000, 2}, {5000, 0, 1}}, 0},    // 유료 배송
+		{[]Line{{12000, 1000, 2}, {5000, 0, 1}}, 4000}, // 유료 배송 + 할인
+		{[]Line{{47000, 0, 1}, {3000, 0, 1}}, 0},       // 무료 배송
+	} {
+		goods, fee, total, err := Total(tc.lines, ship)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := OrderDetail{Total: total - tc.discount, Discount: tc.discount}
+		for _, l := range tc.lines {
+			amount, _ := l.Amount()
+			o.Items = append(o.Items, OrderItem{LineAmount: amount})
+		}
+		if o.Goods() != goods || o.ShippingFee() != fee {
+			t.Errorf("할인 %d: 상품합계 %d·배송비 %d, want %d·%d",
+				tc.discount, o.Goods(), o.ShippingFee(), goods, fee)
+		}
+	}
+}
+
+// 상품 화면의 옵션은 관리자가 넣은 순서대로다 — OptionGroups 가 사전순으로 정렬해
+// 「5mm, 10mm」가 「10mm, 5mm」로, S·M·L 이 L·M·S 로 나왔다. 정의에 없는 값(옛 조합)은
+// 뒤에 남는다.
+func TestOptionGroupsFollowTheDefinedOrder(t *testing.T) {
+	vs := []Variant{
+		{OptionValues: map[string]string{"두께": "10mm", "크기": "L"}},
+		{OptionValues: map[string]string{"두께": "5mm", "크기": "S"}},
+		{OptionValues: map[string]string{"두께": "5mm", "크기": "M"}},
+		{OptionValues: map[string]string{"두께": "20mm", "크기": "M"}}, // 정의에서 빠진 값
+	}
+	defined := []Option{{Name: "크기", Values: []string{"S", "M", "L"}}, {Name: "두께", Values: []string{"5mm", "10mm"}}}
+	got := InDefinedOrder(OptionGroups(vs), defined)
+	if len(got) != 2 || got[0].Name != "크기" || got[1].Name != "두께" {
+		t.Fatalf("그룹 순서 = %+v, want 크기, 두께", got)
+	}
+	if strings.Join(got[0].Values, ",") != "S,M,L" || strings.Join(got[1].Values, ",") != "5mm,10mm,20mm" {
+		t.Errorf("값 순서 = %v / %v, want S,M,L / 5mm,10mm,20mm", got[0].Values, got[1].Values)
+	}
+}

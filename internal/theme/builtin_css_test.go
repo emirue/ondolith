@@ -86,9 +86,10 @@ func classesInStylesheet(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	// **주석을 먼저 걷어낸다.** 주석 속 `style.css` 와 `app.defaultAdminTheme`
-	// 이 `.css`·`.default` 로 읽혀 없는 클래스가 잡혔다.
+	// 이 `.css`·`.default` 로 읽혀 없는 클래스가 잡혔다. `url(…)` 도 같다 — 선택 상자 화살표
+	// 그림의 `www.w3.org` 가 `.w3`·`.org` 로 읽혔다.
 	seen := map[string]bool{}
-	for _, m := range cssClass.FindAllStringSubmatch(stripComments(string(b)), -1) {
+	for _, m := range cssClass.FindAllStringSubmatch(cssURL.ReplaceAllString(stripComments(string(b)), " "), -1) {
 		seen[m[1]] = true
 	}
 	return sortedKeys(seen)
@@ -98,6 +99,8 @@ func classesInStylesheet(t *testing.T) []string {
 var condClass = regexp.MustCompile(`\}\}([a-z][a-z0-9-]*)\{\{`)
 
 var cssComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+
+var cssURL = regexp.MustCompile(`url\("[^"]*"\)`)
 
 func stripComments(css string) string { return cssComment.ReplaceAllString(css, " ") }
 
@@ -337,5 +340,185 @@ func TestSingletonBlocksAppearOnce(t *testing.T) {
 	}
 	if len(dup) > 0 {
 		t.Errorf("한 번만 나와야 하는 블록이 여러 번 있다: %v", dup)
+	}
+}
+
+// **휴대폰에서 목록 표는 행마다 한 덩어리로 쌓인다.**
+//
+// 칸을 옆으로 늘어놓으면 줄바꿈하지 않는 작성자·작성일·금액이 자리를 먼저 차지한다.
+// 390px 에서 글 제목이 낱말마다 꺾였고(「3월/배송/일정」), 주문 내역은 금액이 칸 밖으로
+// 밀려 378,000원이 「378」로 보였다 — 표는 옆으로 밀리지만 밀 수 있다는 표시가 없다.
+//
+// **`screen` 으로 한정한다.** A4 인쇄 폭(약 720px)도 `max-width: 767px` 에 걸려, 영수증을
+// 인쇄하면 표가 카드로 풀린다. 머리줄이 숨으므로 숫자 칸(단가·수량·금액)은 `data-label` 로
+// 무엇의 숫자인지 단다.
+func TestNarrowListTablesStackRows(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := stripComments(string(b))
+	at := strings.Index(css, "@media screen and (max-width: 767px)")
+	if at < 0 {
+		t.Fatal("화면 전용 좁은 폭 블록이 없다 — 표가 휴대폰에서도 옆으로 늘어선다")
+	}
+	block := css[at:]
+	if end := strings.Index(block, "\n}"); end > 0 {
+		block = block[:end]
+	}
+	for _, want := range []*regexp.Regexp{
+		regexp.MustCompile(`\.board-list thead,\s*\.order-list thead\s*\{\s*display:\s*none`),
+		regexp.MustCompile(`\.board-list tr,\s*\.order-list tr\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap`),
+		regexp.MustCompile(`td:first-child[^{]*\{[^}]*flex-basis:\s*100%`),
+		regexp.MustCompile(`\.board-list td\[data-label\]::before,\s*\.order-list td\[data-label\]::before\s*\{[^}]*attr\(data-label\)`),
+		// 카드 안의 칸은 줄을 바꾼다 — 긴 옵션 이름이 카드 밖으로 넘쳐 표가 다시 옆으로 밀렸다.
+		regexp.MustCompile(`\.board-list td,\s*\.order-list td\s*\{[^}]*white-space:\s*normal`),
+		// 빈 목록 문구는 칸 여백(0)을 받지 않는다 — 더 구체적인 규칙이 .empty 의 여백을 지웠다.
+		regexp.MustCompile(`\.board-list td\.empty,\s*\.order-list td\.empty\s*\{[^}]*padding:\s*[1-9]`),
+	} {
+		if !want.MatchString(block) {
+			t.Errorf("좁은 폭 블록에 %s 가 없다", want)
+		}
+	}
+
+	board, err := fs.ReadFile(Builtin(), "board/list.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`data-label="조회"`, `data-label="{{.Label}}"`} {
+		if !strings.Contains(string(board), want) {
+			t.Errorf("게시판 목록에 %s 가 없다 — 휴대폰에서 숫자·값만 남는다", want)
+		}
+	}
+
+	for _, name := range []string{"order/view.html", "order/receipt.html", "shop/complete.html"} {
+		src, err := fs.ReadFile(Builtin(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, label := range []string{"단가", "수량", "금액"} {
+			if !strings.Contains(string(src), `data-label="`+label+`"`) {
+				t.Errorf("%s: 품목 표의 %s 칸에 data-label 이 없다 — 휴대폰에서 숫자만 남는다", name, label)
+			}
+		}
+	}
+}
+
+// **나란히 서는 입력칸과 버튼은 같은 높이다.**
+//
+// 입력칸 42px 옆에 버튼 44px 이 붙어 아랫변이 어긋났고(머리글·게시판 검색), 장바구니
+// 한 행에 수량칸 42·「변경」 44·「빼기」 34px 이 섰다. 같은 「검색」 버튼이 화면에 따라
+// 흰 버튼이거나 초록 주 버튼이었다.
+func TestSideBySideControlsShareAHeight(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := stripComments(string(b))
+	minH := func(sel string) string {
+		m := regexp.MustCompile(`(?m)^` + sel + `\s*\{[^}]*?min-height:\s*([0-9a-z]+)`).FindStringSubmatch(css)
+		if m == nil {
+			t.Fatalf("%s 규칙에서 min-height 를 못 찾았다", sel)
+		}
+		return m[1]
+	}
+	if in, btn := minH(`input,\s*select,\s*textarea`), minH(`button`); in != btn {
+		t.Errorf("입력칸 %s · 버튼 %s — 한 줄에 서면 아랫변이 어긋난다", in, btn)
+	}
+
+	cart, err := fs.ReadFile(Builtin(), "shop/cart.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cart), "btn--sm") {
+		t.Error("장바구니 행의 버튼이 작은 변형이다 — 옆의 「변경」·수량칸과 높이가 다르다")
+	}
+
+	primarySearch := regexp.MustCompile(`<button[^>]*btn--primary[^>]*>검색</button>`)
+	for _, name := range []string{"search.html", "board/list.html", "shop/list.html", "shop/search.html", "partials/header.html"} {
+		src, err := fs.ReadFile(Builtin(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if primarySearch.Match(src) {
+			t.Errorf("%s: 「검색」만 주 버튼이다 — 다른 화면의 같은 버튼과 모양이 다르다", name)
+		}
+	}
+}
+
+// **링크는 버튼과 같은 색 계열이다 — 밝게도 어둡게도.** 밝은 테마는 링크와 버튼이 같은 초록인데
+// 어두운 테마만 링크가 #7aa7f0 파랑이었다(버튼은 초록 그대로). 색상각이 강조색에서 40° 안이어야 한다.
+func TestLinksShareTheAccentHueInBothSchemes(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := stripComments(string(b))
+	dark := css[strings.Index(css, "@media (prefers-color-scheme: dark)"):]
+	dark = dark[:strings.Index(dark, "\n}")]
+	light := css[:strings.Index(css, "@media (prefers-color-scheme: dark)")]
+	token := func(block, name string) string {
+		m := regexp.MustCompile(name + `:\s*(#[0-9a-fA-F]{6})`).FindStringSubmatch(block)
+		if m == nil {
+			t.Fatalf("%s 가 없다", name)
+		}
+		return m[1]
+	}
+	hue := func(hex string) float64 {
+		v, _ := strconv.ParseUint(hex[1:], 16, 32)
+		r, g, b := float64(v>>16&255)/255, float64(v>>8&255)/255, float64(v&255)/255
+		mx, mn := max(r, g, b), min(r, g, b)
+		d := mx - mn
+		var h float64
+		switch {
+		case d == 0:
+			return 0
+		case mx == r:
+			h = (g - b) / d
+		case mx == g:
+			h = (b-r)/d + 2
+		default:
+			h = (r-g)/d + 4
+		}
+		h *= 60
+		if h < 0 {
+			h += 360
+		}
+		return h
+	}
+	for name, block := range map[string]string{"밝게": light, "어둡게": dark} {
+		a, l := token(block, "--accent"), token(block, "--link")
+		diff := hue(a) - hue(l)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 180 {
+			diff = 360 - diff
+		}
+		if diff > 40 {
+			t.Errorf("%s: 링크 %s 와 강조색 %s 의 색상각이 %.0f° 다르다 — 링크만 다른 색이다", name, l, a, diff)
+		}
+	}
+}
+
+// **한 줄에 안 들어가는 긴 낱말은 꺾인다.** 본문 전체가 낱말 단위 줄바꿈(keep-all)이라,
+// `overflow-wrap: anywhere` 가 없는 상자에서는 띄어쓰기 없는 긴 글(「ㅋㅋㅋ…」 댓글, 긴 사이트
+// 이름)이 상자 밖으로 넘쳐 `body { overflow-x: hidden }` 에 소리 없이 잘린다.
+func TestLongWordsWrapWhereUsersWrite(t *testing.T) {
+	b, err := fs.ReadFile(Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?s)\n((?:[^{}\n]+,\n)*[^{}\n]+)\{\s*overflow-wrap:\s*anywhere;\s*\}`).FindAllStringSubmatch(stripComments(string(b)), -1)
+	covered := map[string]bool{}
+	for _, r := range m {
+		for _, sel := range strings.Split(r[1], ",") {
+			covered[strings.TrimSpace(sel)] = true
+		}
+	}
+	for _, want := range []string{".page", ".comments li", ".hero", ".auth", ".flash li"} {
+		if !covered[want] {
+			t.Errorf("%s 에 overflow-wrap: anywhere 가 없다 — 긴 낱말이 넘쳐 잘린다 (있는 것: %v)", want, sortedKeys(covered))
+		}
 	}
 }

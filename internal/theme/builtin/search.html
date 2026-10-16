@@ -3,8 +3,8 @@
 <section class="page">
   <h1>검색</h1>
   <form class="board-filter" method="get" action="/search">
-    <input type="search" name="q" value="{{.Query.Search}}" placeholder="제목 · 내용 검색" autofocus>
-    <button class="btn btn--primary">검색</button>
+    <input type="search" name="q" value="{{.Query.Search}}" placeholder="제목 · 내용 검색"{{if not .Query.Search}} autofocus{{end}}>
+    <button class="btn">검색</button>
   </form>
 
   {{if .Query.Search}}
@@ -19,7 +19,7 @@
           <p class="excerpt">{{truncate .Body 120}}</p>
         </li>
       {{else}}
-        <li class="empty">결과가 없습니다.</li>
+        <li class="empty">「{{.Query.Search}}」에 맞는 글이 없습니다.</li>
       {{end}}
     </ul>
     {{template "partials/pagination.html" .Pager}}

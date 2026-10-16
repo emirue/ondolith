@@ -2,6 +2,7 @@ package app
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -26,6 +27,16 @@ type boardDeps struct {
 	// media 는 에디터로 올린 본문 사진이다 (P-213·P-214, FR-514).
 	media *content.MediaStore
 	spam  spamGuard
+}
+
+// loginWouldAllow 는 로그인하지 않은 방문자에게 「로그인하면 쓸 수 있다」고 말해도 되는지다 —
+// 가입한 회원(member 역할)이 그 게시판에 그 권한을 가질 때만 참이다. 못 읽으면 말하지 않는다.
+func (d *boardDeps) loginWouldAllow(ctx context.Context, a *Actor, perm, boardID string) bool {
+	if a.IsAuthenticated() || d.authStore == nil {
+		return false
+	}
+	p, err := d.authStore.LoadMemberPermissions(ctx)
+	return err == nil && p.CanOn(perm, auth.BoardID(boardID))
 }
 
 // countView bumps the counter once per browser session per post.
@@ -129,10 +140,12 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := d.view(r, b.Name, b.Name+" 목록")
+	canWrite := a.CanOn("post.write", auth.BoardID(b.ID))
 	v.Data = map[string]any{
 		"Board": b, "Posts": posts, "Total": total, "Query": q, "Columns": columns,
-		"CanWrite": a.CanOn("post.write", auth.BoardID(b.ID)),
-		"Pager":    pagerFor("/board/"+b.Slug, q, total),
+		"CanWrite":     canWrite,
+		"LoginToWrite": !canWrite && d.loginWouldAllow(r.Context(), a, "post.write", b.ID),
+		"Pager":        pagerFor("/board/"+b.Slug, q, total),
 	}
 	d.renderPage(w, r, d.boardTemplate(b, "board/list.html"), http.StatusOK, v)
 }
@@ -185,12 +198,27 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	d.countView(w, r, p.ID)
 
 	v := d.view(r, p.Title, firstLine(p.Body))
+	commentForm := map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
+		"Turnstile": v.Site.Turnstile}
+	// 「답글」(?reply=댓글)은 같은 폼을 그 댓글에 대한 답글로 연다 (FR-505). 이 글의
+	// 최상위 댓글일 때만이다 — 저장할 때도 같은 판정을 한다(commentBelongsTo). 이미 읽은
+	// 댓글에서 찾는다: 다시 묻지 않아도 이 글의 댓글은 거기 다 있다.
+	if id := r.URL.Query().Get("reply"); id != "" {
+		for _, c := range comments {
+			if c.ID == id && c.ParentID == "" {
+				commentForm["ParentID"] = id
+				break
+			}
+		}
+	}
+	canComment := b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID))
 	v.Data = map[string]any{
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
 		"Attachments": files,
-		"CanComment":  b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID)),
-		"CommentForm": map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
-			"Turnstile": v.Site.Turnstile},
+		"CanComment":  canComment,
+		"LoginToComment": b.AllowComments && !canComment &&
+			d.loginWouldAllow(r.Context(), a, "comment.write", b.ID),
+		"CommentForm": commentForm,
 		"CanEdit":     p.AuthorID != "" && p.AuthorID == actorID(a),
 		"CanModerate": a.CanOn("post.moderate", auth.BoardID(b.ID)),
 	}
@@ -419,6 +447,9 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 	}
 	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
 	p := content.Post{
+		// 수정(P-206) 경로에서는 경로의 id 다. 비우면 거절 화면의 폼이 「새 글 쓰기」로
+		// 제출돼, 고쳐 저장하는 순간 원래 글은 그대로이고 새 글이 생겼다.
+		ID:       r.PathValue("id"),
 		Title:    strings.TrimSpace(r.PostFormValue("title")),
 		Body:     body,
 		BodyHTML: bodyHTML,
@@ -429,6 +460,16 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 	}
 	if p.Title == "" {
 		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, "제목을 입력하세요.")
+		return content.Post{}, nil, false
+	}
+	// DB CHECK 에 맡기면 500 이고 쓴 글이 사라진다. 여기서 막으면 폼이 그대로 돌아온다.
+	if content.TooLong(p.Title, content.MaxTitleLen) {
+		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity, "제목은 200자까지 쓸 수 있습니다.")
+		return content.Post{}, nil, false
+	}
+	if content.TooLong(p.Body, content.MaxPostBodyLen) || content.TooLong(p.BodyHTML, content.MaxBodyHTMLLen) {
+		d.renderFormError(w, r, b, fields, p, http.StatusUnprocessableEntity,
+			"본문이 너무 깁니다. 글자 50,000자(서식 포함 200,000자)까지 쓸 수 있습니다.")
 		return content.Post{}, nil, false
 	}
 	return p, fields, true

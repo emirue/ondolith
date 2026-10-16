@@ -29,6 +29,30 @@ const (
 	FieldURL         FieldType = "url"
 )
 
+// Label is how A-306·A-406 name the type to an operator. 코드(text·multiselect …)를
+// 그대로 보이면 운영자가 「multiselect」가 무엇인지 따로 알아야 했다.
+func (t FieldType) Label() string {
+	switch t {
+	case FieldText:
+		return "한 줄 글"
+	case FieldTextarea:
+		return "여러 줄 글"
+	case FieldNumber:
+		return "숫자"
+	case FieldSelect:
+		return "하나 선택"
+	case FieldCheckbox:
+		return "체크"
+	case FieldMultiselect:
+		return "여러 개 선택"
+	case FieldDate:
+		return "날짜"
+	case FieldURL:
+		return "링크(URL)"
+	}
+	return string(t)
+}
+
 // FieldSchema is one row of board_fields as the validator needs it.
 type FieldSchema struct {
 	Key        string
@@ -312,6 +336,23 @@ func contains(list []string, v string) bool {
 type FieldInput struct {
 	Field FieldSchema
 	Value any
+}
+
+// Has reports whether opt is among the stored choices — 「여러 개 선택」은 값이
+// 목록이고, 「하나 선택」은 문자열이다. 폼이 이것으로 selected 를 되살린다: 되살리지
+// 않으면 아무것도 고르지 않은 채 그려지고, 그대로 저장하면 값이 지워진다.
+func (in FieldInput) Has(opt string) bool {
+	switch v := in.Value.(type) {
+	case []any:
+		for _, x := range v {
+			if x == opt {
+				return true
+			}
+		}
+	case string:
+		return v == opt
+	}
+	return false
 }
 
 // FieldInputs zips a board's schema with a post's stored values, in schema

@@ -8,15 +8,20 @@
 <p>지금은 회원가입을 받지 않습니다. 계정이 필요하면 사이트 운영자에게 문의하세요.</p>
 {{else}}
 {{with .Data}}{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}{{end}}
+{{/* 거절로 다시 그릴 때 쓴 이메일·이름을 되살린다(Form). 비밀번호는 되살리지 않는다. */}}
+{{$email := ""}}{{$name := ""}}{{with .Data}}{{with .Form}}{{$email = .Email}}{{$name = .DisplayName}}{{end}}{{end}}
 <form method="post" action="/signup" class="form">
   <label for="email">이메일</label>
-  <input id="email" name="email" type="email" required autocomplete="username">
+  <input id="email" name="email" type="email" required autocomplete="username" value="{{$email}}">
   <label for="display_name">표시 이름</label>
-  <input id="display_name" name="display_name" type="text" maxlength="100">
+  <input id="display_name" name="display_name" type="text" maxlength="100" value="{{$name}}">
   <label for="password">비밀번호</label>
   <input id="password" name="password" type="password" required minlength="10"
          autocomplete="new-password">
   <p class="hint">10자 이상</p>
+  <label for="password_confirm">비밀번호 확인</label>
+  <input id="password_confirm" name="password_confirm" type="password" required minlength="10"
+         autocomplete="new-password">
   {{/* 운영자가 A-406 에서 정한 항목 (FR-215). 목록이 코드에 없다 — 이 사이트가
        무엇을 더 받는지는 설정이지 빌드가 아니다. */}}
   {{with .Data}}{{range .Inputs}}
@@ -26,6 +31,7 @@
   {{template "partials/spam.html" .Site.Turnstile}}
   <button type="submit">가입</button>
 </form>
+<p>이미 회원이신가요? <a href="/login">로그인</a></p>
 {{end}}
 </div>
 {{end}}

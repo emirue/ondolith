@@ -1,44 +1,43 @@
 {{define "content"}}
+{{/* 머리줄과 행이 **같은 격자**다(.adm-menu-grid). 앞 판은 머리가 표 열이고 행이 colspan
+     안의 grid 라 열이 어긋났다. 부모는 제목으로 고른다 — UUID 를 쳐야 해서 하위 메뉴를
+     사실상 만들 수 없었다. 순서 칸이 없던 때는 모두 0 이라 id 순으로 나왔다. */}}
+{{$items := .Items}}
 <div class="adm-card adm-card--flush">
-  <div class="adm-table-wrap">
-    <table class="adm-table">
-      <thead><tr><th>제목</th><th>URL</th><th>부모</th><th>동작</th></tr></thead>
-      <tbody>
-      {{range .Items}}
-        <tr>
-          <td colspan="4" style="padding:0">
-            {{/* 삭제 버튼이 없어서 `MenuDelete` 는 라우트도 핸들러도 있는데
-                 누를 자리가 없었다 — 메뉴를 한번 만들면 지울 수 없었다.
-                 「수정」 폼과 다른 폼이어야 하므로 `form` 속성으로 잇고, 버튼은
-                 수정 옆에 나란히 둔다 — 아래 줄에 따로 떨어지면 행이 두 줄이 된다. */}}
-            <form id="menu-del-{{.ID}}" method="post" action="/admin/menus/{{.ID}}/delete"></form>
-            <form method="post" action="/admin/menus/{{.ID}}"
-                  style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;padding:12px 22px;align-items:center">
-              <input type="text" name="title" value="{{.Title}}" aria-label="제목">
-              <input type="text" name="url" value="{{.URL}}" aria-label="URL">
-              <input type="text" name="parent_id" value="{{.ParentID}}" placeholder="(최상위)" aria-label="부모">
-              <span class="adm-actions">
-                <button class="adm-btn adm-btn--sm">수정</button>
-                <button class="adm-btn adm-btn--sm adm-btn--danger" form="menu-del-{{.ID}}">삭제</button>
-              </span>
-            </form>
-          </td>
-        </tr>
-      {{else}}
-        <tr><td colspan="4" class="adm-empty">메뉴 항목이 없습니다.</td></tr>
-      {{end}}
-      </tbody>
-    </table>
+  <div class="adm-menu-grid adm-menu-grid--head" aria-hidden="true">
+    <span>제목</span><span>URL</span><span>부모</span><span>순서</span><span>동작</span>
   </div>
+  {{range .Items}}
+  {{$id := .ID}}{{$parent := .ParentID}}
+  {{/* 삭제는 수정과 다른 폼이라 form 속성으로 잇는다 — 버튼은 수정 옆에 나란히. */}}
+  <form id="menu-del-{{.ID}}" method="post" action="/admin/menus/{{.ID}}/delete"></form>
+  <form method="post" action="/admin/menus/{{.ID}}" class="adm-menu-grid">
+    <input type="text" name="title" maxlength="50" value="{{.Title}}" aria-label="제목">
+    <input type="text" name="url" value="{{.URL}}" aria-label="URL">
+    <select name="parent_id" aria-label="부모">
+      <option value="">(최상위)</option>
+      {{range $items}}{{if ne .ID $id}}<option value="{{.ID}}"{{if eq .ID $parent}} selected{{end}}>{{.Title}}</option>{{end}}{{end}}
+    </select>
+    <input type="number" name="sort_order" step="1" value="{{.Sort}}" aria-label="순서">
+    <span class="adm-actions">
+      <button class="adm-btn adm-btn--sm">수정</button>
+      <button onclick="return confirm('이 메뉴를 삭제할까요?')" class="adm-btn adm-btn--sm adm-btn--danger" form="menu-del-{{.ID}}">삭제</button>
+    </span>
+  </form>
+  {{else}}
+  <p class="adm-empty">메뉴 항목이 없습니다.</p>
+  {{end}}
 </div>
 
 <div class="adm-card">
   <h2>메뉴 추가</h2>
   <form method="post" action="/admin/menus">
     <div class="adm-field-row">
-      <label class="adm-field"><span>제목</span><input type="text" name="title" required></label>
+      <label class="adm-field"><span>제목</span><input type="text" name="title" maxlength="50" required></label>
       <label class="adm-field"><span>URL</span><input type="text" name="url"></label>
-      <label class="adm-field"><span>부모 ID</span><input type="text" name="parent_id" placeholder="(최상위)"></label>
+      <label class="adm-field"><span>부모</span>
+        <select name="parent_id"><option value="">(최상위)</option>{{range $items}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select></label>
+      <label class="adm-field"><span>순서 (작은 수가 앞)</span><input type="number" name="sort_order" step="1" value="0"></label>
     </div>
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">추가</button>

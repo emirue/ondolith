@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f7a63'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23fff' stroke-width='4'/%3E%3C/svg%3E">
 <title>{{.Title}} — 관리자</title>
 <style>{{.CSS}}</style>
 </head>
@@ -22,17 +23,15 @@
 </header>
 
 <div class="adm-body">
+  {{/* 좁은 화면의 메뉴. 사이드바가 본문 위로 올라오면 메뉴 25개가 첫 화면을 다 차지해,
+       접어 두었다가 「메뉴」를 눌러 연다. JS 없이 접으려면 <details> 이고, 넓은 화면은 늘
+       펼친 사이드바가 필요해 같은 목록을 두 번 그린다 — 폭에 따라 하나만 보인다. */}}
+  <details class="adm-mnav">
+    <summary>메뉴</summary>
+    {{template "adm-nav" .}}
+  </details>
   <aside class="adm-sidebar">
-    {{range .Nav}}
-      <div>
-        {{if .Title}}<div class="adm-navgroup-label">{{.Title}}</div>{{end}}
-        <nav>
-          {{range .Items}}
-            <a href="{{.Path}}"{{if eq .Path $.Current}} aria-current="page"{{end}}>{{.Title}}</a>
-          {{end}}
-        </nav>
-      </div>
-    {{end}}
+    {{template "adm-nav" .}}
   </aside>
 
   <main class="adm-main">
@@ -53,6 +52,28 @@
      D19 C7). 별도 재인증 화면을 두지 않기로 했으므로 **칸이 폼 안에 있어야
      한다** — 없으면 15분이 지난 운영자는 그 동작을 영원히 못 한다. 창이 아직
      살아 있으면 서버가 값을 읽지 않는다. */}}
+{{/* board-picker 는 글·댓글·첨부 관리(A-307~309)의 게시판 고르기다. 주소를 직접 치게 했고,
+     댓글 관리에는 고르는 칸조차 없었다. 데이터 {Boards, BoardSlug}. */}}
+{{define "adm-nav"}}
+{{range .Nav}}
+  <div>
+    {{if .Title}}<div class="adm-navgroup-label">{{.Title}}</div>{{end}}
+    <nav>
+      {{range .Items}}
+        <a href="{{.Path}}"{{if eq .Path $.Current}} aria-current="page"{{end}}>{{.Title}}</a>
+      {{end}}
+    </nav>
+  </div>
+{{end}}
+{{end}}
+
+{{define "board-picker"}}
+<select name="board" aria-label="게시판">
+  <option value="">게시판을 고르세요</option>
+  {{range .Boards}}<option value="{{.Slug}}"{{if eq .Slug $.BoardSlug}} selected{{end}}>{{.Name}}</option>{{end}}
+</select>
+{{end}}
+
 {{define "reauth-field"}}
 <label class="adm-field">
   <span>비밀번호 재확인</span>
@@ -67,9 +88,11 @@
      상태 필터 같은 다른 조건이 같은 폼에 있어야 함께 실린다. */}}
 {{define "period-fields"}}
 <label for="from">기간</label>
-<input type="date" id="from" name="from" value="{{.From}}" aria-label="시작일">
-<span>~</span>
-<input type="date" name="to" value="{{.To}}" aria-label="종료일">
+<span class="adm-range">
+  <input type="date" id="from" name="from" value="{{.From}}" aria-label="시작일">
+  <span>~</span>
+  <input type="date" name="to" value="{{.To}}" aria-label="종료일">
+</span>
 {{range .Quick}}<a class="adm-btn" href="{{.URL}}">{{.Label}}</a>{{end}}
-<button class="adm-btn">조회</button>
+<button class="adm-btn adm-btn--primary">조회</button>
 {{end}}

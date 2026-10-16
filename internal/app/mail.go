@@ -16,6 +16,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/emirue/ondolith/internal/auth"
 )
 
 // settingsSender delivers mail using the SMTP settings A-205 stores.
@@ -26,6 +28,9 @@ import (
 type settingsSender struct {
 	settings func(keys ...string) map[string]string
 	log      *slog.Logger
+	// site 는 제목 앞에 붙는 사이트 이름이다. 받는 사람의 수신함에서 「이메일 인증」만으로는
+	// 어느 사이트의 메일인지 모른다. nil 이면 붙이지 않는다.
+	site func() string
 }
 
 // ErrMailNotConfigured is what a site without SMTP gets. It is an error rather
@@ -59,8 +64,42 @@ func (s settingsSender) Send(ctx context.Context, to, subject, body string) erro
 	}
 	// The body is assembled here and never logged: it carries the verification
 	// and reset links, which are single-use credentials (D60).
+	if s.site != nil {
+		subject = mailSubject(s.site(), subject)
+	}
 	msg := buildMessage(kv["mail.from_name"], from, to, subject, body, time.Now())
 	return sendMail(ctx, net.JoinHostPort(host, port), host, kv["mail.tls_mode"], auth, from, []string{to}, msg)
+}
+
+func mailSubject(site, subject string) string {
+	if site == "" {
+		return subject
+	}
+	return "[" + site + "] " + subject
+}
+
+// 메일 문구는 여기 한 곳이다 (FR-207, FR-214, FR-210). 경로마다 따로 쓰다 보니 사용자가
+// 요청한 재설정에는 만료 안내가 있고 관리자가 강제한 재설정에는 없었다. 만료 시간은
+// 토큰의 실제 수명(auth)에서 읽는다 — 숫자를 문구에 따로 적으면 둘이 갈라진다.
+
+func verifyMailBody(link string) string {
+	return fmt.Sprintf("아래 링크로 이메일 인증을 완료하세요. 링크는 %d시간 뒤 만료됩니다.\n%s",
+		int(auth.EmailVerifyTTL.Hours()), link)
+}
+
+func resetMailBody(link string) string {
+	return fmt.Sprintf("아래 링크로 비밀번호를 재설정하세요. 링크는 %d분 뒤 만료됩니다.\n%s",
+		int(auth.PasswordResetTTL.Minutes()), link)
+}
+
+// signupAttemptBody 는 이미 있는 주소로 가입하려 할 때 그 주소의 주인에게 간다 (FR-210).
+// 받는 사람이 주소의 주인이므로 「이미 가입돼 있다」고 말해도 새지 않는다.
+func signupAttemptBody(base string) string {
+	return "이 주소로 가입을 시도한 요청이 있었습니다. 이 주소는 이미 가입돼 있습니다.\n" +
+		"본인이라면 로그인하세요: " + base + "/login\n" +
+		"비밀번호가 기억나지 않으면 재설정하세요: " + base + "/password/reset\n" +
+		"탈퇴했거나 이용이 중지된 계정이라면 로그인·재설정이 되지 않습니다 — 사이트 관리자에게 문의하세요.\n" +
+		"본인이 아니라면 이 메일을 무시하세요."
 }
 
 // buildMessage writes the RFC 5322 message. Headers stay 7-bit: the subject and

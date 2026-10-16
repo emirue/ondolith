@@ -1,10 +1,15 @@
 {{define "content"}}
 <div class="adm-card adm-card--flush">
+  {{/* 이메일·표시 이름으로 찾는다 — 50명씩 넘기는 것밖에 없었다. */}}
+  <form class="adm-filterbar" method="get" action="/admin/users">
+    <input type="search" name="q" value="{{.Q}}" placeholder="이메일·표시 이름" aria-label="사용자 검색">
+    <button class="adm-btn adm-btn--sm adm-btn--primary">찾기</button>
+  </form>
   <div class="adm-table-wrap">
     <table class="adm-table">
       <thead>
         {{/* 열은 A-406 이 정한다 — 코드에 항목 목록이 없다 (D14 3절 규칙 1). */}}
-        <tr><th>이메일</th><th>이름</th>{{range .Columns}}<th>{{.Label}}</th>{{end}}<th>역할</th><th>상태</th></tr>
+        <tr><th>이메일</th><th>표시 이름</th>{{range .Columns}}<th>{{.Label}}</th>{{end}}<th>역할</th><th>상태</th></tr>
       </thead>
       <tbody>
       {{range .Users}}
@@ -20,16 +25,18 @@
           </td>
         </tr>
       {{else}}
-        <tr><td colspan="9" class="adm-empty">사용자가 없습니다.</td></tr>
+        <tr><td colspan="9" class="adm-empty">{{if .Q}}「{{.Q}}」로 찾은 사용자가 없습니다.{{else}}사용자가 없습니다.{{end}}</td></tr>
       {{end}}
       </tbody>
     </table>
   </div>
   <div class="adm-pagination">
-    <span class="adm-count">{{len .Users}}명 · {{.PageNo}}쪽</span>
-    {{if gt .Page 0}}<a href="/admin/users?page={{.PrevPage}}" aria-label="이전">‹</a>{{end}}
+    {{/* 「N명」은 이 쪽의 인원이다 — 전체 인원처럼 읽혔다. 전체를 세지는 않는다(한 행 더 읽어
+         다음 쪽을 안다). 검색어는 쪽을 넘겨도 따라간다. */}}
+    <span class="adm-count">{{.PageNo}}쪽 · 이 쪽 {{len .Users}}명</span>
+    {{if gt .Page 0}}<a href="/admin/users?q={{.Q}}&amp;page={{.PrevPage}}" aria-label="이전">‹</a>{{end}}
     <span class="adm-page adm-page--current">{{.PageNo}}</span>
-    {{if .HasNext}}<a href="/admin/users?page={{.NextPage}}" aria-label="다음">›</a>{{end}}
+    {{if .HasNext}}<a href="/admin/users?q={{.Q}}&amp;page={{.NextPage}}" aria-label="다음">›</a>{{end}}
   </div>
 </div>
 
@@ -51,7 +58,7 @@
       </label>
     </div>
     <div class="adm-actions adm-actions--end">
-      <button class="adm-btn adm-btn--primary">생성</button>
+      <button class="adm-btn adm-btn--primary">추가</button>
     </div>
     <p class="adm-hint">역할은 생성 시 붙지 않습니다. 역할·권한 화면에서 부여하세요.</p>
   </form>

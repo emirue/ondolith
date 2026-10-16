@@ -8,6 +8,7 @@
     <button class="btn">검색</button>
     {{if .CanWrite}}<a class="btn btn--primary" href="/board/{{.Board.Slug}}/write">글쓰기</a>{{end}}
   </form>
+  {{if .LoginToWrite}}<p class="meta"><a href="/login?next=/board/{{.Board.Slug}}/write">로그인</a>하면 글을 쓸 수 있습니다.</p>{{end}}
   {{/* 이 게시판 안에서 찾는 위 폼과 달리 전체 게시판을 가로지른다 (P-212).
        쇼핑몰에서는 머리글 검색이 상품으로 가므로 여기가 글 검색의 진입점이다. */}}
   <p class="meta"><a href="/search">전체 게시판에서 검색</a></p>
@@ -26,7 +27,7 @@
       <span class="meta">{{date .CreatedAt "2006-01-02"}}</span>
     </li>
     {{else}}
-    <li class="empty">글이 없습니다.</li>
+    <li class="empty">{{if .Query.Search}}「{{.Query.Search}}」에 맞는 글이 없습니다. <a href="/board/{{.Board.Slug}}">검색 해제</a>{{else}}글이 없습니다.{{end}}</li>
     {{end}}
   </ul>
   {{else}}
@@ -52,13 +53,13 @@
           {{if .HasAttachment}}<span class="clip" title="첨부 있음">📎</span>{{end}}
         </td>
         {{$p := .}}
-        {{range $cols}}<td class="meta">{{field $p.CustomFields .Key}}</td>{{end}}
+        {{range $cols}}<td class="meta" data-label="{{.Label}}">{{field $p.CustomFields .Key}}</td>{{end}}
         <td class="meta">{{if .AuthorName}}{{.AuthorName}}{{else}}(탈퇴){{end}}</td>
         <td class="meta">{{date .CreatedAt "2006-01-02"}}</td>
-        <td class="meta">{{number .ViewCount}}</td>
+        <td class="meta" data-label="조회">{{number .ViewCount}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="9" class="empty">글이 없습니다.</td></tr>
+      <tr><td colspan="9" class="empty">{{if .Query.Search}}「{{.Query.Search}}」에 맞는 글이 없습니다. <a href="/board/{{.Board.Slug}}">검색 해제</a>{{else}}글이 없습니다.{{end}}</td></tr>
     {{end}}
     </tbody>
   </table>

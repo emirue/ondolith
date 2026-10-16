@@ -31,16 +31,32 @@ func (d *shopDeps) renderReturnForm(w http.ResponseWriter, r *http.Request,
 	order *commerce.OrderDetail, kind commerce.ReturnKind, code int, msg string) {
 
 	data := map[string]any{"Order": order, "Kind": kind, "Error": msg}
-	if kind == commerce.KindExchange && len(order.Items) > 0 {
+	if kind == commerce.KindExchange {
 		// 교환은 **같은 상품의 다른 조합**만 고를 수 있다 (FR-618). 화면이
 		// 그 목록만 보여주면 사용자가 없는 선택지를 고르는 일이 없다 —
 		// 거부하는 것은 여전히 서버다.
-		variants, err := d.store.VariantsForExchange(r.Context(), order.Items[0].ID)
-		if err != nil {
-			d.serverError(w, r, err)
-			return
+		//
+		// **품목마다** 그 상품의 조합을 묶어 보인다. 첫 품목 것만 보이면 두
+		// 상품을 함께 산 사람은 둘째 상품을 교환할 길이 없다.
+		type exchangeGroup struct {
+			Item     commerce.OrderItem
+			Variants []commerce.Variant
 		}
-		data["Variants"] = variants
+		var groups []exchangeGroup
+		for _, it := range order.Items {
+			if it.RemainingQty() == 0 {
+				continue
+			}
+			variants, err := d.store.VariantsForExchange(r.Context(), it.ID)
+			if err != nil {
+				d.serverError(w, r, err)
+				return
+			}
+			if len(variants) > 0 {
+				groups = append(groups, exchangeGroup{Item: it, Variants: variants})
+			}
+		}
+		data["Exchange"] = groups
 	}
 	d.renderPage(w, r, "order/return-form.html", code, d.shopView(r, "반품·교환 요청", data))
 }
@@ -96,7 +112,7 @@ func (d *shopDeps) returnKindCreate(w http.ResponseWriter, r *http.Request,
 		return
 	case errors.Is(err, commerce.ErrExchangeVariant):
 		d.renderReturnForm(w, r, order, kind, http.StatusUnprocessableEntity,
-			"교환은 같은 상품의 다른 옵션으로만 가능합니다.")
+			"교환할 옵션은 고른 품목과 같은 상품이어야 합니다. 다른 상품은 따로 요청하세요.")
 		return
 	case errors.Is(err, commerce.ErrRefundQuantity), errors.Is(err, commerce.ErrQuantityRange),
 		errors.Is(err, commerce.ErrReturnKind):

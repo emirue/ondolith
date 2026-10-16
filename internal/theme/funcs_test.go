@@ -243,3 +243,18 @@ func TestMoneyRefusesFloats(t *testing.T) {
 		}
 	}
 }
+
+// **커스텀 필드 값은 사람이 읽는 모양으로 나온다** (FR-503). 그대로 내보내면
+// html/template 의 Go 기본 서식이라 1,250,000 이 「1.25e+06」, 체크가 「true」,
+// 여러 개 선택이 「[빨강 파랑]」으로 보였다.
+func TestFieldShowsValuesForPeople(t *testing.T) {
+	field := FuncMap(Deps{})["field"].(func(map[string]any, string) string)
+	m := map[string]any{"price": 1250000.0, "ratio": 0.5, "sold": true, "gone": false,
+		"tags": []any{"빨강", "파랑"}, "memo": "첫 줄"}
+	for key, want := range map[string]string{"price": "1250000", "ratio": "0.5", "sold": "예",
+		"gone": "", "tags": "빨강, 파랑", "memo": "첫 줄", "missing": ""} {
+		if got := field(m, key); got != want {
+			t.Errorf("field(%s) = %q, want %q", key, got, want)
+		}
+	}
+}

@@ -11,9 +11,8 @@
 <p>탈퇴하면 계정이 <strong>비활성화되어 더 이상 로그인할 수 없습니다.</strong></p>
 <p>주문 이력은 그대로 남습니다. 다시 이용하시려면 관리자에게 문의해 주세요.</p>
 <form method="post" class="form">
-  <label>비밀번호 확인
-    <input name="password" type="password" required autocomplete="current-password">
-  </label>
+  <label for="password">비밀번호 확인</label>
+  <input id="password" name="password" type="password" required autocomplete="current-password">
   {{/* 되돌릴 수 없는 작업의 확인 단계 (D19 P-110). 비밀번호만 받으면
        비밀번호 관리자가 채운 폼에서 버튼 한 번으로 끝난다. */}}
   <label class="checkbox">

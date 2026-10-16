@@ -142,3 +142,28 @@ func (q *Queries) TermsByID(ctx context.Context, id string) (Term, error) {
 	)
 	return i, err
 }
+
+const termsInForceByID = `-- name: TermsInForceByID :one
+SELECT id, kind, version, body, effective_at, is_required, created_at
+FROM terms WHERE id = $1 AND effective_at <= $2
+`
+
+type TermsInForceByIDParams struct {
+	ID  string
+	Now time.Time
+}
+
+func (q *Queries) TermsInForceByID(ctx context.Context, arg TermsInForceByIDParams) (Term, error) {
+	row := q.db.QueryRow(ctx, termsInForceByID, arg.ID, arg.Now)
+	var i Term
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Version,
+		&i.Body,
+		&i.EffectiveAt,
+		&i.IsRequired,
+		&i.CreatedAt,
+	)
+	return i, err
+}

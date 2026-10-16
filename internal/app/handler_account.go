@@ -24,9 +24,17 @@ type accountDeps struct {
 	verifyRequired func() bool
 	// signupClosed mirrors auth.signup_closed (FR-217). 닫아도 A-401 의 「사용자 추가」는 된다.
 	signupClosed func() bool
-	baseURL      string
-	spam         spamGuard
+	// mailReady 는 A-205 에 SMTP 호스트가 있는지다. 요청마다 읽는다 — 설정은 언제든 바뀐다.
+	// nil 이면 있다고 본다(테스트·옛 조립이 재설정을 잃지 않게).
+	mailReady func() bool
+	baseURL   string
+	spam      spamGuard
 }
+
+func (d *accountDeps) mailOK() bool { return d.mailReady == nil || d.mailReady() }
+
+// socialEnabled 는 켜진 소셜 로그인이 하나라도 있는지다 — 내 정보의 「소셜 계정 연결」을 그릴지.
+func (d *accountDeps) socialEnabled() bool { return d.social != nil && len(d.social()) > 0 }
 
 // signupForm is the whole of what P-103 accepts.
 //
@@ -78,21 +86,39 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// **가입할 때 받는 항목도 운영자가 정한다** (FR-215). 여기서 검증하지 않고
+	// 나중에 「내 정보」에서만 받으면, 필수로 지정한 항목이 필수가 아니게 된다.
+	fields, _, err := d.profileFields(r, "")
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	// 거절은 적은 값을 칸에 남긴 채 다시 그린다 — 항목 칸이 빠지면 고쳐 낸 뒤에야 「필수 항목」
+	// 거절로 다시 나타났다.
+	refuse := func(code int, msg string) {
+		d.render(w, r, "auth/signup.html", code,
+			map[string]any{"Error": msg, "Form": f, "Inputs": submittedInputs(fields, r)})
+	}
+
 	email, err := content.ValidateEmail(f.Email)
 	if err != nil {
-		d.render(w, r, "auth/signup.html", http.StatusBadRequest,
-			map[string]any{"Error": "이메일 형식이 올바르지 않습니다.", "Form": f})
+		refuse(http.StatusBadRequest, "이메일 형식이 올바르지 않습니다.")
 		return
 	}
 	if err := content.ValidatePassword(f.Password); err != nil {
-		d.render(w, r, "auth/signup.html", http.StatusBadRequest,
-			map[string]any{"Error": "비밀번호는 10자 이상이어야 합니다.", "Form": f})
+		refuse(http.StatusBadRequest, "비밀번호는 10자 이상이어야 합니다.")
+		return
+	}
+	// 확인 칸은 화면이 늘 싣는다. 싣지 않는 요청(옛 폼·스크립트)은 예전과 같다 — 오타 난
+	// 비밀번호로 생긴 계정은 재설정 메일로만 열린다.
+	if r.PostForm.Has("password_confirm") && r.PostFormValue("password_confirm") != f.Password {
+		refuse(http.StatusUnprocessableEntity, "비밀번호와 비밀번호 확인이 서로 다릅니다.")
 		return
 	}
 
 	// 해시보다 먼저 본다 — 봇의 제출마다 비밀번호 해시(CPU)를 치르지 않는다.
 	if code, msg := d.spam.check(r); code != 0 {
-		d.render(w, r, "auth/signup.html", code, map[string]any{"Error": msg, "Form": f})
+		refuse(code, msg)
 		return
 	}
 
@@ -102,18 +128,9 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// **가입할 때 받는 항목도 운영자가 정한다** (FR-215). 여기서 검증하지 않고
-	// 나중에 「내 정보」에서만 받으면, 필수로 지정한 항목이 필수가 아니게 된다.
-	fields, _, err := d.profileFields(r, "")
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-		return
-	}
 	custom, err := content.ValidateCustomFields(fields, accountCustomValues(r, fields), nil)
 	if err != nil {
-		d.render(w, r, "auth/signup.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": fieldsMessage(err), "Form": f,
-				"Inputs": content.FieldInputs(fields, nil)})
+		refuse(http.StatusUnprocessableEntity, fieldsMessage(err))
 		return
 	}
 
@@ -123,8 +140,7 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		// "이미 가입된 이메일입니다" is a membership oracle — anyone can test a
 		// list of addresses against it. The same page is shown as for success,
 		// and the existing account is told by mail that someone tried.
-		d.mailer.SendAsync(email, "가입 시도 알림",
-			"이 주소로 가입을 시도한 요청이 있었습니다. 본인이 아니라면 무시하세요.")
+		d.mailer.SendAsync(email, "가입 시도 알림", signupAttemptBody(d.baseURL))
 		d.renderSignupAccepted(w, r, email)
 		return
 	}
@@ -171,8 +187,7 @@ func (d *accountDeps) sendVerification(ctx contextLike, userID, email string) {
 	// link in production answered 404. The integration test did not catch it
 	// because it built its own registry with /verify — a fixture that differed
 	// from the tree (.ai/MISTAKES.md M14).
-	d.mailer.SendAsync(email, "이메일 인증",
-		"아래 링크로 인증을 완료하세요:\n"+d.baseURL+"/verify/"+raw)
+	d.mailer.SendAsync(email, "이메일 인증", verifyMailBody(d.baseURL+"/verify/"+raw))
 }
 
 // refuseUnverified is the login gate of FR-214 (loginDeps.unverified): with
@@ -360,7 +375,7 @@ func (d *accountDeps) profileForm(w http.ResponseWriter, r *http.Request) {
 	}
 	d.render(w, r, "account/profile.html", http.StatusOK, map[string]any{
 		"DisplayName": a.User.DisplayName, "Email": a.User.Email,
-		"Inputs": content.FieldInputs(fields, values),
+		"Inputs": content.FieldInputs(fields, values), "SocialEnabled": d.socialEnabled(),
 	})
 }
 
@@ -392,6 +407,24 @@ func (d *accountDeps) profileFields(r *http.Request, userID string) (
 //
 // 계정 자신의 필드는 애초에 스키마에 없으므로 여기서 따로 거를 필요가 없다:
 // A-406 이 `email` 같은 예약 키를 거부한다.
+// submittedInputs 는 거절된 가입 폼의 항목 칸에 적은 값을 되살린다. 값이 여럿이면(다중
+// 선택) FieldInput.Has 가 읽는 []any 로 넘긴다.
+func submittedInputs(fields []content.FieldSchema, r *http.Request) []content.FieldInput {
+	vals := map[string]any{}
+	for k, v := range accountCustomValues(r, fields) {
+		if len(v) == 1 {
+			vals[k] = v[0]
+			continue
+		}
+		items := make([]any, len(v))
+		for i, x := range v {
+			items[i] = x
+		}
+		vals[k] = items
+	}
+	return content.FieldInputs(fields, vals)
+}
+
 func accountCustomValues(r *http.Request, fields []content.FieldSchema) url.Values {
 	out := url.Values{}
 	for _, f := range fields {
@@ -431,7 +464,7 @@ func (d *accountDeps) updateProfile(w http.ResponseWriter, r *http.Request) {
 	redraw := func(code int, msg string) {
 		d.render(w, r, "account/profile.html", code, map[string]any{
 			"DisplayName": name, "Email": a.User.Email,
-			"Inputs": content.FieldInputs(fields, prev), "Error": msg,
+			"Inputs": content.FieldInputs(fields, prev), "Error": msg, "SocialEnabled": d.socialEnabled(),
 		})
 	}
 	if name == "" {

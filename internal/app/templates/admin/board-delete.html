@@ -1,0 +1,21 @@
+{{define "content"}}
+{{/* A-305 삭제 확인. 글이 있는 게시판의 삭제는 여기서 확인을 받는다 — 목록에서 한 번
+     누르는 것으로는 글·댓글·첨부가 지워지지 않는다. */}}
+<div class="adm-card">
+  {{with .Board}}<h2>「{{.Name}}」 게시판을 삭제할까요?</h2>{{end}}
+  <p>이 게시판의 <strong>글 {{.Posts}}건</strong>과 그 글의 댓글·첨부 파일이 <strong>모두 함께 삭제됩니다.</strong>
+     이 게시판을 가리키는 메뉴도 지워집니다(그 밑의 하위 메뉴는 한 단계 올라갑니다).
+     되돌릴 수 없습니다. 글을 남기려면 게시판을 지우지 말고 권한을 거두세요.</p>
+  <form method="post" action="/admin/boards/{{.Board.ID}}/delete" class="adm-form">
+    {{template "reauth-field" .}}
+    <label class="adm-field adm-field--check">
+      <input type="checkbox" name="confirm" value="1" required>
+      <span>글 {{.Posts}}건과 댓글·첨부를 모두 지우는 것을 확인했습니다</span>
+    </label>
+    <div class="adm-actions">
+      <button onclick="return confirm('글·댓글·첨부를 모두 지웁니다. 계속할까요?')" class="adm-btn adm-btn--danger">모두 삭제</button>
+      <a class="adm-btn" href="/admin/boards">취소</a>
+    </div>
+  </form>
+</div>
+{{end}}

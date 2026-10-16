@@ -76,9 +76,19 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body := strings.TrimSpace(r.PostFormValue("body"))
+	// 브라우저는 줄바꿈을 CRLF(두 글자)로 보내고 maxlength 는 한 글자로 센다 — 그대로 두면
+	// 상한 근처의 여러 줄 댓글이 브라우저를 지나 서버에서 거절된다.
+	body := strings.ReplaceAll(strings.TrimSpace(r.PostFormValue("body")), "\r\n", "\n")
 	if body == "" {
 		http.Redirect(w, r, "/board/"+b.Slug+"/"+p.ID, http.StatusSeeOther)
+		return
+	}
+	// 입력칸의 maxlength 가 브라우저에서 먼저 막는다. 여기 닿는 것은 그것을 넘긴
+	// 요청뿐이라 글 화면을 다시 그리지 않고 이유만 말한다 — DB 에 맡기면 500 이다.
+	if content.TooLong(body, content.MaxCommentLen) {
+		v := d.view(r, "댓글을 저장하지 않았습니다", "")
+		v.Data = map[string]string{"Message": "댓글은 2,000자까지 쓸 수 있습니다."}
+		d.renderPage(w, r, "error.html", http.StatusUnprocessableEntity, v)
 		return
 	}
 	// parent_id is accepted but verified: a reply must belong to THIS post, or
@@ -91,7 +101,7 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 
 	if code, msg := d.spam.check(r); code != 0 {
 		v := d.view(r, "댓글을 저장하지 않았습니다", "")
-		v.Data = map[string]string{"Detail": msg}
+		v.Data = map[string]string{"Message": msg}
 		d.renderPage(w, r, "error.html", code, v)
 		return
 	}
@@ -135,10 +145,17 @@ func (d *boardDeps) commentUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return
 	}
-	body := strings.TrimSpace(r.PostFormValue("body"))
-	if body == "" {
+	// 브라우저는 줄바꿈을 CRLF(두 글자)로 보내고 maxlength 는 한 글자로 센다 — 그대로 두면
+	// 상한 근처의 여러 줄 댓글이 브라우저를 지나 서버에서 거절된다.
+	body := strings.ReplaceAll(strings.TrimSpace(r.PostFormValue("body")), "\r\n", "\n")
+	if body == "" || content.TooLong(body, content.MaxCommentLen) {
+		msg := "내용을 입력하세요."
+		if body != "" {
+			msg = "댓글은 2,000자까지 쓸 수 있습니다."
+			c.Body = body // 쓴 것을 되돌려 보인다
+		}
 		v := d.view(r, "댓글 수정", "")
-		v.Data = map[string]any{"Comment": c, "Board": b, "Error": "내용을 입력하세요."}
+		v.Data = map[string]any{"Comment": c, "Board": b, "Error": msg}
 		d.renderPage(w, r, "comment/form.html", http.StatusUnprocessableEntity, v)
 		return
 	}

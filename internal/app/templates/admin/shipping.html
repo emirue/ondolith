@@ -1,6 +1,9 @@
+{{/* 주문 상세에서 들어오는 화면이다 — 돌아갈 길이 뒤로 가기뿐이었다. */}}
+{{define "pageactions"}}{{with .Order}}<a class="adm-btn" href="/admin/orders/{{.OrderNo}}">← 주문 상세</a>{{end}}{{end}}
 {{define "content"}}
 <div class="adm-card">
-{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>
+{{with .DeliveryMemo}}<p>배송 메모 · {{.}}</p>{{end}}{{end}}
 {{/* 송장 입력은 상태를 옮기지 않는다. 옮기면 `배송준비 → 배송중` 을 일으키는
      화면이 둘이 되고, FR-623 이 A-516 에 대해 지적한 것과 같은 문제가 된다. */}}
 <form method="post" class="adm-form">
@@ -8,7 +11,7 @@
   <input id="carrier" name="carrier" required maxlength="32">
   <label for="tracking_no">송장번호</label>
   <input id="tracking_no" name="tracking_no" required maxlength="64">
-  <button type="submit">기록</button>
+  <button type="submit">저장</button>
 </form>
 {{if .Shipments}}
 <h2>기록된 송장</h2>

@@ -265,3 +265,52 @@ func TestMenuURLCheckRejectsProtocolRelative(t *testing.T) {
 		t.Error("프로토콜 상대 URL 이 저장됐다")
 	}
 }
+
+// **게시판·페이지를 지우면 그것을 가리키던 메뉴도 함께 지운다.** 남기면 머리글·홈의
+// 링크가 404 로 간다(실측: 「빈게시판」 삭제 뒤 링크 두 개가 404). 그 메뉴 밑의 하위
+// 메뉴는 함께 사라지지 않고 한 단계 올라간다.
+func TestDeletingBoardOrPageDropsItsMenus(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	board, err := s.CreateBoard(ctx, Board{Slug: "empty", Name: "빈게시판", PerPage: 20}, PresetPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.CreatePage(ctx, Page{Slug: "about", Title: "소개"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mkItem := func(m MenuItem) string {
+		t.Helper()
+		id, err := s.CreateMenuItem(ctx, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	toBoard := mkItem(MenuItem{Title: "빈게시판", URL: "/board/empty"})
+	child := mkItem(MenuItem{Title: "하위", URL: "/help", ParentID: toBoard})
+	mkItem(MenuItem{Title: "소개", URL: "/about"})
+	keep := mkItem(MenuItem{Title: "상품", URL: "/shop"})
+
+	if err := s.DeleteBoard(ctx, board, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeletePage(ctx, page); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.MenuItems(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]MenuItem{}
+	for _, it := range items {
+		got[it.ID] = it
+	}
+	if len(items) != 2 || got[keep].Title != "상품" {
+		t.Fatalf("남은 메뉴 %v, want 상품·하위", items)
+	}
+	if c, ok := got[child]; !ok || c.ParentID != "" {
+		t.Errorf("하위 메뉴 %+v — 지워지지 않고 최상위로 올라가야 한다", c)
+	}
+}

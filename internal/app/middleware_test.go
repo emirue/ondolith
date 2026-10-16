@@ -40,7 +40,7 @@ func plainUser() *Actor {
 }
 
 func TestTreeGateRedirectsAnonymous(t *testing.T) {
-	h := actorHandler(anon(), withTreeGate(http.HandlerFunc(ok)))
+	h := actorHandler(anon(), withTreeGate(http.HandlerFunc(ok), nil))
 	rec := do(h, http.MethodGet, "/admin/pages")
 
 	if rec.Code != http.StatusSeeOther {
@@ -60,21 +60,21 @@ func TestTreeGateRedirectsAnonymous(t *testing.T) {
 // Logged in but without admin.access is a refusal, not a redirect: sending them
 // to the login screen they already passed is a loop.
 func TestTreeGateForbidsWithoutPermission(t *testing.T) {
-	h := actorHandler(plainUser(), withTreeGate(http.HandlerFunc(ok)))
+	h := actorHandler(plainUser(), withTreeGate(http.HandlerFunc(ok), nil))
 	if rec := do(h, http.MethodGet, "/admin/pages"); rec.Code != http.StatusForbidden {
 		t.Errorf("HTTP %d, want 403", rec.Code)
 	}
 }
 
 func TestTreeGateAllowsAdmin(t *testing.T) {
-	h := actorHandler(adminActor(), withTreeGate(http.HandlerFunc(ok)))
+	h := actorHandler(adminActor(), withTreeGate(http.HandlerFunc(ok), nil))
 	if rec := do(h, http.MethodGet, "/admin/pages"); rec.Code != http.StatusOK {
 		t.Errorf("HTTP %d, want 200", rec.Code)
 	}
 }
 
 func TestTreeGateIgnoresPublicPaths(t *testing.T) {
-	h := actorHandler(anon(), withTreeGate(http.HandlerFunc(ok)))
+	h := actorHandler(anon(), withTreeGate(http.HandlerFunc(ok), nil))
 	for _, p := range []string{"/", "/about", "/board/free"} {
 		if rec := do(h, http.MethodGet, p); rec.Code != http.StatusOK {
 			t.Errorf("%s → HTTP %d, want 200", p, rec.Code)
@@ -85,7 +85,7 @@ func TestTreeGateIgnoresPublicPaths(t *testing.T) {
 // A plain HasPrefix would also gate /administrator and /adminfoo, which are
 // public URLs a site may well use.
 func TestTreeGateMatchesSegmentNotPrefix(t *testing.T) {
-	h := actorHandler(anon(), withTreeGate(http.HandlerFunc(ok)))
+	h := actorHandler(anon(), withTreeGate(http.HandlerFunc(ok), nil))
 	for _, p := range []string{"/administrator", "/adminfoo", "/admins"} {
 		if rec := do(h, http.MethodGet, p); rec.Code != http.StatusOK {
 			t.Errorf("%s 가 관리자 트리로 취급됐다: HTTP %d", p, rec.Code)

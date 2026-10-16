@@ -206,18 +206,42 @@ func (d *publicDeps) renderPartial(w http.ResponseWriter, r *http.Request, name 
 	}
 }
 
+// publicTitles 는 renderNamed 로 그리는 화면의 탭 제목이다. 비워 두면 탭이 사이트 이름뿐이다 —
+// 내 정보·비밀번호 변경·회원 탈퇴가 그랬다.
+var publicTitles = map[string]string{
+	"auth/login.html":                  "로그인",
+	"auth/signup.html":                 "회원가입",
+	"auth/signup-sent.html":            "가입 신청",
+	"auth/verify.html":                 "이메일 인증",
+	"auth/password-reset-request.html": "비밀번호 재설정",
+	"auth/password-reset-sent.html":    "비밀번호 재설정",
+	"auth/password-reset.html":         "새 비밀번호 설정",
+	"account/profile.html":             "내 정보",
+	"account/password.html":            "비밀번호 변경",
+	"account/delete.html":              "회원 탈퇴",
+}
+
 // P-903 — not found.
 // renderNamed is the render func the auth and account screens use: they build
 // a plain map, and the view model wraps it so the theme still gets .Site, .Menu
 // and .User (D17 뷰 모델 규약).
 func (d *publicDeps) renderNamed(w http.ResponseWriter, r *http.Request, name string, code int, data any) {
-	v := d.view(r, "", "")
+	v := d.view(r, publicTitles[name], "")
 	v.Data = data
 	d.renderPage(w, r, name, code, v)
 }
 
+// forbidden is the 403 a logged-in visitor without admin.access gets at /admin —
+// 사이트 레이아웃 안에서 말한다.
+func (d *publicDeps) forbidden(w http.ResponseWriter, r *http.Request) {
+	v := d.view(r, "권한이 없습니다", "")
+	v.Data = map[string]string{"Message": "이 화면에 들어갈 권한이 없습니다. 필요하면 사이트 관리자에게 문의하세요."}
+	d.renderPage(w, r, "error.html", http.StatusForbidden, v)
+}
+
 func (d *publicDeps) notFound(w http.ResponseWriter, r *http.Request) {
 	v := d.view(r, "찾을 수 없습니다", "")
+	v.Data = map[string]string{"Message": "없는 페이지이거나 주소가 바뀌었습니다. 주소를 확인하세요."}
 	d.renderPage(w, r, "error.html", http.StatusNotFound, v)
 }
 
@@ -233,7 +257,7 @@ func (d *publicDeps) unverified(a *Actor) bool {
 // unverified account: the reason and where to get the mail again (P-113).
 func (d *publicDeps) refuseUnverified(w http.ResponseWriter, r *http.Request, what string) {
 	v := d.view(r, "이메일 인증이 필요합니다", "")
-	v.Data = map[string]string{"Detail": "이메일 인증 후 " + what +
+	v.Data = map[string]string{"Message": "이메일 인증 후 " + what +
 		" 인증 메일을 다시 받으려면 계정 화면에서 「인증 메일 재발송」을 누르세요."}
 	d.renderPage(w, r, "error.html", http.StatusBadRequest, v)
 }

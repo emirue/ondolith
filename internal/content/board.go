@@ -137,6 +137,13 @@ func listStyle(s string) string {
 	return "list"
 }
 
+// BoardPostCount is how many posts deleting the board takes with it — A-305 의 확인
+// 화면이 「글 N건도 함께 삭제됩니다」라고 말할 수 있어야 확인이 뜻을 갖는다.
+func (s *Store) BoardPostCount(ctx context.Context, id string) (int, error) {
+	n, err := s.q.CountBoardPosts(ctx, id)
+	return int(n), err
+}
+
 // DeleteBoard removes a board, its posts and its scoped grants — all by
 // CASCADE (D30 3-1).
 //
@@ -154,7 +161,10 @@ func (s *Store) DeleteBoard(ctx context.Context, id string, force bool) error {
 			return fmt.Errorf("%w: 글 %d건", ErrBoardInUse, posts)
 		}
 	}
-	return affected(s.q.DeleteBoard(ctx, id))
+	return s.deleteWithMenus(ctx, func(q *contentq.Queries) (string, error) {
+		slug, err := q.DeleteBoard(ctx, id)
+		return "/board/" + slug, err
+	})
 }
 
 // fieldRow is the shape board_fields and user_fields share. sqlc 는 질의마다

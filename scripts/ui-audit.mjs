@@ -93,6 +93,9 @@ const AUDIT = String.raw`(() => {
     // 올렸을 때 배경이 생기는 것이 그 디자인이며, 모양은 내장한 suneditor.min.css 가 정한다.
     // 우리 테마가 빠뜨린 폼 요소가 아니다. 에디터 밖의 폼 요소는 그대로 잰다.
     if (el.closest('.sun-editor')) continue
+    // 머리글의 「로그아웃」은 폼 버튼이지만 옆 링크(장바구니·내 정보)와 같은 링크 모양으로 그린다 —
+    // 혼자 테두리 버튼이라 튀었다(QA). 테두리·배경이 없는 것이 그 디자인이다(style.css .account-nav button).
+    if (el.tagName === 'BUTTON' && el.closest('.account-nav')) continue
     const bare = parseFloat(cs.borderTopWidth) === 0 &&
       (cs.backgroundColor === 'rgba(0, 0, 0, 0)' || cs.backgroundColor === 'transparent')
     if (bare) out.push('스타일 없는 폼 요소: ' + name(el))

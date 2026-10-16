@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -103,9 +104,37 @@ func FuncMap(d Deps) template.FuncMap {
 			esc := template.HTMLEscapeString(s)
 			return template.HTML(strings.ReplaceAll(esc, "\n", "<br>")) // #nosec G203 -- escaped above; this is the only place theme output is marked safe
 		},
-		"field":  func(m map[string]any, key string) any { return m[key] },
+		"field":  func(m map[string]any, key string) string { return fieldText(m[key]) },
 		"fields": func(m map[string]any) map[string]any { return m },
 		"pages":  pageNumbers,
+	}
+}
+
+// fieldText is how a custom-field value reads on a page (FR-503). 그대로 내보내면
+// html/template 이 Go 기본 서식으로 찍는다 — 숫자(JSON 이라 float64)는 「1.25e+06」,
+// 체크는 「true」, 여러 개 선택은 「[빨강 파랑]」. 숫자에 쉼표를 넣지 않는다: 값이
+// 가격인지 연도인지 코드는 모른다. 체크 해제는 빈 값이다(값이 없는 것과 같게 그린다).
+func fieldText(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		if x {
+			return "예"
+		}
+		return ""
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, e := range x {
+			parts = append(parts, fieldText(e))
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return fmt.Sprint(x)
 	}
 }
 

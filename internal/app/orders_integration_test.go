@@ -248,3 +248,36 @@ func TestGuestFormHasNoAccountOrAddressFields(t *testing.T) {
 		}
 	}
 }
+
+// **환불 요청이 거절돼 다시 그린 화면에도 「주문 취소」가 있다** — 그 주문이 취소될 수 있으면.
+// 정상 화면(refundStatus)은 CanCancel 을 계산하는데 거절 화면(refundError)은 빠뜨려, 품목을
+// 안 고르고 「환불 요청」을 누르면 취소 버튼이 사라졌다.
+func TestRefusedRefundStillOffersCancel(t *testing.T) {
+	srv, pool, variant := shopSite(t)
+	_, no := makeGuestOrder(t, srv.URL, variant, "010-1111-1111", "a@example.com")
+	// 결제완료 주문은 구매자가 취소할 수 있다 (P-506).
+	if _, err := pool.Exec(context.Background(), `UPDATE orders SET status = '결제완료' WHERE order_no = $1`, no); err != nil {
+		t.Fatal(err)
+	}
+	c := client()
+	lookup := post(t, c, srv.URL+"/orders/guest", url.Values{"order_no": {no}, "phone": {"010-1111-1111"}})
+	lookup.Body.Close()
+	if lookup.StatusCode != http.StatusSeeOther {
+		t.Fatalf("비회원 조회 HTTP %d", lookup.StatusCode)
+	}
+	got, err := c.Get(srv.URL + "/orders/" + no + "/refunds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view := readAll(t, got); !strings.Contains(view, `action="/orders/`+no+`/cancel"`) {
+		t.Fatalf("결제완료 주문의 환불 화면에 「주문 취소」가 없다 — 전제가 틀렸다: %.1500s", view)
+	}
+	resp := post(t, c, srv.URL+"/orders/"+no+"/refund", url.Values{})
+	body := readAll(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("품목 없는 환불 요청 = HTTP %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(body, `action="/orders/`+no+`/cancel"`) {
+		t.Error("환불 거절 화면에서 「주문 취소」가 사라졌다")
+	}
+}

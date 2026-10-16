@@ -26,15 +26,25 @@
       <input type="number" name="order.return_fee_amount" min="0"
              value="{{index . "order.return_fee_amount"}}" required>
     </label>
+    <label class="adm-field">
+      <span>주문 배송비 (원)</span>
+      <input type="number" name="shipping.flat_fee" min="0"
+             value="{{index . "shipping.flat_fee"}}" required>
+    </label>
+    <label class="adm-field">
+      <span>무료배송 기준액 (원) — 상품 합계가 이 금액 이상이면 배송비 0원. 0이면 늘 배송비를 받습니다</span>
+      <input type="number" name="shipping.free_threshold" min="0"
+             value="{{index . "shipping.free_threshold"}}" required>
+    </label>
     {{end}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>
   </form>
   <p class="adm-hint">
-    이 값은 <strong>이후</strong> 반품·교환에만 적용됩니다. 이미 접수된 건의
-    배송비는 수거 확인 시점에 그 건으로 복사되어 있어, 여기서 바꿔도 과거
-    환불액이 달라지지 않습니다.
+    이 값은 <strong>이후</strong> 주문과 반품·교환에만 적용됩니다. 이미 받은 주문의
+    배송비는 결제 금액에 들어 있고, 접수된 반품의 배송비는 수거 확인 시점에 그
+    건으로 복사되어 있어, 여기서 바꿔도 과거 금액이 달라지지 않습니다.
   </p>
 </div>
 {{end}}

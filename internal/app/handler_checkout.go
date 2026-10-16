@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -35,7 +36,7 @@ func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
-	if len(items) == 0 {
+	if len(items) == 0 || hasUnsellable(items) {
 		http.Redirect(w, r, "/cart", http.StatusSeeOther)
 		return
 	}
@@ -56,11 +57,27 @@ func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := ActorFrom(ctx)
+	form := url.Values{}
+	if a.IsAuthenticated() {
+		// 회원은 지난 주문의 배송지에서 시작한다 — 이메일만 채워 받는 분·주소를 매번
+		// 다시 쓰게 했다.
+		last, err := d.store.LastOrderForm(ctx, a.User.ID)
+		if err != nil {
+			d.serverError(w, r, err)
+			return
+		}
+		for k, v := range map[string]string{"receiver_name": last.ReceiverName, "receiver_phone": last.ReceiverPhone,
+			"postcode": last.Postcode, "address1": last.Address1, "address2": last.Address2,
+			"orderer_phone": last.OrdererPhone} {
+			form.Set(k, v)
+		}
+		form.Set("orderer_email", a.User.Email)
+	}
 	data := map[string]any{
 		"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee, "Terms": terms,
-	}
-	if a.IsAuthenticated() {
-		data["Email"] = a.User.Email
+		"Form": form, "Agreed": map[string]bool{},
+		// 옛 키 — 내장 테마를 복사한 테마가 아직 {{.Email}} 을 쓴다.
+		"Email": form.Get("orderer_email"),
 	}
 	d.renderPage(w, r, "shop/checkout.html", http.StatusOK, d.shopView(r, "주문서", data))
 }
@@ -123,7 +140,7 @@ func (d *shopDeps) checkoutCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, commerce.ErrTermsRequired), errors.Is(err, commerce.ErrOrdererContact),
 		errors.Is(err, commerce.ErrOutOfStock), errors.Is(err, commerce.ErrNotSellable),
-		errors.Is(err, commerce.ErrQuantityRange):
+		errors.Is(err, commerce.ErrQuantityRange), errors.Is(err, commerce.ErrAmountTooBig):
 		d.checkoutError(w, r, err)
 		return
 	case err != nil:
@@ -148,10 +165,15 @@ func (d *shopDeps) checkoutError(w http.ResponseWriter, r *http.Request, cause e
 		goods += it.UnitPrice * it.Quantity
 	}
 	fee, _ := d.shipping().Fee(goods)
+	agreed := map[string]bool{}
+	for _, id := range r.PostForm["agreed_terms"] {
+		agreed[id] = true
+	}
 	d.renderPage(w, r, "shop/checkout.html", http.StatusUnprocessableEntity,
 		d.shopView(r, "주문서", map[string]any{
 			"Items": items, "Goods": goods, "Fee": fee, "Total": goods + fee,
 			"Terms": terms, "Error": cartMessage(cause),
+			"Form": r.PostForm, "Agreed": agreed, "Email": r.PostForm.Get("orderer_email"),
 		}))
 }
 
@@ -325,4 +347,22 @@ func (d *shopDeps) checkoutComplete(w http.ResponseWriter, r *http.Request) {
 	// 화면은 스냅샷만 쓴다 (FR-612).
 	d.renderPage(w, r, "shop/complete.html", http.StatusOK,
 		d.shopView(r, "주문 완료", map[string]any{"Order": order}))
+}
+
+// P-411 GET /terms/{id} — one terms version's text.
+//
+// 주문서가 동의를 받는 약관의 본문이다. 이 화면이 없을 때 주문서는 체크박스만
+// 그렸고, 구매자는 읽지 않은 것에 동의해야 했다.
+func (d *shopDeps) termsView(w http.ResponseWriter, r *http.Request) {
+	t, err := d.store.TermsForReading(r.Context(), r.PathValue("id"), time.Now())
+	if errors.Is(err, commerce.ErrNotFound) {
+		d.notFound(w, r)
+		return
+	}
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	d.renderPage(w, r, "shop/terms.html", http.StatusOK,
+		d.shopView(r, t.Kind, map[string]any{"Terms": t}))
 }

@@ -8,16 +8,19 @@
       <tbody>
       {{range .Categories}}
         <tr>
-          <td>{{.Name}}</td>
+          {{/* 이름·순서는 줄에서 고친다 — 지우고 다시 만들면 상품과의 연결이 끊긴다. 주소는
+               공개 URL 이라 고치지 않는다. 폼은 form 속성으로 이 줄의 칸을 묶는다. */}}
+          <td><input type="text" name="name" value="{{.Name}}" maxlength="100" required form="cat-{{.ID}}" aria-label="이름"></td>
           <td><a href="/shop/c/{{.Slug}}">{{.Slug}}</a></td>
           {{/* 상위를 이름으로 보인다. 앞 판은 UUID 를 그대로 냈는데, 화면에
                UUID 가 없으니 그것을 골라 옮길 방법도 없었다. */}}
           <td>{{$p := .ParentID}}{{range $cats}}{{if eq .ID $p}}{{.Name}}{{end}}{{end}}</td>
-          <td>{{.SortOrder}}</td>
+          <td><input type="number" name="sort_order" value="{{.SortOrder}}" step="1" form="cat-{{.ID}}" aria-label="순서"></td>
           <td>
             <span class="adm-actions">
+              <form id="cat-{{.ID}}" method="post" action="/admin/categories/{{.ID}}"><button class="adm-btn adm-btn--sm">저장</button></form>
               <form method="post" action="/admin/categories/{{.ID}}/delete">
-                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+                <button onclick="return confirm('이 카테고리를 삭제할까요?')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
               </form>
             </span>
           </td>

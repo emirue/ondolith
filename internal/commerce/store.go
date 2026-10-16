@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
@@ -44,6 +45,9 @@ type Product struct {
 	// InStock 은 판매 가능한 조합이 하나라도 있는지다. 목록에서 품절 배지를
 	// 그리는 데 쓰고, 이것이 없으면 화면이 상품마다 조합을 조회한다 (N+1).
 	InStock bool
+	// HasVariants 는 팔 조합이 하나라도 정의돼 있는지다. 없으면 「판매 준비 중」 이고(상세와
+	// 같은 말), 있는데 재고가 없으면 「품절」이다 — 둘을 한 배지로 부르면 목록과 상세가 갈린다.
+	HasVariants bool
 	// ImageID 는 대표 이미지(올린 순서의 첫 장)의 id 다. 없으면 빈 문자열.
 	// 목록 질의가 함께 낸다 — 상품마다 이미지를 다시 읽지 않는다 (NFR-105).
 	// 주소는 `/shop/images/{ImageID}` (P-306).
@@ -117,7 +121,7 @@ func (s *Store) ListProductsMore(ctx context.Context, opt ProductQuery) ([]Produ
 func productFromList(r commerceq.ListProductsRow) Product {
 	return Product{ID: r.ID, Slug: r.Slug, Name: r.Name, Description: r.Description,
 		BasePrice: int(r.BasePrice), Visible: r.IsVisible, MinDelta: int(r.MinDelta), InStock: r.InStock,
-		ImageID: r.ImageID}
+		HasVariants: r.HasVariants, ImageID: r.ImageID}
 }
 
 func productFromRow(r commerceq.ProductByIDRow) *Product {
@@ -405,6 +409,20 @@ func (s *Store) CategoryBySlug(ctx context.Context, slug string) (*Category, err
 	return &c, nil
 }
 
+// RenameCategory changes a category's name and display order (A-509). 주소(slug)는
+// 바꾸지 않는다 — 누가 저장해 둔 링크다(게시판 주소와 같은 규칙).
+func (s *Store) RenameCategory(ctx context.Context, id, name string, sortOrder int) error {
+	n, err := s.q.UpdateCategoryNameOrder(ctx, commerceq.UpdateCategoryNameOrderParams{
+		ID: id, Name: name, SortOrder: int32(sortOrder)})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // CreateCategory is A-509's write (D19 A-509 「입력 필드」).
 //
 // **이것이 없어서 카테고리를 만들 방법이 없었다.** A-509 는 「이동」만 구현돼
@@ -540,6 +558,37 @@ func OptionGroups(variants []Variant) []OptionGroup {
 		}
 		insertionSort(vals)
 		out = append(out, OptionGroup{Name: name, Values: vals})
+	}
+	return out
+}
+
+// InDefinedOrder puts groups and their values in the order A-503 saved them
+// (product_options.sort_order, values as typed). OptionGroups 는 조합에서 선택지를
+// 만들어 사전순으로 정렬한다 — 「5mm, 10mm」가 「10mm, 5mm」로, S·M·L 이 L·M·S 로
+// 나왔다. 정의에 없는 그룹·값(옛 조합)은 뒤에 사전순으로 남는다.
+func InDefinedOrder(groups []OptionGroup, defined []Option) []OptionGroup {
+	gi := map[string]int{}
+	vi := map[string]map[string]int{}
+	for i, o := range defined {
+		gi[o.Name] = i
+		vi[o.Name] = map[string]int{}
+		for j, v := range o.Values {
+			vi[o.Name][v] = j
+		}
+	}
+	rank := func(m map[string]int, k string) int {
+		if i, ok := m[k]; ok {
+			return i
+		}
+		return len(m) // 정의에 없는 것은 뒤로
+	}
+	out := slices.Clone(groups)
+	slices.SortStableFunc(out, func(a, b OptionGroup) int { return rank(gi, a.Name) - rank(gi, b.Name) })
+	for i := range out {
+		vals := slices.Clone(out[i].Values)
+		order := vi[out[i].Name]
+		slices.SortStableFunc(vals, func(a, b string) int { return rank(order, a) - rank(order, b) })
+		out[i].Values = vals
 	}
 	return out
 }

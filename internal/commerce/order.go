@@ -291,11 +291,28 @@ type OrderDetail struct {
 	Postcode      string
 	Address1      string
 	Address2      string
+	DeliveryMemo  string
 	OrdererEmail  string
 	OrdererPhone  string
 	CreatedAt     time.Time
 	Items         []OrderItem
 }
+
+// Goods is the sum of the line snapshots.
+func (o OrderDetail) Goods() int {
+	n := 0
+	for _, it := range o.Items {
+		n += it.LineAmount
+	}
+	return n
+}
+
+// ShippingFee is what the order paid for delivery.
+//
+// orders 에 배송비 열이 없다. 총액이 상품합계 + 배송비 − 할인으로 만들어지므로
+// (CreateOrder) 저장된 값에서 거꾸로 푼다 — 지금 정책으로 다시 계산하면 정책이
+// 바뀐 뒤 과거 주문의 배송비가 달라진다.
+func (o OrderDetail) ShippingFee() int { return o.Total + o.Discount - o.Goods() }
 
 // OrderItem is one line, from the snapshot columns only.
 //
@@ -342,13 +359,13 @@ func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone str
 	return s.withItems(ctx, orderDetailFromRow(commerceq.OrderByNoUnscopedRow(r)))
 }
 
-// orderDetailFromRow converts the 13-column order read. 세 질의(OrderByNo·
+// orderDetailFromRow converts the 14-column order read. 세 질의(OrderByNo·
 // OrderByNoUnscoped·GuestOrder)의 행이 같은 모양이라 구조체 변환으로 여기 온다.
 func orderDetailFromRow(r commerceq.OrderByNoUnscopedRow) OrderDetail {
 	return OrderDetail{ID: r.ID, OrderNo: r.OrderNo, Status: Status(r.Status),
 		Total: int(r.TotalAmount), Discount: int(r.DiscountAmount),
 		ReceiverName: r.ReceiverName, ReceiverPhone: r.ReceiverPhone, Postcode: r.Postcode,
-		Address1: r.Address1, Address2: r.Address2, OrdererEmail: r.OrdererEmail,
+		Address1: r.Address1, Address2: r.Address2, DeliveryMemo: r.DeliveryMemo, OrdererEmail: r.OrdererEmail,
 		OrdererPhone: r.OrdererPhone, CreatedAt: r.CreatedAt}
 }
 
@@ -382,6 +399,31 @@ func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderD
 			Total: int(r.TotalAmount), CreatedAt: r.CreatedAt})
 	}
 	return out, more, nil
+}
+
+// LastOrderForm is a member's most recent delivery details, to start P-405 from.
+// 주문이 없으면 빈 폼이다. 배송 메모는 그 주문만의 요청이라 옮기지 않는다.
+func (s *Store) LastOrderForm(ctx context.Context, userID string) (OrderForm, error) {
+	r, err := s.q.LastOrderAddress(ctx, &userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OrderForm{}, nil
+	}
+	if err != nil {
+		return OrderForm{}, err
+	}
+	return OrderForm{ReceiverName: r.ReceiverName, ReceiverPhone: r.ReceiverPhone, Postcode: r.Postcode,
+		Address1: r.Address1, Address2: r.Address2, OrdererPhone: r.OrdererPhone}, nil
+}
+
+// PaymentMethod is the approved order payment's method as the PG reported it
+// (카드·가상계좌·간편결제 …), for the receipt (P-509). 결제가 없으면 빈 값이다.
+// 호출자가 소유권을 이미 판정한 주문의 id 를 넘긴다.
+func (s *Store) PaymentMethod(ctx context.Context, orderID string) (string, error) {
+	m, err := s.q.OrderPaymentMethod(ctx, orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return m, err
 }
 
 // OrderByNoUnscoped reads an order without an ownership predicate.

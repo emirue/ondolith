@@ -52,7 +52,7 @@ ORDER BY kind, effective_at DESC, created_at DESC, id;
 -- name: OrderByNo :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders
 WHERE order_no = sqlc.arg('order_no')
   AND ( (sqlc.narg('user_id')::uuid IS NOT NULL AND user_id = sqlc.narg('user_id'))
@@ -71,13 +71,13 @@ ORDER BY created_at DESC, id LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offse
 -- name: OrderByNoUnscoped :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders WHERE order_no = $1;
 
 -- name: GuestOrder :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders
 WHERE order_no = sqlc.arg('order_no')
   AND user_id IS NULL
@@ -137,3 +137,9 @@ WHERE id = sqlc.arg('id') AND status = sqlc.arg('from_status');
 
 -- name: OpenOrders :one
 SELECT count(*) FROM orders WHERE status = ANY(sqlc.arg('open')::text[]);
+
+-- name: LastOrderAddress :one
+-- 회원 주문서(P-405)의 시작 값 — 지난 주문의 배송지·연락처. 배송 메모는 그 주문의 것이라 뺀다.
+SELECT receiver_name, receiver_phone, postcode, address1, address2, orderer_phone
+FROM orders WHERE user_id = $1
+ORDER BY created_at DESC, id LIMIT 1;

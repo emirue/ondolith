@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/emirue/ondolith/internal/auth"
@@ -21,10 +22,21 @@ func (d *Deps) MenuList(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := d.Content.MenuItems(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.Render(w, r, "admin/menus.html", http.StatusOK, map[string]any{"Items": items})
+}
+
+// menuError redraws A-204 with the list. 목록 없이 그리면 「메뉴 항목이 없습니다」가 뜨고
+// 부모 선택칸도 비어, 고쳐 다시 보낼 수가 없다.
+func (d *Deps) menuError(w http.ResponseWriter, r *http.Request, msg string) {
+	items, err := d.Content.MenuItems(r.Context())
+	if err != nil {
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		return
+	}
+	d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity, map[string]any{"Items": items, "Error": msg})
 }
 
 // MenuCreate adds one entry.
@@ -37,7 +49,7 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	ctx := r.Context()
@@ -46,9 +58,13 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 		URL:      r.PostFormValue("url"),
 		ParentID: r.PostFormValue("parent_id"),
 	}
-	if item.Title == "" {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "제목을 입력하세요."})
+	if item.Title == "" || content.TooLong(item.Title, content.MaxMenuTitleLen) {
+		d.menuError(w, r, "메뉴 제목은 1~50자입니다.")
+		return
+	}
+	var ok bool
+	if item.Sort, ok = menuSort(r); !ok {
+		d.menuError(w, r, "순서는 정수로 입력하세요.")
 		return
 	}
 
@@ -56,11 +72,22 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 	// and a parent that does not exist is refused by the foreign key. The check
 	// lives in MenuUpdate, which is the operation that can build one.
 	if _, err := d.Content.CreateMenuItem(ctx, item); err != nil {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "저장하지 못했습니다."})
+		d.menuError(w, r, "저장하지 못했습니다.")
 		return
 	}
 	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
+}
+
+// menuSort reads A-204's 순서. 비면 0 이다. 이 칸이 없던 때 sort_order 는 모두 0 이었고
+// 메뉴는 id(UUID) 순 — 추가한 순서와 무관하게 — 로 나왔다.
+func menuSort(r *http.Request) (int, bool) {
+	v := strings.TrimSpace(r.PostFormValue("sort_order"))
+	if v == "" {
+		return 0, true
+	}
+	// sort_order 는 int32 다 — 그 밖의 값은 저장 때 뒤집혀(2147483648 → 음수) 맨 앞으로 간다.
+	n, err := strconv.ParseInt(v, 10, 32)
+	return int(n), err == nil
 }
 
 // MenuUpdate edits an entry, re-parenting included.
@@ -75,7 +102,7 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	ctx := r.Context()
@@ -86,15 +113,19 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		URL:      r.PostFormValue("url"),
 		ParentID: r.PostFormValue("parent_id"),
 	}
-	if item.Title == "" {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "제목을 입력하세요."})
+	if item.Title == "" || content.TooLong(item.Title, content.MaxMenuTitleLen) {
+		d.menuError(w, r, "메뉴 제목은 1~50자입니다.")
+		return
+	}
+	var ok bool
+	if item.Sort, ok = menuSort(r); !ok {
+		d.menuError(w, r, "순서는 정수로 입력하세요.")
 		return
 	}
 
 	existing, err := d.Content.MenuItems(ctx)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	found := false
@@ -107,18 +138,16 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		probe = append(probe, e)
 	}
 	if !found {
-		http.Error(w, "항목을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "항목을 찾을 수 없습니다.")
 		return
 	}
 	if _, err := content.BuildMenu(probe, nil); err != nil {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": d.refusal(r, menuMessage(err), err)})
+		d.menuError(w, r, d.refusal(r, menuMessage(err), err))
 		return
 	}
 
 	if err := d.Content.UpdateMenuItem(ctx, id, item); err != nil {
-		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": "저장하지 못했습니다."})
+		d.menuError(w, r, "저장하지 못했습니다.")
 		return
 	}
 	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
@@ -148,13 +177,27 @@ func (d *Deps) RoleList(w http.ResponseWriter, r *http.Request) {
 // renderRoles draws A-403, whose forms post to A-404·A-405. 재인증이 모자라면
 // 그 두 화면이 이것을 403 으로 다시 그린다 (D15 5.3-1, D19 C7).
 func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, code int, msg string) {
-	roles, err := d.Auth.Roles(r.Context())
+	ctx := r.Context()
+	roles, err := d.Auth.Roles(ctx)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		return
+	}
+	// 고르는 목록이다 — 역할 키·권한 키·게시판 id 를 직접 치게 하던 칸들이다.
+	// 무엇을 줄 수 있는지는 여전히 서버가 판정한다 (R1~R5).
+	perms, err := d.Auth.PermissionKeys(ctx)
+	if err != nil {
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		return
+	}
+	boards, err := d.Content.Boards(ctx)
+	if err != nil {
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.Render(w, r, "admin/roles.html", code, map[string]any{
-		"Roles": roles, "NeedsReauth": c.NeedsReauth(), "Error": msg})
+		"Roles": roles, "Permissions": perms, "Boards": boards,
+		"NeedsReauth": c.NeedsReauth(), "Error": msg})
 }
 
 // RoleGrantPermission is A-404. R4 and R5 are enforced HERE, on the server —
@@ -165,7 +208,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	// 권한 상승의 최종 단계다 — 재인증 (D15 5.3-1).
@@ -183,11 +226,11 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 
 	role, err := d.Auth.RoleByKey(ctx, roleKey)
 	if errors.Is(err, auth.ErrNoRole) {
-		http.Error(w, "역할을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "역할을 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 
@@ -196,14 +239,14 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	// actually holds.
 	actorPerms, err := d.Auth.LoadPermissions(ctx, c.UserID())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: actorPerms}
 	if err := auth.CanAddPermissionToRole(actor, role, permKey); err != nil {
 		// R4·R5 위반은 권한 상승 시도다 — 남긴다 (D19 A-404).
 		d.log(r, c, "role.manage", "role", role.Key, "권한 부여 거부 ("+permKey+") — "+err.Error())
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 
@@ -211,16 +254,16 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	// cannot express this, so the handler and the seed share this one function.
 	scoped, err := d.Auth.PermissionIsScoped(ctx, permKey)
 	if err != nil {
-		http.Error(w, "권한을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "권한을 찾을 수 없습니다.")
 		return
 	}
 	if err := auth.ValidateGrantScope(scoped, board); err != nil {
-		http.Error(w, "이 권한은 게시판 단위로 부여할 수 없습니다.", http.StatusUnprocessableEntity)
+		d.refuse(w, r, http.StatusUnprocessableEntity, "이 권한은 게시판 단위로 부여할 수 없습니다.")
 		return
 	}
 
 	if err := d.Auth.GrantPermission(ctx, role.Key, permKey, board); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.log(r, c, "role.manage", "role", role.Key, "권한 부여: "+permKey)
@@ -234,7 +277,7 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	// 최고 위험 화면이다 — 재인증 (D15 5.3-1).
@@ -248,34 +291,48 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 	// passes guardID.
 	targetUser := r.PostFormValue("user_id")
 	roleKey := r.PostFormValue("role")
+	// A-403 의 폼은 사용자를 **이메일**로 고른다 — UUID 는 화면 어디에도 보이지 않는다.
+	// 사용자 상세(A-402)의 폼은 그 사용자의 id 를 싣는다.
+	if targetUser == "" {
+		u, _, err := d.Auth.FindActiveUserByEmail(ctx, content.NormalizeEmail(r.PostFormValue("email")))
+		if errors.Is(err, auth.ErrNoUser) {
+			d.refuse(w, r, http.StatusNotFound, "그 이메일을 쓰는 활성 회원이 없습니다.")
+			return
+		}
+		if err != nil {
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			return
+		}
+		targetUser = u.ID
+	}
 
 	role, err := d.Auth.RoleByKey(ctx, roleKey)
 	if errors.Is(err, auth.ErrNoRole) {
-		http.Error(w, "역할을 찾을 수 없습니다.", http.StatusNotFound)
+		d.refuse(w, r, http.StatusNotFound, "역할을 찾을 수 없습니다.")
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	actorPerms, err := d.Auth.LoadPermissions(ctx, c.UserID())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: actorPerms}
 	if err := auth.CanAssignRole(actor, targetUser, role); err != nil {
 		// R1·R2·R3 위반은 남긴다 (D19 A-405).
 		d.log(r, c, "role.assign", "user", targetUser, "역할 부여 거부 ("+role.Key+") — "+err.Error())
-		Forbidden(w)
+		d.forbid(w, r)
 		return
 	}
 	if err := d.Auth.AssignRole(ctx, targetUser, role.Key); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	d.log(r, c, "role.assign", "user", targetUser, "역할 부여: "+role.Key)
-	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/users/"+targetUser, http.StatusSeeOther)
 }
 
 // ---- A-202 테마 -------------------------------------------------------------
@@ -287,19 +344,34 @@ func (d *Deps) themeChanged(name string) {
 	}
 }
 
-// ThemeList is A-202's read. It shows which theme is active; discovering what
-// is installed is A-203's job (Phase 2), so this does not walk the disk.
+// ThemeList is A-202's read: the active theme and what is installed.
+//
+// 설치된 테마를 나열한다 — 디렉터리 이름을 직접 쳐야 했고, 업로드 화면(A-203)으로 가는
+// 길도 없어 런타임 테마 교체를 운영자가 찾을 수 없었다.
 func (d *Deps) ThemeList(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "theme.view"); !ok {
 		return
 	}
 	kv, err := d.Content.Settings(r.Context(), "theme.active")
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
-	d.Render(w, r, "admin/themes.html", http.StatusOK,
-		map[string]any{"Active": kv["theme.active"]})
+	d.renderThemes(w, r, http.StatusOK, map[string]any{"Active": kv["theme.active"]})
+}
+
+// renderThemes draws A-202 with the installed list. 활성화가 거절되거나 경고가 날 때도
+// 같은 표다 — 목록 없이 그리면 「내장 테마 — 사용 중」이 거짓으로 찍혔다.
+func (d *Deps) renderThemes(w http.ResponseWriter, r *http.Request, code int, data map[string]any) {
+	if d.InstalledThemes != nil {
+		installed, err := d.InstalledThemes()
+		if err != nil {
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			return
+		}
+		data["Installed"] = installed
+	}
+	d.Render(w, r, "admin/themes.html", code, data)
 }
 
 // ThemeActivate switches the active theme.
@@ -312,14 +384,14 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	name := r.PostFormValue("theme")
 	if name == "" {
 		// Empty means the built-in theme, which always renders.
 		if err := d.Content.PutSettings(r.Context(), map[string]string{"theme.active": ""}); err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}
 		d.themeChanged("")
@@ -327,17 +399,22 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if d.ValidateTheme == nil {
-		http.Error(w, "테마를 확인할 수 없습니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "테마를 확인할 수 없습니다.")
 		return
 	}
 	warn, err := d.ValidateTheme(name)
 	if err != nil {
-		d.Render(w, r, "admin/themes.html", http.StatusUnprocessableEntity,
-			map[string]any{"Error": d.themeRefusal(r, "테마를 활성화하지 못했습니다.", err)})
+		kv, kerr := d.Content.Settings(r.Context(), "theme.active")
+		if kerr != nil {
+			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			return
+		}
+		d.renderThemes(w, r, http.StatusUnprocessableEntity, map[string]any{"Active": kv["theme.active"],
+			"Error": d.themeRefusal(r, "테마를 활성화하지 못했습니다.", err)})
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), map[string]string{"theme.active": name}); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// Only after the write: telling the renderer about a theme the database
@@ -347,8 +424,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		// D17: a dev build skips the version floor. The operator is told,
 		// because the alternative is a theme that misbehaves for no visible
 		// reason on the machine where it was least expected to.
-		d.Render(w, r, "admin/themes.html", http.StatusOK,
-			map[string]any{"Warning": warn, "Active": name})
+		d.renderThemes(w, r, http.StatusOK, map[string]any{"Warning": warn, "Active": name})
 		return
 	}
 	http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)
@@ -377,11 +453,11 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	// D15 5.3-1: uploading executable-ish content is the last step of a takeover.
 	if !reauthOK(c, r) {
-		http.Error(w, "비밀번호를 다시 입력하세요.", http.StatusForbidden)
+		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
 	}
 	if d.InstallTheme == nil {
-		http.Error(w, "테마를 설치할 수 없습니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "테마를 설치할 수 없습니다.")
 		return
 	}
 
@@ -403,7 +479,7 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	// 덮어쓴다 — 거부하면 이름을 바꿔 올리게 되고 목록에 쓰레기가 쌓인다.
 	kv, err := d.Content.Settings(r.Context(), "theme.active")
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	if name != "" && name == kv["theme.active"] {
@@ -424,7 +500,7 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	// only when the part was spooled to disk; buffer otherwise.
 	ra, size, err := readerAt(file, header.Size)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 

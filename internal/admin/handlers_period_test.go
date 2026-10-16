@@ -329,3 +329,36 @@ func TestWebhookLogFiltersByPeriodAndCarriesIt(t *testing.T) {
 		t.Errorf("2쪽 %d건, 다음 %v — want 2건, 다음 없음", got, data["NextURL"])
 	}
 }
+
+// **결제 목록·웹훅 이력은 결제사를 이름으로 부른다.** 저장값 `toss` 를 그대로 그려,
+// 결제 설정 화면의 「토스페이먼츠」와 다른 이름이었다.
+func TestPaymentLogsNameTheProvider(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"payment.view": true}}
+	d, _ := fixture(t, caller)
+	for path, h := range map[string]http.HandlerFunc{"/admin/reconcile": d.Reconcile, "/admin/webhooks": d.WebhookLog} {
+		_, data := view(t, d, h, path)
+		names, _ := data["PGNames"].(map[string]string)
+		if names["toss"] != "토스페이먼츠" {
+			t.Errorf("%s: PGNames = %v — 결제사 코드가 화면에 그대로 나간다", path, data["PGNames"])
+		}
+	}
+}
+
+// **새로 만들기 화면은 「새 …」라고 부른다.** 상품 새로 만들기가 「상품 편집」, 게시판은
+// 「게시판 설정」, 페이지는 「페이지 편집」이었다. 새 상품은 「공개」가 미리 체크돼 0원
+// 상태로 저장 한 번에 공개될 수 있었다 — 기본은 비공개다.
+func TestNewFormsSayNew(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true, "board.manage": true, "page.create": true}}
+	d, _ := fixture(t, caller)
+	for want, h := range map[string]http.HandlerFunc{"새 상품": d.ProductForm, "새 게시판": d.BoardForm, "새 페이지": d.PageForm} {
+		code, data := view(t, d, h, "/admin/x/new")
+		if code != http.StatusOK || data["Title"] != want {
+			t.Errorf("새로 만들기 = HTTP %d, 제목 %v — want %q", code, data["Title"], want)
+		}
+		if want == "새 상품" {
+			if p, _ := data["Product"].(*commerce.Product); p == nil || p.Visible {
+				t.Errorf("새 상품이 공개로 시작한다: %+v", data["Product"])
+			}
+		}
+	}
+}

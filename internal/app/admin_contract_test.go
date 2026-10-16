@@ -13,6 +13,7 @@ import (
 	"testing"
 	"text/template/parse"
 
+	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/theme"
 )
 
@@ -272,7 +273,10 @@ func TestEveryCSSTokenIsDefined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	def := regexp.MustCompile(`(--[a-z0-9-]+)\s*:`)
+	// 정의는 선언 자리(줄 머리·`{`·`;` 뒤)에서만 센다. 앞 판은 아무 데서나 세서
+	// `.btn--danger:hover` 를 `--danger` 의 정의로 읽었고, 정의 없는 `var(--danger)` 가
+	// 이 검사를 지나갔다 — 위험 버튼의 테두리·글자색이 빈 값이었다.
+	def := regexp.MustCompile(`(?:^|[{;\s])(--[a-z0-9-]+)\s*:`)
 	use := regexp.MustCompile(`var\((--[a-z0-9-]+)`)
 
 	for name, src := range map[string]string{
@@ -625,5 +629,418 @@ func TestPaymentTemplateHasVerifyForm(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `name="action" value="verify"`) {
 		t.Fatal("payment.html 에 연결 확인 폼(action=verify)이 없다 — 핸들러 분기에 닿을 버튼이 없다")
+	}
+}
+
+// **가로로 밀리는 표는 밀린다는 것을 보인다.**
+//
+// 표 감싸미는 `overflow-x: auto` 라 넘쳐도 페이지가 흔들리지 않지만, 휴대폰에는 스크롤
+// 막대가 없다. 재고 입고칸·주문 금액·게시판의 동작 버튼이 화면 밖에 있는데 표시가 없어
+// 기능이 없는 것처럼 보였다. 가장자리 그림자(`background-attachment: local` 덮개 +
+// `scroll` 그림자)는 더 밀 것이 있는 쪽에만 남는다. 두 스타일시트가 같은 문제를 가진다.
+func TestTableScrollersShowTheyScroll(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ css, sel string }{
+		"admin/admin.css":   {string(adminCSS), ".adm-table-wrap"},
+		"builtin/style.css": {string(themeCSS), ".table-wrap"},
+	} {
+		rule := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(c.sel) + `\s*\{([^}]*)\}`).FindStringSubmatch(c.css)
+		if rule == nil {
+			t.Errorf("%s: %s 규칙이 없다", name, c.sel)
+			continue
+		}
+		body := rule[1]
+		if !strings.Contains(body, "overflow-x: auto") || strings.Count(body, " local") < 2 || strings.Count(body, " scroll") < 2 {
+			t.Errorf("%s: %s 가 넘칠 때 가장자리 그림자를 그리지 않는다 — 밀 수 있는지 모른다:\n%s", name, c.sel, body)
+		}
+	}
+}
+
+// **한국어는 낱말 사이에서만 줄을 바꾼다.**
+//
+// 브라우저 기본값은 한글 음절마다 줄바꿈을 허용해, 줄 끝에서 「합니/다」「배송완/료」
+// 「온돌빌/딩」처럼 낱말이 갈렸다. `keep-all` 은 게시판 목록 칸 한 곳에만 있었다.
+// 문서 전체(body)에 둔다 — 한 줄에 다 안 들어가는 긴 낱말은 `overflow-wrap` 이 받는다.
+func TestKoreanWordsAreNotSplit(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := regexp.MustCompile(`(?m)^body\s*\{[^}]*word-break:\s*keep-all`)
+	for name, css := range map[string][]byte{"admin/admin.css": adminCSS, "builtin/style.css": themeCSS} {
+		if !body.Match(css) {
+			t.Errorf("%s: body 에 word-break: keep-all 이 없다 — 한글 낱말이 줄 끝에서 갈린다", name)
+		}
+	}
+}
+
+// **휴대폰에서 관리자 메뉴는 접혀 있다가 「메뉴」를 눌러 연다.**
+//
+// 1023px 이하에서 사이드바가 본문 위로 올라오며 메뉴 25개가 칩으로 늘 펼쳐져, 375px 에서
+// 본문이 약 700px 아래에서 시작했다. CSS 주석은 「details/summary 로 같은 결과를
+// 얻는다」고 했지만 layout.html 에 그 요소가 없었다. JS 없이 접으려면 `<details>` 가
+// 필요하고, 넓은 화면에서는 늘 펼친 사이드바가 필요해 두 벌을 그리고 폭으로 하나만 보인다.
+func TestNarrowAdminMenuIsCollapsed(t *testing.T) {
+	html := renderAdmin(t, "admin/refusal.html", map[string]any{"Error": "x"})
+	m := regexp.MustCompile(`<details class="adm-mnav"([^>]*)>\s*<summary>메뉴</summary>`).FindStringSubmatch(html)
+	if m == nil {
+		t.Fatal("관리자 화면에 접히는 메뉴(<details class=\"adm-mnav\"><summary>메뉴</summary>)가 없다")
+	}
+	if strings.Contains(m[1], "open") {
+		t.Error("접히는 메뉴가 펼친 채로 그려진다 — 휴대폰 첫 화면을 메뉴가 다시 차지한다")
+	}
+
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(css)
+	if !regexp.MustCompile(`(?m)^\.adm-mnav\s*\{[^}]*display:\s*none`).MatchString(src) {
+		t.Error("넓은 화면에서 접히는 메뉴가 숨지 않는다 — 사이드바와 메뉴가 두 벌 보인다")
+	}
+	at := strings.Index(src, "@media (max-width: 1023px)")
+	if at < 0 {
+		t.Fatal("1023px 블록이 없다")
+	}
+	block := src[at:]
+	block = block[:strings.Index(block, "\n}")]
+	for _, want := range []string{`\.adm-sidebar\s*\{\s*display:\s*none`, `\.adm-mnav\s*\{[^}]*display:\s*block`} {
+		if !regexp.MustCompile(want).MatchString(block) {
+			t.Errorf("1023px 블록에 %s 가 없다", want)
+		}
+	}
+}
+
+// **휴대폰에서 입력칸 글자는 16px 이상이다.**
+//
+// iOS Safari 는 글자가 16px 미만인 칸에 초점이 가면 화면을 확대한다 — 53개 화면의 입력칸이
+// 14px 였고, 확대된 머리글에서 「장바구니」가 「바구니」로 잘렸다(iPhone 시뮬레이터). 관리자
+// 화면은 필터줄 13px 처럼 더 구체적인 규칙이 있어, 좁은 폭 블록이 그것들을 이겨야 한다.
+func TestNarrowInputsDoNotTriggerZoom(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := regexp.MustCompile(`input,\s*select,\s*textarea\s*\{\s*font-size:\s*16px\s*!important`)
+	for name, css := range map[string]string{"admin/admin.css": string(adminCSS), "builtin/style.css": string(themeCSS)} {
+		at := strings.Index(css, "@media (max-width: 767px)")
+		if at < 0 {
+			t.Fatalf("%s: 767px 블록이 없다", name)
+		}
+		block := css[at:]
+		block = block[:strings.Index(block, "\n}")]
+		if !rule.MatchString(block) {
+			t.Errorf("%s: 767px 블록에서 입력칸 글자를 16px 로 올리지 않는다 — iPhone 이 초점마다 확대한다", name)
+		}
+	}
+}
+
+// **좁은 화면의 여백(--pad·--gap)은 어느 안·다크에서도 줄어든다.** 1199px·767px 블록이
+// `:root`(명시도 0,1,0)로 줄였는데, 안 블록 `:root[data-admin-theme="1c"]` 와 다크 블록
+// `:root:not([data-admin-theme])` 는 0,2,0 이라 순서와 상관없이 이겼다 — 다크 휴대폰은 본문
+// 좌우가 16px 이 아니라 28px 로 남아, 라이트에서 맞던 주문 상세가 다크에서만 옆으로 밀렸다(CI).
+// 명시도는 이 파일의 선택자 모양(:root·속성·:not(속성))만 센다.
+func TestNarrowSpacingBeatsEveryTheme(t *testing.T) {
+	raw, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(string(raw), "")
+	spec := func(sel string) int { return strings.Count(sel, ":root") + strings.Count(sel, "[") }
+	padRule := regexp.MustCompile(`([^{}]+)\{[^{}]*--pad:`)
+	var narrow [][]string
+	rest := css
+	for _, q := range []string{"@media (max-width: 1199px)", "@media (max-width: 767px)"} {
+		at := strings.Index(rest, q)
+		if at < 0 {
+			t.Fatalf("%s 블록이 없다", q)
+		}
+		end := at + strings.Index(rest[at:], "\n}") + 2
+		m := padRule.FindStringSubmatch(rest[at+len(q)+2 : end])
+		if m == nil {
+			t.Fatalf("%s 블록이 --pad 를 줄이지 않는다", q)
+		}
+		sels := strings.Split(m[1], ",")
+		for i := range sels {
+			sels[i] = strings.TrimSpace(sels[i])
+		}
+		narrow = append(narrow, sels)
+		rest = rest[:at] + rest[end:]
+	}
+	var themes []string
+	for _, m := range padRule.FindAllStringSubmatch(rest, -1) {
+		themes = append(themes, strings.Split(m[1], ",")...)
+	}
+	if len(themes) < 6 {
+		t.Fatalf("--pad 를 정하는 안 선택자가 %d 개다 — 다섯 안과 다크를 찾지 못했다", len(themes))
+	}
+	for _, sels := range narrow {
+		low, bare, themed := 99, false, false
+		for _, s := range sels {
+			low = min(low, spec(s))
+			bare = bare || strings.Contains(s, ":not([data-admin-theme])")
+			themed = themed || s == ":root[data-admin-theme]"
+		}
+		for _, th := range themes {
+			if spec(th) > low {
+				t.Errorf("좁은 화면 규칙 %q 가 %q 에 진다 — 그 안에서는 여백이 줄지 않는다", strings.Join(sels, ","), strings.TrimSpace(th))
+			}
+		}
+		if !bare || !themed {
+			t.Errorf("좁은 화면 규칙 %q 가 안을 고른 경우와 고르지 않은 경우를 다 덮지 않는다", strings.Join(sels, ","))
+		}
+	}
+}
+
+// **같은 개념은 관리자 화면 어디서나 같은 말로 부른다.**
+//
+// 게시판 「주소」 / 페이지 「슬러그」 / 상품 「주소(slug)」, 공개 / 노출 / 발행, 추가 / 생성 /
+// 기록, toss / 토스페이먼츠, 작성일 / 올린 날짜가 섞여 있었고, 페이지 목록은 배지가 「공개」인데
+// 버튼이 「발행 취소」였다. 정한 말: 주소 · 공개/숨김(페이지는 공개/초안) · 추가 · 저장 ·
+// 결제사(토스페이먼츠) · 작성일(날짜)/시각(분까지). 템플릿 주석은 사람이 읽지 않으므로 뺀다.
+func TestAdminVocabularyIsConsistent(t *testing.T) {
+	comment := regexp.MustCompile(`(?s)\{\{/\*.*?\*/\}\}`)
+	banned := []string{"슬러그", "(slug)", ">노출<", "{{if .Visible}}노출", "발행 취소", "발행{{end}}",
+		">생성</button>", ">기록</button>", "올린 날짜", "<th>PG</th>"}
+	entries, err := fs.ReadDir(adminFS, "templates/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanned := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		b, err := adminFS.ReadFile("templates/admin/" + e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanned++
+		text := comment.ReplaceAllString(string(b), "")
+		for _, w := range banned {
+			if strings.Contains(text, w) {
+				t.Errorf("%s: %q — 다른 화면이 같은 것을 다르게 부른다", e.Name(), w)
+			}
+		}
+	}
+	if scanned < 30 {
+		t.Fatalf("관리자 템플릿을 %d 개밖에 못 읽었다 — 검사가 헛돌았다", scanned)
+	}
+
+	html := renderAdmin(t, "admin/webhooks.html", map[string]any{
+		"Rows":    []commerce.WebhookRow{{PG: "toss", EventID: "e1", Status: "처리"}},
+		"PGNames": map[string]string{"toss": "토스페이먼츠"},
+	})
+	if !strings.Contains(html, "<td>토스페이먼츠</td>") {
+		t.Error("웹훅 이력이 결제사를 코드(toss)로 그린다")
+	}
+	html = renderAdmin(t, "admin/reconcile.html", map[string]any{
+		"Rows":    []commerce.ReconcileRow{{PG: "toss", OrderNo: "ORD-1", Kind: "주문결제", OurStatus: "승인"}},
+		"PGNames": map[string]string{"toss": "토스페이먼츠"},
+	})
+	if !strings.Contains(html, "<td>토스페이먼츠</td>") {
+		t.Error("결제 목록이 결제사를 코드(toss)로 그린다")
+	}
+}
+
+// **회원·계정 화면은 탭 제목이 있다.** 이 화면들은 renderNamed 로 그려지는데 그것이 제목을
+// 비워, 내 정보·비밀번호 변경·회원 탈퇴의 탭이 사이트 이름뿐이었다. 연결된 계정(socialView)만
+// 제목을 따로 넣고 있었다. 새 화면을 만들고 제목을 빠뜨리면 여기서 걸린다.
+func TestAccountScreensHaveTabTitles(t *testing.T) {
+	scanned := 0
+	for _, dir := range []string{"auth", "account"} {
+		entries, err := fs.ReadDir(theme.Builtin(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			name := dir + "/" + e.Name()
+			if name == "account/connections.html" { // socialView 가 제목을 넣는다
+				continue
+			}
+			scanned++
+			if publicTitles[name] == "" {
+				t.Errorf("%s 의 탭 제목이 없다 — 사이트 이름만 보인다", name)
+			}
+		}
+	}
+	if scanned < 8 {
+		t.Fatalf("화면을 %d 개밖에 못 찾았다 — 검사가 헛돌았다", scanned)
+	}
+}
+
+// **어두운 팔레트는 `color-scheme: dark` 를 함께 선언한다.** 체크박스·선택 상자의 펼친 목록·
+// 스크롤 막대는 브라우저가 그리고, 색 토큰을 따르지 않는다. 선언이 없으면 어두운 주문서에
+// 약관 체크박스만 흰 네모로 남았다.
+func TestDarkPalettesDeclareColorScheme(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ css, block string }{
+		"builtin/style.css 다크 선호":  {string(themeCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root \{`},
+		"admin/admin.css 다크 선호":    {string(adminCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-admin-theme\]\) \{`},
+		"admin/admin.css 1c 다크 콘솔": {string(adminCSS), `(?m)^:root\[data-admin-theme="1c"\] \{`},
+	} {
+		loc := regexp.MustCompile(c.block).FindStringIndex(c.css)
+		if loc == nil {
+			t.Fatalf("%s 블록을 못 찾았다", name)
+		}
+		body := c.css[loc[1]:]
+		body = body[:strings.Index(body, "}")]
+		if !strings.Contains(body, "color-scheme: dark") {
+			t.Errorf("%s: color-scheme: dark 가 없다 — 체크박스가 흰 네모로 그려진다", name)
+		}
+	}
+}
+
+// **휴대폰에서 관리자 폼은 한 열이고, 기간 필터의 「~」는 날짜 칸과 붙어 다닌다.**
+//
+// `.adm-field-row` 의 최소 폭이 130px 라 375px 에서도 두 열이 서서 이메일·SMTP 호스트 칸이
+// 약 140px 이었다. 최소 폭을 늘리면 넓은 화면의 네 칸 줄이 3+1 로 깨져, 좁은 화면에서만 쌓는다. 기간 필터는 줄이 바뀌면 「~」가 혼자 한 줄에 남았고, 제출 「조회」가
+// 「1주일」「1개월」 바로가기와 같은 모양이었다.
+func TestNarrowAdminFormsStackAndPeriodHoldsTogether(t *testing.T) {
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(css)
+	at := strings.Index(src, "@media (max-width: 767px)")
+	if at < 0 {
+		t.Fatal("767px 블록이 없다")
+	}
+	block := src[at:]
+	block = block[:strings.Index(block, "\n}")]
+	if !regexp.MustCompile(`\.adm-field-row\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)`).MatchString(block) {
+		t.Error("767px 블록이 .adm-field-row 를 한 열로 쌓지 않는다 — 375px 에 두 열이 선다")
+	}
+
+	html := renderAdmin(t, "admin/webhooks.html", map[string]any{"From": "2026-10-01", "To": "2026-10-16"})
+	if !regexp.MustCompile(`<span class="adm-range">\s*<input type="date"[^>]*>\s*<span>~</span>\s*<input type="date"`).MatchString(html) {
+		t.Error("기간의 「~」가 두 날짜 칸과 한 덩어리(.adm-range)가 아니다")
+	}
+	if !strings.Contains(html, `<button class="adm-btn adm-btn--primary">조회</button>`) {
+		t.Error("기간 필터의 「조회」가 바로가기 버튼과 같은 모양이다")
+	}
+}
+
+// **관리자 입력칸의 값은 본문 글씨다.** 맨 `label` 규칙(작고 흐린 라벨 모양)이 입력칸을 감싼
+// `<label class="adm-field">` 에도 걸려, 칸 안에 입력된 「온돌 매트」가 opacity .6·12.5px 로
+// placeholder 「(기본)」과 구분되지 않았다. 시스템 정보의 버전 문자열은 카드 밖으로 넘쳤다.
+func TestAdminFieldValuesAreNotFaded(t *testing.T) {
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := regexp.MustCompile(`(?m)^\.adm-field\s*\{([^}]*)\}`).FindSubmatch(css)
+	if field == nil {
+		t.Fatal(".adm-field 규칙이 없다")
+	}
+	for _, want := range []string{"opacity: 1", "font-size: inherit"} {
+		if !strings.Contains(string(field[1]), want) {
+			t.Errorf(".adm-field 가 %s 로 되돌리지 않는다 — label 규칙이 칸 안의 값까지 흐리게 한다", want)
+		}
+	}
+	if !regexp.MustCompile(`(?m)^\.adm-stat-value\s*\{[^}]*overflow-wrap:\s*anywhere`).Match(css) {
+		t.Error(".adm-stat-value 가 긴 값(버전 dev+012f0b846e)을 꺾지 않는다 — 카드 밖으로 넘친다")
+	}
+}
+
+// **이름-값 목록의 값은 칸 안에서 꺾인다.** 주문 상세의 「주문자 member@example.com · 010…」
+// 처럼 공백 없는 이메일은 꺾을 자리가 없어, 좁은 화면에서 dd 밖으로 나가 문서가 옆으로
+// 밀렸다(CI 의 Linux 글꼴·다크 375px 에서 13px). 값 칸은 minmax(0, 1fr) 라 줄어들 뿐 글을
+// 꺾지 않는다.
+func TestAdminDetailValuesWrap(t *testing.T) {
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^\.adm-detail dd\s*\{[^}]*overflow-wrap:\s*anywhere`).Match(css) {
+		t.Error(".adm-detail dd 가 긴 값(이메일·키)을 꺾지 않는다 — 좁은 화면에서 문서가 옆으로 밀린다")
+	}
+}
+
+// **파비콘이 있다.** 없으면 브라우저가 첫 방문마다 `/favicon.ico` 를 요청해 콘솔에 404 가
+// 찍히고 탭에 아이콘이 없다(헤드리스 점검은 그 요청을 하지 않아 보이지 않았다). 파일이 아니라
+// data: 주소인 까닭: 디스크 테마가 정적 파일을 빠뜨려도, 라우트를 하나 늘리지 않아도 된다.
+func TestPagesDeclareAFavicon(t *testing.T) {
+	head, err := fs.ReadFile(theme.Builtin(), "partials/head.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := adminFS.ReadFile("templates/admin/layout.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, src := range map[string][]byte{"partials/head.html": head, "admin/layout.html": layout} {
+		if !strings.Contains(string(src), `<link rel="icon" href="data:image/svg+xml,`) {
+			t.Errorf("%s 에 파비콘이 없다 — 브라우저가 /favicon.ico 를 찾다 404 를 받는다", name)
+		}
+	}
+	// html/template 이 data: 주소를 #ZgotmplZ 로 바꾸지 않았는지 — 그려진 결과로 본다.
+	if html := renderAdmin(t, "admin/refusal.html", map[string]any{"Error": "x"}); !strings.Contains(html, `<link rel="icon" href="data:image/svg+xml,`) {
+		t.Error("그려진 관리자 화면에 파비콘이 없다")
+	}
+}
+
+// **선택 상자는 브라우저 기본 모양이 아니다.** iOS Safari 는 select 를 자기 알약 모양으로 더
+// 낮게 그려, 상품 옵션·수량, 정렬 칸이 옆 입력칸과 높이·모서리가 달랐다. 모양을 직접 그리고
+// 화살표는 배경 그림으로 단다.
+func TestSelectsDrawTheirOwnShape(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := regexp.MustCompile(`(?m)^select:not\(\[multiple\]\)\s*\{[^}]*-webkit-appearance:\s*none[^}]*appearance:\s*none[^}]*background-image:`)
+	for name, css := range map[string][]byte{"admin/admin.css": adminCSS, "builtin/style.css": themeCSS} {
+		if !rule.Match(css) {
+			t.Errorf("%s: select 가 기본 모양(appearance)을 끄고 화살표를 그리지 않는다", name)
+		}
+	}
+}
+
+// **글꼴 목록의 첫째는 실제로 있는 글꼴이다.** 「Noto Sans KR」을 첫째로 선언했지만 글꼴 파일을
+// 싣지 않아, 그 글꼴이 설치된 PC 에서만 그것으로 보였다 — 실제 Chrome(macOS)은 한 글자도 그것으로
+// 그리지 않았다(CDP 로 잼). 시스템 글꼴을 먼저 두고, 플랫폼별 한글 글꼴을 뒤에 둔다.
+func TestFontStackStartsWithTheSystemFont(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, css := range map[string][]byte{"admin/admin.css": adminCSS, "builtin/style.css": themeCSS} {
+		m := regexp.MustCompile(`--font-sans:\s*([^;]+);`).FindSubmatch(css)
+		if m == nil {
+			t.Fatalf("%s: --font-sans 가 없다", name)
+		}
+		if !strings.HasPrefix(string(m[1]), "system-ui") {
+			t.Errorf("%s: 글꼴 목록이 %q 로 시작한다 — 싣지 않은 글꼴이 첫째면 PC 마다 다르게 보인다", name, m[1])
+		}
 	}
 }

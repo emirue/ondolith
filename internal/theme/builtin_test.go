@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -184,9 +185,15 @@ func payloadFor(name string) any {
 			"Items": []cartItemLike{{ID: "ci1", Name: "티셔츠",
 				Option: map[string]string{"크기": "L"}, UnitPrice: 13000, Quantity: 2}},
 			"Goods": 26000, "Fee": 3000, "Total": 29000,
-			"Email": "a@example.com",
-			"Terms": []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
-			"Error": "필수 약관에 동의해야 합니다",
+			"Form":   url.Values{"orderer_email": {"a@example.com"}},
+			"Agreed": map[string]bool{},
+			"Terms":  []termLike{{ID: "t1", Kind: "이용약관", Version: "v1", Required: true}},
+			"Error":  "필수 약관에 동의해야 합니다",
+		}
+	case "shop/terms.html":
+		return map[string]any{
+			"Terms": termLike{ID: "t1", Kind: "이용약관", Version: "1.0", Body: "제1조\n제2조",
+				EffectiveAt: time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)},
 		}
 	case "shop/pay.html", "shop/complete.html":
 		return map[string]any{
@@ -227,7 +234,7 @@ func payloadFor(name string) any {
 					UnitPrice: 13000, Quantity: 3, LineAmount: 39000, Discount: 1000, Settled: 1}}},
 			"Refunds": []refundLike{{Status: "요청", Requester: "구매자", Amount: 5000,
 				Reason: "단순 변심", CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
-			"Approved": 29000, "Refunded": 5000, "Remaining": 24000,
+			"Approved": 29000, "Refunded": 5000, "Remaining": 24000, "CanCancel": true,
 			"Error": "환불 가능 금액을 넘었습니다.",
 		}
 	case "order/receipt.html":
@@ -246,8 +253,10 @@ func payloadFor(name string) any {
 			"Order": orderLike{OrderNo: "20260805-ABCDEFGHJK", Status: "배송완료",
 				Items: []orderItemLike{{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L",
 					UnitPrice: 13000, Quantity: 2, LineAmount: 26000, Settled: 1}}},
-			"Variants": []variantLike{{ID: "v2",
-				OptionValues: map[string]string{"크기": "M"}, PriceDelta: 1000, Stock: 3}},
+			"Exchange": []exchangeGroupLike{{
+				Item: orderItemLike{ID: "oi1", ProductName: "티셔츠", OptionLabel: "크기: L"},
+				Variants: []variantLike{{ID: "v2",
+					OptionValues: map[string]string{"크기": "M"}, PriceDelta: 1000, Stock: 3}}}},
 			"Error": "이미 처리 중인 요청이 있습니다.",
 		}
 	case "order/returns.html":
@@ -283,7 +292,7 @@ func payloadFor(name string) any {
 		return map[string]any{
 			"Items": []cartItemLike{{ID: "ci1", VariantID: "v1", ProductID: "p1",
 				Slug: "tee", Name: "티셔츠", Option: map[string]string{"크기": "L"},
-				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true}},
+				UnitPrice: 13000, Quantity: 2, Stock: 3, Sellable: true, ProductVisible: true}},
 			"Goods": 26000, "Fee": 3000, "Total": 29000,
 			"Error": "수량이 재고를 넘습니다",
 		}
@@ -357,7 +366,7 @@ func payloadFor(name string) any {
 				{Field: fieldLike{Key: "site", Label: "링크", Type: "url"}, Value: "https://example.com"},
 				{Field: fieldLike{Key: "qty", Label: "수량", Type: "number"}, Value: 3},
 				{Field: fieldLike{Key: "tags", Label: "태그", Type: "multiselect",
-					Options: []string{"A", "B"}}, Value: nil},
+					Options: []string{"A", "B"}}, Value: []any{"B"}},
 				{Field: fieldLike{Key: "detail", Label: "상세", Type: "textarea"}, Value: "여러 줄"},
 			},
 			"Fields": []fieldLike{
@@ -481,13 +490,18 @@ type inputLike struct {
 	Value any
 }
 
+// Has mirrors content.FieldInput.Has — field.html 이 부른다 (M14).
+func (in inputLike) Has(opt string) bool {
+	return content.FieldInput{Value: in.Value}.Has(opt)
+}
+
 // 커머스 화면이 받는 모양. 실물 타입을 쓰지 않는 이유는 이 패키지가
 // internal/commerce 를 import 하지 않기 위해서다 — 테마는 데이터 모양만 알면
 // 되고, 그 반대 방향 의존은 테마를 커머스에 묶는다.
 type productLike struct {
 	ID, Slug, Name, Description string
 	BasePrice, MinDelta         int
-	InStock                     bool
+	InStock, HasVariants        bool
 	// ImageID 가 빈 것과 있는 것을 둘 다 그려 본다 (P-306).
 	ImageID string
 }
@@ -514,12 +528,19 @@ type cartItemLike struct {
 	ID, VariantID, ProductID, Slug, Name string
 	Option                               map[string]string
 	UnitPrice, Quantity, Stock           int
-	Sellable                             bool
+	Sellable, ProductVisible             bool
 }
 
 type termLike struct {
 	ID, Kind, Version, Body string
 	Required                bool
+	EffectiveAt             time.Time
+}
+
+// exchangeGroupLike mirrors the per-item group P-512 draws (handler_returns.go).
+type exchangeGroupLike struct {
+	Item     orderItemLike
+	Variants []variantLike
 }
 
 type orderItemLike struct {
@@ -534,12 +555,23 @@ type orderItemLike struct {
 // 실물과 다르면 그 경로는 렌더링되지 않고, 검사는 통과한다** (M14).
 func (it orderItemLike) RemainingQty() int { return it.Quantity - it.Settled }
 
+// Goods·ShippingFee mirror commerce.OrderDetail's — 주문 뒤 화면이 부른다.
+func (o orderLike) Goods() int {
+	n := 0
+	for _, it := range o.Items {
+		n += it.LineAmount
+	}
+	return n
+}
+func (o orderLike) ShippingFee() int { return o.Total + o.Discount - o.Goods() }
+
 type orderLike struct {
 	OrderNo, Status                                           string
 	Total                                                     int
 	ReceiverName, ReceiverPhone, Postcode, Address1, Address2 string
 	CreatedAt                                                 time.Time
 	OrdererEmail, OrdererPhone                                string
+	DeliveryMemo                                              string
 	Discount                                                  int
 	Items                                                     []orderItemLike
 }
@@ -569,6 +601,7 @@ type returnLike struct {
 	ReturnNo, Kind, Status string
 	Reason, RejectReason   string
 	Fault, FeePolicy       string
+	NewOption              string
 	FeeAmount, PriceDiff   int
 	CreatedAt              time.Time
 	Items                  []returnItemLike
@@ -936,5 +969,459 @@ func pagerFixture(base string, cur int) map[string]any {
 		"FirstURL": base, "PrevURL": base, "NextURL": base + "?page=3", "LastURL": base + "?page=3",
 		// 검색은 상한을 넘은 경우로 그린다 — 「10,000건 이상」 분기도 렌더링 검사를 지난다.
 		"Capped": base == "/search", "CapTotal": int64(10000),
+	}
+}
+
+// 글 제목·댓글 칸에 글자 수 상한이 있다 — 없으면 붙여넣기 한 번에 서버 거절까지 간다.
+func TestWritingInputsCarryTheirLimits(t *testing.T) {
+	l := newBuiltinLoader()
+	for name, want := range map[string]string{
+		"board/form.html":   `maxlength="200"`,
+		"comment/form.html": `name="body" maxlength="2000"`,
+	} {
+		v := fullView()
+		v.Data = payloadFor(name)
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("%s 에 %s 가 없다", name, want)
+		}
+	}
+}
+
+// 수정 폼이 「여러 개 선택」의 저장값을 고른 채 그린다 — 안 그리면 제목만 고쳐
+// 저장해도 그 값이 지워졌다 (실측: "tags":["빨강","파랑"] 이 사라짐).
+func TestMultiselectKeepsStoredChoices(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	v.Data = payloadFor("board/form.html") // tags = ["B"]
+	var b bytes.Buffer
+	if err := l.Render(&b, "board/form.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, `<option value="B" selected>`) || strings.Contains(out, `<option value="A" selected>`) {
+		t.Error("여러 개 선택의 저장값이 되살아나지 않았다")
+	}
+}
+
+// 로그인한 머리글에 내 정보로 가는 링크는 이름 하나다 — 「내 정보」를 따로 두었더니
+// 같은 곳으로 두 번 가는 링크가 생겼고, 1280px 에서도 계정 링크가 둘째 줄로 밀렸다.
+func TestHeaderLinksToProfileOnce(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	var b bytes.Buffer
+	if err := l.Render(&b, "page.html", v); err != nil {
+		t.Fatal(err)
+	}
+	header := b.String()
+	if i := strings.Index(header, "</header>"); i > 0 {
+		header = header[:i]
+	}
+	if n := strings.Count(header, `href="/me"`); n != 1 {
+		t.Errorf("머리글의 내 정보 링크 %d개, want 1", n)
+	}
+}
+
+// 주문 뒤 화면은 배송비를 따로 보인다. 결제 금액만 있으면 품목 합계와 결제
+// 금액이 맞지 않는데 왜 다른지 화면 어디에도 없다.
+func TestOrderPagesShowShippingFee(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, name := range []string{"order/view.html", "order/receipt.html"} {
+		v := fullView()
+		v.Data = payloadFor(name) // 품목 26,000원 · 결제 29,000원
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		for _, want := range []string{"<dt>상품 합계</dt><dd>26,000원</dd>", "<dt>배송비</dt><dd>3,000원</dd>"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s 에 %q 가 없다", name, want)
+			}
+		}
+	}
+}
+
+// 주문서가 받은 배송 메모를 구매자도 다시 본다 — 무엇을 요청했는지 확인할 곳이
+// 없으면 받기만 하는 칸이다. 메모가 없으면 줄도 없다.
+func TestOrderPagesShowDeliveryMemo(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, name := range []string{"order/view.html", "order/receipt.html"} {
+		for _, memo := range []string{"부재 시 경비실", ""} {
+			v := fullView()
+			data := payloadFor(name).(map[string]any)
+			o := data["Order"].(orderLike)
+			o.DeliveryMemo = memo
+			data["Order"] = o
+			v.Data = data
+			var b bytes.Buffer
+			if err := l.Render(&b, name, v); err != nil {
+				t.Fatal(err)
+			}
+			has := strings.Contains(b.String(), "배송 메모")
+			if memo != "" && (!has || !strings.Contains(b.String(), memo)) {
+				t.Errorf("%s 에 배송 메모 %q 가 없다", name, memo)
+			}
+			if memo == "" && has {
+				t.Errorf("%s: 메모가 없는데 「배송 메모」 줄이 있다", name)
+			}
+		}
+	}
+}
+
+// 바꿀 옵션이 하나도 없는 교환 폼은 이유를 말하고 보낼 버튼을 그리지 않는다 —
+// 전에는 선택칸만 조용히 사라지고 버튼은 남아, 누르면 422 였다.
+func TestExchangeFormWithoutOptionsSaysWhy(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("order/return-form.html").(map[string]any)
+	data["Exchange"] = nil
+	data["Error"] = ""
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/return-form.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "교환할 수 있는 다른 옵션이 없습니다") {
+		t.Error("옵션 없는 교환 폼이 이유를 말하지 않는다")
+	}
+	if strings.Contains(out, `교환 요청</button>`) {
+		t.Error("옵션 없는 교환 폼에 보내기 버튼이 있다")
+	}
+}
+
+// 교환 건은 무엇으로 바꿔 받는지 보인다 — 구매자가 요청한 것을 다시 확인할 곳이다.
+func TestReturnsPageShowsTheExchangeOption(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("order/returns.html").(map[string]any)
+	rets := data["Returns"].([]returnLike)
+	rets[0].Kind, rets[0].NewOption = "교환", "색상: 흰색"
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/returns.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "색상: 흰색") {
+		t.Error("반품·교환 내역에 교환으로 받을 옵션이 없다")
+	}
+}
+
+// 상품 설명의 줄바꿈이 살아 있다 — 관리자는 여러 줄 칸에 쓰는데 상품 화면이 그대로
+// 찍어 한 문단으로 붙었다(게시판 본문·댓글·페이지는 줄바꿈을 살린다).
+func TestProductDescriptionKeepsLineBreaks(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/product.html").(map[string]any)
+	p := data["Product"].(productLike)
+	p.Description = "첫 줄\n둘째 줄"
+	data["Product"] = p
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/product.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "첫 줄<br>둘째 줄") {
+		t.Error("상품 설명의 줄바꿈이 사라졌다")
+	}
+}
+
+// 상품 목록은 상세와 같은 말을 쓴다 — 조합이 없으면 「판매 준비 중」, 있는데 재고가
+// 없으면 「품절」. 조합 없는 상품을 목록은 「품절」, 상세는 「판매 준비 중」이라 했다.
+func TestProductListNamesStockStateLikeTheDetail(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/list.html").(map[string]any)
+	data["Products"] = []productLike{
+		{ID: "p1", Slug: "ready", Name: "준비중", HasVariants: false},
+		{ID: "p2", Slug: "out", Name: "품절품", HasVariants: true, InStock: false},
+		{ID: "p3", Slug: "on", Name: "판매품", HasVariants: true, InStock: true}}
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/list.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.Count(out, "판매 준비 중") != 1 || strings.Count(out, ">품절<") != 1 {
+		t.Errorf("판매 준비 중 %d개·품절 %d개, want 1·1", strings.Count(out, "판매 준비 중"), strings.Count(out, ">품절<"))
+	}
+}
+
+// 영수증은 증빙에 필요한 칸을 갖는다 — 결제수단, 판매자(사업자 정보), 받는 분·연락처
+// 라벨. 주문 상세와 거의 같은 표뿐이라 영수증이라 부르기에 모자랐다.
+func TestReceiptCarriesWhatAReceiptNeeds(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView() // Site.Business = {상호: 온돌}
+	data := payloadFor("order/receipt.html").(map[string]any)
+	data["PayMethod"] = "카드"
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/receipt.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	main := out[strings.Index(out, "<h1>주문서·영수증</h1>"):]
+	if i := strings.Index(main, "</section>"); i > 0 {
+		main = main[:i]
+	}
+	for _, want := range []string{"<dt>결제수단</dt><dd>카드</dd>", "<dt>상호</dt><dd>온돌</dd>",
+		"<dt>받는 분</dt>", "<dt>연락처</dt>", "<dt>주문자</dt>"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("영수증 본문에 %q 가 없다", want)
+		}
+	}
+}
+
+// 취소·환불 화면은 할 수 있는 것만 낸다 — 남은 금액이 0원이면 환불 요청 폼이 없고,
+// 상태 기계가 취소를 허락하지 않으면 「주문 취소」가 없다. 남은 0개에도 두 버튼이 눌렸다.
+func TestRefundsPageOffersOnlyWhatIsPossible(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(remaining int, canCancel bool) string {
+		v := fullView()
+		data := payloadFor("order/refunds.html").(map[string]any)
+		data["Remaining"], data["CanCancel"] = remaining, canCancel
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "order/refunds.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	done := render(0, false)
+	if strings.Contains(done, "환불 요청</button>") || strings.Contains(done, "주문 취소</button>") {
+		t.Error("남은 금액 0원·취소 불가인데 요청 버튼이 있다")
+	}
+	if !strings.Contains(done, "환불할 수 있는 금액이 남아 있지 않습니다") {
+		t.Error("왜 요청할 수 없는지 말하지 않는다")
+	}
+	open := render(24000, true)
+	if !strings.Contains(open, "환불 요청</button>") || !strings.Contains(open, "주문 취소</button>") {
+		t.Error("남은 금액이 있고 취소할 수 있는데 버튼이 없다")
+	}
+}
+
+// 메일을 보낼 수 없는 사이트의 재설정 화면은 이유를 말하고 폼을 그리지 않는다.
+func TestResetRequestWithoutMailShowsNoForm(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	v.User = nil
+	v.Data = map[string]any{"NoMail": true, "Error": "이 사이트는 아직 메일을 보낼 수 없어"}
+	var b bytes.Buffer
+	if err := l.Render(&b, "auth/password-reset-request.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "이 사이트는 아직 메일을 보낼 수 없어") || strings.Contains(out, `action="/password/reset"`) {
+		t.Error("메일 미설정 재설정 화면이 이유를 말하지 않거나 폼을 그린다")
+	}
+}
+
+// 가입이 거절돼도 쓴 이메일·표시 이름이 남는다(비밀번호는 아니다). 핸들러는 Form 을 넘기는데
+// 템플릿이 쓰지 않아 칸이 비었다. 비밀번호 확인 칸과 로그인 링크가 있다.
+func TestSignupKeepsWhatWasTyped(t *testing.T) {
+	type formLike struct{ Email, Password, DisplayName string }
+	l := newBuiltinLoader()
+	v := fullView()
+	v.User = nil
+	v.Data = map[string]any{"Error": "이메일 형식이 올바르지 않습니다.",
+		"Form": formLike{Email: "a@example", Password: "secret-pass-1", DisplayName: "온돌"}}
+	var b bytes.Buffer
+	if err := l.Render(&b, "auth/signup.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{`value="a@example"`, `value="온돌"`, `name="password_confirm"`, `href="/login"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("가입 화면에 %q 가 없다", want)
+		}
+	}
+	if strings.Contains(out, "secret-pass-1") {
+		t.Error("가입 화면이 비밀번호를 되살렸다")
+	}
+}
+
+// **통합 검색은 검색어가 없을 때만 입력칸에 초점을 준다.**
+//
+// 결과 화면에서도 초점이 걸려, 휴대폰에서는 들어가자마자 키보드가 올라와 결과를
+// 가렸다(iPhone Safari). 검색어를 고치려는 사람은 칸을 누르면 된다.
+func TestSearchFocusesOnlyWithoutQuery(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(q string) string {
+		v := fullView()
+		data := payloadFor("search.html").(map[string]any)
+		data["Query"] = struct{ Search string }{Search: q}
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "search.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	if strings.Contains(render("검색어"), "autofocus") {
+		t.Error("결과 화면의 검색칸에 autofocus 가 있다 — 휴대폰 키보드가 결과를 가린다")
+	}
+	if !strings.Contains(render(""), "autofocus") {
+		t.Error("빈 검색 화면에 autofocus 가 없다 — 칸을 한 번 더 눌러야 한다")
+	}
+}
+
+// **검색 0건은 빈 게시판과 다르게 말한다.**
+//
+// 게시판 안 검색 0건이 빈 게시판과 같은 「글이 없습니다.」였고 검색어도 해제 링크도 없었다.
+// 통합 검색 0건은 「0건」과 「전체 0건」이 두 번, 쪽 번호 「1」까지 나왔다 — 0건이면 쪽
+// 이동이 없다.
+func TestEmptySearchSaysWhatWasSearched(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(name string, edit func(map[string]any)) string {
+		v := fullView()
+		data := payloadFor(name).(map[string]any)
+		edit(data)
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	zero := func(p map[string]any) map[string]any {
+		p["Total"], p["Capped"], p["Pages"] = int64(0), false, nil
+		p["FirstURL"], p["PrevURL"], p["NextURL"], p["LastURL"] = "", "", "", ""
+		return p
+	}
+
+	board := render("board/list.html", func(d map[string]any) {
+		d["Posts"], d["Total"] = nil, int64(0)
+		d["Query"] = struct{ Search string }{Search: "없는말"}
+		d["Pager"] = zero(pagerFixture("/board/free", 1))
+	})
+	for _, want := range []string{"「없는말」", `href="/board/free">검색 해제`} {
+		if !strings.Contains(board, want) {
+			t.Errorf("게시판 검색 0건에 %q 가 없다", want)
+		}
+	}
+
+	search := render("search.html", func(d map[string]any) {
+		d["Results"], d["Total"] = nil, int64(0)
+		d["Query"] = struct{ Search string }{Search: "없는말"}
+		d["Pager"] = zero(pagerFixture("/search", 1))
+	})
+	if !strings.Contains(search, "「없는말」") {
+		t.Error("통합 검색 0건이 무엇을 찾았는지 말하지 않는다")
+	}
+	if strings.Contains(search, "전체 0건") || strings.Contains(search, `class="pager"`) {
+		t.Error("통합 검색 0건에 쪽 이동(전체 0건·1)이 그려진다")
+	}
+}
+
+// 홈 상단 표시만 영어(SHOP·WELCOME)였다 — 나머지 화면은 모두 한국어다 (NFR-403 한국어 우선).
+func TestHomeEyebrowIsKorean(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, typ := range []string{"shop", "cms"} {
+		v := fullView()
+		v.Site.Type = typ
+		v.Data = payloadFor("home.html")
+		var b bytes.Buffer
+		if err := l.Render(&b, "home.html", v); err != nil {
+			t.Fatal(err)
+		}
+		if out := b.String(); strings.Contains(out, "SHOP") || strings.Contains(out, "WELCOME") {
+			t.Errorf("%s 홈에 영어 표시가 있다", typ)
+		}
+	}
+}
+
+// **쓸 수 없는 메뉴는 그리지 않는다.** 로그인한 회원에게도 바닥글에 「비회원 주문 조회」가
+// 나왔고, 소셜 로그인이 설정되지 않아도 내 정보에 「소셜 계정 연결」이 있어 누르면 「관리자가
+// 소셜 로그인을 설정하지 않았습니다.」만 나왔다.
+func TestUnusableMenusAreHidden(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(name string, member bool, data any) string {
+		v := fullView()
+		v.Site.Type = "shop"
+		if !member {
+			v.User = nil
+		}
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	if !strings.Contains(render("home.html", false, payloadFor("home.html")), `href="/orders/guest"`) {
+		t.Error("비회원에게 바닥글의 비회원 주문 조회가 없다")
+	}
+	if strings.Contains(render("home.html", true, payloadFor("home.html")), `href="/orders/guest"`) {
+		t.Error("로그인한 회원에게 비회원 주문 조회가 나온다")
+	}
+	profile := func(social bool) string {
+		return render("account/profile.html", true, map[string]any{"DisplayName": "회원", "Email": "m@example.com",
+			"SocialEnabled": social})
+	}
+	if strings.Contains(profile(false), `href="/me/connections"`) {
+		t.Error("소셜 로그인이 꺼져 있는데 「소셜 계정 연결」이 있다")
+	}
+	if !strings.Contains(profile(true), `href="/me/connections"`) {
+		t.Error("소셜 로그인이 켜져 있는데 「소셜 계정 연결」이 없다")
+	}
+}
+
+// 상품 검색 0건도 글 검색처럼 무엇을 찾았는지 말한다 — 「검색 결과가 없습니다.」 하나뿐이었다.
+func TestEmptyProductSearchSaysWhatWasSearched(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/search.html").(map[string]any)
+	data["Query"], data["Products"] = "없는상품", nil
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/search.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "「없는상품」에 맞는 상품이 없습니다.") {
+		t.Error("상품 검색 0건이 검색어를 말하지 않는다")
+	}
+}
+
+// **오류 화면은 그 오류의 말을 한다.** 404 와 500 이 같은 「요청을 처리하지 못했습니다. 주소를
+// 확인하거나 잠시 후 다시 시도하세요.」였다. 화면이 `Message` 를 주면 그것을, 안 주면 일반 문구를
+// 쓴다. `Detail` 은 개발 모드의 원인(회색 상자)이다.
+func TestErrorPageSaysWhatWentWrong(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(data any) string {
+		v := fullView()
+		v.Meta.Title = "찾을 수 없습니다"
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "error.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	const generic = "요청을 처리하지 못했습니다"
+	out := render(map[string]string{"Message": "없는 페이지입니다."})
+	if !strings.Contains(out, "<p>없는 페이지입니다.</p>") || strings.Contains(out, generic) {
+		t.Error("오류 화면이 받은 문구 대신 일반 문구를 쓴다")
+	}
+	if !strings.Contains(render(nil), generic) {
+		t.Error("문구를 받지 않은 오류 화면에 일반 문구가 없다")
+	}
+}
+
+// 회원 탈퇴의 비밀번호 칸은 라벨 밖에 있다 — `.form label` 의 흐린 라벨 모양(opacity .6·12.5px)이
+// 감싼 입력칸까지 흐리게 해, 입력한 값이 placeholder 처럼 보였다(관리자 .adm-field 와 같은 결함).
+func TestDeleteFormPasswordIsNotInsideALabel(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	v.Data = payloadFor("account/delete.html")
+	var b bytes.Buffer
+	if err := l.Render(&b, "account/delete.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`<label for="password">[^<]*</label>\s*<input id="password"`).MatchString(b.String()) {
+		t.Error("탈퇴 화면의 비밀번호 칸이 라벨 안에 있다 — 입력값이 흐리게 보인다")
 	}
 }

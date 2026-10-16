@@ -613,3 +613,43 @@ func TestPaginationLinksReflectWhereYouAre(t *testing.T) {
 		t.Errorf("999쪽이 마지막 쪽(2쪽)을 그리지 않는다: %.300s", beyond)
 	}
 }
+
+// **로그인하지 않은 방문자에게 「로그인하면 쓸 수 있다」고 말한다 — 그것이 참일 때만.**
+//
+// 글쓰기 버튼과 댓글 폼이 말없이 사라져, 방문자는 이 게시판이 쓰기를 받지 않는 줄 알았다.
+// 회원 역할에 쓰기가 없는 게시판(운영진만 공지)에서 같은 말을 하면 거짓이다.
+func TestAnonymousVisitorIsToldToLogInOnlyWhenThatHelps(t *testing.T) {
+	srv, pool := liveSite(t)
+	ctx := context.Background()
+	freeID := mkBoard(t, pool, "free", content.PresetPublic)
+	noticeID := mkBoard(t, pool, "notice", content.PresetPublic)
+	var postID string
+	if err := pool.QueryRow(ctx, `INSERT INTO posts (board_id, title, body) VALUES ($1, '첫 글', '본문') RETURNING id`,
+		freeID).Scan(&postID); err != nil {
+		t.Fatal(err)
+	}
+	// 공지: 회원은 읽기만 한다.
+	if _, err := pool.Exec(ctx, `DELETE FROM role_permissions rp USING roles r, permissions p
+		WHERE rp.role_id = r.id AND rp.permission_id = p.id AND r.key = 'member'
+		  AND p.key IN ('post.write', 'comment.write') AND rp.board_id = $1`, noticeID); err != nil {
+		t.Fatal(err)
+	}
+	anon := client()
+	if _, body := mustGet(t, anon, srv.URL+"/board/free"); !strings.Contains(body, "하면 글을 쓸 수 있습니다") ||
+		!strings.Contains(body, `href="/login?next=/board/free/write"`) {
+		t.Error("회원이 쓸 수 있는 게시판인데 익명 방문자에게 로그인 안내가 없다")
+	}
+	if _, body := mustGet(t, anon, srv.URL+"/board/free/"+postID); !strings.Contains(body, "하면 댓글을 쓸 수 있습니다") {
+		t.Error("회원이 댓글을 쓸 수 있는 글인데 익명 방문자에게 로그인 안내가 없다")
+	}
+	if _, body := mustGet(t, anon, srv.URL+"/board/notice"); strings.Contains(body, "하면 글을 쓸 수 있습니다") {
+		t.Error("회원도 쓸 수 없는 게시판에서 「로그인하면 쓸 수 있다」고 말한다")
+	}
+
+	mkUser(t, pool, "m@example.com")
+	member := client()
+	login(t, srv.URL, "m@example.com", member)
+	if _, body := mustGet(t, member, srv.URL+"/board/notice"); strings.Contains(body, "하면 글을 쓸 수 있습니다") {
+		t.Error("이미 로그인한 회원에게 로그인하라고 한다")
+	}
+}

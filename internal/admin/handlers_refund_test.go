@@ -1058,7 +1058,8 @@ func TestPolicyRejectsConfirmWindowShorterThanReturnWindow(t *testing.T) {
 	for _, tc := range []struct{ ret, confirm string }{{"7", "7"}, {"7", "6"}} {
 		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 			"order.return_days": {tc.ret}, "order.confirm_days": {tc.confirm},
-			"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"0"}})
+			"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"0"},
+			"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("반품 %s / 확정 %s = HTTP %d, want 422", tc.ret, tc.confirm, rec.Code)
 		}
@@ -1076,7 +1077,8 @@ func TestPolicyRejectsConfirmWindowShorterThanReturnWindow(t *testing.T) {
 	// 길면 저장된다 — 위 단언이 "무엇이든 막힌다" 를 본 것이 아니라는 것.
 	rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 		"order.return_days": {"7"}, "order.confirm_days": {"8"},
-		"order.return_fee_policy": {"별도청구"}, "order.return_fee_amount": {"3000"}})
+		"order.return_fee_policy": {"별도청구"}, "order.return_fee_amount": {"3000"},
+		"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("정상 저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
@@ -1107,10 +1109,54 @@ func TestPolicyRejectsBadShippingFeeValues(t *testing.T) {
 	} {
 		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 			"order.return_days": {"7"}, "order.confirm_days": {"8"},
-			"order.return_fee_policy": {tc.policy}, "order.return_fee_amount": {tc.amount}})
+			"order.return_fee_policy": {tc.policy}, "order.return_fee_amount": {tc.amount},
+			"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("방식 %q / 금액 %q = HTTP %d, want 422", tc.policy, tc.amount, rec.Code)
 		}
+	}
+}
+
+// 주문 배송비 정책(D50)도 A-512 가 정한다. 장바구니·주문서는 shipping.* 를
+// 읽는데 그 값을 쓰는 화면이 없어, 배송비가 늘 0원이었다.
+func TestPolicySavesShippingPolicy(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "u1", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	form := func(flat, free string) url.Values {
+		return url.Values{"order.return_days": {"7"}, "order.confirm_days": {"8"},
+			"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"0"},
+			"shipping.flat_fee": {flat}, "shipping.free_threshold": {free}}
+	}
+
+	for _, tc := range [][2]string{{"-1", "0"}, {"3000", "-1"}, {"삼천", "0"}, {"", "0"}, {"3000", ""},
+		// 상한(20억)을 넘으면 그 뒤 모든 주문이 금액 상한에 걸린다 — 저장하지 않는다.
+		{"2000000001", "0"}, {"0", "2000000001"}} {
+		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, form(tc[0], tc[1]))
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("배송비 %q / 기준액 %q = HTTP %d, want 422", tc[0], tc[1], rec.Code)
+		}
+	}
+
+	if rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, form("3000", "50000")); rec.Code != http.StatusSeeOther {
+		t.Fatalf("정상 저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	kv, err := d.Content.Settings(context.Background(), "shipping.flat_fee", "shipping.free_threshold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["shipping.flat_fee"] != "3000" || kv["shipping.free_threshold"] != "50000" {
+		t.Errorf("저장값 %v, want 3000 / 50000", kv)
+	}
+
+	// 폼은 저장된 값을 다시 보인다 — 보이지 않으면 다음 저장이 0 으로 덮는다.
+	var got map[string]string
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		got, _ = data.(map[string]any)["Policy"].(map[string]string)
+	}
+	d.PolicyForm(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/commerce/policy", nil))
+	if got["shipping.flat_fee"] != "3000" || got["shipping.free_threshold"] != "50000" {
+		t.Errorf("폼 값 %v, want 3000 / 50000", got)
 	}
 }
 
@@ -1134,7 +1180,8 @@ func TestPolicyChangeDoesNotApplyRetroactively(t *testing.T) {
 	// 정책을 바꾼다.
 	if rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 		"order.return_days": {"7"}, "order.confirm_days": {"8"},
-		"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"9000"}},
+		"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"9000"},
+		"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}},
 	); rec.Code != http.StatusSeeOther {
 		t.Fatalf("정책 저장 = HTTP %d", rec.Code)
 	}
@@ -1148,6 +1195,43 @@ func TestPolicyChangeDoesNotApplyRetroactively(t *testing.T) {
 	}
 	if fee != 1000 {
 		t.Errorf("스냅샷 배송비 %d, want 1000 — 정책 변경이 소급됐다", fee)
+	}
+}
+
+// A-503 의 「판매 중지」 칸이 조합을 내리고, 칸을 풀면 다시 연다.
+func TestVariantSaveStopsAndResumesSelling(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true},
+		id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+	var productID, variantID string
+	if err := pool.QueryRow(ctx, `INSERT INTO products (slug,name,base_price,is_visible)
+		VALUES ('tee','티셔츠',12000,true) RETURNING id`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"L"}',0,7) RETURNING id`, productID).Scan(&variantID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		hidden string
+		want   bool
+	}{{"1", false}, {"", true}} {
+		form := url.Values{"variant_id": {variantID}, "delta_" + variantID: {"0"}, "price_delta_" + variantID: {"0"}}
+		if tc.hidden != "" {
+			form.Set("hidden_"+variantID, tc.hidden)
+		}
+		if rec := postAdmin(t, d.VariantSave, "/admin/products/"+productID+"/variants",
+			map[string]string{"id": productID}, form); rec.Code != http.StatusSeeOther {
+			t.Fatalf("저장 = HTTP %d", rec.Code)
+		}
+		var visible bool
+		if err := pool.QueryRow(ctx, `SELECT is_visible FROM product_variants WHERE id = $1`, variantID).Scan(&visible); err != nil {
+			t.Fatal(err)
+		}
+		if visible != tc.want {
+			t.Errorf("판매 중지 %q → 판매 %v, want %v", tc.hidden, visible, tc.want)
+		}
 	}
 }
 
@@ -1973,5 +2057,100 @@ func TestReconcileResolveNeedsOrderUpdateAndAnAnswer(t *testing.T) {
 
 	if rec := post("not-a-uuid"); rec.Code != http.StatusNotFound {
 		t.Errorf("깨진 결제 id = HTTP %d, want 404", rec.Code)
+	}
+}
+
+// **이름이 길면 이유를 말하고 거절한다** (D19 A-305·A-502·A-509·A-202). 앱이 길이를 보지
+// 않아 카테고리·상품 이름은 DB CHECK 위반으로 500, 게시판 이름은 이유 없는 「저장하지
+// 못했습니다」였다. 메뉴 제목은 상한이 없어 300자가 저장되고 모든 머리글이 깨졌다.
+func TestOverlongNamesAreRefusedWithAReason(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"product.manage": true, "board.manage": true,
+		"menu.manage": true}, id: "u1", email: "op@example.com", superuser: true}
+	d, pool := fixture(t, caller)
+	var body string
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
+		body, _ = data.(map[string]any)["Error"].(string)
+		w.WriteHeader(code)
+	}
+	for _, tc := range []struct {
+		name string
+		h    http.HandlerFunc
+		path string
+		form url.Values
+		want string
+	}{
+		{"카테고리 101자", d.CategoryCreate, "/admin/categories",
+			url.Values{"name": {strings.Repeat("가", 101)}, "slug": {"cat"}}, "100자"},
+		{"상품 201자", d.ProductSave, "/admin/products/new",
+			url.Values{"name": {strings.Repeat("가", 201)}, "slug": {"p"}, "base_price": {"1000"}}, "200자"},
+		{"게시판 101자", d.BoardSave, "/admin/boards/new",
+			url.Values{"name": {strings.Repeat("가", 101)}, "slug": {"b"}, "preset": {"공개"}}, "100자"},
+		{"메뉴 51자", d.MenuCreate, "/admin/menus",
+			url.Values{"title": {strings.Repeat("가", 51)}, "url": {"/"}}, "50자"},
+	} {
+		body = ""
+		pv := map[string]string{"id": "new"}
+		rec := postAdmin(t, tc.h, tc.path, pv, tc.form)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, tc.want) {
+			t.Errorf("%s = HTTP %d %q, want 422 + %q", tc.name, rec.Code, body, tc.want)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM categories) +
+		(SELECT count(*) FROM products) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM menus)`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("거절됐는데 %d행이 저장됐다 (%v)", n, err)
+	}
+}
+
+// **글이 있는 게시판은 확인을 받고서야 지운다** (D19 A-305). 목록의 삭제 폼이 숨은
+// confirm=1 을 늘 실어 보내, 한 번 누르면 글·댓글·첨부가 통째로 사라졌다. 이제 확인
+// 없이 온 삭제는 몇 건이 함께 지워지는지 보여 주는 확인 화면이고, 확인해야 지운다.
+func TestBoardDeleteAsksBeforeTakingPosts(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"board.manage": true}, id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+	var board string
+	if err := pool.QueryRow(ctx, `INSERT INTO boards (slug, name) VALUES ('notice', '공지') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := pool.Exec(ctx, `INSERT INTO posts (board_id, title, body) VALUES ($1, '글', '본문')`, board); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var page string
+	var posts any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, name string, code int, data any) {
+		page, posts = name, data.(map[string]any)["Posts"]
+		w.WriteHeader(code)
+	}
+	rec := postAdmin(t, d.BoardDelete, "/admin/boards/"+board+"/delete", map[string]string{"id": board}, url.Values{})
+	if rec.Code != http.StatusConflict || page != "admin/board-delete.html" || posts != 3 {
+		t.Errorf("확인 없는 삭제 = HTTP %d, 화면 %q, 글 %v건 — want 409 확인 화면, 3건", rec.Code, page, posts)
+	}
+	exists := func() bool {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM boards WHERE id = $1`, board).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if !exists() {
+		t.Fatal("확인 전에 게시판이 지워졌다")
+	}
+	rec = postAdmin(t, d.BoardDelete, "/admin/boards/"+board+"/delete", map[string]string{"id": board}, url.Values{"confirm": {"1"}})
+	if rec.Code != http.StatusSeeOther || exists() {
+		t.Errorf("확인한 삭제 = HTTP %d, 남음 %v", rec.Code, exists())
+	}
+}
+
+// 페이지 본문(서식 포함)도 상한을 앞에서 본다 — pages_body_html_len CHECK 에 맡기면 500 이다.
+func TestOverlongPageBodyIsRefusedWithAReason(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"page.create": true, "page.update": true}, id: "u1", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	rec := postAdmin(t, d.PageSave, "/admin/pages/new", nil, url.Values{
+		"slug": {"long"}, "title": {"긴 페이지"}, "body_html": {"<p>" + strings.Repeat("가", 200001) + "</p>"}})
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "200,000자") {
+		t.Errorf("긴 페이지 본문 = HTTP %d, want 422 + 이유", rec.Code)
 	}
 }

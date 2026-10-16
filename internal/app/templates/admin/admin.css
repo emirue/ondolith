@@ -14,7 +14,7 @@
 
 /* ---- 공통 (5안 무관) ---------------------------------------------------- */
 :root {
-  --font-sans: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --font-sans: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
 
   /* 여백 스케일 */
   --s4: 4px;   --s6: 6px;   --s8: 8px;   --s10: 10px; --s12: 12px;
@@ -77,6 +77,8 @@
 
 /* ---- 1c 다크 콘솔 -------------------------------------------------------- */
 :root[data-admin-theme="1c"] {
+  /* 체크박스·스크롤 막대처럼 브라우저가 그리는 것도 어둡게 — 흰 네모로 남았다. */
+  color-scheme: dark;
   --bg: #14171b;        --panel: #1b1f25;    --ink: #e5e9ee;      --line: #2b313a;
   --accent: #4fbf94;    --accent-ink: #0d1214;
   --header-bg: #0f1216; --header-ink: #e5e9ee; --header-line: #2b313a; --header-h: 64px;
@@ -126,6 +128,8 @@
  * 사용자의 선택이므로 시스템 설정이 뒤집지 않는다. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-admin-theme]) {
+    /* 체크박스·스크롤 막대처럼 브라우저가 그리는 것도 어둡게 — 흰 네모로 남았다. */
+    color-scheme: dark;
     --bg: #14171b;        --panel: #1b1f25;    --ink: #e5e9ee;      --line: #2b313a;
     --accent: #4fbf94;    --accent-ink: #0d1214;
     --header-bg: #0f1216; --header-ink: #e5e9ee; --header-line: #2b313a; --header-h: 64px;
@@ -151,6 +155,8 @@ body {
   font: 14px/1.6 var(--font-sans);
   color: var(--ink);
   background: var(--bg);
+  /* 한국어는 낱말 사이에서만 꺾는다 — 안내문이 「계정/은」처럼 갈렸다. */
+  word-break: keep-all;
 }
 
 a { color: var(--link); }
@@ -249,7 +255,8 @@ a:hover { color: var(--link-hover); }
   text-transform: uppercase;
 }
 
-.adm-sidebar a {
+.adm-sidebar a,
+.adm-mnav a {
   display: block;
   font-size: 14px;
   padding: var(--s10) var(--s12);
@@ -259,14 +266,19 @@ a:hover { color: var(--link-hover); }
   opacity: .7;
 }
 
-.adm-sidebar a:hover { opacity: 1; background: var(--nav-active-bg); }
+.adm-sidebar a:hover,
+.adm-mnav a:hover { opacity: 1; background: var(--nav-active-bg); }
 
-.adm-sidebar a[aria-current] {
+.adm-sidebar a[aria-current],
+.adm-mnav a[aria-current] {
   background: var(--nav-active-bg);
   color: var(--nav-active-ink);
   font-weight: 600;
   opacity: 1;
 }
+
+/* 좁은 화면의 접히는 메뉴(layout.html). 넓은 화면은 사이드바가 늘 펼쳐 있다. */
+.adm-mnav { display: none; }
 
 /* ---- 페이지 헤더 --------------------------------------------------------- */
 .adm-pagehead {
@@ -324,11 +336,22 @@ a:hover { color: var(--link-hover); }
   font-weight: 700;
   letter-spacing: -.03em;
   margin-top: var(--s12);
+  /* 버전(dev+012f0b846e)처럼 띄어쓰기 없는 값이 카드 밖으로 넘쳤다. */
+  overflow-wrap: anywhere;
 }
 
 /* ---- 표 ----------------------------------------------------------------- */
 /* 래퍼가 가로 스크롤을 갖는다. 표가 그리드를 밀면 사이드바가 잘린다. */
-.adm-table-wrap { overflow-x: auto; }
+.adm-table-wrap {
+  overflow-x: auto;
+  /* 밀 수 있다는 표시: 덮개(local)는 내용과 함께 움직이고 그림자(scroll)는 가장자리에
+   * 머문다 — 더 밀 것이 남은 쪽에만 그림자가 보인다. 휴대폰에는 스크롤 막대가 없다. */
+  background:
+    linear-gradient(to right, var(--panel) 30%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--panel) 30%, transparent) right / 32px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 12px 100% no-repeat scroll;
+}
 
 .adm-table {
   width: 100%;
@@ -427,7 +450,10 @@ a:hover { color: var(--link-hover); }
 .adm-filterbar .adm-btn { height: var(--h-aux); padding: 0 var(--s12); font-size: 13px; }
 
 /* ---- 폼 ----------------------------------------------------------------- */
-.adm-field { display: block; margin-bottom: var(--s16); }
+/* 입력칸을 감싸는 `<label>` 이다 — 아래 맨 `label` 규칙(작고 흐린 라벨 모양)을 되돌린다.
+   되돌리지 않으면 칸 안에 입력된 값까지 흐려져 placeholder 와 구분되지 않았다. 라벨 글자는
+   `> span` 이 흐리게 한다. */
+.adm-field { display: block; margin-bottom: var(--s16); opacity: 1; font-size: inherit; }
 
 .adm-field > span {
   display: block;
@@ -453,6 +479,18 @@ textarea {
   color: var(--ink);
   font: inherit;
   max-width: 100%;
+}
+
+/* iOS Safari 는 select 를 자기 알약 모양으로 더 낮게 그려 옆 입력칸과 높이·모서리가 달랐다.
+   기본 모양을 끄고 화살표를 배경 그림으로 단다 — 회색 하나라 밝은·어두운 바탕 모두에서 보인다. */
+select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23888' stroke-width='1.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 8px;
 }
 
 /* 체크박스·라디오는 상자다. 위 높이·여백을 그대로 받으면 빈 사각형이 된다. */
@@ -504,6 +542,10 @@ input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width:
 .adm-field + .adm-hint,
 .adm-field-row + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--s16); }
 .adm-card + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--gap); }
+
+/* 기간의 두 날짜와 「~」는 한 덩어리로 줄을 바꾼다 — 「~」만 혼자 한 줄에 남았다. */
+.adm-range { display: inline-flex; align-items: center; gap: var(--s6); flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+.adm-range input { min-width: 0; flex: 1 1 9rem; }
 
 /* 대시보드 위젯. `.adm-field-row` 와 같은 규칙이되 최소 폭만 다르다 —
    표가 들어가므로 130px 에서는 열이 겹친다. 좁은 화면에서는 한 줄로 떨어진다. */
@@ -741,7 +783,8 @@ dl { margin: 0 0 var(--s20); }
 }
 
 .adm-detail dt { opacity: .6; }
-.adm-detail dd { margin: 0; }
+/* 공백 없는 이메일·키는 꺾을 자리가 없어 좁은 화면에서 칸 밖으로 나갔다. */
+.adm-detail dd { margin: 0; overflow-wrap: anywhere; }
 
 /* ═══ 폼 · 패널 ════════════════════════════════════════════════════════════ */
 /* 칸이 화면 폭을 다 쓰면 「택배사」 한 단어를 치는 칸이 980px 가 된다. */
@@ -821,8 +864,27 @@ dl { margin: 0 0 var(--s20); }
 .qr-label svg,
 .qr-label img { width: 100%; height: auto; }
 
+/* A-204 메뉴: 머리줄과 행이 같은 격자다 — 머리가 표 열이고 행이 colspan 안의 grid 이던
+   앞 판은 열이 어긋났다. 좁은 화면(767px 이하)에서는 한 줄씩 쌓고 머리줄을 숨긴다. */
+.adm-menu-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 5.5rem auto;
+  gap: 8px;
+  padding: 12px 22px;
+  align-items: center;
+}
+.adm-menu-grid + form + .adm-menu-grid { border-top: 1px solid var(--line); }
+.adm-menu-grid--head { font-size: 12.5px; font-weight: 600; opacity: .7; }
+
+/* 좁은 위젯 표의 긴 글(대시보드 「최근 글」 제목). keep-all 은 공백 없는 긴 제목을 꺾지
+   못해 옆 열을 카드 밖으로 밀어낸다 — 어디서든 꺾는다. */
+.adm-wrap { overflow-wrap: anywhere; word-break: normal; }
+
+/* 약관 본문처럼 줄바꿈이 뜻을 갖는 긴 글. <pre> 기본값은 줄을 접지 않아 표를 밀어낸다. */
+.adm-pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 60ch; margin: 8px 0 0; font: inherit; }
+
 @media print {
-  .adm-header, .adm-sidebar { display: none; }
+  .adm-header, .adm-sidebar, .adm-mnav { display: none; }
   .qr-label { break-inside: avoid; }
 }
 
@@ -843,34 +905,42 @@ dl { margin: 0 0 var(--s20); }
 /* 수량은 두세 자리다. 폼 기본 폭이면 줄을 다 차지한다. */
 .adm-qty { width: 5.5rem; flex: none; text-align: center; }
 
+/* 좁은 화면의 여백은 안·다크 블록(명시도 0,2,0)을 이겨야 한다. 맨 `:root`(0,1,0)였을 때는
+ * 안을 고르거나 다크면 휴대폰에서도 28~40px 로 남았다. 둘을 합치면 모든 경우를 덮는다. */
 @media (max-width: 1199px) {
-  :root { --pad: 24px; --gap: 18px; }
+  :root[data-admin-theme], :root:not([data-admin-theme]) { --pad: 24px; --gap: 18px; }
   .adm-body { grid-template-columns: 184px minmax(0, 1fr); }
 }
 
 @media (max-width: 1023px) {
-  /* 사이드바는 문서 흐름 위쪽으로 접힌다. 오프캔버스 드로어는 JS 가 필요하고
-   * 관리자 화면에 JS 의존을 만들지 않는다 — details/summary 로 같은 결과를
-   * 얻는다. */
+  /* 사이드바 대신 본문 위에 접히는 메뉴(.adm-mnav)가 선다. 오프캔버스 드로어는 JS 가
+   * 필요하고 관리자 화면에 JS 의존을 만들지 않는다 — details/summary 로 같은 결과를
+   * 얻는다. 늘 펼쳐 두면 375px 에서 본문이 메뉴 아래 약 700px 에서 시작했다. */
   .adm-body { grid-template-columns: minmax(0, 1fr); }
-  .adm-sidebar {
-    border-right: 0;
+  .adm-sidebar { display: none; }
+  .adm-mnav {
+    display: block;
+    background: var(--sidebar-bg);
+    color: var(--sidebar-ink);
     border-bottom: 1px solid var(--sidebar-line);
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: var(--s12);
-    padding: var(--s12) var(--s16);
+    padding: 0 var(--s16);
   }
+  /* 높이는 여백으로 낸다(12+22+12px) — `display: flex` 로 바꾸면 펼침 삼각형(::marker)이 사라진다. */
+  .adm-mnav summary { padding: var(--s12) 0; font-weight: 600; cursor: pointer; }
+  .adm-mnav > div { padding-bottom: var(--s12); }
   /* **제목을 숨기지 않는다.** 접힌 사이드바는 링크 스물다섯 개가 한 덩어리로
    * 깔리는데, 그 상태에서 「주문」을 찾으려면 전부 읽어야 한다 — 375px 스크린샷
    * 에서 보고 알았다. 그룹은 이미 `<div>` 단위로 줄바꿈되므로 제목 한 줄만
    * 되살리면 덩어리가 넷으로 갈린다. */
   .adm-navgroup-label { margin-bottom: var(--s6); }
-  .adm-sidebar nav { display: flex; flex-wrap: wrap; gap: var(--s6); }
+  .adm-mnav nav { display: flex; flex-wrap: wrap; gap: var(--s6); }
 }
 
 @media (max-width: 767px) {
-  :root { --pad: 16px; --gap: 14px; }
+  :root[data-admin-theme], :root:not([data-admin-theme]) { --pad: 16px; --gap: 14px; }
+  /* iOS Safari 는 글자가 16px 미만인 칸에 초점이 가면 화면을 확대한다(14px 였다). 플랫폼의
+     문턱이라 더 구체적인 규칙(필터줄 13px 등)도 이기도록 !important 다. */
+  input, select, textarea { font-size: 16px !important; }
   .adm-gnb { display: none; }
   /* 로고와 오른쪽 사이의 26px 은 좁은 화면에서 통째로 밀어내는 크기다. */
   .adm-header { gap: var(--s12); }
@@ -878,6 +948,12 @@ dl { margin: 0 0 var(--s20); }
   .adm-table td { padding: var(--row-pad) var(--s12); }
   /* 터치 타겟 최소 44px */
   .adm-btn { min-height: 44px; }
-  .adm-sidebar a { min-height: 44px; display: flex; align-items: center; }
+  .adm-mnav a { min-height: 44px; display: flex; align-items: center; }
   .adm-filterbar a:not(.adm-btn) { min-height: 44px; display: inline-flex; align-items: center; }
+  /* 나란히 선 칸은 한 열로 쌓는다 — 375px 에서도 두 열이 서서 이메일·SMTP 호스트 칸이 140px
+     이었다. 넓은 화면의 최소 폭(130px)을 늘리면 네 칸 줄이 3+1 로 깨져 여기서만 쌓는다. */
+  .adm-field-row { grid-template-columns: minmax(0, 1fr); }
+  /* 메뉴 행은 한 줄씩 쌓고 머리줄을 숨긴다. */
+  .adm-menu-grid { grid-template-columns: minmax(0, 1fr); }
+  .adm-menu-grid--head { display: none; }
 }

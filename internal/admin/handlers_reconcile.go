@@ -42,7 +42,7 @@ func (d *Deps) ReconcileResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
 	id, from, to := r.PostFormValue("payment_id"), r.PostFormValue("from"), r.PostFormValue("to")
@@ -55,7 +55,7 @@ func (d *Deps) ReconcileResolve(w http.ResponseWriter, r *http.Request) {
 	// 요구한다. 조회 권한만으로 주문을 바꾸면 대사가 우회 경로가 된다.
 	if !c.Can("order.update") {
 		d.log(r, c, "payment.reconcile", "payment", id, "PG 결과 반영 거부 — order.update 없음")
-		http.Error(w, "주문 변경 권한이 필요합니다.", http.StatusForbidden)
+		d.refuse(w, r, http.StatusForbidden, "주문 변경 권한이 필요합니다.")
 		return
 	}
 	to2, err := d.Commerce.ResolvePendingPayment(r.Context(), d.pgGateway(), id)
@@ -119,7 +119,9 @@ func (d *Deps) reconcilePage(w http.ResponseWriter, r *http.Request, c Caller,
 		// 3개월 버튼이 없다 — 상한이 31일이다.
 		"Quick": quickLinks("/admin/reconcile", nil, today, false),
 		// 「PG 결과로 반영」은 order.update 가 있을 때만 그린다 (D13).
-		"CanResolve": c.Can("order.update")}
+		"CanResolve": c.Can("order.update"),
+		// 저장값(toss)이 아니라 결제 설정 화면과 같은 이름으로 부른다.
+		"PGNames": pgProviders}
 	if msg != "" {
 		data["Error"] = msg
 	}
@@ -131,7 +133,7 @@ func (d *Deps) reconcilePage(w http.ResponseWriter, r *http.Request, c Caller,
 
 	rows, err := d.Commerce.PaymentsToReconcile(r.Context(), *p.Since, *p.Until)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	// 클로저가 nil 인 경우(배선 전)와 반환값이 nil 인 경우(PG 「사용 안 함」)를
@@ -165,7 +167,7 @@ func (d *Deps) WebhookLog(w http.ResponseWriter, r *http.Request) {
 	page := pageOf(r)
 	p, perr := parsePeriod(q.Get("from"), q.Get("to"), time.Local)
 	data := map[string]any{"From": p.From, "To": p.To,
-		"Quick": quickLinks("/admin/webhooks", nil, time.Now(), true)}
+		"Quick": quickLinks("/admin/webhooks", nil, time.Now(), true), "PGNames": pgProviders}
 	if perr != nil {
 		data["Error"] = perr.Error()
 		d.Render(w, r, "admin/webhooks.html", http.StatusUnprocessableEntity, data)
@@ -176,7 +178,7 @@ func (d *Deps) WebhookLog(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.Commerce.WebhookHistory(r.Context(), p.Since, p.Until,
 		webhookPageSize+1, (page-1)*webhookPageSize)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
 	more := len(rows) > webhookPageSize

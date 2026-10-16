@@ -11,7 +11,9 @@
         <tr>
           <td class="muted adm-nw">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
           <td>{{if .ActorEmail}}{{.ActorEmail}}{{else}}<span class="muted">시스템</span>{{end}}</td>
-          <td><span class="adm-badge">{{.Action}}</span></td>
+          {{/* 동작은 한국어 이름이다. 코드(settings.update …)는 title 로 남긴다 — 이름표에 없는
+               새 동작은 코드 그대로 보인다. */}}
+          <td><span class="adm-badge" title="{{.Action}}">{{with index $.ActionLabels .Action}}{{.}}{{else}}{{.Action}}{{end}}</span></td>
           <td class="muted">{{.TargetType}}{{if .TargetID}} · {{.TargetID}}{{end}}</td>
           <td>{{.Summary}}</td>
           <td class="muted">{{.IP}}</td>
@@ -23,13 +25,13 @@
     </table>
   </div>
   <div class="adm-pagination">
-    <span class="adm-count">{{number .Count}}건 · {{.PageNo}}쪽</span>
+    <span class="adm-count">{{.PageNo}}쪽 · 전체 {{number .Count}}건</span>
     {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
     <span class="adm-page adm-page--current">{{.PageNo}}</span>
     {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}
   </div>
 </div>
 <p class="adm-hint">
-  이 표는 수정·삭제하지 않습니다 (D15 7절). 데이터베이스가 강제합니다.
+  이 기록은 고치거나 지울 수 없습니다. 데이터베이스가 막습니다.
 </p>
 {{end}}

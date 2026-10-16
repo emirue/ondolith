@@ -240,6 +240,24 @@ func (l *Loader) RenderPartial(w io.Writer, name string, data any) error {
 	return t.ExecuteTemplate(w, "body", data)
 }
 
+// BoardSkins lists the board skins the built-in theme carries (A-305): every
+// board/<skin>-list.html. 게시판이 스킨을 고르는 규칙(boardTemplate → HasBuiltin)과
+// 같은 곳을 본다 — 거기서 안 쓰이는 이름을 고르게 하면 고른 것이 아무 일도 하지 않는다.
+// 내장 테마에는 스킨이 없어 지금은 늘 비고, A-305 는 선택칸을 그리지 않는다.
+func (l *Loader) BoardSkins() []string {
+	entries, err := fs.ReadDir(l.builtin, "board")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if name, ok := strings.CutSuffix(e.Name(), "-list.html"); ok && !e.IsDir() {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // HasBuiltin reports whether the built-in theme carries name. A-202 uses this
 // before activating a theme: a name the built-in lacks can never be a fallback,
 // so requesting it is a core bug rather than a theme error.

@@ -78,6 +78,12 @@ type Shipping struct {
 	FreeThreshold int // shipping.free_threshold — 0 이면 항상 유료
 }
 
+// 배송비 정책의 settings 키. A-512 가 쓰고 장바구니·주문서가 요청마다 읽는다.
+const (
+	SettingShippingFlatFee       = "shipping.flat_fee"
+	SettingShippingFreeThreshold = "shipping.free_threshold"
+)
+
 // Fee returns the shipping charge for a given goods subtotal.
 //
 // 경계는 "미만이면 부과" 다 (D50). 기준액과 정확히 같으면 무료 — `>` 로 쓰면
