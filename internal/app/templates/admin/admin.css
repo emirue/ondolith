@@ -336,6 +336,8 @@ a:hover { color: var(--link-hover); }
   font-weight: 700;
   letter-spacing: -.03em;
   margin-top: var(--s12);
+  /* 버전(dev+012f0b846e)처럼 띄어쓰기 없는 값이 카드 밖으로 넘쳤다. */
+  overflow-wrap: anywhere;
 }
 
 /* ---- 표 ----------------------------------------------------------------- */
@@ -448,7 +450,10 @@ a:hover { color: var(--link-hover); }
 .adm-filterbar .adm-btn { height: var(--h-aux); padding: 0 var(--s12); font-size: 13px; }
 
 /* ---- 폼 ----------------------------------------------------------------- */
-.adm-field { display: block; margin-bottom: var(--s16); }
+/* 입력칸을 감싸는 `<label>` 이다 — 아래 맨 `label` 규칙(작고 흐린 라벨 모양)을 되돌린다.
+   되돌리지 않으면 칸 안에 입력된 값까지 흐려져 placeholder 와 구분되지 않았다. 라벨 글자는
+   `> span` 이 흐리게 한다. */
+.adm-field { display: block; margin-bottom: var(--s16); opacity: 1; font-size: inherit; }
 
 .adm-field > span {
   display: block;

@@ -876,3 +876,25 @@ func TestNarrowAdminFormsStackAndPeriodHoldsTogether(t *testing.T) {
 		t.Error("기간 필터의 「조회」가 바로가기 버튼과 같은 모양이다")
 	}
 }
+
+// **관리자 입력칸의 값은 본문 글씨다.** 맨 `label` 규칙(작고 흐린 라벨 모양)이 입력칸을 감싼
+// `<label class="adm-field">` 에도 걸려, 칸 안에 입력된 「온돌 매트」가 opacity .6·12.5px 로
+// placeholder 「(기본)」과 구분되지 않았다. 시스템 정보의 버전 문자열은 카드 밖으로 넘쳤다.
+func TestAdminFieldValuesAreNotFaded(t *testing.T) {
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := regexp.MustCompile(`(?m)^\.adm-field\s*\{([^}]*)\}`).FindSubmatch(css)
+	if field == nil {
+		t.Fatal(".adm-field 규칙이 없다")
+	}
+	for _, want := range []string{"opacity: 1", "font-size: inherit"} {
+		if !strings.Contains(string(field[1]), want) {
+			t.Errorf(".adm-field 가 %s 로 되돌리지 않는다 — label 규칙이 칸 안의 값까지 흐리게 한다", want)
+		}
+	}
+	if !regexp.MustCompile(`(?m)^\.adm-stat-value\s*\{[^}]*overflow-wrap:\s*anywhere`).Match(css) {
+		t.Error(".adm-stat-value 가 긴 값(버전 dev+012f0b846e)을 꺾지 않는다 — 카드 밖으로 넘친다")
+	}
+}
