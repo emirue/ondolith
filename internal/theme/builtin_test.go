@@ -588,6 +588,7 @@ type returnLike struct {
 	ReturnNo, Kind, Status string
 	Reason, RejectReason   string
 	Fault, FeePolicy       string
+	NewOption              string
 	FeeAmount, PriceDiff   int
 	CreatedAt              time.Time
 	Items                  []returnItemLike
@@ -1024,5 +1025,22 @@ func TestExchangeFormWithoutOptionsSaysWhy(t *testing.T) {
 	}
 	if strings.Contains(out, `교환 요청</button>`) {
 		t.Error("옵션 없는 교환 폼에 보내기 버튼이 있다")
+	}
+}
+
+// 교환 건은 무엇으로 바꿔 받는지 보인다 — 구매자가 요청한 것을 다시 확인할 곳이다.
+func TestReturnsPageShowsTheExchangeOption(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("order/returns.html").(map[string]any)
+	rets := data["Returns"].([]returnLike)
+	rets[0].Kind, rets[0].NewOption = "교환", "색상: 흰색"
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/returns.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "색상: 흰색") {
+		t.Error("반품·교환 내역에 교환으로 받을 옵션이 없다")
 	}
 }

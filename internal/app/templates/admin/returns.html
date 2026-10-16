@@ -4,6 +4,7 @@
 <section class="adm-panel">
   <h2>{{.ReturnNo}} · {{.Kind}} · {{.Status}}</h2>
   <ul>{{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}</ul>
+  {{with .NewOption}}<p>교환으로 보낼 옵션: <strong>{{.}}</strong></p>{{end}}
   {{with .Reason}}<p>사유: {{.}}</p>{{end}}
   {{if .Fault}}<p>귀책 {{.Fault}} · 배송비 {{money .FeeAmount}} ({{.FeePolicy}})</p>{{end}}
 

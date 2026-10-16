@@ -169,3 +169,15 @@ func TestAdminOrderScreensShowDeliveryMemo(t *testing.T) {
 		t.Error("송장 입력 화면에 배송 메모가 없다")
 	}
 }
+
+// 운영자는 교환 건마다 무엇을 보내야 하는지 본다. 조합 ID 만 저장돼 있고 화면에
+// 없어서, 교환을 받고도 보낼 물건을 알 수 없었다.
+func TestAdminReturnsShowTheExchangeOption(t *testing.T) {
+	data := map[string]any{"Order": &commerce.OrderDetail{OrderNo: "N1"},
+		"Returns": []commerce.Return{{ReturnNo: "R1", Kind: commerce.KindExchange,
+			Status: commerce.StatusExchangeOpen, NewOption: "색상: 흰색",
+			Items: []commerce.ReturnItem{{ProductName: "베개", OptionLabel: "색상: 회색", Quantity: 1}}}}}
+	if out := renderAdmin(t, "admin/returns.html", data); !strings.Contains(out, "색상: 흰색") {
+		t.Error("반품·교환 처리 화면에 교환으로 보낼 옵션이 없다")
+	}
+}

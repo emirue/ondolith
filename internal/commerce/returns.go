@@ -98,9 +98,12 @@ type Return struct {
 	FeePolicy    string
 	FeeAmount    int
 	NewVariantID string
-	PriceDiff    int
-	CreatedAt    time.Time
-	Items        []ReturnItem
+	// NewOption 은 교환으로 받을 조합의 표기("색상: 흰색")다. 조합 ID 만으로는
+	// 운영자가 보낼 물건을, 구매자가 요청한 것을 화면에서 알 수 없다.
+	NewOption string
+	PriceDiff int
+	CreatedAt time.Time
+	Items     []ReturnItem
 }
 
 // ReturnItem is one line of a return request.
@@ -622,7 +625,11 @@ func (s *Store) Returns(ctx context.Context, orderID string) ([]Return, error) {
 	}
 	var out []Return
 	for _, r := range rows {
-		out = append(out, returnFromRow(commerceq.ReturnByNoRow(r)))
+		ret, err := returnFromRow(commerceq.ReturnByNoRow(r))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ret)
 	}
 
 	if len(out) == 0 {
@@ -649,13 +656,17 @@ func (s *Store) Returns(ctx context.Context, orderID string) ([]Return, error) {
 	return out, nil
 }
 
-// returnFromRow converts the 12-column return read. Returns 의 행도 같은 모양이라
+// returnFromRow converts the 13-column return read. Returns 의 행도 같은 모양이라
 // 구조체 변환으로 여기 온다.
-func returnFromRow(r commerceq.ReturnByNoRow) Return {
+func returnFromRow(r commerceq.ReturnByNoRow) (Return, error) {
+	var opts map[string]string
+	if err := unmarshalOptions(r.NewOptionValues, &opts); err != nil {
+		return Return{}, err
+	}
 	return Return{ID: r.ID, ReturnNo: r.ReturnNo, Kind: ReturnKind(r.Kind), Status: Status(r.Status),
 		Reason: r.Reason, RejectReason: r.RejectReason, Fault: r.Fault, FeePolicy: r.FeePolicy,
-		FeeAmount: int(r.FeeAmount), NewVariantID: r.NewVariantID, PriceDiff: int(r.PriceDifference),
-		CreatedAt: r.CreatedAt}
+		FeeAmount: int(r.FeeAmount), NewVariantID: r.NewVariantID, NewOption: OptionLabel(opts),
+		PriceDiff: int(r.PriceDifference), CreatedAt: r.CreatedAt}, nil
 }
 
 func returnItemFromRow(r commerceq.ReturnItemsRow) ReturnItem {
@@ -684,7 +695,10 @@ func (s *Store) ReturnByNo(ctx context.Context, returnNo string) (*Return, error
 	if err != nil {
 		return nil, err
 	}
-	r := returnFromRow(row)
+	r, err := returnFromRow(row)
+	if err != nil {
+		return nil, err
+	}
 	items, err := s.returnItems(ctx, r.ID)
 	if err != nil {
 		return nil, err

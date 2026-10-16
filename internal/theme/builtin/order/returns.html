@@ -10,6 +10,7 @@
       <ul>
         {{range .Items}}<li>{{.ProductName}} {{.OptionLabel}} × {{.Quantity}}</li>{{end}}
       </ul>
+      {{with .NewOption}}<p>교환으로 받을 옵션: {{.}}</p>{{end}}
       {{with .Reason}}<p class="reason">사유: {{.}}</p>{{end}}
       {{with .RejectReason}}<p class="reason">거부 사유: {{.}}</p>{{end}}
       {{/* 배송비는 수거 확인 시점에 찍힌 스냅샷이다 — A-512 를 나중에 바꿔도
