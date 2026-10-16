@@ -1092,3 +1092,28 @@ func TestProductListNamesStockStateLikeTheDetail(t *testing.T) {
 		t.Errorf("판매 준비 중 %d개·품절 %d개, want 1·1", strings.Count(out, "판매 준비 중"), strings.Count(out, ">품절<"))
 	}
 }
+
+// 영수증은 증빙에 필요한 칸을 갖는다 — 결제수단, 판매자(사업자 정보), 받는 분·연락처
+// 라벨. 주문 상세와 거의 같은 표뿐이라 영수증이라 부르기에 모자랐다.
+func TestReceiptCarriesWhatAReceiptNeeds(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView() // Site.Business = {상호: 온돌}
+	data := payloadFor("order/receipt.html").(map[string]any)
+	data["PayMethod"] = "카드"
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "order/receipt.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	main := out[strings.Index(out, "<h1>주문서·영수증</h1>"):]
+	if i := strings.Index(main, "</section>"); i > 0 {
+		main = main[:i]
+	}
+	for _, want := range []string{"<dt>결제수단</dt><dd>카드</dd>", "<dt>상호</dt><dd>온돌</dd>",
+		"<dt>받는 분</dt>", "<dt>연락처</dt>", "<dt>주문자</dt>"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("영수증 본문에 %q 가 없다", want)
+		}
+	}
+}

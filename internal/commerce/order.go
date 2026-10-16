@@ -401,6 +401,17 @@ func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderD
 	return out, more, nil
 }
 
+// PaymentMethod is the approved order payment's method as the PG reported it
+// (카드·가상계좌·간편결제 …), for the receipt (P-509). 결제가 없으면 빈 값이다.
+// 호출자가 소유권을 이미 판정한 주문의 id 를 넘긴다.
+func (s *Store) PaymentMethod(ctx context.Context, orderID string) (string, error) {
+	m, err := s.q.OrderPaymentMethod(ctx, orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return m, err
+}
+
 // OrderByNoUnscoped reads an order without an ownership predicate.
 //
 // **호출자가 소유권을 이미 판정했을 때만 쓴다.** 지금 그런 곳은 하나뿐이다:

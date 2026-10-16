@@ -23,10 +23,22 @@
     <dt>배송비</dt><dd>{{money .ShippingFee}}</dd>
     {{if .Discount}}<dt>할인</dt><dd>-{{money .Discount}}</dd>{{end}}
     <dt>결제 금액</dt><dd>{{money .Total}}</dd>
+    {{with $.Data.PayMethod}}<dt>결제수단</dt><dd>{{.}}</dd>{{end}}
   </dl>
-  <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
-  {{with .DeliveryMemo}}<p>배송 메모 · {{.}}</p>{{end}}
-  <p>{{.OrdererEmail}} · {{.OrdererPhone}}</p>
+  {{/* 라벨 없이 「받는이 · 010…」만 있던 자리다. */}}
+  <dl class="receipt-info">
+    <dt>받는 분</dt><dd>{{.ReceiverName}}</dd>
+    <dt>연락처</dt><dd>{{.ReceiverPhone}}</dd>
+    <dt>배송지</dt><dd>({{.Postcode}}) {{.Address1}} {{.Address2}}</dd>
+    {{with .DeliveryMemo}}<dt>배송 메모</dt><dd>{{.}}</dd>{{end}}
+    <dt>주문자</dt><dd>{{.OrdererEmail}} · {{.OrdererPhone}}</dd>
+  </dl>
   {{end}}{{end}}
+  {{/* 판매자. 전자상거래 증빙에 들어가는 사업자 정보다 (FR-711) — 인쇄하면 바닥글은
+       빠지므로(@media print) 영수증 안에 따로 둔다. 비어 있으면 절째 없다. */}}
+  {{with .Site.Business}}
+  <h2>판매자</h2>
+  <dl class="receipt-info">{{range $label, $v := .}}<dt>{{$label}}</dt><dd>{{$v}}</dd>{{end}}</dl>
+  {{end}}
 </section>
 {{end}}

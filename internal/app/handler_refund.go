@@ -157,8 +157,14 @@ func (d *shopDeps) orderReceipt(w http.ResponseWriter, r *http.Request) {
 		d.notFound(w, r)
 		return
 	}
+	// 결제수단은 결제사 응답에서 온다. 소유권은 위에서 판정했다.
+	method, err := d.store.PaymentMethod(r.Context(), order.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 	d.renderPage(w, r, "order/receipt.html", http.StatusOK,
-		d.shopView(r, "주문서·영수증", map[string]any{"Order": order}))
+		d.shopView(r, "주문서·영수증", map[string]any{"Order": order, "PayMethod": method}))
 }
 
 // P-510 POST /orders/{orderNo}/confirm — the buyer confirms.
