@@ -647,6 +647,9 @@ func (d *Deps) renderPageEdit(w http.ResponseWriter, r *http.Request, code int, 
 	if kv, err := d.Content.Settings(r.Context(), mapKeyNames...); err == nil {
 		data["Maps"] = kv
 	}
+	if isCreate(r.PathValue("id")) {
+		data["Title"] = "새 페이지"
+	}
 	d.Render(w, r, "admin/page-edit.html", code, data)
 }
 

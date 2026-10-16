@@ -64,6 +64,8 @@ func (d *Deps) BoardForm(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data["Board"] = b
+	} else {
+		data["Title"] = "새 게시판"
 	}
 	d.Render(w, r, "admin/board-edit.html", http.StatusOK, data)
 }
@@ -130,9 +132,11 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Deps) boardFormError(w http.ResponseWriter, r *http.Request, b content.Board, msg string, code int) {
-	d.Render(w, r, "admin/board-edit.html", code, map[string]any{
-		"Board": &b, "Presets": content.Presets(), "Skins": d.skins(), "Error": msg,
-	})
+	data := map[string]any{"Board": &b, "Presets": content.Presets(), "Skins": d.skins(), "Error": msg}
+	if isCreate(r.PathValue("id")) {
+		data["Title"] = "새 게시판"
+	}
+	d.Render(w, r, "admin/board-edit.html", code, data)
 }
 
 func (d *Deps) skins() []string {

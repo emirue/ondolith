@@ -18,7 +18,8 @@ func (d *Deps) ProductForm(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if isCreate(id) {
-		d.renderProduct(w, r, &commerce.Product{Visible: true}, http.StatusOK, "")
+		// 비공개로 시작한다 — 미리 체크해 두면 가격을 넣기 전 저장 한 번에 0원으로 공개된다.
+		d.renderProduct(w, r, &commerce.Product{}, http.StatusOK, "")
 		return
 	}
 	p, err := d.Commerce.ProductByID(r.Context(), id)
@@ -208,6 +209,9 @@ func (d *Deps) renderProduct(w http.ResponseWriter, r *http.Request,
 	}
 	data := map[string]any{"Product": p, "Categories": choices, "New": isCreate(id),
 		"Images": images}
+	if isCreate(id) {
+		data["Title"] = "새 상품"
+	}
 	if msg != "" {
 		data["Error"] = msg
 	}

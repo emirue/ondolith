@@ -522,3 +522,15 @@ func TestUserListScreenSearchAndCount(t *testing.T) {
 		}
 	}
 }
+
+// **상품 폼에는 「취소」가 있고, 기본가는 쉼표로 끊어 읽힌다.** 숫자 칸은 「189000」을 그대로
+// 보여서 자릿수를 세어야 했고, 새 상품 화면에는 돌아갈 버튼이 없었다(페이지·게시판 폼에는 있다).
+func TestProductFormHasCancelAndReadablePrice(t *testing.T) {
+	html := renderAdmin(t, "admin/product-edit.html", map[string]any{
+		"Product": &commerce.Product{ID: "p1", Name: "온돌 매트", BasePrice: 189000}, "New": false})
+	for _, want := range []string{`<a class="adm-btn" href="/admin/products">취소</a>`, "189,000원"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("상품 폼에 %q 가 없다", want)
+		}
+	}
+}
