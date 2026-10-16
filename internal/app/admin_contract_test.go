@@ -921,3 +921,23 @@ func TestPagesDeclareAFavicon(t *testing.T) {
 		t.Error("그려진 관리자 화면에 파비콘이 없다")
 	}
 }
+
+// **선택 상자는 브라우저 기본 모양이 아니다.** iOS Safari 는 select 를 자기 알약 모양으로 더
+// 낮게 그려, 상품 옵션·수량, 정렬 칸이 옆 입력칸과 높이·모서리가 달랐다. 모양을 직접 그리고
+// 화살표는 배경 그림으로 단다.
+func TestSelectsDrawTheirOwnShape(t *testing.T) {
+	adminCSS, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeCSS, err := fs.ReadFile(theme.Builtin(), "static/css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := regexp.MustCompile(`(?m)^select:not\(\[multiple\]\)\s*\{[^}]*-webkit-appearance:\s*none[^}]*appearance:\s*none[^}]*background-image:`)
+	for name, css := range map[string][]byte{"admin/admin.css": adminCSS, "builtin/style.css": themeCSS} {
+		if !rule.Match(css) {
+			t.Errorf("%s: select 가 기본 모양(appearance)을 끄고 화살표를 그리지 않는다", name)
+		}
+	}
+}

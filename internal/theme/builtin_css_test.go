@@ -86,9 +86,10 @@ func classesInStylesheet(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	// **주석을 먼저 걷어낸다.** 주석 속 `style.css` 와 `app.defaultAdminTheme`
-	// 이 `.css`·`.default` 로 읽혀 없는 클래스가 잡혔다.
+	// 이 `.css`·`.default` 로 읽혀 없는 클래스가 잡혔다. `url(…)` 도 같다 — 선택 상자 화살표
+	// 그림의 `www.w3.org` 가 `.w3`·`.org` 로 읽혔다.
 	seen := map[string]bool{}
-	for _, m := range cssClass.FindAllStringSubmatch(stripComments(string(b)), -1) {
+	for _, m := range cssClass.FindAllStringSubmatch(cssURL.ReplaceAllString(stripComments(string(b)), " "), -1) {
 		seen[m[1]] = true
 	}
 	return sortedKeys(seen)
@@ -98,6 +99,8 @@ func classesInStylesheet(t *testing.T) []string {
 var condClass = regexp.MustCompile(`\}\}([a-z][a-z0-9-]*)\{\{`)
 
 var cssComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+
+var cssURL = regexp.MustCompile(`url\("[^"]*"\)`)
 
 func stripComments(css string) string { return cssComment.ReplaceAllString(css, " ") }
 

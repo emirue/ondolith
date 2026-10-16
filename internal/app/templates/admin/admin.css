@@ -481,6 +481,18 @@ textarea {
   max-width: 100%;
 }
 
+/* iOS Safari 는 select 를 자기 알약 모양으로 더 낮게 그려 옆 입력칸과 높이·모서리가 달랐다.
+   기본 모양을 끄고 화살표를 배경 그림으로 단다 — 회색 하나라 밝은·어두운 바탕 모두에서 보인다. */
+select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23888' stroke-width='1.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 8px;
+}
+
 /* 체크박스·라디오는 상자다. 위 높이·여백을 그대로 받으면 빈 사각형이 된다. */
 input[type="checkbox"],
 input[type="radio"] {
