@@ -18,8 +18,9 @@
   {{end}}{{end}}
   <button type="submit">저장</button>
 </form>
-{{/* 소셜 연결 관리(P-111)는 이 줄이 유일한 진입점이다. */}}
-<p><a href="/me/password">비밀번호 변경</a> · <a href="/me/connections">소셜 계정 연결</a>
+{{/* 소셜 연결 관리(P-111)는 이 줄이 유일한 진입점이다. 소셜 로그인이 하나도 켜져 있지 않으면
+     눌러도 「설정하지 않았습니다」뿐이라 그리지 않는다. */}}
+<p><a href="/me/password">비밀번호 변경</a>{{if .Data.SocialEnabled}} · <a href="/me/connections">소셜 계정 연결</a>{{end}}
    · <a href="/me/delete">회원 탈퇴</a></p>
 </div>
 {{end}}

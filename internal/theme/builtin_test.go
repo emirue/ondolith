@@ -1333,3 +1333,39 @@ func TestHomeEyebrowIsKorean(t *testing.T) {
 		}
 	}
 }
+
+// **쓸 수 없는 메뉴는 그리지 않는다.** 로그인한 회원에게도 바닥글에 「비회원 주문 조회」가
+// 나왔고, 소셜 로그인이 설정되지 않아도 내 정보에 「소셜 계정 연결」이 있어 누르면 「관리자가
+// 소셜 로그인을 설정하지 않았습니다.」만 나왔다.
+func TestUnusableMenusAreHidden(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(name string, member bool, data any) string {
+		v := fullView()
+		v.Site.Type = "shop"
+		if !member {
+			v.User = nil
+		}
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	if !strings.Contains(render("home.html", false, payloadFor("home.html")), `href="/orders/guest"`) {
+		t.Error("비회원에게 바닥글의 비회원 주문 조회가 없다")
+	}
+	if strings.Contains(render("home.html", true, payloadFor("home.html")), `href="/orders/guest"`) {
+		t.Error("로그인한 회원에게 비회원 주문 조회가 나온다")
+	}
+	profile := func(social bool) string {
+		return render("account/profile.html", true, map[string]any{"DisplayName": "회원", "Email": "m@example.com",
+			"SocialEnabled": social})
+	}
+	if strings.Contains(profile(false), `href="/me/connections"`) {
+		t.Error("소셜 로그인이 꺼져 있는데 「소셜 계정 연결」이 있다")
+	}
+	if !strings.Contains(profile(true), `href="/me/connections"`) {
+		t.Error("소셜 로그인이 켜져 있는데 「소셜 계정 연결」이 없다")
+	}
+}

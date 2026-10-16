@@ -456,8 +456,19 @@ func TestSignupChecksThePasswordConfirmation(t *testing.T) {
 // 회원 화면의 탭 제목이 운영 트리에서 실제로 그려진다 — publicTitles 표만 있고 renderNamed 가
 // 읽지 않으면 TestAccountScreensHaveTabTitles 는 초록이다.
 func TestAccountTabTitleOnTheLiveSite(t *testing.T) {
-	srv, _ := liveSite(t)
+	srv, pool := liveSite(t)
 	if code, body := mustGet(t, client(), srv.URL+"/login"); code != http.StatusOK || !strings.Contains(body, "<title>로그인 · ") {
 		t.Errorf("GET /login = HTTP %d, 탭 제목에 「로그인」이 없다", code)
+	}
+	// 같은 배선으로 내 정보를 본다: 탭 제목, 그리고 소셜 로그인이 꺼진 사이트에는 「소셜 계정 연결」이 없다.
+	mkUser(t, pool, "m@example.com")
+	member := client()
+	login(t, srv.URL, "m@example.com", member)
+	code, body := mustGet(t, member, srv.URL+"/me")
+	if code != http.StatusOK || !strings.Contains(body, "<title>내 정보 · ") {
+		t.Errorf("GET /me = HTTP %d, 탭 제목에 「내 정보」가 없다", code)
+	}
+	if strings.Contains(body, `href="/me/connections"`) {
+		t.Error("소셜 로그인이 꺼진 사이트의 내 정보에 「소셜 계정 연결」이 있다")
 	}
 }

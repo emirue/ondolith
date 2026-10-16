@@ -33,6 +33,9 @@ type accountDeps struct {
 
 func (d *accountDeps) mailOK() bool { return d.mailReady == nil || d.mailReady() }
 
+// socialEnabled 는 켜진 소셜 로그인이 하나라도 있는지다 — 내 정보의 「소셜 계정 연결」을 그릴지.
+func (d *accountDeps) socialEnabled() bool { return d.social != nil && len(d.social()) > 0 }
+
 // signupForm is the whole of what P-103 accepts.
 //
 // Mass-assignment defence is structural: the struct has three fields, so a
@@ -370,7 +373,7 @@ func (d *accountDeps) profileForm(w http.ResponseWriter, r *http.Request) {
 	}
 	d.render(w, r, "account/profile.html", http.StatusOK, map[string]any{
 		"DisplayName": a.User.DisplayName, "Email": a.User.Email,
-		"Inputs": content.FieldInputs(fields, values),
+		"Inputs": content.FieldInputs(fields, values), "SocialEnabled": d.socialEnabled(),
 	})
 }
 
@@ -441,7 +444,7 @@ func (d *accountDeps) updateProfile(w http.ResponseWriter, r *http.Request) {
 	redraw := func(code int, msg string) {
 		d.render(w, r, "account/profile.html", code, map[string]any{
 			"DisplayName": name, "Email": a.User.Email,
-			"Inputs": content.FieldInputs(fields, prev), "Error": msg,
+			"Inputs": content.FieldInputs(fields, prev), "Error": msg, "SocialEnabled": d.socialEnabled(),
 		})
 	}
 	if name == "" {

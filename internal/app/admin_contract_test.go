@@ -834,8 +834,8 @@ func TestDarkPalettesDeclareColorScheme(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, c := range map[string]struct{ css, block string }{
-		"builtin/style.css 다크 선호":    {string(themeCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root \{`},
-		"admin/admin.css 다크 선호":      {string(adminCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-admin-theme\]\) \{`},
+		"builtin/style.css 다크 선호":  {string(themeCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root \{`},
+		"admin/admin.css 다크 선호":    {string(adminCSS), `@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-admin-theme\]\) \{`},
 		"admin/admin.css 1c 다크 콘솔": {string(adminCSS), `(?m)^:root\[data-admin-theme="1c"\] \{`},
 	} {
 		loc := regexp.MustCompile(c.block).FindStringIndex(c.css)
