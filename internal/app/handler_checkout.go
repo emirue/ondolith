@@ -59,6 +59,18 @@ func (d *shopDeps) checkoutForm(w http.ResponseWriter, r *http.Request) {
 	a := ActorFrom(ctx)
 	form := url.Values{}
 	if a.IsAuthenticated() {
+		// 회원은 지난 주문의 배송지에서 시작한다 — 이메일만 채워 받는 분·주소를 매번
+		// 다시 쓰게 했다.
+		last, err := d.store.LastOrderForm(ctx, a.User.ID)
+		if err != nil {
+			d.serverError(w, r, err)
+			return
+		}
+		for k, v := range map[string]string{"receiver_name": last.ReceiverName, "receiver_phone": last.ReceiverPhone,
+			"postcode": last.Postcode, "address1": last.Address1, "address2": last.Address2,
+			"orderer_phone": last.OrdererPhone} {
+			form.Set(k, v)
+		}
 		form.Set("orderer_email", a.User.Email)
 	}
 	data := map[string]any{

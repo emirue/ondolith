@@ -300,6 +300,36 @@ func (q *Queries) InsertOrderItem(ctx context.Context, arg InsertOrderItemParams
 	return err
 }
 
+const lastOrderAddress = `-- name: LastOrderAddress :one
+SELECT receiver_name, receiver_phone, postcode, address1, address2, orderer_phone
+FROM orders WHERE user_id = $1
+ORDER BY created_at DESC, id LIMIT 1
+`
+
+type LastOrderAddressRow struct {
+	ReceiverName  string
+	ReceiverPhone string
+	Postcode      string
+	Address1      string
+	Address2      string
+	OrdererPhone  string
+}
+
+// 회원 주문서(P-405)의 시작 값 — 지난 주문의 배송지·연락처. 배송 메모는 그 주문의 것이라 뺀다.
+func (q *Queries) LastOrderAddress(ctx context.Context, userID *string) (LastOrderAddressRow, error) {
+	row := q.db.QueryRow(ctx, lastOrderAddress, userID)
+	var i LastOrderAddressRow
+	err := row.Scan(
+		&i.ReceiverName,
+		&i.ReceiverPhone,
+		&i.Postcode,
+		&i.Address1,
+		&i.Address2,
+		&i.OrdererPhone,
+	)
+	return i, err
+}
+
 const lockCartForOrder = `-- name: LockCartForOrder :many
 
 SELECT ci.variant_id, ci.quantity, p.id AS product_id, p.name, v.option_values,

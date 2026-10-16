@@ -137,3 +137,9 @@ WHERE id = sqlc.arg('id') AND status = sqlc.arg('from_status');
 
 -- name: OpenOrders :one
 SELECT count(*) FROM orders WHERE status = ANY(sqlc.arg('open')::text[]);
+
+-- name: LastOrderAddress :one
+-- 회원 주문서(P-405)의 시작 값 — 지난 주문의 배송지·연락처. 배송 메모는 그 주문의 것이라 뺀다.
+SELECT receiver_name, receiver_phone, postcode, address1, address2, orderer_phone
+FROM orders WHERE user_id = $1
+ORDER BY created_at DESC, id LIMIT 1;

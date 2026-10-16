@@ -209,3 +209,32 @@ func TestCheckoutOverTheAmountCapIs422(t *testing.T) {
 		t.Errorf("상한을 넘는 주문 = HTTP %d (이유 포함 %v), want 422", resp.StatusCode, strings.Contains(string(b), "20억"))
 	}
 }
+
+// **회원의 주문서는 지난 주문의 배송지로 채워진다.** 이메일만 채워져 받는 분·연락처·
+// 주소를 매번 다시 써야 했다. 비회원 조회용 안내는 회원에게 보이지 않는다.
+func TestMemberCheckoutStartsFromTheLastAddress(t *testing.T) {
+	srv, pool, variant := shopSite(t)
+	ctx := context.Background()
+	userID := mkUser(t, pool, "again@example.com")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO orders (order_no, user_id, status, receiver_name, receiver_phone, postcode,
+		                    address1, address2, orderer_email, orderer_phone, total_amount)
+		VALUES ('PREV0001', $1, '구매확정', '김온돌', '010-3333-4444', '04524', '서울시 중구 세종대로 110',
+		        '3층', 'again@example.com', '010-5555-6666', 1000)`, userID); err != nil {
+		t.Fatal(err)
+	}
+	c := client()
+	login(t, srv.URL, "again@example.com", c)
+	resp := post(t, c, srv.URL+"/cart/items", url.Values{"variant_id": {variant}, "quantity": {"1"}})
+	resp.Body.Close()
+	_, _, page := getBody(t, c, srv.URL+"/checkout")
+	for _, want := range []string{`value="김온돌"`, `value="010-3333-4444"`, `value="04524"`,
+		`value="서울시 중구 세종대로 110"`, `value="3층"`, `value="010-5555-6666"`, `value="again@example.com"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("회원 주문서에 지난 배송지 %s 가 없다", want)
+		}
+	}
+	if strings.Contains(page, "비회원 주문 조회에 씁니다") {
+		t.Error("회원에게 비회원 조회 안내가 보인다")
+	}
+}

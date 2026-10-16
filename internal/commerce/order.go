@@ -401,6 +401,20 @@ func (s *Store) MyOrders(ctx context.Context, userID string, page int) ([]OrderD
 	return out, more, nil
 }
 
+// LastOrderForm is a member's most recent delivery details, to start P-405 from.
+// 주문이 없으면 빈 폼이다. 배송 메모는 그 주문만의 요청이라 옮기지 않는다.
+func (s *Store) LastOrderForm(ctx context.Context, userID string) (OrderForm, error) {
+	r, err := s.q.LastOrderAddress(ctx, &userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OrderForm{}, nil
+	}
+	if err != nil {
+		return OrderForm{}, err
+	}
+	return OrderForm{ReceiverName: r.ReceiverName, ReceiverPhone: r.ReceiverPhone, Postcode: r.Postcode,
+		Address1: r.Address1, Address2: r.Address2, OrdererPhone: r.OrdererPhone}, nil
+}
+
 // PaymentMethod is the approved order payment's method as the PG reported it
 // (카드·가상계좌·간편결제 …), for the receipt (P-509). 결제가 없으면 빈 값이다.
 // 호출자가 소유권을 이미 판정한 주문의 id 를 넘긴다.
