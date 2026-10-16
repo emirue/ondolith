@@ -501,6 +501,11 @@ func TestRoleAssignTakesAnEmail(t *testing.T) {
 		"email": {"nobody@example.com"}, "role": {"operator"}}); rec.Code != http.StatusNotFound {
 		t.Errorf("없는 이메일 = HTTP %d, want 404", rec.Code)
 	}
+	// 이메일로 찾은 뒤에도 R1(자기 자신에게 부여 금지)이 그대로다.
+	if rec := post(d.RoleAssign, "/admin/users/roles", url.Values{
+		"email": {"me@example.com"}, "role": {"operator"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("자기 이메일로 부여 = HTTP %d, want 403", rec.Code)
+	}
 	rec := post(d.RoleAssign, "/admin/users/roles", url.Values{"email": {" Staff@Example.com "}, "role": {"operator"}})
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/users/"+target {
 		t.Fatalf("이메일로 부여 = HTTP %d → %q", rec.Code, rec.Header().Get("Location"))

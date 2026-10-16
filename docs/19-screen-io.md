@@ -2717,8 +2717,9 @@ P-214 와 같은 입력·응답이다(같은 함수). 다른 것은 권한뿐이
 | **타인 비밀번호 재설정 강제** | POST | **`user.reset_password`** |
 
 > D11 A-402의 주소(`/admin/users/{id}`)는 GET 이고, 동작은 하위 주소의 POST 다(`/admin/users/new`·
-> `…/{id}/deactivate`·`…/{id}/delete`·`…/{id}/reset-password`). DELETE 는 없다. D15 2.2는 `user.delete`의
-> 사용 화면을 A-402로 적는다 → **삭제는 POST 동작으로 수행한다.** 「수정」(표시 이름·재활성화)은 아직
+> `…/{id}/deactivate`·`…/{id}/activate`·`…/{id}/delete`·`…/{id}/reset-password`). DELETE 는 없다. D15 2.2는
+> `user.delete`의 사용 화면을 A-402로 적는다 → **삭제는 POST 동작으로 수행한다.** 비활성화는 그 계정의 기존 세션도
+> 끝낸다(`sessions_valid_from` 을 옮긴다) — 그래야 재활성화가 옛 세션을 되살리지 않는다. 표시 이름 수정은 아직
 > 없다 ([GAP-25](85-gaps.md)).
 
 **거부 조건**

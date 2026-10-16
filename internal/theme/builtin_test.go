@@ -938,3 +938,19 @@ func pagerFixture(base string, cur int) map[string]any {
 		"Capped": base == "/search", "CapTotal": int64(10000),
 	}
 }
+
+// 메일을 보낼 수 없는 사이트의 재설정 화면은 이유를 말하고 폼을 그리지 않는다.
+func TestResetRequestWithoutMailShowsNoForm(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	v.User = nil
+	v.Data = map[string]any{"NoMail": true, "Error": "이 사이트는 아직 메일을 보낼 수 없어"}
+	var b bytes.Buffer
+	if err := l.Render(&b, "auth/password-reset-request.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "이 사이트는 아직 메일을 보낼 수 없어") || strings.Contains(out, `action="/password/reset"`) {
+		t.Error("메일 미설정 재설정 화면이 이유를 말하지 않거나 폼을 그린다")
+	}
+}

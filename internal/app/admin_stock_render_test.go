@@ -189,3 +189,21 @@ func TestRolesScreenOffersChoices(t *testing.T) {
 		t.Error("사용자 상세에서 역할을 줄 수 없다")
 	}
 }
+
+// 역할·권한 선택은 「선택하세요」로 시작한다 — 첫 항목이 기본값이면 아무것도 고르지 않은
+// 「부여」가 anonymous(모든 방문자)에게 admin.access 를 주는 조합이 됐다. 부여할 수 없는
+// 역할(anonymous·member)은 역할 부여 목록에 없다.
+func TestRoleFormsStartUnselected(t *testing.T) {
+	roles := []auth.Role{{Key: "anonymous"}, {Key: "editor", Assignable: true}, {Key: "member"}}
+	out := renderAdmin(t, "admin/roles.html", map[string]any{"Roles": roles,
+		"Permissions": []string{"admin.access"}, "Boards": nil, "NeedsReauth": false, "Error": ""})
+	if n := strings.Count(out, `required><option value="">선택하세요</option>`); n != 3 {
+		t.Errorf("「선택하세요」로 시작하는 선택칸 %d개, want 3 (역할·권한·부여할 역할)", n)
+	}
+	detail := renderAdmin(t, "admin/user-detail.html", map[string]any{
+		"User": &auth.User{ID: "u1", IsActive: true}, "Roles": roles})
+	if strings.Contains(detail, `<option value="member">`) || strings.Contains(detail, `<option value="anonymous">`) ||
+		!strings.Contains(detail, `<option value="editor">`) {
+		t.Error("사용자 상세의 역할 목록이 부여할 수 없는 역할을 보이거나 부여할 역할을 빠뜨린다")
+	}
+}

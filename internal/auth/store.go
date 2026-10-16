@@ -349,7 +349,8 @@ func (s *Store) Roles(ctx context.Context) ([]Role, error) {
 	}
 	var out []Role
 	for _, r := range rows {
-		out = append(out, Role{Key: r.Key, Superuser: r.IsSuperuser, Permissions: r.Permissions})
+		out = append(out, Role{Key: r.Key, Superuser: r.IsSuperuser, Permissions: r.Permissions,
+			Assignable: r.IsAssignable})
 	}
 	return out, nil
 }

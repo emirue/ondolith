@@ -100,9 +100,11 @@ func (q *Queries) DBNow(ctx context.Context) (time.Time, error) {
 }
 
 const deactivateUser = `-- name: DeactivateUser :exec
-UPDATE users SET is_active = false, updated_at = now() WHERE id = $1
+UPDATE users SET is_active = false, sessions_valid_from = now(), updated_at = now() WHERE id = $1
 `
 
+// 세션 기준 시각도 옮긴다 — 그대로 두면 비활성 동안 쓰이지 않은 세션이 재활성화와 함께
+// 다시 통한다(미들웨어는 다음 요청에서야 비활성 세션을 지운다).
 func (q *Queries) DeactivateUser(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deactivateUser, id)
 	return err
@@ -396,20 +398,21 @@ func (q *Queries) RoleByKey(ctx context.Context, key string) (RoleByKeyRow, erro
 }
 
 const roles = `-- name: Roles :many
-SELECT r.key, r.name, r.is_superuser,
+SELECT r.key, r.name, r.is_superuser, r.is_assignable,
        coalesce(array_agg(DISTINCT p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions
 FROM roles r
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
-GROUP BY r.id, r.key, r.name, r.is_superuser
+GROUP BY r.id, r.key, r.name, r.is_superuser, r.is_assignable
 ORDER BY r.key
 `
 
 type RolesRow struct {
-	Key         string
-	Name        string
-	IsSuperuser bool
-	Permissions []string
+	Key          string
+	Name         string
+	IsSuperuser  bool
+	IsAssignable bool
+	Permissions  []string
 }
 
 // DISTINCT: 게시판 범위 권한은 게시판마다 한 행이라, 없으면 같은 키가 게시판 수만큼
@@ -427,6 +430,7 @@ func (q *Queries) Roles(ctx context.Context) ([]RolesRow, error) {
 			&i.Key,
 			&i.Name,
 			&i.IsSuperuser,
+			&i.IsAssignable,
 			&i.Permissions,
 		); err != nil {
 			return nil, err

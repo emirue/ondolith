@@ -859,11 +859,11 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u, "Roles": roles})
 }
 
-// guardAccountOp is the shared front door for the destructive A-402 actions —
-// deactivate, delete and forced password reset.
+// guardAccountOp is the shared front door for the A-402 account actions —
+// deactivate, reactivate, delete and forced password reset.
 //
-// All three are the last step of an account takeover, so D19 puts the same
-// three refusals on each: re-authentication (D15 5.3-1), R6 (only a superuser
+// Each is a step of an account takeover (reactivation opens an account someone
+// locked), so D19 puts the same three refusals on each: re-authentication (D15 5.3-1), R6 (only a superuser
 // may operate on a superuser holder), and no self-targeting. Writing them once
 // is what keeps a later fourth action from getting two of the three.
 func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, target string) bool {
@@ -909,6 +909,8 @@ func (d *Deps) UserDeactivate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	// D15 7절·D19 A-402: 사용자 생성·비활성·삭제·재설정은 작업 로그에 남긴다.
+	d.log(r, c, "user.update", "user", target, "사용자 비활성화")
 	// 상세로 돌아간다 — 바뀐 상태가 거기 보인다. 목록으로 보내면 무엇이 됐는지 모른다.
 	http.Redirect(w, r, "/admin/users/"+target, http.StatusSeeOther)
 }
@@ -930,6 +932,7 @@ func (d *Deps) UserActivate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	d.log(r, c, "user.update", "user", target, "사용자 활성화")
 	http.Redirect(w, r, "/admin/users/"+target, http.StatusSeeOther)
 }
 
@@ -957,6 +960,7 @@ func (d *Deps) UserDelete(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 	default:
+		d.log(r, c, "user.delete", "user", target, "사용자 삭제")
 		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 	}
 }
@@ -999,12 +1003,16 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	if d.SendReset != nil {
 		d.SendReset(u.Email, raw)
 	}
+	// 토큰·링크는 넣지 않는다 (D15 7절 「절대 기록하지 않음」). 「비밀번호」가 든 요약은
+	// 작업 로그가 자격증명으로 보고 가리므로(content.Redacted) 낱말을 피한다.
+	d.log(r, c, "user.reset_password", "user", target, "재설정 강제 (세션 종료·재설정 메일 발송)")
 	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 
 // UserCreate needs user.create, which is again its own permission (D19).
 func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "user.create"); !ok {
+	c, ok := d.require(w, r, "user.create")
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -1053,6 +1061,7 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
+	d.log(r, c, "user.create", "user", id, "사용자 생성: "+email)
 	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 

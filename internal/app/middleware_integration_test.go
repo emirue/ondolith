@@ -151,6 +151,32 @@ func TestDeactivatedAccountLosesSession(t *testing.T) {
 	}
 }
 
+// **비활성화했다가 다시 살려도 그 전의 세션은 죽은 채다** (A-402). 비활성화가 is_active
+// 만 바꾸고 세션 기준 시각은 그대로 두면, 비활성 동안 쓰이지 않은 세션(탈취된 쿠키 등)이
+// 재활성화와 함께 다시 통한다 — 미들웨어는 다음 요청에서야 비활성 세션을 지운다.
+func TestReactivationDoesNotReviveOldSessions(t *testing.T) {
+	store, _, sm := authFixture(t)
+	ctx := context.Background()
+	id, err := store.CreateUser(ctx, "back@example.com", "h", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := loginStamp(t, store)
+	if err := store.SetActive(ctx, id, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetActive(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := runWithSession(t, sm, store, func(c context.Context) {
+		sm.Put(c, sessUserID, id)
+		stampAuthAt(sm, c, opened)
+	})
+	if a.IsAuthenticated() {
+		t.Error("비활성화 전의 세션이 재활성화 뒤에 다시 통한다")
+	}
+}
+
 // D15 5.4: this is what makes "log out everywhere" and a password change
 // actually end the other sessions. Checked on every request, because that is
 // the only moment we can reach them.

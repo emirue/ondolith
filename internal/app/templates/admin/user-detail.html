@@ -36,7 +36,7 @@
     <form method="post" action="/admin/users/roles">
       <input type="hidden" name="user_id" value="{{.ID}}">
       <label class="adm-field"><span>역할 부여</span>
-        <select name="role" required>{{range $.Roles}}<option value="{{.Key}}">{{.Key}}</option>{{end}}</select></label>
+        <select name="role" required><option value="">선택하세요</option>{{range $.Roles}}{{if .Assignable}}<option value="{{.Key}}">{{.Key}}</option>{{end}}{{end}}</select></label>
       {{template "reauth-field" .}}
       <button class="adm-btn">역할 부여</button>
     </form>

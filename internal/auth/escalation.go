@@ -42,6 +42,9 @@ type Role struct {
 	Superuser bool
 	// Permissions the role holds, as permission keys. Used by R2.
 	Permissions []string
+	// Assignable is roles.is_assignable — anonymous·member 는 모두가 이미 갖고 있어 사람에게
+	// 부여하지 않는다. A-405 의 선택 목록이 이것으로 거른다(부여해도 0행이라 성공처럼 보였다).
+	Assignable bool
 }
 
 // CanAssignRole applies R1, R2 and R3 to "give target this role" and to
@@ -80,8 +83,8 @@ func CanAddPermissionToRole(actor Actor, role Role, permission string) error {
 	return nil
 }
 
-// CanOperateOnAccount applies R6: deactivating, deleting or force-resetting the
-// password of a superuser holder. Without it R3 is theatre — the role survives
+// CanOperateOnAccount applies R6: deactivating, reactivating, deleting or
+// force-resetting the password of a superuser holder. Without it R3 is theatre — the role survives
 // while its holder is switched off, which reaches the same end by another road.
 func CanOperateOnAccount(actor Actor, targetHoldsSuperuser bool) error {
 	if targetHoldsSuperuser && !actor.Perms.isSuperuser() {
