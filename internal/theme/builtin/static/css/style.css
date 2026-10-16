@@ -77,7 +77,10 @@ a:hover { color: var(--link-hover); }
   color: inherit;
 }
 
-.site-menu ul { display: flex; gap: 16px; list-style: none; margin: 0; padding: 0; }
+/* 메뉴가 많거나 이름이 길면 **항목 단위로** 다음 줄로 간다. 줄바꿈을 막지 않으면 좁은
+   화면에서 항목 안의 글자가 「고객/센터」「자유게/시판」처럼 갈라졌다(375px 실측). */
+.site-menu ul { display: flex; flex-wrap: wrap; gap: 6px 16px; list-style: none; margin: 0; padding: 0; }
+.site-menu li { white-space: nowrap; }
 .site-menu ul ul { margin-left: 12px; }
 .site-menu a { color: inherit; text-decoration: none; opacity: .8; font-size: 14px; }
 .site-menu a:hover { opacity: 1; }
@@ -94,6 +97,12 @@ a:hover { color: var(--link-hover); }
 }
 
 .account-nav a { color: inherit; text-decoration: none; opacity: .8; white-space: nowrap; }
+/* 로그아웃은 폼 버튼이지만 옆 링크와 같은 모양이다 — 혼자 테두리 버튼이라 튀었다. */
+.account-nav button {
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  opacity: .8; cursor: pointer; white-space: nowrap;
+}
+.account-nav button:hover { opacity: 1; }
 .account-nav a:hover { opacity: 1; }
 .inline { display: inline; }
 
@@ -928,7 +937,9 @@ a:focus-visible {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex: 1 1 200px;
+  /* 기준 폭이 작아야 머리글이 꽉 찰 때 검색칸이 먼저 줄어든다 — 200px 이면 계정 링크가
+     둘째 줄로 내려갔다(1280px 회원 실측, 머리글 146px). */
+  flex: 1 1 140px;
   min-width: 0;
   max-width: 320px;
 }
@@ -1091,6 +1102,7 @@ address + p { font-size: 14px; margin-top: 6px; }
      좁은 화면에서 옆 링크를 같이 누르게 된다. 문장 속 링크는 대상이 아니다 —
      줄 높이를 따라야 글이 읽힌다. */
   .account-nav a,
+  .account-nav button,
   .site-menu a,
   .card-list h2 a,
   .foot-links a,
@@ -1102,6 +1114,12 @@ address + p { font-size: 14px; margin-top: 6px; }
   main { padding: 20px var(--pad) 48px; }
   .site-header { gap: 14px; }
   .account-nav { width: 100%; margin-left: 0; }
+  /* 검색칸은 한 줄을 다 쓴다 — 오른쪽이 비어 있었다. */
+  .site-search { flex-basis: 100%; max-width: none; }
+  .site-search input { flex: 1; }
+  /* 홈 히어로의 버튼은 머리글 메뉴와 같다. 휴대폰에서는 첫 화면 절반을 메뉴가 두 번
+     차지해서 숨긴다 — 머리글 메뉴가 그대로 있다. */
+  .hero-cta { display: none; }
 
   /* 폼은 좁은 화면에서 폭 제한을 푼다. `max-width: 24rem` 이 그대로 남으면
      화면 한쪽에 몰려 나머지가 빈 채로 남는다. */

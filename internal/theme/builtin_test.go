@@ -978,3 +978,21 @@ func TestMultiselectKeepsStoredChoices(t *testing.T) {
 		t.Error("여러 개 선택의 저장값이 되살아나지 않았다")
 	}
 }
+
+// 로그인한 머리글에 내 정보로 가는 링크는 이름 하나다 — 「내 정보」를 따로 두었더니
+// 같은 곳으로 두 번 가는 링크가 생겼고, 1280px 에서도 계정 링크가 둘째 줄로 밀렸다.
+func TestHeaderLinksToProfileOnce(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	var b bytes.Buffer
+	if err := l.Render(&b, "page.html", v); err != nil {
+		t.Fatal(err)
+	}
+	header := b.String()
+	if i := strings.Index(header, "</header>"); i > 0 {
+		header = header[:i]
+	}
+	if n := strings.Count(header, `href="/me"`); n != 1 {
+		t.Errorf("머리글의 내 정보 링크 %d개, want 1", n)
+	}
+}

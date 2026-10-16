@@ -19,7 +19,8 @@
            「관리자」인 계정에서 그것이 「눌리지 않는 관리자 버튼」으로 읽혔다. */}}
       <a class="who" href="/me" title="내 정보">{{.User.DisplayName}}</a>
       {{if eq .Site.Type "shop"}}<a href="/orders">주문 내역</a>{{end}}
-      <a href="/me">내 정보</a>
+      {{/* 「내 정보」를 따로 두지 않는다 — 이름이 같은 곳으로 가고, 둘을 두면 1280px 에서도
+           계정 링크가 둘째 줄로 밀렸다. */}}
       {{/* 관리자에게만 보인다. **판정은 서버가 하고 여기서는 그 결과만 읽는다** —
            트리 관문(admin.access)이 실제 방어이고 이 링크는 안내다. */}}
       {{if index .Can "admin.access"}}<a href="/admin/">관리자 화면</a>{{end}}
