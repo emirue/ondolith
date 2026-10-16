@@ -94,6 +94,13 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"Error": "비밀번호는 10자 이상이어야 합니다.", "Form": f})
 		return
 	}
+	// 확인 칸은 화면이 늘 싣는다. 싣지 않는 요청(옛 폼·스크립트)은 예전과 같다 — 오타 난
+	// 비밀번호로 생긴 계정은 재설정 메일로만 열린다.
+	if r.PostForm.Has("password_confirm") && r.PostFormValue("password_confirm") != f.Password {
+		d.render(w, r, "auth/signup.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": "비밀번호와 비밀번호 확인이 서로 다릅니다.", "Form": f})
+		return
+	}
 
 	// 해시보다 먼저 본다 — 봇의 제출마다 비밀번호 해시(CPU)를 치르지 않는다.
 	if code, msg := d.spam.check(r); code != 0 {

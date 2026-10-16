@@ -219,6 +219,7 @@
 |---|---|:---:|---|---|
 | `email` | text | ✔ | 형식·최대 254자 | 소문자화 후 저장 |
 | `password` | password | ✔ | **10자 이상** (NFR-208), 최대 72바이트 | bcrypt. 그 이상의 복잡도 규칙은 두지 않는다 ([D60](60-security.md)) |
+| `password_confirm` | password | 화면 ✔ | `password` 와 같아야 한다. **실려 올 때만** 대조한다(옛 폼·스크립트 호환) | 다르면 422 「비밀번호와 비밀번호 확인이 서로 다릅니다」. 거절 화면은 이메일·표시 이름을 되살린다(비밀번호는 아니다) |
 | `password_confirm` | password | ✔ | `password`와 일치 | |
 | `display_name` | text | ✔ | 공백만으로 구성 불가, **100자 이하** | [D30](30-data-model.md) 3-2 |
 

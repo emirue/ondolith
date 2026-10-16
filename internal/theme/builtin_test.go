@@ -954,3 +954,27 @@ func TestResetRequestWithoutMailShowsNoForm(t *testing.T) {
 		t.Error("메일 미설정 재설정 화면이 이유를 말하지 않거나 폼을 그린다")
 	}
 }
+
+// 가입이 거절돼도 쓴 이메일·표시 이름이 남는다(비밀번호는 아니다). 핸들러는 Form 을 넘기는데
+// 템플릿이 쓰지 않아 칸이 비었다. 비밀번호 확인 칸과 로그인 링크가 있다.
+func TestSignupKeepsWhatWasTyped(t *testing.T) {
+	type formLike struct{ Email, Password, DisplayName string }
+	l := newBuiltinLoader()
+	v := fullView()
+	v.User = nil
+	v.Data = map[string]any{"Error": "이메일 형식이 올바르지 않습니다.",
+		"Form": formLike{Email: "a@example", Password: "secret-pass-1", DisplayName: "온돌"}}
+	var b bytes.Buffer
+	if err := l.Render(&b, "auth/signup.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{`value="a@example"`, `value="온돌"`, `name="password_confirm"`, `href="/login"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("가입 화면에 %q 가 없다", want)
+		}
+	}
+	if strings.Contains(out, "secret-pass-1") {
+		t.Error("가입 화면이 비밀번호를 되살렸다")
+	}
+}

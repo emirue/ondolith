@@ -433,3 +433,22 @@ func TestUnverifiedAccountCannotLogInWhenVerificationIsRequired(t *testing.T) {
 		t.Error("인증을 끈 사이트에서 미인증 계정이 로그인되지 않는다")
 	}
 }
+
+// 비밀번호 확인 칸이 있으면 서버도 대조한다 — 오타 난 비밀번호로 계정이 생기면 그 계정은
+// 재설정 메일로만 열린다. 칸을 싣지 않는 요청(옛 폼·스크립트)은 예전과 같다.
+func TestSignupChecksThePasswordConfirmation(t *testing.T) {
+	_, h, store, _ := accountFixture(t, false)
+	rec := postForm(h, "/signup", url.Values{"email": {"typo@example.com"},
+		"password": {"correct horse battery"}, "password_confirm": {"correct horse batterz"}}, nil)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "서로 다릅니다") {
+		t.Errorf("확인 불일치 = HTTP %d %q, want 422", rec.Code, rec.Body.String())
+	}
+	if _, _, err := store.FindActiveUserByEmail(context.Background(), "typo@example.com"); err == nil {
+		t.Error("확인이 다른데 계정이 생겼다")
+	}
+	rec = postForm(h, "/signup", url.Values{"email": {"same@example.com"},
+		"password": {"correct horse battery"}, "password_confirm": {"correct horse battery"}}, nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("확인 일치 = HTTP %d, want 200", rec.Code)
+	}
+}
