@@ -6,6 +6,8 @@
      — Capped 는 검색이 CapTotal 에서 세기를 멈췄다는 뜻(「10,000건 이상」)
      — 빈 주소는 그 링크가 없다는 뜻. 앞 판의 {Base, Query, PageNo, PrevPage, NextPage,
      HasPrev, HasNext} 도 그대로 들어온다 (이 조각을 덮어쓴 테마를 위해). */}}
+{{/* 0건이면 옮겨 갈 쪽이 없다 — 「전체 0건」과 쪽 번호 「1」만 남았다. */}}
+{{if or .Total .Capped}}
 <nav class="pager" aria-label="페이지">
   <span class="meta">전체 {{if .Capped}}{{number .CapTotal}}건 이상{{else}}{{number .Total}}건{{end}}</span>
   {{with .FirstURL}}<a class="btn btn--sm" href="{{.}}">처음</a>{{end}}
@@ -15,3 +17,4 @@
   {{with .NextURL}}<a class="btn btn--sm" href="{{.}}">다음</a>{{end}}
   {{with .LastURL}}<a class="btn btn--sm" href="{{.}}">마지막</a>{{end}}
 </nav>
+{{end}}

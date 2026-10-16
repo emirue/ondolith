@@ -26,7 +26,7 @@
       <span class="meta">{{date .CreatedAt "2006-01-02"}}</span>
     </li>
     {{else}}
-    <li class="empty">글이 없습니다.</li>
+    <li class="empty">{{if .Query.Search}}「{{.Query.Search}}」에 맞는 글이 없습니다. <a href="/board/{{.Board.Slug}}">검색 해제</a>{{else}}글이 없습니다.{{end}}</li>
     {{end}}
   </ul>
   {{else}}
@@ -58,7 +58,7 @@
         <td class="meta">{{number .ViewCount}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="9" class="empty">글이 없습니다.</td></tr>
+      <tr><td colspan="9" class="empty">{{if .Query.Search}}「{{.Query.Search}}」에 맞는 글이 없습니다. <a href="/board/{{.Board.Slug}}">검색 해제</a>{{else}}글이 없습니다.{{end}}</td></tr>
     {{end}}
     </tbody>
   </table>

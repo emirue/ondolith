@@ -1268,3 +1268,51 @@ func TestSearchFocusesOnlyWithoutQuery(t *testing.T) {
 		t.Error("빈 검색 화면에 autofocus 가 없다 — 칸을 한 번 더 눌러야 한다")
 	}
 }
+
+// **검색 0건은 빈 게시판과 다르게 말한다.**
+//
+// 게시판 안 검색 0건이 빈 게시판과 같은 「글이 없습니다.」였고 검색어도 해제 링크도 없었다.
+// 통합 검색 0건은 「0건」과 「전체 0건」이 두 번, 쪽 번호 「1」까지 나왔다 — 0건이면 쪽
+// 이동이 없다.
+func TestEmptySearchSaysWhatWasSearched(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(name string, edit func(map[string]any)) string {
+		v := fullView()
+		data := payloadFor(name).(map[string]any)
+		edit(data)
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	zero := func(p map[string]any) map[string]any {
+		p["Total"], p["Capped"], p["Pages"] = int64(0), false, nil
+		p["FirstURL"], p["PrevURL"], p["NextURL"], p["LastURL"] = "", "", "", ""
+		return p
+	}
+
+	board := render("board/list.html", func(d map[string]any) {
+		d["Posts"], d["Total"] = nil, int64(0)
+		d["Query"] = struct{ Search string }{Search: "없는말"}
+		d["Pager"] = zero(pagerFixture("/board/free", 1))
+	})
+	for _, want := range []string{"「없는말」", `href="/board/free">검색 해제`} {
+		if !strings.Contains(board, want) {
+			t.Errorf("게시판 검색 0건에 %q 가 없다", want)
+		}
+	}
+
+	search := render("search.html", func(d map[string]any) {
+		d["Results"], d["Total"] = nil, int64(0)
+		d["Query"] = struct{ Search string }{Search: "없는말"}
+		d["Pager"] = zero(pagerFixture("/search", 1))
+	})
+	if !strings.Contains(search, "「없는말」") {
+		t.Error("통합 검색 0건이 무엇을 찾았는지 말하지 않는다")
+	}
+	if strings.Contains(search, "전체 0건") || strings.Contains(search, `class="pager"`) {
+		t.Error("통합 검색 0건에 쪽 이동(전체 0건·1)이 그려진다")
+	}
+}

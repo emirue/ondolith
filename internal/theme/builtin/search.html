@@ -19,7 +19,7 @@
           <p class="excerpt">{{truncate .Body 120}}</p>
         </li>
       {{else}}
-        <li class="empty">결과가 없습니다.</li>
+        <li class="empty">「{{.Query.Search}}」에 맞는 글이 없습니다.</li>
       {{end}}
     </ul>
     {{template "partials/pagination.html" .Pager}}
