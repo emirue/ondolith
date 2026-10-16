@@ -21,7 +21,7 @@
     <input type="number" name="sort_order" step="1" value="{{.Sort}}" aria-label="순서">
     <span class="adm-actions">
       <button class="adm-btn adm-btn--sm">수정</button>
-      <button class="adm-btn adm-btn--sm adm-btn--danger" form="menu-del-{{.ID}}">삭제</button>
+      <button onclick="return confirm('이 메뉴를 삭제할까요?')" class="adm-btn adm-btn--sm adm-btn--danger" form="menu-del-{{.ID}}">삭제</button>
     </span>
   </form>
   {{else}}

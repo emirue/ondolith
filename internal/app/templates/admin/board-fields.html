@@ -13,7 +13,7 @@
           <td>
             <form method="post" action="/admin/boards/{{$b.ID}}/fields">
               <input type="hidden" name="delete" value="{{.Key}}">
-              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+              <button onclick="return confirm('이 필드를 삭제할까요? 글에 저장된 그 값은 화면에서 사라집니다.')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
             </form>
           </td>
         </tr>

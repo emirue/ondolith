@@ -14,7 +14,7 @@
           <td>
             <form method="post" action="/admin/user-fields">
               <input type="hidden" name="delete" value="{{.Key}}">
-              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+              <button onclick="return confirm('이 회원 항목을 삭제할까요?')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
             </form>
           </td>
         </tr>

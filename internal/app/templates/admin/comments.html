@@ -19,7 +19,7 @@
             <form method="post" action="/admin/comments">
               <input type="hidden" name="comment_id" value="{{.ID}}">
               <input type="hidden" name="page" value="{{$.PageNo}}">
-              <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+              <button onclick="return confirm('이 댓글을 삭제할까요? 되돌릴 수 없습니다.')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
             </form>
             {{end}}
           </td>

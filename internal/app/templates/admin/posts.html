@@ -36,7 +36,7 @@
                 <input type="hidden" name="post_id" value="{{.ID}}">
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="page" value="{{$.PageNo}}">
-                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+                <button onclick="return confirm('이 글을 삭제할까요? 댓글·첨부도 함께 지워지고 되돌릴 수 없습니다.')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
               </form>
             </div>
           </td>

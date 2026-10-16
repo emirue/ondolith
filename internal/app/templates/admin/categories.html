@@ -17,7 +17,7 @@
           <td>
             <span class="adm-actions">
               <form method="post" action="/admin/categories/{{.ID}}/delete">
-                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+                <button onclick="return confirm('이 카테고리를 삭제할까요?')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
               </form>
             </span>
           </td>

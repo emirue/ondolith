@@ -26,7 +26,7 @@
                 <button class="adm-btn adm-btn--sm">{{if eq .Status "published"}}발행 취소{{else}}발행{{end}}</button>
               </form>
               <form method="post" action="/admin/pages/{{.ID}}/delete">
-                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+                <button onclick="return confirm('이 페이지를 삭제할까요? 되돌릴 수 없습니다.')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
               </form>
             </div>
           </td>

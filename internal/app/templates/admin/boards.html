@@ -29,7 +29,7 @@
                    실었더니 한 번 누르면 글·댓글·첨부가 통째로 사라졌다. */}}
               <form method="post" action="/admin/boards/{{.ID}}/delete">
                 {{template "reauth-field" .}}
-                <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+                <button onclick="return confirm('이 게시판을 삭제할까요? 되돌릴 수 없습니다.')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
               </form>
             </div>
           </td>

@@ -2,6 +2,8 @@ package app
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -238,5 +240,33 @@ func TestPostRowsOfferOnlyTheirActions(t *testing.T) {
 	}
 	if !strings.Contains(out, `href="/board/free/p1"`) {
 		t.Error("제목이 글로 가는 링크가 아니다")
+	}
+}
+
+// **관리자 화면의 삭제는 한 번 더 묻는다.** 공개 화면은 글·댓글·장바구니 빼기에 확인창이
+// 있는데 관리자 삭제 버튼 12개(게시판·페이지·카테고리·메뉴·댓글·첨부·상품·이미지·회원·
+// 필드…)는 없었다 — 더 위험한 쪽이 더 쉽게 지워졌다. 「삭제」 위험 버튼마다 confirm 이 있다.
+func TestAdminDeleteButtonsAsk(t *testing.T) {
+	files, err := filepath.Glob("templates/admin/*.html")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("관리자 템플릿을 찾지 못했다: %v", err)
+	}
+	n := 0
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			if strings.Contains(line, "adm-btn--danger") && strings.Contains(line, "삭제</button>") {
+				n++
+				if !strings.Contains(line, `onclick="return confirm(`) {
+					t.Errorf("%s:%d 삭제 버튼에 확인창이 없다", f, i+1)
+				}
+			}
+		}
+	}
+	if n < 12 {
+		t.Errorf("삭제 버튼 %d개 — 검사가 버튼을 다 찾지 못했다", n)
 	}
 }

@@ -67,7 +67,7 @@
       <li>
         <img src="/shop/images/{{.ID}}" alt="{{$.Product.Name}}" width="96" height="96" loading="lazy">
         <form method="post" action="/admin/product-images/{{.ID}}/delete">
-          <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
+          <button onclick="return confirm('이 이미지를 삭제할까요?')" class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
         </form>
       </li>
       {{else}}
@@ -89,7 +89,7 @@
        둘이 되면 조회에서 한쪽을 빠뜨리는 순간 지운 상품이 되살아난다. */}}
   <form method="post" action="/admin/products/{{.Product.ID}}/delete" class="adm-actions">
     {{template "reauth-field" .}}
-    <button class="adm-btn adm-btn--danger">삭제</button>
+    <button onclick="return confirm('이 상품을 삭제할까요? 주문 기록이 있으면 숨기세요.')" class="adm-btn adm-btn--danger">삭제</button>
   </form>
 </div>
 {{end}}
