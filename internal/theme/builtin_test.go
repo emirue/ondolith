@@ -1052,3 +1052,22 @@ func TestReturnsPageShowsTheExchangeOption(t *testing.T) {
 		t.Error("반품·교환 내역에 교환으로 받을 옵션이 없다")
 	}
 }
+
+// 상품 설명의 줄바꿈이 살아 있다 — 관리자는 여러 줄 칸에 쓰는데 상품 화면이 그대로
+// 찍어 한 문단으로 붙었다(게시판 본문·댓글·페이지는 줄바꿈을 살린다).
+func TestProductDescriptionKeepsLineBreaks(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/product.html").(map[string]any)
+	p := data["Product"].(productLike)
+	p.Description = "첫 줄\n둘째 줄"
+	data["Product"] = p
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/product.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "첫 줄<br>둘째 줄") {
+		t.Error("상품 설명의 줄바꿈이 사라졌다")
+	}
+}

@@ -15,7 +15,7 @@
   {{with .Product}}
   <h1>{{.Name}}</h1>
   <p class="price">{{money .BasePrice}}</p>
-  <div class="page-body">{{.Description}}</div>
+  <div class="page-body">{{nl2br .Description}}</div>
   {{end}}
   {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
 
