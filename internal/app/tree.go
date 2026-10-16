@@ -166,6 +166,9 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "settings.update", Handler: ad.MailSettingsForm})
 	r.Add(Route{Screen: "A-205", Method: "POST", Pattern: "/admin/settings/mail", Class: SC5,
 		Permission: "settings.update", Handler: ad.MailSettingsSave})
+	// 시험 발송 (D13·D19 A-205). 같은 화면의 둘째 동작이라 화면 ID 가 같다.
+	r.Add(Route{Screen: "A-205", Method: "POST", Pattern: "/admin/settings/mail/test", Class: SC5,
+		Permission: "settings.update", Handler: ad.MailTest})
 	// A-206 소셜 로그인 설정. 커머스가 아니라 **코어**다 — cms 사이트도
 	// 회원 로그인을 쓴다.
 	r.Add(Route{Screen: "A-206", Method: "GET", Pattern: "/admin/settings/social", Class: SC4,

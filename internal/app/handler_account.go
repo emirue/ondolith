@@ -141,36 +141,23 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if !d.verifyRequired() {
-		// FR-214 off: the account is usable immediately, and logging them in
-		// here is what makes "sign up" mean what it says.
-		if err := d.sm.RenewToken(ctx); err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-			return
-		}
-		d.sm.Put(ctx, sessUserID, userID)
-		// The account was created a moment ago, so its cutoff is the freshest
-		// one in the table — this is the exact spot where a process clock
-		// running behind the database logs the new user straight back out.
-		authAt, err := d.store.Now(ctx)
-		if err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-			return
-		}
-		stampAuthAt(d.sm, ctx, authAt)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
+	// FR-214 가 꺼져 있어도 **로그인시키지 않는다** (FR-210). 중복 주소는 로그인시킬
+	// 수 없으니, 새 가입만 로그인시키면 쿠키·머리글 하나로 가입 여부가 샌다 — 예전
+	// 이 자리가 그랬다(303 → 홈 vs 200). 계정은 바로 쓸 수 있고, 접수 화면이 로그인을
+	// 안내한다 (D19 P-103 「중복이든 아니든 같은 화면」).
+	if d.verifyRequired() {
+		d.sendVerification(ctx, userID, email)
 	}
-
-	d.sendVerification(ctx, userID, email)
 	d.renderSignupAccepted(w, r, email)
 }
 
 // renderSignupAccepted is the one response both a real signup and a duplicate
 // get. Keeping it in a function is what stops the two paths from drifting into
-// distinguishable answers.
+// distinguishable answers. 문구가 갈리는 것은 사이트 설정(인증 여부)뿐이고, 그것은
+// 두 경로에 똑같다.
 func (d *accountDeps) renderSignupAccepted(w http.ResponseWriter, r *http.Request, email string) {
-	d.render(w, r, "auth/signup-sent.html", http.StatusOK, map[string]any{"Email": email})
+	d.render(w, r, "auth/signup-sent.html", http.StatusOK,
+		map[string]any{"Email": email, "NoVerify": !d.verifyRequired()})
 }
 
 func (d *accountDeps) sendVerification(ctx contextLike, userID, email string) {
@@ -186,6 +173,21 @@ func (d *accountDeps) sendVerification(ctx contextLike, userID, email string) {
 	// from the tree (.ai/MISTAKES.md M14).
 	d.mailer.SendAsync(email, "이메일 인증",
 		"아래 링크로 인증을 완료하세요:\n"+d.baseURL+"/verify/"+raw)
+}
+
+// refuseUnverified is the login gate of FR-214 (loginDeps.unverified): with
+// verification required, an unverified account gets no session, and the
+// verification mail goes out again within the per-account limit (3 an hour,
+// the same bucket as P-113 — D15 4.3-2).
+func (d *accountDeps) refuseUnverified(ctx context.Context, u *auth.User) (refused, sent bool) {
+	if !d.verifyRequired() || u.EmailVerifiedAt != nil {
+		return false, false
+	}
+	if d.limiter.Allow("verify-resend:acct:"+u.ID, d.limits.VerifyMailAccount) {
+		d.sendVerification(ctx, u.ID, u.Email)
+		return true, true
+	}
+	return true, false
 }
 
 // P-110 GET — the withdrawal form.

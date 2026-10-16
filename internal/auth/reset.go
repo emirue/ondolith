@@ -85,6 +85,13 @@ func (s *Store) ResetPassword(ctx context.Context, raw, hash string) (time.Time,
 	if err != nil {
 		return zero, err
 	}
+	// 재설정 링크를 받아 비밀번호를 바꿨다면 그 메일함의 주인이다 — 인증도 된 것이다
+	// (FR-214). 인증을 켠 사이트는 미인증 계정의 로그인을 막으므로, 이것이 없으면
+	// 비밀번호를 되찾고도 들어갈 수 없다. 남이 내 주소로 먼저 가입해 둔 계정을
+	// 되찾는 길도 이것이다.
+	if err := q.MarkEmailVerified(ctx, userID); err != nil {
+		return zero, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return zero, err

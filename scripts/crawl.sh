@@ -112,6 +112,9 @@ JAR=$WORK/jar-member
 code POST /signup --data-urlencode "email=member@example.com" \
 	--data-urlencode "display_name=회원" --data-urlencode "password=$MEMBER_PW" \
 	--data-urlencode "nickname=온돌이" >/dev/null
+# 가입은 로그인시키지 않는다 (FR-210) — 회원 세션은 로그인으로 연다.
+code POST /login --data-urlencode "email=member@example.com" \
+	--data-urlencode "password=$MEMBER_PW" >/dev/null
 want "가입할 때 회원 항목이 저장됐다" 온돌이 \
 	"$(sql "select custom_fields->>'nickname' from users where email='member@example.com'")"
 # 장바구니에 담아 둔다 — 빈 장바구니는 상품 링크를 그리지 않아 그 링크가

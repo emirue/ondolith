@@ -129,3 +129,23 @@ func TestReconcileOffersResolveOnlyWhereThePGAnswered(t *testing.T) {
 		t.Errorf("order.update 없이 반영 버튼 = %v, want 없음", got)
 	}
 }
+
+// **메일 설정 화면에 시험 발송이 있다** (D13·D19 A-205). 라우트만 있고 누를 자리가
+// 없으면 운영자는 여전히 저장한 설정이 맞는지 모른다. 받는 주소 칸은 없다 — 본인
+// 주소로만 보낸다(D13). 저장과 같은 문이라 재확인 칸이 그 폼 안에 있어야 한다.
+func TestMailScreenOffersATestSendToTheAdminOnly(t *testing.T) {
+	body := renderAdmin(t, "admin/mail.html", map[string]any{
+		"Settings": map[string]string{}, "SecretSaved": map[string]bool{}})
+	i := strings.Index(body, `action="/admin/settings/mail/test"`)
+	if i < 0 {
+		t.Fatal("메일 설정 화면에 시험 발송 폼이 없다")
+	}
+	form := body[i:]
+	form = form[:strings.Index(form, "</form>")]
+	if !strings.Contains(form, `name="password"`) {
+		t.Error("시험 발송 폼에 비밀번호 재확인 칸이 없다 — 재인증 창이 지나면 늘 거부된다")
+	}
+	if strings.Contains(form, `name="to"`) || strings.Contains(form, `type="email"`) {
+		t.Error("시험 발송 폼이 받는 주소를 받는다 — 임의 주소로 쏘는 중계가 된다 (D13)")
+	}
+}

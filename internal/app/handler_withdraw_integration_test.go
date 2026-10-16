@@ -119,11 +119,23 @@ func TestLastSuperuserCannotWithdraw(t *testing.T) {
 	}
 }
 
+// loginUnverified opens a session for an unverified account — the state P-113
+// still serves after FR-214's login gate: a session from before the gate, or a
+// site that turned verification on after members had logged in. The gate is
+// lifted only for this login.
+func loginUnverified(t *testing.T, d *accountDeps, h http.Handler, store *auth.Store, email, pw string) *http.Cookie {
+	t.Helper()
+	on := d.verifyRequired
+	d.verifyRequired = func() bool { return false }
+	defer func() { d.verifyRequired = on }()
+	return loginAs(t, h, store, email, pw)
+}
+
 // **P-113 은 수신 주소를 입력으로 받지 않는다** (D19 P-113 「받지 않는 필드」).
 // 받으면 우리 도메인에서 임의 주소로 메일을 쏘는 릴레이가 된다.
 func TestResendIgnoresAttackerSuppliedRecipient(t *testing.T) {
-	_, h, store, sender := accountFixture(t, true)
-	c := loginAs(t, h, store, "a@example.com", "correct-horse-battery")
+	d, h, store, sender := accountFixture(t, true)
+	c := loginUnverified(t, d, h, store, "a@example.com", "correct-horse-battery")
 	other := "victim@elsewhere.example"
 
 	rec := postForm(h, "/verify/resend", url.Values{
@@ -151,7 +163,7 @@ func TestResendIgnoresAttackerSuppliedRecipient(t *testing.T) {
 // 메일이고, IP 로 세면 같은 계정을 여러 IP 에서 두드릴 수 있다.
 func TestResendIsRateLimitedPerAccount(t *testing.T) {
 	d, h, store, sender := accountFixture(t, true)
-	c := loginAs(t, h, store, "a@example.com", "correct-horse-battery")
+	c := loginUnverified(t, d, h, store, "a@example.com", "correct-horse-battery")
 	limit := d.limits.VerifyMailAccount
 
 	var last int
@@ -171,8 +183,8 @@ func TestResendIsRateLimitedPerAccount(t *testing.T) {
 // 이미 인증된 계정에도 **성공과 같은 응답**을 준다. 다르게 답하면 이 화면이
 // 「이 계정이 인증됐는지」를 알려주는 조회 도구가 된다.
 func TestResendToVerifiedAccountLooksIdenticalButSendsNothing(t *testing.T) {
-	_, h, store, sender := accountFixture(t, true)
-	c := loginAs(t, h, store, "a@example.com", "correct-horse-battery")
+	d, h, store, sender := accountFixture(t, true)
+	c := loginUnverified(t, d, h, store, "a@example.com", "correct-horse-battery")
 	ctx := context.Background()
 	if err := store.MarkEmailVerified(ctx, userByEmail(t, store, "a@example.com").ID); err != nil {
 		t.Fatal(err)
@@ -189,8 +201,8 @@ func TestResendToVerifiedAccountLooksIdenticalButSendsNothing(t *testing.T) {
 
 // GET 으로는 발송되지 않는다. 되면 링크 프리페치와 크롤러가 메일을 쏜다.
 func TestResendIsPostOnly(t *testing.T) {
-	_, h, store, sender := accountFixture(t, true)
-	c := loginAs(t, h, store, "a@example.com", "correct-horse-battery")
+	d, h, store, sender := accountFixture(t, true)
+	c := loginUnverified(t, d, h, store, "a@example.com", "correct-horse-battery")
 
 	req, _ := http.NewRequest(http.MethodGet, "/verify/resend", nil)
 	req.AddCookie(c)

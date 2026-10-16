@@ -359,6 +359,39 @@ func TestSocialCallbackRefusesDeactivatedAccount(t *testing.T) {
 	}
 }
 
+// 인증을 켠 사이트에서는 소셜 로그인도 미인증 계정을 들이지 않는다 (FR-214). 이 규칙
+// 전에 미인증인 채로 연결해 둔 계정이 소셜로 인증을 우회하면 안 된다.
+func TestSocialCallbackRefusesUnverifiedAccount(t *testing.T) {
+	p := fakeProvider{name: "google", uid: "u1"}
+	d, store, sm := socialFixture(t, p, true)
+	d.unverified = func(_ context.Context, u *auth.User) (bool, bool) { return u.EmailVerifiedAt == nil, true }
+	ctx := context.Background()
+	hash, _ := auth.HashPassword("correct horse battery")
+	uid, err := store.CreateUser(ctx, "nov@example.com", hash, "미인증")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkSocial(ctx, uid, "google", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	callback := func() int {
+		cookies, state := beginAndGetState(t, d, sm, store, "google", nil)
+		req := httptest.NewRequest(http.MethodGet,
+			"/auth/google/callback?code=x&state="+url.QueryEscape(state), nil)
+		req.SetPathValue("provider", "google")
+		return socialRun(t, sm, store, d.socialCallback, req, cookies).Code
+	}
+	if code := callback(); code == http.StatusSeeOther {
+		t.Error("미인증 계정이 소셜로 로그인했다")
+	}
+	if err := store.MarkEmailVerified(ctx, uid); err != nil {
+		t.Fatal(err)
+	}
+	if code := callback(); code != http.StatusSeeOther {
+		t.Errorf("인증한 뒤 소셜 로그인 = HTTP %d, want 303 — 위 단언이 「늘 거부」였다", code)
+	}
+}
+
 // 프로바이더가 인가를 거부하거나 사용자 조회가 실패하면 로그인되지 않는다.
 func TestSocialCallbackRefusesProviderFailure(t *testing.T) {
 	for _, tc := range []struct {

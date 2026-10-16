@@ -21,8 +21,6 @@ func TestUnverifiedAccountCannotWriteWhenRequired(t *testing.T) {
 	srv, pool := liveSite(t)
 	ctx := context.Background()
 	for _, q := range []string{
-		`INSERT INTO settings (key, value) VALUES ('auth.email_verification_required', '1')
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
 		`INSERT INTO boards (slug, name) VALUES ('free', '자유')`,
 		`INSERT INTO role_permissions (role_id, permission_id)
 		 SELECT r.id, p.id FROM roles r, permissions p
@@ -32,7 +30,17 @@ func TestUnverifiedAccountCannotWriteWhenRequired(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
+	// 이제 인증을 켠 사이트는 미인증 계정을 로그인시키지 않는다 (FR-214). 그래도 이 글쓰기
+	// 검사는 남는다 — 그 문 이전의 세션이나 회원이 로그인한 **뒤에** 인증을 켠 사이트가
+	// 있다. 그 상태를 만든다: 인증을 끈 채 로그인하고, 그다음 켠다.
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES ('auth.email_verification_required', '')
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
 	post := memberSession(t, srv, pool, "new@example.com")
+	if _, err := pool.Exec(ctx, `UPDATE settings SET value = '1' WHERE key = 'auth.email_verification_required'`); err != nil {
+		t.Fatal(err)
+	}
 
 	form := url.Values{"title": {"첫 글"}, "body": {"본문"}}
 	resp := post("/board/free/write", form)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -22,6 +23,11 @@ type loginDeps struct {
 	// 활성 프로바이더가 0이면 버튼도 없다 (FR-709). nil 이면 소셜이 없는
 	// 배포다.
 	social func() []auth.SocialConfig
+	// unverified refuses a correctly authenticated but unverified account when
+	// the site requires verification (FR-214), resending the verification mail
+	// within the per-account limit. refused=false lets the login through; sent
+	// reports whether a mail went out this time. nil 이면 검사하지 않는다.
+	unverified func(ctx context.Context, u *auth.User) (refused, sent bool)
 }
 
 // socialButtons is what the login screen draws. 켠 것이 없으면 빈 목록이다.
@@ -98,6 +104,20 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
+	}
+	// FR-214: 인증을 켠 사이트에서 미인증 계정에는 세션을 주지 않는다. 비밀번호가 맞을
+	// 때만 여기에 오므로, 인증 메일을 다시 보내는 자리로 쓴다 — 재발송(P-113)은
+	// 로그인을 전제로 했고 이제 그 로그인이 막힌다.
+	if d.unverified != nil {
+		if refused, sent := d.unverified(ctx, u); refused {
+			msg := "이메일 인증이 끝나지 않았습니다. " + u.Email + " 로 인증 메일을 다시 보냈습니다. 메일의 링크를 누른 뒤 로그인하세요."
+			if !sent {
+				msg = "이메일 인증이 끝나지 않았습니다. 받은 인증 메일의 링크를 누른 뒤 로그인하세요. 인증 메일은 한 시간에 세 번까지 보냅니다."
+			}
+			d.render(w, r, "auth/login.html", http.StatusForbidden, map[string]any{
+				"Error": msg, "Email": email, "Next": next})
+			return
+		}
 	}
 
 	// FR-204 session fixation: the token the visitor arrived with must not be

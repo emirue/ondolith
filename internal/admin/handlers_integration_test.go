@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -973,6 +974,16 @@ func TestUserCreateValidatesAndAssignsNoRole(t *testing.T) {
 	if roles != 0 {
 		t.Errorf("생성만으로 역할 %d개가 붙었다 — user.create 가 곧 권한 부여가 된다", roles)
 	}
+	// 관리자가 만든 계정은 **인증된 채로** 만든다 — 관리자가 보증한 주소이고, 인증을
+	// 켠 사이트에서 미인증이면 로그인조차 되지 않는다 (FR-214).
+	var verified bool
+	if err := pool.QueryRow(ctx,
+		`SELECT email_verified_at IS NOT NULL FROM users WHERE email = 'new@example.com'`).Scan(&verified); err != nil {
+		t.Fatal(err)
+	}
+	if !verified {
+		t.Error("관리자가 만든 계정이 미인증이다 — 인증 켬에서 로그인할 수 없다")
+	}
 
 	// 중복은 DB UNIQUE 가 막는다.
 	if rec := post(d.UserCreate, "/admin/users", url.Values{
@@ -1149,6 +1160,42 @@ func postThemeZip(t *testing.T, d *Deps, name string) *httptest.ResponseRecorder
 	rec := httptest.NewRecorder()
 	d.ThemeUpload(rec, req)
 	return rec
+}
+
+// **메일(SMTP)이 비어 있으면 대시보드가 알린다** (FR-708, D13 A-205).
+//
+// 새 설치는 이메일 인증이 켜진 채로 시작한다(FR-214). SMTP 를 넣기 전에는
+// 가입한 회원이 인증 메일을 받지 못하고, 재설정도 「보냈습니다」라고만 답한다
+// (계정 열거 방지라 화면이 실패를 말할 수 없다). 그 사실을 아는 자리가 필요하다.
+func TestDashboardWarnsWhenMailIsNotConfigured(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"admin.access": true}, id: "u1"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	var warning string
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		warning = ""
+		if m, ok := data.(map[string]any); ok {
+			if s, ok := m["MailWarning"].(string); ok {
+				warning = s
+			}
+		}
+	}
+	call := func() {
+		d.Dashboard(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin", nil))
+	}
+
+	call()
+	if !strings.Contains(warning, "메일") {
+		t.Errorf("SMTP 가 비어 있는데 경고하지 않았다: %q", warning)
+	}
+	if err := d.Content.PutSettings(ctx, map[string]string{"mail.smtp_host": "smtp.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	call()
+	if warning != "" {
+		t.Errorf("SMTP 를 넣었는데도 경고한다: %q — 위 단언이 「늘 경고한다」였다", warning)
+	}
 }
 
 // **shop 모드에서 사업자 정보가 비면 대시보드가 알린다** (FR-711, W3-33).
@@ -1451,6 +1498,144 @@ func TestMailSettingsAreSuperuserOnlyReauthedAndLogged(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("SMTP 변경 작업 로그 %d건, want 1", n)
+	}
+}
+
+// **SMTP 설정은 형식을 검사한다** (D19 A-205). 검사하지 않으면 포트 「abc」·발신
+// 「not-an-email」이 저장되고, 그 뒤의 재설정·인증 메일은 화면 아무 데도 드러나지
+// 않은 채 전부 실패한다. 비운 설정은 받는다 — A-205 「설정이 비어 있는 상태 저장:
+// 거부하지 않는다」.
+func TestMailSettingsRefuseMalformedValues(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{superuser: true})
+	ctx := context.Background()
+	ok := url.Values{"mail.smtp_host": {"smtp.example.com"}, "mail.smtp_port": {"587"},
+		"mail.tls_mode": {"starttls"}, "mail.from_address": {"noreply@example.com"}}
+	if rec := post(d.MailSettingsSave, "/admin/settings/mail", ok); rec.Code != http.StatusSeeOther {
+		t.Fatalf("정상 값 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	bad := map[string][2]string{
+		"포트 글자":    {"mail.smtp_port", "abc"},
+		"포트 0":     {"mail.smtp_port", "0"},
+		"포트 범위 밖":  {"mail.smtp_port", "70000"},
+		"발신 주소 형식": {"mail.from_address", "not-an-email"},
+		"호스트에 공백":  {"mail.smtp_host", "smtp example.com"},
+		"호스트에 스킴":  {"mail.smtp_host", "smtp://smtp.example.com"},
+		"호스트에 포트":  {"mail.smtp_host", "smtp.example.com:587"},
+	}
+	for name, kv := range bad {
+		t.Run(name, func(t *testing.T) {
+			form := url.Values{}
+			for k, v := range ok {
+				form[k] = v
+			}
+			form.Set(kv[0], kv[1])
+			if rec := post(d.MailSettingsSave, "/admin/settings/mail", form); rec.Code != http.StatusUnprocessableEntity {
+				t.Errorf("%s=%q → HTTP %d, want 422", kv[0], kv[1], rec.Code)
+			}
+			if got, _ := d.Content.Settings(ctx, kv[0]); got[kv[0]] != ok.Get(kv[0]) {
+				t.Errorf("거부했는데 %s 가 %q 로 바뀌었다", kv[0], got[kv[0]])
+			}
+		})
+	}
+
+	// 발신 주소는 소문자로 저장한다 (D19 A-205, D30 3절).
+	form := url.Values{}
+	for k, v := range ok {
+		form[k] = v
+	}
+	form.Set("mail.from_address", "NoReply@Example.COM")
+	if rec := post(d.MailSettingsSave, "/admin/settings/mail", form); rec.Code != http.StatusSeeOther {
+		t.Fatalf("대문자 발신 주소 = HTTP %d", rec.Code)
+	}
+	if got, _ := d.Content.Settings(ctx, "mail.from_address"); got["mail.from_address"] != "noreply@example.com" {
+		t.Errorf("발신 주소 = %q, want 소문자", got["mail.from_address"])
+	}
+
+	// 비운 설정은 받는다 — 메일을 끄는 방법이다. IP 호스트, 밑줄이 든 Docker
+	// compose 서비스 이름(리졸버가 해석한다)도 정상이다.
+	for _, host := range []string{"", "10.0.0.25", "mail_relay"} {
+		empty := url.Values{"mail.smtp_host": {host}, "mail.smtp_port": {""},
+			"mail.tls_mode": {"none"}, "mail.from_address": {""}}
+		if rec := post(d.MailSettingsSave, "/admin/settings/mail", empty); rec.Code != http.StatusSeeOther {
+			t.Errorf("호스트 %q·빈 포트·빈 발신 = HTTP %d, want 303", host, rec.Code)
+		}
+	}
+}
+
+// **메일 설정 시험 발송** (D13·D19 A-205, D15 4.3-2).
+//
+// 없던 동안 운영자는 저장한 SMTP 가 맞는지 알 방법이 없었다 — 재설정·인증
+// 메일의 실패는 공개 화면이 말할 수 없다 (FR-207). 받는 주소는 **로그인한
+// 관리자 본인**뿐이다: 주소를 받으면 우리 SMTP 가 임의 주소로 쏘는 중계가 된다.
+func TestMailTestSendsOnlyToTheAdminItself(t *testing.T) {
+	su := &fakeCaller{superuser: true, email: "su@example.com"}
+	d, pool := fixture(t, su)
+	ctx := context.Background()
+	var sentTo []string
+	var fail error
+	d.SendMailTest = func(_ context.Context, to string) error {
+		sentTo = append(sentTo, to)
+		return fail
+	}
+	d.Limiter = auth.NewLimiter()
+	d.Limits = auth.DefaultLimits()
+	var shown map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
+		w.WriteHeader(code)
+		shown, _ = data.(map[string]any)
+	}
+
+	// 폼이 다른 주소를 실어 와도 무시한다.
+	rec := post(d.MailTest, "/admin/settings/mail/test", url.Values{"to": {"victim@example.com"}})
+	if rec.Code != http.StatusOK || len(sentTo) != 1 || sentTo[0] != "su@example.com" {
+		t.Fatalf("HTTP %d, 받는 주소 %v — want 200·관리자 본인 한 번", rec.Code, sentTo)
+	}
+	if n, _ := shown["Notice"].(string); !strings.Contains(n, "su@example.com") {
+		t.Errorf("성공 안내에 받는 주소가 없다: %q", n)
+	}
+
+	// 실패는 SMTP 원인을 보이고 작업 로그에 남는다 (D19 A-205 「테스트 발송 실패: 남김」).
+	fail = errors.New("535 Authentication Credentials Invalid")
+	post(d.MailTest, "/admin/settings/mail/test", nil)
+	if e, _ := shown["Error"].(string); !strings.Contains(e, "발송에 실패했습니다") || !strings.Contains(e, "535") {
+		t.Errorf("실패 안내 = %q, want 「발송에 실패했습니다: …535…」", e)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs
+		WHERE action = 'mail.failed' AND actor_email = 'su@example.com'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("시험 발송 실패 작업 로그 %d건, want 1", n)
+	}
+
+	// 계정당 5회/시간 (D15 4.3-2) — 남의 SMTP 를 우리가 대신 두드리는 요청이다.
+	fail = nil
+	for i := 0; i < 10 && len(sentTo) < 5; i++ { // 상한: 한도가 일찍 막아도 멈춘다
+		post(d.MailTest, "/admin/settings/mail/test", nil)
+	}
+	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusTooManyRequests || len(sentTo) != 5 {
+		t.Errorf("여섯 번째 = HTTP %d·발송 %d회, want 429·5회", rec.Code, len(sentTo))
+	}
+
+	// 재인증 창이 지난 superuser 는 비밀번호를 다시 넣어야 보낸다 (저장과 같은 문).
+	stale := &fakeCaller{superuser: true, reauth: true, email: "late@example.com", password: "correct horse battery"}
+	d.Caller = func(*http.Request) Caller { return stale }
+	before := len(sentTo)
+	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusForbidden || len(sentTo) != before {
+		t.Errorf("재인증 없이 = HTTP %d·발송 %d회, want 403·0회", rec.Code, len(sentTo)-before)
+	}
+	if rec := post(d.MailTest, "/admin/settings/mail/test", url.Values{"password": {"correct horse battery"}}); rec.Code != http.StatusOK || len(sentTo) != before+1 {
+		t.Errorf("재인증 뒤 = HTTP %d·발송 %d회, want 200·1회 — 위 단언이 「늘 거부」였다", rec.Code, len(sentTo)-before)
+	}
+
+	// 저장과 같은 문: superuser 만 (D15 5.1 R7).
+	op := &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"}
+	d.Caller = func(*http.Request) Caller { return op }
+	before = len(sentTo)
+	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusForbidden || len(sentTo) != before {
+		t.Errorf("settings.update 만 있는 운영자 = HTTP %d·발송 %d회, want 403·0회", rec.Code, len(sentTo)-before)
 	}
 }
 

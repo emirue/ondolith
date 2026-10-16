@@ -59,4 +59,18 @@
     </p>
   </form>
 </div>
+
+{{/* 시험 발송 (D13·D19 A-205). 받는 주소 칸을 두지 않는다 — 로그인한 관리자
+     본인에게만 보낸다. 주소를 받으면 우리 SMTP 가 임의 주소로 쏘는 중계가 된다.
+     문은 저장과 같다(최고 관리자 + 재확인)이라 재확인 칸이 이 폼에도 있다. */}}
+<div class="adm-card">
+  <form method="post" action="/admin/settings/mail/test">
+    <h2>시험 발송</h2>
+    <p class="adm-hint">저장된 설정으로 지금 로그인한 관리자 본인의 주소에 시험 메일을 보냅니다. 설정을 바꿨다면 먼저 저장하세요.</p>
+    {{template "reauth-field" .}}
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn">시험 메일 보내기</button>
+    </div>
+  </form>
+</div>
 {{end}}

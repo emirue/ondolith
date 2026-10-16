@@ -3,6 +3,8 @@
      핸들러가 아예 묻지 않으므로 여기서 가릴 것이 없다 — 값이 없으면 위젯이
      없다. 화면은 권한 검사의 자리가 아니다 (D15 4.4). */}}
 
+{{with .MailWarning}}<p class="adm-toast adm-toast--warn">{{.}} <a href="/admin/settings/mail">메일 설정</a></p>{{end}}
+
 {{if or .Posts .Orders}}
 <div class="adm-grid-2">
   {{if .Posts}}

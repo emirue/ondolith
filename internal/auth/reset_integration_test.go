@@ -75,3 +75,30 @@ func TestResetTokenExpires(t *testing.T) {
 		t.Errorf("만료까지 %v, want ≈%v", d, PasswordResetTTL)
 	}
 }
+
+// 재설정 링크로 비밀번호를 바꿨다면 그 메일함의 주인이다 — 인증도 된 것이다 (FR-214).
+// 그러지 않으면 인증을 켠 사이트에서 미인증 계정이 비밀번호를 되찾고도 로그인할 수
+// 없고, 남이 내 주소로 먼저 가입해 둔 계정을 되찾을 길도 이것뿐이다.
+func TestResetMarksTheEmailVerified(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "unverified@example.com")
+	raw, err := s.IssueResetToken(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := HashPassword("a-brand-new-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResetPassword(ctx, raw, h); err != nil {
+		t.Fatal(err)
+	}
+	var verified bool
+	if err := pool.QueryRow(ctx, `SELECT email_verified_at IS NOT NULL FROM users WHERE id = $1`, u).Scan(&verified); err != nil {
+		t.Fatal(err)
+	}
+	if !verified {
+		t.Error("재설정을 마쳤는데 미인증으로 남았다 — 인증 켬에서 로그인할 수 없다")
+	}
+}

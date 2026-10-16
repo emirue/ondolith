@@ -151,14 +151,23 @@ want "T2.1 관리자 로그인" 303 "$(code POST /login \
 want "T2.1 /admin 은 /admin/ 으로 보낸다" 308 "$(code GET /admin)"
 want "T2.1 /admin/ 이 열린다" 200 "$(code GET /admin/)"
 
-# 회원가입 직후 로그인 상태 (M16 이 고친 자리). 별도 쿠키 항아리를 쓴다 —
-# 관리자 세션을 덮으면 이후 단계가 익명으로 돈다.
+# 회원가입은 **로그인시키지 않는다** — 새 가입과 중복 가입이 같은 응답이어야
+# 한다 (FR-210). 가입한 계정으로 로그인하면 바로 쓸 수 있다 (M16 이 고친 시계
+# 비교가 로그인 경로에 남아 있다). 별도 쿠키 항아리를 쓴다 — 관리자 세션을
+# 덮으면 이후 단계가 익명으로 돈다.
 JAR_ADMIN=$JAR
 JAR=$WORK/cookies-buyer
-want "T2.3 회원가입" 303 "$(code POST /signup \
+want "T2.3 회원가입 — 접수 화면" 200 "$(code POST /signup \
 	--data-urlencode "email=buyer@example.com" --data-urlencode "display_name=구매자" \
 	--data-urlencode "password=e2e-buyer-passphrase")"
-want "T2.3 가입 직후 로그인 상태다" 200 "$(code GET /me)"
+# 새 설치는 이메일 인증이 켜져 있고(FR-214), 인증 전 계정은 로그인되지 않는다.
+want "T2.3 인증 전에는 로그인되지 않는다" 403 "$(code POST /login \
+	--data-urlencode "email=buyer@example.com" --data-urlencode "password=e2e-buyer-passphrase")"
+# 메일의 인증 링크를 누른 것과 같다 — 메일은 이 시험 밖이다.
+sql "update users set email_verified_at = now() where email = 'buyer@example.com'" >/dev/null
+want "T2.3 인증한 뒤 로그인" 303 "$(code POST /login \
+	--data-urlencode "email=buyer@example.com" --data-urlencode "password=e2e-buyer-passphrase")"
+want "T2.3 로그인 상태다" 200 "$(code GET /me)"
 want "T2.6 로그아웃" 303 "$(code POST /logout)"
 want "T2.6 로그아웃 뒤 /me 는 밀린다" 303 "$(code GET /me)"
 JAR=$JAR_ADMIN

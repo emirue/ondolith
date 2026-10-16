@@ -222,6 +222,29 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 		t.Errorf("bcrypt 해시가 아니거나 비밀번호와 맞지 않는다: %v", err)
 	}
 
+	// FR-214: 이메일 인증은 **기본 켬**이다. 설정 행이 없으면 꺼진 것으로 읽히므로
+	// 설치가 넣지 않으면 새 사이트는 인증 없이 열린다 — 실제로 그렇게 배포됐다.
+	var verify string
+	if err := pool.QueryRow(ctx,
+		`SELECT value FROM settings WHERE key = 'auth.email_verification_required'`).Scan(&verify); err != nil {
+		t.Fatalf("이메일 인증 설정이 없다 — 새 사이트가 인증 꺼짐으로 시작한다 (FR-214): %v", err)
+	}
+	if verify != "1" {
+		t.Errorf("auth.email_verification_required = %q, want 1 (FR-214 기본 켬)", verify)
+	}
+	// 그러면 **설치한 관리자도 인증돼 있어야 한다.** 인증 전 계정은 글·주문을
+	// 못 하는데(FR-214), 설치 직후에는 SMTP 도 없어 스스로 인증할 길이 없다 —
+	// 사이트 주인이 자기 사이트에 글을 못 쓴다(make e2e T4.3 이 잡았다). 설치
+	// 폼에 이메일을 적은 사람이 곧 그 주소의 주인이다.
+	var verified bool
+	if err := pool.QueryRow(ctx,
+		`SELECT email_verified_at IS NOT NULL FROM users WHERE email = 'admin@example.com'`).Scan(&verified); err != nil {
+		t.Fatal(err)
+	}
+	if !verified {
+		t.Error("설치한 관리자가 미인증이다 — 인증 기본 켬에서 자기 사이트에 글·주문을 못 한다")
+	}
+
 	// FR-105: the config is written, owner-only, and loads back.
 	fi, err := os.Stat(w.configPath)
 	if err != nil {
@@ -279,6 +302,36 @@ func TestInstallRefusesDatabaseThatAlreadyHasAdmin(t *testing.T) {
 	}
 	if _, err := os.Stat(second.configPath); err == nil {
 		t.Error("거부됐는데 설정 파일이 쓰였다")
+	}
+}
+
+// FR-214 기본값은 **새 사이트에만** 넣는다. 설정 파일을 잃고 같은 DB 로 마법사를
+// 다시 돌리면(다른 관리자 이메일이면 설치가 진행된다) 이 기본값이 운영 중인
+// 사이트의 인증을 켜서, 인증 없이 쓰던 회원이 글·주문에서 막힌다.
+func TestReinstallOverALiveSiteLeavesVerificationAlone(t *testing.T) {
+	dsn := testDSN(t)
+	pool := freshSchema(t, dsn)
+	ctx := context.Background()
+	if rec := newWizard(t).post(installForm(dsn)); rec.Code != http.StatusSeeOther {
+		t.Fatalf("첫 설치 HTTP %d, want 303", rec.Code)
+	}
+	// 이 기본값이 생기기 전에 설치했고 A-201 을 한 번도 저장하지 않은 사이트 — 행이 없다.
+	if _, err := pool.Exec(ctx, `DELETE FROM settings WHERE key = 'auth.email_verification_required'`); err != nil {
+		t.Fatal(err)
+	}
+
+	form := installForm(dsn)
+	form.Set("admin_email", "second@example.com")
+	if rec := newWizard(t).post(form); rec.Code != http.StatusSeeOther {
+		t.Fatalf("다른 이메일로 재설치 HTTP %d, want 303 (이 테스트의 전제)", rec.Code)
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM settings WHERE key = 'auth.email_verification_required'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Error("회원이 있는 DB 에 재설치했더니 이메일 인증이 켜졌다 — 운영 중인 사이트의 동작이 바뀐다")
 	}
 }
 

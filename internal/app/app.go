@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -324,6 +325,20 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
 		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
+	// D13: 끝내 나가지 못한 메일은 작업 로그에 남긴다. 화면은 실패를 말할 수
+	// 없어서(FR-207) 여기가 아니면 운영자가 알 곳이 없다. 자동 백업과 같이 주체는
+	// system 이다 (D15 7절). 본문은 받지 않는다 — 재설정 링크가 곧 토큰이다.
+	mailer.OnFail = func(to, subject string, err error) {
+		e, ok := mailFailureEntry(to, subject, err)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if rerr := contentStore.OpLog().Record(ctx, e); rerr != nil {
+			log.Error("작업 로그 기록 실패", "action", "mail.failed", "err", rerr)
+		}
+	}
 	// 메일 링크의 주소는 설치 때 잡아 둔 값이다 (config.SiteURL). 비어 있으면
 	// 링크가 `/password/reset/…` 뿐이라 메일에서 눌리지 않는다 — v0.1.0 으로
 	// 설치한 사이트가 그렇다. 요청의 Host 로 채우지 않는 이유는 그 필드에 있다.
@@ -334,6 +349,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	spam := spamGuard{keys: turnstileKeys, verify: turnstile.Verify, log: log}
 	acc := &accountDeps{loginDeps: *lg, mailer: mailer, baseURL: strings.TrimSuffix(cfg.SiteURL, "/"),
 		userFields: contentStore.UserFields, verifyRequired: verifyRequired, signupClosed: signupClosed, spam: spam}
+	// 로그인·소셜 로그인의 미인증 판정은 가입 쪽이 안다(인증 설정·재발송) (FR-214).
+	lg.unverified = acc.refuseUnverified
 
 	// FR-710 style: the direction is a setting, not a rebuild. The handoff's
 	// five directions share one markup, so switching is a token swap.
@@ -404,6 +421,12 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			mailer.SendAsync(email, "비밀번호 재설정",
 				"아래 링크로 재설정하세요:\n"+strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token)
 		},
+		// 시험 발송은 기다려서 결과를 본다 — 재시도 큐(mailer)를 거치지 않는다.
+		SendMailTest: func(ctx context.Context, to string) error {
+			return settingsSender{settings: setting, log: log}.Send(ctx, to, "메일 설정 시험",
+				"관리자 화면에서 보낸 메일 설정 시험입니다. 이 메일을 받으셨다면 SMTP 설정이 맞습니다.")
+		},
+		Limiter: limiter, Limits: limits,
 	}
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
@@ -428,7 +451,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// **콜백 URL 은 요청에서 만든다.** 설정으로 두면 관리자가 그 값을 바꿔
 	// 인가 코드를 다른 곳으로 돌릴 수 있고, 그것이 D19 A-206 이 콜백 URL 을
 	// 받지 않기로 한 이유다.
-	soc := &socialDeps{publicDeps: pub, sm: sessions, store: authStore,
+	soc := &socialDeps{publicDeps: pub, sm: sessions, store: authStore, unverified: acc.refuseUnverified,
 		provider: func(r *http.Request, name string) (goth.Provider, error) {
 			cfg := socialConfigOf(name)
 			// **꺼진 프로바이더는 없는 것과 같다** (FR-709). 자격증명이
@@ -658,6 +681,23 @@ func themePath(cfg *config.Config, name string) string {
 func backupSchedule(kv map[string]string) backup.Schedule {
 	return backup.Schedule{Enabled: kv["backup.auto"] != "",
 		Hour: atoiOr(kv["backup.hour"], 0), Keep: atoiOr(kv["backup.keep"], 7)}
+}
+
+// mailFailureEntry is the operation-log row for a mail that never went out, or
+// false when the failure is not worth a row.
+//
+// SMTP 가 비어 있어서 실패한 것은 남기지 않는다. 그 상태는 대시보드가 알리고,
+// 남기면 공개 재설정·가입 요청마다 지울 수 없는 행이 하나씩 쌓여 외부에서 작업
+// 로그를 채울 수 있다. 제목은 「대상」에 둔다: 요약은 자격증명 낱말 검사
+// (content.Redacted)를 거치는데 「비밀번호 재설정」 제목이 걸려 요약 전체가
+// 가려졌다. SMTP 응답에 그 낱말이 있으면(Gmail 535 「Password not accepted」)
+// 요약은 여전히 가려진다 — 행과 대상은 남고, 원인은 A-205 시험 발송이 보인다.
+func mailFailureEntry(to, subject string, err error) (content.Entry, bool) {
+	if errors.Is(err, ErrMailNotConfigured) {
+		return content.Entry{}, false
+	}
+	return content.Entry{ActorEmail: "system", Action: "mail.failed", TargetType: "mail",
+		TargetID: subject, Summary: to + " 에 메일을 보내지 못했습니다 — " + truncate(err.Error(), 300)}, true
 }
 
 func truncate(s string, n int) string {
