@@ -10,6 +10,8 @@
     <dt>결제 금액</dt><dd><strong>{{money .Total}}</strong></dd>
     <dt>받는 사람</dt><dd>{{.ReceiverName}} · {{.ReceiverPhone}}</dd>
     <dt>배송지</dt><dd><address>({{.Postcode}}) {{.Address1}} {{.Address2}}</address></dd>
+    {{with .DeliveryMemo}}<dt>배송 메모</dt><dd>{{.}}</dd>{{end}}
+    <dt>주문자</dt><dd>{{.OrdererEmail}} · {{.OrdererPhone}}</dd>
   </dl>
 </div>
 <div class="adm-card adm-card--flush">

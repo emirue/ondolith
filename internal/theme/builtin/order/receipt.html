@@ -25,6 +25,7 @@
     <dt>결제 금액</dt><dd>{{money .Total}}</dd>
   </dl>
   <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
+  {{with .DeliveryMemo}}<p>배송 메모 · {{.}}</p>{{end}}
   <p>{{.OrdererEmail}} · {{.OrdererPhone}}</p>
   {{end}}{{end}}
 </section>

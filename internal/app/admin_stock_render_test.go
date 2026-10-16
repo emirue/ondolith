@@ -149,3 +149,23 @@ func TestMailScreenOffersATestSendToTheAdminOnly(t *testing.T) {
 		t.Error("시험 발송 폼이 받는 주소를 받는다 — 임의 주소로 쏘는 중계가 된다 (D13)")
 	}
 }
+
+// 주문서가 받은 배송 메모와 주문자 연락처를 운영자가 본다. 주문 상세와 송장
+// 입력 어디에도 없어서, 「부재 시 경비실」은 DB 에만 있었다.
+func TestAdminOrderScreensShowDeliveryMemo(t *testing.T) {
+	order := &commerce.OrderDetail{OrderNo: "20261016-ABCDEFGHJK", Status: commerce.StatusPaid,
+		Total: 29000, ReceiverName: "받는이", ReceiverPhone: "010-0000-0000",
+		Postcode: "12345", Address1: "서울시 어딘가", DeliveryMemo: "부재 시 경비실",
+		OrdererEmail: "buyer@example.com", OrdererPhone: "010-1111-1111",
+		Items: []commerce.OrderItem{{ProductName: "티셔츠", UnitPrice: 13000, Quantity: 2, LineAmount: 26000}}}
+
+	detail := renderAdmin(t, "admin/order.html", map[string]any{"Order": order})
+	for _, want := range []string{"부재 시 경비실", "buyer@example.com", "010-1111-1111"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("관리자 주문 상세에 %q 가 없다", want)
+		}
+	}
+	if ship := renderAdmin(t, "admin/shipping.html", map[string]any{"Order": order}); !strings.Contains(ship, "부재 시 경비실") {
+		t.Error("송장 입력 화면에 배송 메모가 없다")
+	}
+}

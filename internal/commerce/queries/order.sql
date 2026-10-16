@@ -52,7 +52,7 @@ ORDER BY kind, effective_at DESC, created_at DESC, id;
 -- name: OrderByNo :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders
 WHERE order_no = sqlc.arg('order_no')
   AND ( (sqlc.narg('user_id')::uuid IS NOT NULL AND user_id = sqlc.narg('user_id'))
@@ -71,13 +71,13 @@ ORDER BY created_at DESC, id LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offse
 -- name: OrderByNoUnscoped :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders WHERE order_no = $1;
 
 -- name: GuestOrder :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders
 WHERE order_no = sqlc.arg('order_no')
   AND user_id IS NULL

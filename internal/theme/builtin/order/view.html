@@ -25,6 +25,7 @@
     <dt>결제 금액</dt><dd>{{money .Total}}</dd>
   </dl>
   <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
+  {{with .DeliveryMemo}}<p>배송 메모 · {{.}}</p>{{end}}
 
   {{/* **구매 이후의 화면과 동작은 전부 여기서만 갈 수 있다.** 영수증·취소·환불·
        반품·교환·구매확정은 만들어져 있었지만 어느 화면도 그것을 가리키지 않아,

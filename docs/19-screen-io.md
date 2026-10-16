@@ -1072,7 +1072,7 @@
 | `postcode` | text | ✔ | 형식 | |
 | `address1` | text | ✔ | 공백만 불가 | |
 | `address2` | text | | 길이 상한 | |
-| `delivery_memo` | text | | 길이 상한 | |
+| `delivery_memo` | text | | 길이 상한 | 구매자 주문 상세·영수증, 관리자 주문 상세(A-506)·송장 입력(A-510)에 나온다 |
 | `orderer_email` | text | ✔(비회원) | 형식·최대 254자 | 회원은 세션 사용자 이메일을 쓴다 |
 | `orderer_phone` | text | ✔(비회원) | 형식 | 비회원 주문 조회(P-504)의 대조 키가 된다 |
 | `agreed_terms[]` | checkbox | ✔ | **시행 중인 필수 약관의 버전 ID 전부.** 화면에 보여준 버전과 저장할 버전이 같은지 **서버에서 다시 확인** (FR-619) | 폼 값을 믿지 않는다 |

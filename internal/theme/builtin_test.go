@@ -550,6 +550,7 @@ type orderLike struct {
 	ReceiverName, ReceiverPhone, Postcode, Address1, Address2 string
 	CreatedAt                                                 time.Time
 	OrdererEmail, OrdererPhone                                string
+	DeliveryMemo                                              string
 	Discount                                                  int
 	Items                                                     []orderItemLike
 }
@@ -964,6 +965,33 @@ func TestOrderPagesShowShippingFee(t *testing.T) {
 		for _, want := range []string{"<dt>상품 합계</dt><dd>26,000원</dd>", "<dt>배송비</dt><dd>3,000원</dd>"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s 에 %q 가 없다", name, want)
+			}
+		}
+	}
+}
+
+// 주문서가 받은 배송 메모를 구매자도 다시 본다 — 무엇을 요청했는지 확인할 곳이
+// 없으면 받기만 하는 칸이다. 메모가 없으면 줄도 없다.
+func TestOrderPagesShowDeliveryMemo(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, name := range []string{"order/view.html", "order/receipt.html"} {
+		for _, memo := range []string{"부재 시 경비실", ""} {
+			v := fullView()
+			data := payloadFor(name).(map[string]any)
+			o := data["Order"].(orderLike)
+			o.DeliveryMemo = memo
+			data["Order"] = o
+			v.Data = data
+			var b bytes.Buffer
+			if err := l.Render(&b, name, v); err != nil {
+				t.Fatal(err)
+			}
+			has := strings.Contains(b.String(), "배송 메모")
+			if memo != "" && (!has || !strings.Contains(b.String(), memo)) {
+				t.Errorf("%s 에 배송 메모 %q 가 없다", name, memo)
+			}
+			if memo == "" && has {
+				t.Errorf("%s: 메모가 없는데 「배송 메모」 줄이 있다", name)
 			}
 		}
 	}

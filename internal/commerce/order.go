@@ -291,6 +291,7 @@ type OrderDetail struct {
 	Postcode      string
 	Address1      string
 	Address2      string
+	DeliveryMemo  string
 	OrdererEmail  string
 	OrdererPhone  string
 	CreatedAt     time.Time
@@ -358,13 +359,13 @@ func (s *Store) OrderByNo(ctx context.Context, orderNo, userID, ordererPhone str
 	return s.withItems(ctx, orderDetailFromRow(commerceq.OrderByNoUnscopedRow(r)))
 }
 
-// orderDetailFromRow converts the 13-column order read. 세 질의(OrderByNo·
+// orderDetailFromRow converts the 14-column order read. 세 질의(OrderByNo·
 // OrderByNoUnscoped·GuestOrder)의 행이 같은 모양이라 구조체 변환으로 여기 온다.
 func orderDetailFromRow(r commerceq.OrderByNoUnscopedRow) OrderDetail {
 	return OrderDetail{ID: r.ID, OrderNo: r.OrderNo, Status: Status(r.Status),
 		Total: int(r.TotalAmount), Discount: int(r.DiscountAmount),
 		ReceiverName: r.ReceiverName, ReceiverPhone: r.ReceiverPhone, Postcode: r.Postcode,
-		Address1: r.Address1, Address2: r.Address2, OrdererEmail: r.OrdererEmail,
+		Address1: r.Address1, Address2: r.Address2, DeliveryMemo: r.DeliveryMemo, OrdererEmail: r.OrdererEmail,
 		OrdererPhone: r.OrdererPhone, CreatedAt: r.CreatedAt}
 }
 

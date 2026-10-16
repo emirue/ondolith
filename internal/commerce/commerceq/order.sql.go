@@ -122,7 +122,7 @@ func (q *Queries) ExpirablePendingOrders(ctx context.Context, arg ExpirablePendi
 const guestOrder = `-- name: GuestOrder :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders
 WHERE order_no = $1
   AND user_id IS NULL
@@ -147,6 +147,7 @@ type GuestOrderRow struct {
 	Postcode       string
 	Address1       string
 	Address2       string
+	DeliveryMemo   string
 	OrdererEmail   string
 	OrdererPhone   string
 	CreatedAt      time.Time
@@ -166,6 +167,7 @@ func (q *Queries) GuestOrder(ctx context.Context, arg GuestOrderParams) (GuestOr
 		&i.Postcode,
 		&i.Address1,
 		&i.Address2,
+		&i.DeliveryMemo,
 		&i.OrdererEmail,
 		&i.OrdererPhone,
 		&i.CreatedAt,
@@ -484,7 +486,7 @@ func (q *Queries) OpenOrders(ctx context.Context, open []string) (int64, error) 
 const orderByNo = `-- name: OrderByNo :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders
 WHERE order_no = $1
   AND ( ($2::uuid IS NOT NULL AND user_id = $2)
@@ -508,6 +510,7 @@ type OrderByNoRow struct {
 	Postcode       string
 	Address1       string
 	Address2       string
+	DeliveryMemo   string
 	OrdererEmail   string
 	OrdererPhone   string
 	CreatedAt      time.Time
@@ -527,6 +530,7 @@ func (q *Queries) OrderByNo(ctx context.Context, arg OrderByNoParams) (OrderByNo
 		&i.Postcode,
 		&i.Address1,
 		&i.Address2,
+		&i.DeliveryMemo,
 		&i.OrdererEmail,
 		&i.OrdererPhone,
 		&i.CreatedAt,
@@ -537,7 +541,7 @@ func (q *Queries) OrderByNo(ctx context.Context, arg OrderByNoParams) (OrderByNo
 const orderByNoUnscoped = `-- name: OrderByNoUnscoped :one
 SELECT id, order_no, status, total_amount, discount_amount,
        receiver_name, receiver_phone,
-       postcode, address1, address2, orderer_email, orderer_phone, created_at
+       postcode, address1, address2, delivery_memo, orderer_email, orderer_phone, created_at
 FROM orders WHERE order_no = $1
 `
 
@@ -552,6 +556,7 @@ type OrderByNoUnscopedRow struct {
 	Postcode       string
 	Address1       string
 	Address2       string
+	DeliveryMemo   string
 	OrdererEmail   string
 	OrdererPhone   string
 	CreatedAt      time.Time
@@ -571,6 +576,7 @@ func (q *Queries) OrderByNoUnscoped(ctx context.Context, orderNo string) (OrderB
 		&i.Postcode,
 		&i.Address1,
 		&i.Address2,
+		&i.DeliveryMemo,
 		&i.OrdererEmail,
 		&i.OrdererPhone,
 		&i.CreatedAt,

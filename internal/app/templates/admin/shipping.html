@@ -1,6 +1,7 @@
 {{define "content"}}
 <div class="adm-card">
-{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>{{end}}
+{{with .Order}}<p>주문 {{.OrderNo}} · 상태 {{.Status}}</p>
+{{with .DeliveryMemo}}<p>배송 메모 · {{.}}</p>{{end}}{{end}}
 {{/* 송장 입력은 상태를 옮기지 않는다. 옮기면 `배송준비 → 배송중` 을 일으키는
      화면이 둘이 되고, FR-623 이 A-516 에 대해 지적한 것과 같은 문제가 된다. */}}
 <form method="post" class="adm-form">
