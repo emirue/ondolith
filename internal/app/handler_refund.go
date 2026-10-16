@@ -129,6 +129,9 @@ func (d *shopDeps) refundStatus(w http.ResponseWriter, r *http.Request) {
 		d.shopView(r, "취소·환불", map[string]any{
 			"Order": order, "Refunds": refunds,
 			"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
+			// 「주문 취소」는 상태 기계가 허락할 때만 낸다 (D14 5절) — 눌러서 422 를 받는
+			// 버튼을 그리지 않는다. 판정은 P-506 이 다시 한다.
+			"CanCancel": commerce.CanTransition(order.Status, commerce.StatusCancelled, "P-506") == nil,
 		}))
 }
 

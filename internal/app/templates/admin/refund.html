@@ -36,7 +36,8 @@
             <input type="hidden" name="action" value="reject">
             <input type="hidden" name="refund_id" value="{{.ID}}">
             <input name="reason" maxlength="500" required aria-label="거부 사유" placeholder="거부 사유">
-            <button type="submit">거부</button>
+            {{/* 「실행」(돈이 나감)과 같은 주 버튼이면 둘이 구별되지 않는다. */}}
+            <button type="submit" class="adm-btn adm-btn--danger">거부</button>
           </form>
           {{end}}
           </td></tr>

@@ -234,7 +234,7 @@ func payloadFor(name string) any {
 					UnitPrice: 13000, Quantity: 3, LineAmount: 39000, Discount: 1000, Settled: 1}}},
 			"Refunds": []refundLike{{Status: "요청", Requester: "구매자", Amount: 5000,
 				Reason: "단순 변심", CreatedAt: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)}},
-			"Approved": 29000, "Refunded": 5000, "Remaining": 24000,
+			"Approved": 29000, "Refunded": 5000, "Remaining": 24000, "CanCancel": true,
 			"Error": "환불 가능 금액을 넘었습니다.",
 		}
 	case "order/receipt.html":
@@ -1115,5 +1115,33 @@ func TestReceiptCarriesWhatAReceiptNeeds(t *testing.T) {
 		if !strings.Contains(main, want) {
 			t.Errorf("영수증 본문에 %q 가 없다", want)
 		}
+	}
+}
+
+// 취소·환불 화면은 할 수 있는 것만 낸다 — 남은 금액이 0원이면 환불 요청 폼이 없고,
+// 상태 기계가 취소를 허락하지 않으면 「주문 취소」가 없다. 남은 0개에도 두 버튼이 눌렸다.
+func TestRefundsPageOffersOnlyWhatIsPossible(t *testing.T) {
+	l := newBuiltinLoader()
+	render := func(remaining int, canCancel bool) string {
+		v := fullView()
+		data := payloadFor("order/refunds.html").(map[string]any)
+		data["Remaining"], data["CanCancel"] = remaining, canCancel
+		v.Data = data
+		var b bytes.Buffer
+		if err := l.Render(&b, "order/refunds.html", v); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	done := render(0, false)
+	if strings.Contains(done, "환불 요청</button>") || strings.Contains(done, "주문 취소</button>") {
+		t.Error("남은 금액 0원·취소 불가인데 요청 버튼이 있다")
+	}
+	if !strings.Contains(done, "환불할 수 있는 금액이 남아 있지 않습니다") {
+		t.Error("왜 요청할 수 없는지 말하지 않는다")
+	}
+	open := render(24000, true)
+	if !strings.Contains(open, "환불 요청</button>") || !strings.Contains(open, "주문 취소</button>") {
+		t.Error("남은 금액이 있고 취소할 수 있는데 버튼이 없다")
 	}
 }

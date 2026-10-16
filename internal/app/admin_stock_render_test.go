@@ -223,3 +223,15 @@ func TestAdminOrderDetailShowsTheOrderNumber(t *testing.T) {
 		t.Error("관리자 주문 상세에 주문번호가 보이지 않는다")
 	}
 }
+
+// 환불 처리의 「거부」는 「실행」과 다른 모양이다 — 둘 다 같은 초록 주 버튼이라 돈을
+// 내보내는 동작과 막는 동작이 구별되지 않았다.
+func TestRefundRejectLooksDifferentFromExecute(t *testing.T) {
+	out := renderAdmin(t, "admin/refund.html", map[string]any{
+		"Order":      &commerce.OrderDetail{OrderNo: "N1"},
+		"Refunds":    []commerce.Refund{{ID: "r1", Status: "요청", Amount: 1000}},
+		"RequestKey": "k", "NeedsReauth": false, "Approved": 1000, "Refunded": 0, "Remaining": 1000})
+	if !strings.Contains(out, `<button type="submit" class="adm-btn adm-btn--danger">거부</button>`) {
+		t.Error("「거부」가 「실행」과 같은 주 버튼이다")
+	}
+}
