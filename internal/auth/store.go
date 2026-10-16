@@ -143,7 +143,15 @@ type UserRow struct {
 // the screen most likely to grow, and a per-row query turns it into N+1 the
 // moment it does.
 func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]UserRow, error) {
-	rows, err := s.q.ListUsers(ctx, authq.ListUsersParams{Limit: int32(limit), Offset: int32(offset)})
+	return s.SearchUsers(ctx, "", limit, offset)
+}
+
+// SearchUsers is ListUsers narrowed to accounts whose email or display name
+// contains q (A-401). LIKE 의 % 와 _ 는 글자 그대로 찾는다 — 그렇지 않으면 「_」 하나로
+// 모든 사용자가 나온다.
+func (s *Store) SearchUsers(ctx context.Context, q string, limit, offset int) ([]UserRow, error) {
+	pattern := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(q))
+	rows, err := s.q.ListUsers(ctx, authq.ListUsersParams{Pattern: pattern, Limit: int32(limit), Offset: int32(offset)})
 	if err != nil {
 		return nil, err
 	}

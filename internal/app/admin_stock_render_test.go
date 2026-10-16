@@ -207,3 +207,16 @@ func TestRoleFormsStartUnselected(t *testing.T) {
 		t.Error("사용자 상세의 역할 목록이 부여할 수 없는 역할을 보이거나 부여할 역할을 빠뜨린다")
 	}
 }
+
+// 사용자 목록: 검색칸이 있고 검색어가 쪽 넘김을 따라간다. 「N명」은 이 쪽의 인원이라고 말한다.
+func TestUserListScreenSearchAndCount(t *testing.T) {
+	out := renderAdmin(t, "admin/users.html", map[string]any{"Q": "kim", "Page": 1, "PageNo": 2,
+		"PrevPage": 0, "NextPage": 2, "HasNext": true,
+		"Users": []auth.UserRow{{ID: "u1", Email: "kim@example.com", IsActive: true, Verified: true}}})
+	for _, want := range []string{`name="q" value="kim"`, `href="/admin/users?q=kim&amp;page=2"`,
+		"2쪽 · 이 쪽 1명", "<th>표시 이름</th>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("사용자 목록에 %q 가 없다", want)
+		}
+	}
+}

@@ -48,6 +48,10 @@ SELECT u.id, u.email, u.display_name, u.is_active,
 FROM (
     SELECT uu.id, uu.email, uu.display_name, uu.is_active, uu.email_verified_at, uu.custom_fields, uu.created_at
     FROM users uu
+    -- A-401 검색: 이메일·표시 이름의 일부. 패턴 글자는 호출자가 이스케이프했다(\).
+    WHERE sqlc.arg('pattern')::text = ''
+       OR uu.email ILIKE '%' || sqlc.arg('pattern')::text || '%' ESCAPE '\'
+       OR uu.display_name ILIKE '%' || sqlc.arg('pattern')::text || '%' ESCAPE '\'
     ORDER BY uu.created_at DESC, uu.id
     LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int
 ) u

@@ -795,7 +795,8 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	// 그려서, 사용자가 한 명뿐인 사이트도 무한히 다음 쪽을 제시했다 — 링크를
 	// 따라가는 검사가 35쪽까지 걸어가 요청 제한에 걸렸다. 전체 개수를 세는
 	// COUNT 를 따로 치지 않는 이유는 그 값이 화면에 필요하지 않기 때문이다.
-	users, err := d.Auth.ListUsers(r.Context(), userPageSize+1, page*userPageSize)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	users, err := d.Auth.SearchUsers(r.Context(), q, userPageSize+1, page*userPageSize)
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
@@ -826,7 +827,7 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.Render(w, r, "admin/users.html", http.StatusOK, map[string]any{
-		"Users": users, "Page": page, "HasNext": hasNext, "Columns": columns,
+		"Users": users, "Page": page, "HasNext": hasNext, "Columns": columns, "Q": q,
 		// Pre-computed rather than arithmetic in the template: html/template has
 		// no maths, and adding an `add` function to the map is a function the
 		// next screen will also reach for something it should not compute.
