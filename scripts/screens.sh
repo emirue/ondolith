@@ -182,6 +182,7 @@ id_for() {
 	A-402 | A-405) echo "$USER" ;;
 	A-404) echo "$ROLE" ;;
 	A-502 | A-503 | A-513) echo "$PROD" ;;
+	P-411) echo "$TERMS" ;;
 	*) echo "$PAGE" ;;
 	esac
 }
@@ -213,6 +214,13 @@ req -o /dev/null -X POST "$BASE/checkout" \
 # 비웠으므로 한 번 더 담는다 — 두 화면이 서로 반대 상태를 요구한다.
 req -o /dev/null -X POST "$BASE/cart/items" \
 	--data-urlencode "variant_id=$VAR" --data-urlencode "quantity=1"
+
+# **약관 보기(P-411)는 시행된 약관이 있어야 열린다.** 주문을 다 만든 뒤에 넣는다 — 먼저
+# 넣으면 주문서가 그 약관 동의를 요구한다. 필수가 아니게 둔다(주문서 화면 스윕에 영향 없게).
+req -o /dev/null -X POST "$BASE/admin/terms" \
+	--data-urlencode "kind=이용약관" --data-urlencode "version=1.0" \
+	--data-urlencode "body=제1조 목적" --data-urlencode "effective_at=$(date +%F)"
+TERMS=$(sql "select id from terms limit 1")
 
 echo "D11 화면 훑기 ($BASE)"
 
