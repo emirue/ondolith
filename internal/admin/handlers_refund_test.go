@@ -2017,3 +2017,45 @@ func TestOverlongNamesAreRefusedWithAReason(t *testing.T) {
 		t.Errorf("거절됐는데 %d행이 저장됐다 (%v)", n, err)
 	}
 }
+
+// **글이 있는 게시판은 확인을 받고서야 지운다** (D19 A-305). 목록의 삭제 폼이 숨은
+// confirm=1 을 늘 실어 보내, 한 번 누르면 글·댓글·첨부가 통째로 사라졌다. 이제 확인
+// 없이 온 삭제는 몇 건이 함께 지워지는지 보여 주는 확인 화면이고, 확인해야 지운다.
+func TestBoardDeleteAsksBeforeTakingPosts(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"board.manage": true}, id: "u1", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+	var board string
+	if err := pool.QueryRow(ctx, `INSERT INTO boards (slug, name) VALUES ('notice', '공지') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := pool.Exec(ctx, `INSERT INTO posts (board_id, title, body) VALUES ($1, '글', '본문')`, board); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var page string
+	var posts any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, name string, code int, data any) {
+		page, posts = name, data.(map[string]any)["Posts"]
+		w.WriteHeader(code)
+	}
+	rec := postAdmin(t, d.BoardDelete, "/admin/boards/"+board+"/delete", map[string]string{"id": board}, url.Values{})
+	if rec.Code != http.StatusConflict || page != "admin/board-delete.html" || posts != 3 {
+		t.Errorf("확인 없는 삭제 = HTTP %d, 화면 %q, 글 %v건 — want 409 확인 화면, 3건", rec.Code, page, posts)
+	}
+	exists := func() bool {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM boards WHERE id = $1`, board).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if !exists() {
+		t.Fatal("확인 전에 게시판이 지워졌다")
+	}
+	rec = postAdmin(t, d.BoardDelete, "/admin/boards/"+board+"/delete", map[string]string{"id": board}, url.Values{"confirm": {"1"}})
+	if rec.Code != http.StatusSeeOther || exists() {
+		t.Errorf("확인한 삭제 = HTTP %d, 남음 %v", rec.Code, exists())
+	}
+}

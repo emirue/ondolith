@@ -24,9 +24,11 @@
           <td>
             <div class="adm-actions">
               <a class="adm-btn adm-btn--sm" href="/admin/boards/{{.ID}}/fields">필드</a>
+              {{/* 확인 값을 싣지 않는다. 글이 있으면 서버가 몇 건이 함께 지워지는지 보여
+                   주는 확인 화면(board-delete.html)으로 답한다 — 여기서 confirm=1 을
+                   실었더니 한 번 누르면 글·댓글·첨부가 통째로 사라졌다. */}}
               <form method="post" action="/admin/boards/{{.ID}}/delete">
                 {{template "reauth-field" .}}
-                <input type="hidden" name="confirm" value="1">
                 <button class="adm-btn adm-btn--sm adm-btn--danger">삭제</button>
               </form>
             </div>

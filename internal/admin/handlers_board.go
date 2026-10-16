@@ -151,7 +151,16 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 	err := d.Content.DeleteBoard(r.Context(), id, force)
 	switch {
 	case errors.Is(err, content.ErrBoardInUse):
-		http.Error(w, msgBoardInUse, http.StatusConflict)
+		// 확인 화면이다. 몇 건이 함께 지워지는지 보이고, 확인을 받아야 지운다.
+		ctx := r.Context()
+		b, berr := d.Content.BoardByID(ctx, id)
+		n, nerr := d.Content.BoardPostCount(ctx, id)
+		if berr != nil || nerr != nil {
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+		d.Render(w, r, "admin/board-delete.html", http.StatusConflict,
+			map[string]any{"Board": b, "Posts": n, "Error": msgBoardInUse})
 	case errors.Is(err, content.ErrNotFound):
 		http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
 	case err != nil:

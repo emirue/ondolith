@@ -143,6 +143,7 @@ var adminScreenTitles = map[string]string{
 	"admin/system.html":           "시스템 정보",
 	"admin/backup.html":           "백업",
 	"admin/boards.html":           "게시판",
+	"admin/board-delete.html":     "게시판 삭제",
 	"admin/board-edit.html":       "게시판 설정",
 	"admin/board-fields.html":     "커스텀 필드",
 	"admin/posts.html":            "글 관리",

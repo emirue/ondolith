@@ -175,7 +175,7 @@ func TestAdminRefusalsReachTheirScreens(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO posts (board_id, title, body) VALUES ($1, '글', '본문')`, board); err != nil {
 		t.Fatal(err)
 	}
-	// 화면의 폼은 확인을 늘 보낸다 — 확인 없이 온 요청에만 이 문구가 나간다.
+	// 확인 없이 온 요청에는 확인 화면이 이 문구와 함께 나간다.
 	rec = postAdmin(t, d.BoardDelete, "/admin/boards/"+board+"/delete", map[string]string{"id": board}, url.Values{})
 	if rec.Code != http.StatusConflict {
 		t.Errorf("글이 남은 게시판 삭제 = HTTP %d, want 409", rec.Code)

@@ -149,3 +149,12 @@ func TestMailScreenOffersATestSendToTheAdminOnly(t *testing.T) {
 		t.Error("시험 발송 폼이 받는 주소를 받는다 — 임의 주소로 쏘는 중계가 된다 (D13)")
 	}
 }
+
+// 게시판 목록의 삭제 폼은 확인 값을 싣지 않는다 — 실으면 확인 없이 글이 통째로 지워진다.
+func TestBoardListDeleteDoesNotPreConfirm(t *testing.T) {
+	out := renderAdmin(t, "admin/boards.html", map[string]any{
+		"Boards": []map[string]any{{"ID": "b1", "Name": "공지", "Slug": "notice"}}})
+	if strings.Contains(out, `name="confirm"`) {
+		t.Error("게시판 목록의 삭제 폼이 확인 값을 미리 싣는다")
+	}
+}
