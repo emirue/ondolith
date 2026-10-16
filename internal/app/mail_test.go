@@ -229,3 +229,31 @@ func TestMailFailureEntrySkipsUnconfiguredSMTP(t *testing.T) {
 		t.Errorf("작업 로그 항목 = %+v", e)
 	}
 }
+
+// **같은 메일은 어느 경로로 나가든 같은 문구다** (FR-207, FR-214, FR-210).
+//
+// 사용자가 요청한 재설정은 「30분 뒤 만료됩니다」, 관리자가 강제한 재설정은 「아래 링크로
+// 재설정하세요:」뿐이었다. 인증 메일에는 24시간 만료 안내가 없었고, 제목에 사이트 이름이
+// 없었다. 「가입 시도 알림」은 「본인이 아니라면 무시하세요」뿐이라 본인이면 할 일이 없었다.
+func TestMailCopyCarriesExpiryAndSiteName(t *testing.T) {
+	link := "https://example.com/password/reset/abc"
+	if b := resetMailBody(link); !strings.Contains(b, "30분") || !strings.Contains(b, link) {
+		t.Errorf("재설정 메일에 만료 시간이나 링크가 없다: %q", b)
+	}
+	vlink := "https://example.com/verify/abc"
+	if b := verifyMailBody(vlink); !strings.Contains(b, "24시간") || !strings.Contains(b, vlink) {
+		t.Errorf("인증 메일에 만료 시간이나 링크가 없다: %q", b)
+	}
+	b := signupAttemptBody("https://example.com")
+	for _, want := range []string{"https://example.com/login", "https://example.com/password/reset", "무시"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("가입 시도 알림에 %q 가 없다: %q", want, b)
+		}
+	}
+	if got := mailSubject("온돌샵", "이메일 인증"); got != "[온돌샵] 이메일 인증" {
+		t.Errorf("제목 = %q — 어느 사이트의 메일인지 모른다", got)
+	}
+	if got := mailSubject("", "이메일 인증"); got != "이메일 인증" {
+		t.Errorf("사이트 이름이 없을 때 제목 = %q", got)
+	}
+}

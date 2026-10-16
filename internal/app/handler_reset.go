@@ -72,9 +72,7 @@ func (d *accountDeps) resetRequest(w http.ResponseWriter, r *http.Request) {
 	user, _, err := d.store.FindActiveUserByEmail(ctx, email)
 	if err == nil && user != nil {
 		if raw, terr := d.store.IssueResetToken(ctx, user.ID); terr == nil {
-			d.mailer.SendAsync(email, "비밀번호 재설정",
-				"아래 링크로 비밀번호를 재설정하세요. 30분 뒤 만료됩니다.\n"+
-					d.baseURL+"/password/reset/"+raw)
+			d.mailer.SendAsync(email, "비밀번호 재설정", resetMailBody(d.baseURL+"/password/reset/"+raw))
 		}
 	}
 	// Mail failures land here too: SendAsync reports to the log, and D19 puts

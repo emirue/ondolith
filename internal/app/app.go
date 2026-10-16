@@ -324,7 +324,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
 		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
-	mailer := auth.NewMailer(settingsSender{settings: setting, log: log}, log)
+	siteName := func() string { return site().Name }
+	mailer := auth.NewMailer(settingsSender{settings: setting, log: log, site: siteName}, log)
 	// D13: 끝내 나가지 못한 메일은 작업 로그에 남긴다. 화면은 실패를 말할 수
 	// 없어서(FR-207) 여기가 아니면 운영자가 알 곳이 없다. 자동 백업과 같이 주체는
 	// system 이다 (D15 7절). 본문은 받지 않는다 — 재설정 링크가 곧 토큰이다.
@@ -422,11 +423,11 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		BoardSkins:      func() []string { return loaderRef.Load().BoardSkins() },
 		SendReset: func(email, token string) {
 			mailer.SendAsync(email, "비밀번호 재설정",
-				"아래 링크로 재설정하세요:\n"+strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token)
+				resetMailBody(strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token))
 		},
 		// 시험 발송은 기다려서 결과를 본다 — 재시도 큐(mailer)를 거치지 않는다.
 		SendMailTest: func(ctx context.Context, to string) error {
-			return settingsSender{settings: setting, log: log}.Send(ctx, to, "메일 설정 시험",
+			return settingsSender{settings: setting, log: log, site: siteName}.Send(ctx, to, "메일 설정 시험",
 				"관리자 화면에서 보낸 메일 설정 시험입니다. 이 메일을 받으셨다면 SMTP 설정이 맞습니다.")
 		},
 		Limiter: limiter, Limits: limits,

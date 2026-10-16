@@ -135,8 +135,7 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		// "이미 가입된 이메일입니다" is a membership oracle — anyone can test a
 		// list of addresses against it. The same page is shown as for success,
 		// and the existing account is told by mail that someone tried.
-		d.mailer.SendAsync(email, "가입 시도 알림",
-			"이 주소로 가입을 시도한 요청이 있었습니다. 본인이 아니라면 무시하세요.")
+		d.mailer.SendAsync(email, "가입 시도 알림", signupAttemptBody(d.baseURL))
 		d.renderSignupAccepted(w, r, email)
 		return
 	}
@@ -183,8 +182,7 @@ func (d *accountDeps) sendVerification(ctx contextLike, userID, email string) {
 	// link in production answered 404. The integration test did not catch it
 	// because it built its own registry with /verify — a fixture that differed
 	// from the tree (.ai/MISTAKES.md M14).
-	d.mailer.SendAsync(email, "이메일 인증",
-		"아래 링크로 인증을 완료하세요:\n"+d.baseURL+"/verify/"+raw)
+	d.mailer.SendAsync(email, "이메일 인증", verifyMailBody(d.baseURL+"/verify/"+raw))
 }
 
 // refuseUnverified is the login gate of FR-214 (loginDeps.unverified): with
