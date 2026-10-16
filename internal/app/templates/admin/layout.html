@@ -22,17 +22,15 @@
 </header>
 
 <div class="adm-body">
+  {{/* 좁은 화면의 메뉴. 사이드바가 본문 위로 올라오면 메뉴 25개가 첫 화면을 다 차지해,
+       접어 두었다가 「메뉴」를 눌러 연다. JS 없이 접으려면 <details> 이고, 넓은 화면은 늘
+       펼친 사이드바가 필요해 같은 목록을 두 번 그린다 — 폭에 따라 하나만 보인다. */}}
+  <details class="adm-mnav">
+    <summary>메뉴</summary>
+    {{template "adm-nav" .}}
+  </details>
   <aside class="adm-sidebar">
-    {{range .Nav}}
-      <div>
-        {{if .Title}}<div class="adm-navgroup-label">{{.Title}}</div>{{end}}
-        <nav>
-          {{range .Items}}
-            <a href="{{.Path}}"{{if eq .Path $.Current}} aria-current="page"{{end}}>{{.Title}}</a>
-          {{end}}
-        </nav>
-      </div>
-    {{end}}
+    {{template "adm-nav" .}}
   </aside>
 
   <main class="adm-main">
@@ -55,6 +53,19 @@
      살아 있으면 서버가 값을 읽지 않는다. */}}
 {{/* board-picker 는 글·댓글·첨부 관리(A-307~309)의 게시판 고르기다. 주소를 직접 치게 했고,
      댓글 관리에는 고르는 칸조차 없었다. 데이터 {Boards, BoardSlug}. */}}
+{{define "adm-nav"}}
+{{range .Nav}}
+  <div>
+    {{if .Title}}<div class="adm-navgroup-label">{{.Title}}</div>{{end}}
+    <nav>
+      {{range .Items}}
+        <a href="{{.Path}}"{{if eq .Path $.Current}} aria-current="page"{{end}}>{{.Title}}</a>
+      {{end}}
+    </nav>
+  </div>
+{{end}}
+{{end}}
+
 {{define "board-picker"}}
 <select name="board" aria-label="게시판">
   <option value="">게시판을 고르세요</option>

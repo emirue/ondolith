@@ -251,7 +251,8 @@ a:hover { color: var(--link-hover); }
   text-transform: uppercase;
 }
 
-.adm-sidebar a {
+.adm-sidebar a,
+.adm-mnav a {
   display: block;
   font-size: 14px;
   padding: var(--s10) var(--s12);
@@ -261,14 +262,19 @@ a:hover { color: var(--link-hover); }
   opacity: .7;
 }
 
-.adm-sidebar a:hover { opacity: 1; background: var(--nav-active-bg); }
+.adm-sidebar a:hover,
+.adm-mnav a:hover { opacity: 1; background: var(--nav-active-bg); }
 
-.adm-sidebar a[aria-current] {
+.adm-sidebar a[aria-current],
+.adm-mnav a[aria-current] {
   background: var(--nav-active-bg);
   color: var(--nav-active-ink);
   font-weight: 600;
   opacity: 1;
 }
+
+/* 좁은 화면의 접히는 메뉴(layout.html). 넓은 화면은 사이드바가 늘 펼쳐 있다. */
+.adm-mnav { display: none; }
 
 /* ---- 페이지 헤더 --------------------------------------------------------- */
 .adm-pagehead {
@@ -852,7 +858,7 @@ dl { margin: 0 0 var(--s20); }
 .adm-pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 60ch; margin: 8px 0 0; font: inherit; }
 
 @media print {
-  .adm-header, .adm-sidebar { display: none; }
+  .adm-header, .adm-sidebar, .adm-mnav { display: none; }
   .qr-label { break-inside: avoid; }
 }
 
@@ -879,24 +885,27 @@ dl { margin: 0 0 var(--s20); }
 }
 
 @media (max-width: 1023px) {
-  /* 사이드바는 문서 흐름 위쪽으로 접힌다. 오프캔버스 드로어는 JS 가 필요하고
-   * 관리자 화면에 JS 의존을 만들지 않는다 — details/summary 로 같은 결과를
-   * 얻는다. */
+  /* 사이드바 대신 본문 위에 접히는 메뉴(.adm-mnav)가 선다. 오프캔버스 드로어는 JS 가
+   * 필요하고 관리자 화면에 JS 의존을 만들지 않는다 — details/summary 로 같은 결과를
+   * 얻는다. 늘 펼쳐 두면 375px 에서 본문이 메뉴 아래 약 700px 에서 시작했다. */
   .adm-body { grid-template-columns: minmax(0, 1fr); }
-  .adm-sidebar {
-    border-right: 0;
+  .adm-sidebar { display: none; }
+  .adm-mnav {
+    display: block;
+    background: var(--sidebar-bg);
+    color: var(--sidebar-ink);
     border-bottom: 1px solid var(--sidebar-line);
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: var(--s12);
-    padding: var(--s12) var(--s16);
+    padding: 0 var(--s16);
   }
+  /* 높이는 여백으로 낸다(12+22+12px) — `display: flex` 로 바꾸면 펼침 삼각형(::marker)이 사라진다. */
+  .adm-mnav summary { padding: var(--s12) 0; font-weight: 600; cursor: pointer; }
+  .adm-mnav > div { padding-bottom: var(--s12); }
   /* **제목을 숨기지 않는다.** 접힌 사이드바는 링크 스물다섯 개가 한 덩어리로
    * 깔리는데, 그 상태에서 「주문」을 찾으려면 전부 읽어야 한다 — 375px 스크린샷
    * 에서 보고 알았다. 그룹은 이미 `<div>` 단위로 줄바꿈되므로 제목 한 줄만
    * 되살리면 덩어리가 넷으로 갈린다. */
   .adm-navgroup-label { margin-bottom: var(--s6); }
-  .adm-sidebar nav { display: flex; flex-wrap: wrap; gap: var(--s6); }
+  .adm-mnav nav { display: flex; flex-wrap: wrap; gap: var(--s6); }
 }
 
 @media (max-width: 767px) {
@@ -908,7 +917,7 @@ dl { margin: 0 0 var(--s20); }
   .adm-table td { padding: var(--row-pad) var(--s12); }
   /* 터치 타겟 최소 44px */
   .adm-btn { min-height: 44px; }
-  .adm-sidebar a { min-height: 44px; display: flex; align-items: center; }
+  .adm-mnav a { min-height: 44px; display: flex; align-items: center; }
   .adm-filterbar a:not(.adm-btn) { min-height: 44px; display: inline-flex; align-items: center; }
   /* 메뉴 행은 한 줄씩 쌓고 머리줄을 숨긴다. */
   .adm-menu-grid { grid-template-columns: minmax(0, 1fr); }

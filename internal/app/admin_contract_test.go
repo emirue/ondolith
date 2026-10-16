@@ -683,3 +683,40 @@ func TestKoreanWordsAreNotSplit(t *testing.T) {
 		}
 	}
 }
+
+// **휴대폰에서 관리자 메뉴는 접혀 있다가 「메뉴」를 눌러 연다.**
+//
+// 1023px 이하에서 사이드바가 본문 위로 올라오며 메뉴 25개가 칩으로 늘 펼쳐져, 375px 에서
+// 본문이 약 700px 아래에서 시작했다. CSS 주석은 「details/summary 로 같은 결과를
+// 얻는다」고 했지만 layout.html 에 그 요소가 없었다. JS 없이 접으려면 `<details>` 가
+// 필요하고, 넓은 화면에서는 늘 펼친 사이드바가 필요해 두 벌을 그리고 폭으로 하나만 보인다.
+func TestNarrowAdminMenuIsCollapsed(t *testing.T) {
+	html := renderAdmin(t, "admin/refusal.html", map[string]any{"Error": "x"})
+	m := regexp.MustCompile(`<details class="adm-mnav"([^>]*)>\s*<summary>메뉴</summary>`).FindStringSubmatch(html)
+	if m == nil {
+		t.Fatal("관리자 화면에 접히는 메뉴(<details class=\"adm-mnav\"><summary>메뉴</summary>)가 없다")
+	}
+	if strings.Contains(m[1], "open") {
+		t.Error("접히는 메뉴가 펼친 채로 그려진다 — 휴대폰 첫 화면을 메뉴가 다시 차지한다")
+	}
+
+	css, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(css)
+	if !regexp.MustCompile(`(?m)^\.adm-mnav\s*\{[^}]*display:\s*none`).MatchString(src) {
+		t.Error("넓은 화면에서 접히는 메뉴가 숨지 않는다 — 사이드바와 메뉴가 두 벌 보인다")
+	}
+	at := strings.Index(src, "@media (max-width: 1023px)")
+	if at < 0 {
+		t.Fatal("1023px 블록이 없다")
+	}
+	block := src[at:]
+	block = block[:strings.Index(block, "\n}")]
+	for _, want := range []string{`\.adm-sidebar\s*\{\s*display:\s*none`, `\.adm-mnav\s*\{[^}]*display:\s*block`} {
+		if !regexp.MustCompile(want).MatchString(block) {
+			t.Errorf("1023px 블록에 %s 가 없다", want)
+		}
+	}
+}
