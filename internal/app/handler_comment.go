@@ -76,7 +76,9 @@ func (d *boardDeps) commentCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body := strings.TrimSpace(r.PostFormValue("body"))
+	// 브라우저는 줄바꿈을 CRLF(두 글자)로 보내고 maxlength 는 한 글자로 센다 — 그대로 두면
+	// 상한 근처의 여러 줄 댓글이 브라우저를 지나 서버에서 거절된다.
+	body := strings.ReplaceAll(strings.TrimSpace(r.PostFormValue("body")), "\r\n", "\n")
 	if body == "" {
 		http.Redirect(w, r, "/board/"+b.Slug+"/"+p.ID, http.StatusSeeOther)
 		return
@@ -143,7 +145,9 @@ func (d *boardDeps) commentUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
 		return
 	}
-	body := strings.TrimSpace(r.PostFormValue("body"))
+	// 브라우저는 줄바꿈을 CRLF(두 글자)로 보내고 maxlength 는 한 글자로 센다 — 그대로 두면
+	// 상한 근처의 여러 줄 댓글이 브라우저를 지나 서버에서 거절된다.
+	body := strings.ReplaceAll(strings.TrimSpace(r.PostFormValue("body")), "\r\n", "\n")
 	if body == "" || content.TooLong(body, content.MaxCommentLen) {
 		msg := "내용을 입력하세요."
 		if body != "" {

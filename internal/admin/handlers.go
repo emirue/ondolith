@@ -719,6 +719,12 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
+	// pages_body_html_len CHECK 에 맡기면 500 이다 — 글(P-205)과 같은 상한을 앞에서 본다.
+	if content.TooLong(bodyHTML, content.MaxBodyHTMLLen) {
+		d.renderPageEdit(w, r, http.StatusUnprocessableEntity,
+			map[string]any{"Error": "본문이 너무 깁니다. 서식 포함 200,000자까지 쓸 수 있습니다."})
+		return
+	}
 	p := content.Page{
 		Slug:     slug,
 		Title:    r.PostFormValue("title"),

@@ -51,6 +51,15 @@ func TestOverlongPostsAndCommentsAreRefusedNotServerErrors(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id FROM posts`).Scan(&postID); err != nil {
 		t.Fatalf("짧은 글이 저장되지 않았다: %v", err)
 	}
+
+	// **글 수정에서 거절돼도 되돌린 폼은 그 글의 수정 폼이다.** 전에는 ID 없는 글로 다시
+	// 그려 폼이 「새 글 쓰기」로 제출됐고, 고쳐 저장하면 원래 글은 그대로 두고 새 글이 생겼다.
+	resp = post("/board/free/"+postID+"/edit", url.Values{"title": {longTitle}, "body": {"본문"}})
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(b), `action="/board/free/`+postID+`/edit"`) {
+		t.Errorf("수정 거절 = HTTP %d, 수정 폼 유지 %v", resp.StatusCode, strings.Contains(string(b), postID+`/edit"`))
+	}
 	resp = post("/board/free/"+postID+"/comments", url.Values{"body": {strings.Repeat("가", 2001)}})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -59,6 +68,14 @@ func TestOverlongPostsAndCommentsAreRefusedNotServerErrors(t *testing.T) {
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM comments`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("거절된 댓글 %d건 (%v)", n, err)
+	}
+
+	// 브라우저는 줄바꿈을 CRLF 로 보낸다. 줄바꿈을 한 글자로 세면 1,800자인 여러 줄 댓글은
+	// 받아야 한다 — 그대로 세면 2,700자라 거절됐다.
+	resp = post("/board/free/"+postID+"/comments", url.Values{"body": {strings.Repeat("가\r\n", 900)}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("여러 줄 댓글(줄바꿈 900개) = HTTP %d, want 303", resp.StatusCode)
 	}
 }
 

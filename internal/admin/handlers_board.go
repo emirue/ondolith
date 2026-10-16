@@ -92,13 +92,15 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(r.PostFormValue("per_page")); err == nil && n > 0 {
 		b.PerPage = n
 	}
+	id := r.PathValue("id")
+	if !isCreate(id) {
+		b.ID = id // 거절 화면의 폼이 같은 게시판으로 다시 제출되게 한다
+	}
 	// 이유 없는 「저장하지 못했습니다」로 끝나던 자리다 — DB CHECK 가 거부했다.
 	if b.Name == "" || content.TooLong(b.Name, content.MaxNameLen) {
 		d.boardFormError(w, r, b, "게시판 이름은 1~100자입니다.", http.StatusUnprocessableEntity)
 		return
 	}
-
-	id := r.PathValue("id")
 	if isCreate(id) {
 		newID, err := d.Content.CreateBoard(ctx, b, content.BoardPreset(r.PostFormValue("preset")))
 		switch {
@@ -160,7 +162,7 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.Render(w, r, "admin/board-delete.html", http.StatusConflict,
-			map[string]any{"Board": b, "Posts": n, "Error": msgBoardInUse})
+			map[string]any{"Board": b, "Posts": n, "Warning": msgBoardInUse})
 	case errors.Is(err, content.ErrNotFound):
 		http.Error(w, "게시판을 찾을 수 없습니다.", http.StatusNotFound)
 	case err != nil:

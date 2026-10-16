@@ -137,12 +137,6 @@ func listStyle(s string) string {
 	return "list"
 }
 
-// DeleteBoard removes a board, its posts and its scoped grants — all by
-// CASCADE (D30 3-1).
-//
-// The count is checked first and reported, rather than letting the delete
-// succeed silently: A-305 has a confirmation step, and "이 게시판의 글 128건도
-// 함께 삭제됩니다" is the only thing that makes that step mean anything.
 // BoardPostCount is how many posts deleting the board takes with it — A-305 의 확인
 // 화면이 「글 N건도 함께 삭제됩니다」라고 말할 수 있어야 확인이 뜻을 갖는다.
 func (s *Store) BoardPostCount(ctx context.Context, id string) (int, error) {
@@ -150,6 +144,12 @@ func (s *Store) BoardPostCount(ctx context.Context, id string) (int, error) {
 	return int(n), err
 }
 
+// DeleteBoard removes a board, its posts and its scoped grants — all by
+// CASCADE (D30 3-1).
+//
+// The count is checked first and reported, rather than letting the delete
+// succeed silently: A-305 has a confirmation step, and "이 게시판의 글 128건도
+// 함께 삭제됩니다" is the only thing that makes that step mean anything.
 func (s *Store) DeleteBoard(ctx context.Context, id string, force bool) error {
 	defer s.counts.reset()
 	if !force {

@@ -2059,3 +2059,14 @@ func TestBoardDeleteAsksBeforeTakingPosts(t *testing.T) {
 		t.Errorf("확인한 삭제 = HTTP %d, 남음 %v", rec.Code, exists())
 	}
 }
+
+// 페이지 본문(서식 포함)도 상한을 앞에서 본다 — pages_body_html_len CHECK 에 맡기면 500 이다.
+func TestOverlongPageBodyIsRefusedWithAReason(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"page.create": true, "page.update": true}, id: "u1", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	rec := postAdmin(t, d.PageSave, "/admin/pages/new", nil, url.Values{
+		"slug": {"long"}, "title": {"긴 페이지"}, "body_html": {"<p>" + strings.Repeat("가", 200001) + "</p>"}})
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "200,000자") {
+		t.Errorf("긴 페이지 본문 = HTTP %d, want 422 + 이유", rec.Code)
+	}
+}

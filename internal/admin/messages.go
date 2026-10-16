@@ -118,8 +118,9 @@ func termsMessage(err error) string {
 	return ""
 }
 
-// msgBoardInUse is A-305's delete without the confirmation the form sends.
-const msgBoardInUse = "글이 남아 있는 게시판입니다. 삭제하면 글, 댓글, 첨부 파일이 모두 함께 삭제됩니다. 확인한 뒤 다시 시도해 주세요."
+// msgBoardInUse heads A-305's delete confirmation (board-delete.html): a board
+// with posts is deleted only after this screen's checkbox.
+const msgBoardInUse = "글이 남아 있는 게시판입니다. 삭제하면 글, 댓글, 첨부 파일이 모두 함께 삭제됩니다. 아래에서 확인해 주세요."
 
 // themeRefusal is A-202·A-203's sentence: what failed, then why. A fault with no
 // sentence gets refusal's own, which already says it failed — prefixing it would

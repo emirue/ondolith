@@ -188,9 +188,15 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	commentForm := map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
 		"Turnstile": v.Site.Turnstile}
 	// 「답글」(?reply=댓글)은 같은 폼을 그 댓글에 대한 답글로 연다 (FR-505). 이 글의
-	// 최상위 댓글일 때만이다 — 저장할 때도 같은 판정을 한다(commentCreate).
-	if id := r.URL.Query().Get("reply"); id != "" && d.commentBelongsTo(ctx, id, p.ID) {
-		commentForm["ParentID"] = id
+	// 최상위 댓글일 때만이다 — 저장할 때도 같은 판정을 한다(commentBelongsTo). 이미 읽은
+	// 댓글에서 찾는다: 다시 묻지 않아도 이 글의 댓글은 거기 다 있다.
+	if id := r.URL.Query().Get("reply"); id != "" {
+		for _, c := range comments {
+			if c.ID == id && c.ParentID == "" {
+				commentForm["ParentID"] = id
+				break
+			}
+		}
 	}
 	v.Data = map[string]any{
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
@@ -425,6 +431,9 @@ func (d *boardDeps) readPostForm(w http.ResponseWriter, r *http.Request, b *cont
 	}
 	body, bodyHTML := content.FormBody(r.PostFormValue("body"), r.PostFormValue("body_html"))
 	p := content.Post{
+		// 수정(P-206) 경로에서는 경로의 id 다. 비우면 거절 화면의 폼이 「새 글 쓰기」로
+		// 제출돼, 고쳐 저장하는 순간 원래 글은 그대로이고 새 글이 생겼다.
+		ID:       r.PathValue("id"),
 		Title:    strings.TrimSpace(r.PostFormValue("title")),
 		Body:     body,
 		BodyHTML: bodyHTML,
