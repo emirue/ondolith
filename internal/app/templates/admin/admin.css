@@ -529,11 +529,9 @@ input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width:
   resize: vertical;
 }
 
-/* 열은 220px 아래로 줄지 않는다 — 130px 이던 때 375px 화면에도 두 열이 서서 이메일·SMTP
-   호스트 칸이 140px 이었다. min(100%) 는 카드보다 좁은 화면에서 넘치지 않게 한다. */
 .adm-field-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: var(--s16);
 }
 
@@ -949,6 +947,9 @@ dl { margin: 0 0 var(--s20); }
   .adm-btn { min-height: 44px; }
   .adm-mnav a { min-height: 44px; display: flex; align-items: center; }
   .adm-filterbar a:not(.adm-btn) { min-height: 44px; display: inline-flex; align-items: center; }
+  /* 나란히 선 칸은 한 열로 쌓는다 — 375px 에서도 두 열이 서서 이메일·SMTP 호스트 칸이 140px
+     이었다. 넓은 화면의 최소 폭(130px)을 늘리면 네 칸 줄이 3+1 로 깨져 여기서만 쌓는다. */
+  .adm-field-row { grid-template-columns: minmax(0, 1fr); }
   /* 메뉴 행은 한 줄씩 쌓고 머리줄을 숨긴다. */
   .adm-menu-grid { grid-template-columns: minmax(0, 1fr); }
   .adm-menu-grid--head { display: none; }

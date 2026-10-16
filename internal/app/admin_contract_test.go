@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"text/template/parse"
@@ -853,19 +852,22 @@ func TestDarkPalettesDeclareColorScheme(t *testing.T) {
 // **휴대폰에서 관리자 폼은 한 열이고, 기간 필터의 「~」는 날짜 칸과 붙어 다닌다.**
 //
 // `.adm-field-row` 의 최소 폭이 130px 라 375px 에서도 두 열이 서서 이메일·SMTP 호스트 칸이
-// 약 140px 이었다. 기간 필터는 줄이 바뀌면 「~」가 혼자 한 줄에 남았고, 제출 「조회」가
+// 약 140px 이었다. 최소 폭을 늘리면 넓은 화면의 네 칸 줄이 3+1 로 깨져, 좁은 화면에서만 쌓는다. 기간 필터는 줄이 바뀌면 「~」가 혼자 한 줄에 남았고, 제출 「조회」가
 // 「1주일」「1개월」 바로가기와 같은 모양이었다.
 func TestNarrowAdminFormsStackAndPeriodHoldsTogether(t *testing.T) {
 	css, err := adminFS.ReadFile("templates/admin/admin.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := regexp.MustCompile(`(?m)^\.adm-field-row\s*\{[^}]*minmax\(min\(100%,\s*(\d+)px\)`).FindSubmatch(css)
-	if m == nil {
-		t.Fatal(".adm-field-row 의 열 최소 폭이 min(100%, Npx) 가 아니다 — 좁은 화면에서 열이 쪼개진다")
+	src := string(css)
+	at := strings.Index(src, "@media (max-width: 767px)")
+	if at < 0 {
+		t.Fatal("767px 블록이 없다")
 	}
-	if n, _ := strconv.Atoi(string(m[1])); n < 200 {
-		t.Errorf(".adm-field-row 최소 폭 %dpx — 375px 화면에 두 열이 선다", n)
+	block := src[at:]
+	block = block[:strings.Index(block, "\n}")]
+	if !regexp.MustCompile(`\.adm-field-row\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)`).MatchString(block) {
+		t.Error("767px 블록이 .adm-field-row 를 한 열로 쌓지 않는다 — 375px 에 두 열이 선다")
 	}
 
 	html := renderAdmin(t, "admin/webhooks.html", map[string]any{"From": "2026-10-01", "To": "2026-10-16"})
