@@ -179,3 +179,32 @@ func TestNoFloatingPointInTheMoneyPath(t *testing.T) {
 		t.Fatal("패키지를 하나도 읽지 못했다 — 검사가 헛돌았다")
 	}
 }
+
+// 주문 뒤 화면(주문 상세·영수증)은 배송비를 저장된 값에서 거꾸로 푼다 — orders
+// 에 배송비 열이 없다. 주문을 만들 때의 식(총액 = 상품합계 + 배송비 − 할인)과
+// 어긋나면 화면의 배송비가 결제한 배송비와 달라진다.
+func TestOrderDetailRecoversShippingFee(t *testing.T) {
+	ship := Shipping{FlatFee: 3000, FreeThreshold: 50000}
+	for _, tc := range []struct {
+		lines    []Line
+		discount int
+	}{
+		{[]Line{{12000, 1000, 2}, {5000, 0, 1}}, 0},    // 유료 배송
+		{[]Line{{12000, 1000, 2}, {5000, 0, 1}}, 4000}, // 유료 배송 + 할인
+		{[]Line{{47000, 0, 1}, {3000, 0, 1}}, 0},       // 무료 배송
+	} {
+		goods, fee, total, err := Total(tc.lines, ship)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := OrderDetail{Total: total - tc.discount, Discount: tc.discount}
+		for _, l := range tc.lines {
+			amount, _ := l.Amount()
+			o.Items = append(o.Items, OrderItem{LineAmount: amount})
+		}
+		if o.Goods() != goods || o.ShippingFee() != fee {
+			t.Errorf("할인 %d: 상품합계 %d·배송비 %d, want %d·%d",
+				tc.discount, o.Goods(), o.ShippingFee(), goods, fee)
+		}
+	}
+}

@@ -297,6 +297,22 @@ type OrderDetail struct {
 	Items         []OrderItem
 }
 
+// Goods is the sum of the line snapshots.
+func (o OrderDetail) Goods() int {
+	n := 0
+	for _, it := range o.Items {
+		n += it.LineAmount
+	}
+	return n
+}
+
+// ShippingFee is what the order paid for delivery.
+//
+// orders 에 배송비 열이 없다. 총액이 상품합계 + 배송비 − 할인으로 만들어지므로
+// (CreateOrder) 저장된 값에서 거꾸로 푼다 — 지금 정책으로 다시 계산하면 정책이
+// 바뀐 뒤 과거 주문의 배송비가 달라진다.
+func (o OrderDetail) ShippingFee() int { return o.Total + o.Discount - o.Goods() }
+
 // OrderItem is one line, from the snapshot columns only.
 //
 // 상품 표를 조인하지 않는다. 조인해 현재 이름·가격을 보여주면 FR-612 가

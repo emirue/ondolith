@@ -4,6 +4,9 @@
   <dl class="adm-detail">
     <dt>상태</dt><dd><strong>{{.Status}}</strong></dd>
     <dt>주문일</dt><dd>{{date .CreatedAt "2006-01-02 15:04"}}</dd>
+    <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
+    <dt>배송비</dt><dd>{{money .ShippingFee}}</dd>
+    {{if .Discount}}<dt>할인</dt><dd>-{{money .Discount}}</dd>{{end}}
     <dt>결제 금액</dt><dd><strong>{{money .Total}}</strong></dd>
     <dt>받는 사람</dt><dd>{{.ReceiverName}} · {{.ReceiverPhone}}</dd>
     <dt>배송지</dt><dd><address>({{.Postcode}}) {{.Address1}} {{.Address2}}</address></dd>

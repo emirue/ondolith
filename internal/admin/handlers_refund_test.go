@@ -1058,7 +1058,8 @@ func TestPolicyRejectsConfirmWindowShorterThanReturnWindow(t *testing.T) {
 	for _, tc := range []struct{ ret, confirm string }{{"7", "7"}, {"7", "6"}} {
 		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 			"order.return_days": {tc.ret}, "order.confirm_days": {tc.confirm},
-			"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"0"}})
+			"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"0"},
+			"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("반품 %s / 확정 %s = HTTP %d, want 422", tc.ret, tc.confirm, rec.Code)
 		}
@@ -1076,7 +1077,8 @@ func TestPolicyRejectsConfirmWindowShorterThanReturnWindow(t *testing.T) {
 	// 길면 저장된다 — 위 단언이 "무엇이든 막힌다" 를 본 것이 아니라는 것.
 	rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 		"order.return_days": {"7"}, "order.confirm_days": {"8"},
-		"order.return_fee_policy": {"별도청구"}, "order.return_fee_amount": {"3000"}})
+		"order.return_fee_policy": {"별도청구"}, "order.return_fee_amount": {"3000"},
+		"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("정상 저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
@@ -1107,10 +1109,52 @@ func TestPolicyRejectsBadShippingFeeValues(t *testing.T) {
 	} {
 		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 			"order.return_days": {"7"}, "order.confirm_days": {"8"},
-			"order.return_fee_policy": {tc.policy}, "order.return_fee_amount": {tc.amount}})
+			"order.return_fee_policy": {tc.policy}, "order.return_fee_amount": {tc.amount},
+			"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("방식 %q / 금액 %q = HTTP %d, want 422", tc.policy, tc.amount, rec.Code)
 		}
+	}
+}
+
+// 주문 배송비 정책(D50)도 A-512 가 정한다. 장바구니·주문서는 shipping.* 를
+// 읽는데 그 값을 쓰는 화면이 없어, 배송비가 늘 0원이었다.
+func TestPolicySavesShippingPolicy(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true},
+		id: "u1", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	form := func(flat, free string) url.Values {
+		return url.Values{"order.return_days": {"7"}, "order.confirm_days": {"8"},
+			"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"0"},
+			"shipping.flat_fee": {flat}, "shipping.free_threshold": {free}}
+	}
+
+	for _, tc := range [][2]string{{"-1", "0"}, {"3000", "-1"}, {"삼천", "0"}, {"", "0"}, {"3000", ""}} {
+		rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, form(tc[0], tc[1]))
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("배송비 %q / 기준액 %q = HTTP %d, want 422", tc[0], tc[1], rec.Code)
+		}
+	}
+
+	if rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, form("3000", "50000")); rec.Code != http.StatusSeeOther {
+		t.Fatalf("정상 저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	kv, err := d.Content.Settings(context.Background(), "shipping.flat_fee", "shipping.free_threshold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["shipping.flat_fee"] != "3000" || kv["shipping.free_threshold"] != "50000" {
+		t.Errorf("저장값 %v, want 3000 / 50000", kv)
+	}
+
+	// 폼은 저장된 값을 다시 보인다 — 보이지 않으면 다음 저장이 0 으로 덮는다.
+	var got map[string]string
+	d.Render = func(_ http.ResponseWriter, _ *http.Request, _ string, _ int, data any) {
+		got, _ = data.(map[string]any)["Policy"].(map[string]string)
+	}
+	d.PolicyForm(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/commerce/policy", nil))
+	if got["shipping.flat_fee"] != "3000" || got["shipping.free_threshold"] != "50000" {
+		t.Errorf("폼 값 %v, want 3000 / 50000", got)
 	}
 }
 
@@ -1134,7 +1178,8 @@ func TestPolicyChangeDoesNotApplyRetroactively(t *testing.T) {
 	// 정책을 바꾼다.
 	if rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, url.Values{
 		"order.return_days": {"7"}, "order.confirm_days": {"8"},
-		"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"9000"}},
+		"order.return_fee_policy": {"차감"}, "order.return_fee_amount": {"9000"},
+		"shipping.flat_fee": {"0"}, "shipping.free_threshold": {"0"}},
 	); rec.Code != http.StatusSeeOther {
 		t.Fatalf("정책 저장 = HTTP %d", rec.Code)
 	}

@@ -534,6 +534,16 @@ type orderItemLike struct {
 // 실물과 다르면 그 경로는 렌더링되지 않고, 검사는 통과한다** (M14).
 func (it orderItemLike) RemainingQty() int { return it.Quantity - it.Settled }
 
+// Goods·ShippingFee mirror commerce.OrderDetail's — 주문 뒤 화면이 부른다.
+func (o orderLike) Goods() int {
+	n := 0
+	for _, it := range o.Items {
+		n += it.LineAmount
+	}
+	return n
+}
+func (o orderLike) ShippingFee() int { return o.Total + o.Discount - o.Goods() }
+
 type orderLike struct {
 	OrderNo, Status                                           string
 	Total                                                     int
@@ -936,5 +946,25 @@ func pagerFixture(base string, cur int) map[string]any {
 		"FirstURL": base, "PrevURL": base, "NextURL": base + "?page=3", "LastURL": base + "?page=3",
 		// 검색은 상한을 넘은 경우로 그린다 — 「10,000건 이상」 분기도 렌더링 검사를 지난다.
 		"Capped": base == "/search", "CapTotal": int64(10000),
+	}
+}
+
+// 주문 뒤 화면은 배송비를 따로 보인다. 결제 금액만 있으면 품목 합계와 결제
+// 금액이 맞지 않는데 왜 다른지 화면 어디에도 없다.
+func TestOrderPagesShowShippingFee(t *testing.T) {
+	l := newBuiltinLoader()
+	for _, name := range []string{"order/view.html", "order/receipt.html"} {
+		v := fullView()
+		v.Data = payloadFor(name) // 품목 26,000원 · 결제 29,000원
+		var b bytes.Buffer
+		if err := l.Render(&b, name, v); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		for _, want := range []string{"<dt>상품 합계</dt><dd>26,000원</dd>", "<dt>배송비</dt><dd>3,000원</dd>"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s 에 %q 가 없다", name, want)
+			}
+		}
 	}
 }

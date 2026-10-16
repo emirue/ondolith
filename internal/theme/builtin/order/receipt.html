@@ -16,7 +16,14 @@
     </tbody>
   </table>
   </div>
-  <dl class="totals"><dt>결제 금액</dt><dd>{{money .Total}}</dd></dl>
+  {{/* 배송비는 저장된 총액에서 거꾸로 푼다 (OrderDetail.ShippingFee). 결제 금액만
+       보이면 품목 합계와 왜 다른지 화면 어디에도 없다. */}}
+  <dl class="totals">
+    <dt>상품 합계</dt><dd>{{money .Goods}}</dd>
+    <dt>배송비</dt><dd>{{money .ShippingFee}}</dd>
+    {{if .Discount}}<dt>할인</dt><dd>-{{money .Discount}}</dd>{{end}}
+    <dt>결제 금액</dt><dd>{{money .Total}}</dd>
+  </dl>
   <address>{{.ReceiverName}} · {{.ReceiverPhone}}<br>({{.Postcode}}) {{.Address1}} {{.Address2}}</address>
   <p>{{.OrdererEmail}} · {{.OrdererPhone}}</p>
   {{end}}{{end}}
