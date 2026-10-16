@@ -566,3 +566,12 @@ func TestOpLogPageLabelMatchesOtherLists(t *testing.T) {
 		t.Error("작업 로그의 쪽 표시가 다른 목록과 다르다")
 	}
 }
+
+// 작성자가 없는(탈퇴한) 글은 어디서나 「(탈퇴)」다 — 글 관리 목록은 「(탈퇴)」, 대시보드는 「—」였다.
+func TestDashboardNamesAWithdrawnAuthorLikeTheList(t *testing.T) {
+	html := renderAdmin(t, "admin/dashboard.html", map[string]any{
+		"Posts": []content.Post{{ID: "p1", Title: "글", BoardID: "b1"}}, "BoardSlugs": map[string]string{"b1": "free"}})
+	if !strings.Contains(html, "(탈퇴)") {
+		t.Error("대시보드 최근 글의 빈 작성자가 「(탈퇴)」가 아니다")
+	}
+}

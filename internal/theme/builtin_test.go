@@ -1369,3 +1369,19 @@ func TestUnusableMenusAreHidden(t *testing.T) {
 		t.Error("소셜 로그인이 켜져 있는데 「소셜 계정 연결」이 없다")
 	}
 }
+
+// 상품 검색 0건도 글 검색처럼 무엇을 찾았는지 말한다 — 「검색 결과가 없습니다.」 하나뿐이었다.
+func TestEmptyProductSearchSaysWhatWasSearched(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	data := payloadFor("shop/search.html").(map[string]any)
+	data["Query"], data["Products"] = "없는상품", nil
+	v.Data = data
+	var b bytes.Buffer
+	if err := l.Render(&b, "shop/search.html", v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "「없는상품」에 맞는 상품이 없습니다.") {
+		t.Error("상품 검색 0건이 검색어를 말하지 않는다")
+	}
+}

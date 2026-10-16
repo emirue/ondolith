@@ -19,7 +19,7 @@
           {{/* 제목은 칸 안에서 접고(.adm-wrap) 작성자·작성일은 접지 않는다 — 긴 제목이 두 열을
                카드 밖으로 밀어냈다. 「최근 주문」의 주문번호처럼 글로 가는 링크다. */}}
           <td class="adm-wrap"><a href="/board/{{index $.BoardSlugs .BoardID}}/{{.ID}}">{{.Title}}</a></td>
-          <td class="adm-nw">{{if .AuthorName}}{{.AuthorName}}{{else}}—{{end}}</td>
+          <td class="adm-nw">{{if .AuthorName}}{{.AuthorName}}{{else}}(탈퇴){{end}}</td>
           <td class="adm-nw">{{date .CreatedAt "2006-01-02"}}</td>
         </tr>
         {{end}}

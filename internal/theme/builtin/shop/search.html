@@ -15,7 +15,7 @@
       {{template "partials/stock-badge.html" .}}
     </li>
     {{else}}
-    <li class="empty">검색 결과가 없습니다.</li>
+    <li class="empty">「{{.Query}}」에 맞는 상품이 없습니다.</li>
     {{end}}
   </ul>
   {{template "partials/pager.html" .Pager}}
