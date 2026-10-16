@@ -92,6 +92,8 @@
 
   {{if .CanComment}}
     {{template "partials/comment-form.html" .CommentForm}}
+  {{else if .LoginToComment}}
+    <p class="meta"><a href="/login?next=/board/{{.Board.Slug}}/{{.Post.ID}}">로그인</a>하면 댓글을 쓸 수 있습니다.</p>
   {{end}}
 </section>
 {{end}}

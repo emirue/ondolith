@@ -2,6 +2,7 @@ package app
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -26,6 +27,16 @@ type boardDeps struct {
 	// media 는 에디터로 올린 본문 사진이다 (P-213·P-214, FR-514).
 	media *content.MediaStore
 	spam  spamGuard
+}
+
+// loginWouldAllow 는 로그인하지 않은 방문자에게 「로그인하면 쓸 수 있다」고 말해도 되는지다 —
+// 가입한 회원(member 역할)이 그 게시판에 그 권한을 가질 때만 참이다. 못 읽으면 말하지 않는다.
+func (d *boardDeps) loginWouldAllow(ctx context.Context, a *Actor, perm, boardID string) bool {
+	if a.IsAuthenticated() || d.authStore == nil {
+		return false
+	}
+	p, err := d.authStore.LoadMemberPermissions(ctx)
+	return err == nil && p.CanOn(perm, auth.BoardID(boardID))
 }
 
 // countView bumps the counter once per browser session per post.
@@ -129,10 +140,12 @@ func (d *boardDeps) boardList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := d.view(r, b.Name, b.Name+" 목록")
+	canWrite := a.CanOn("post.write", auth.BoardID(b.ID))
 	v.Data = map[string]any{
 		"Board": b, "Posts": posts, "Total": total, "Query": q, "Columns": columns,
-		"CanWrite": a.CanOn("post.write", auth.BoardID(b.ID)),
-		"Pager":    pagerFor("/board/"+b.Slug, q, total),
+		"CanWrite":     canWrite,
+		"LoginToWrite": !canWrite && d.loginWouldAllow(r.Context(), a, "post.write", b.ID),
+		"Pager":        pagerFor("/board/"+b.Slug, q, total),
 	}
 	d.renderPage(w, r, d.boardTemplate(b, "board/list.html"), http.StatusOK, v)
 }
@@ -198,10 +211,13 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	canComment := b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID))
 	v.Data = map[string]any{
 		"Board": b, "Post": p, "Comments": comments, "Fields": fields,
 		"Attachments": files,
-		"CanComment":  b.AllowComments && a.CanOn("comment.write", auth.BoardID(b.ID)),
+		"CanComment":  canComment,
+		"LoginToComment": b.AllowComments && !canComment &&
+			d.loginWouldAllow(r.Context(), a, "comment.write", b.ID),
 		"CommentForm": commentForm,
 		"CanEdit":     p.AuthorID != "" && p.AuthorID == actorID(a),
 		"CanModerate": a.CanOn("post.moderate", auth.BoardID(b.ID)),

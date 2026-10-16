@@ -10,6 +10,7 @@
   </form>
   {{/* 이 게시판 안에서 찾는 위 폼과 달리 전체 게시판을 가로지른다 (P-212).
        쇼핑몰에서는 머리글 검색이 상품으로 가므로 여기가 글 검색의 진입점이다. */}}
+  {{if .LoginToWrite}}<p class="meta"><a href="/login?next=/board/{{.Board.Slug}}/write">로그인</a>하면 글을 쓸 수 있습니다.</p>{{end}}
   <p class="meta"><a href="/search">전체 게시판에서 검색</a></p>
 
   {{if eq .Board.ListStyle "gallery"}}

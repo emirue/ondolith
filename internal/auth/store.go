@@ -86,6 +86,17 @@ func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, err
 	return NewPermissions(false, parseGrants(keys)), nil
 }
 
+// LoadMemberPermissions is what a freshly signed-up account holds (the `member`
+// role). 로그인하지 않은 방문자에게 「로그인하면 쓸 수 있다」고 말해도 되는지를 이것으로
+// 판정한다 — 운영진만 쓰는 게시판에서 그렇게 말하면 거짓이다.
+func (s *Store) LoadMemberPermissions(ctx context.Context) (*Permissions, error) {
+	keys, err := s.q.LoadMemberPermissions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewPermissions(false, parseGrants(keys)), nil
+}
+
 // FindActiveUserByEmail is the login lookup. Inactive accounts are filtered in
 // the WHERE clause rather than after the fetch: a caller who forgets the Go-side
 // check would otherwise log in a deactivated account, and there is no way to

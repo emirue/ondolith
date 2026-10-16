@@ -308,6 +308,24 @@ func (q *Queries) LoadAnonymousPermissions(ctx context.Context) ([]string, error
 	return perms, err
 }
 
+const loadMemberPermissions = `-- name: LoadMemberPermissions :one
+SELECT coalesce(
+    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+        FILTER (WHERE p.key IS NOT NULL),
+    '{}')::text[] AS perms
+FROM roles r
+LEFT JOIN role_permissions rp ON rp.role_id = r.id
+LEFT JOIN permissions p       ON p.id = rp.permission_id
+WHERE r.key = 'member'
+`
+
+func (q *Queries) LoadMemberPermissions(ctx context.Context) ([]string, error) {
+	row := q.db.QueryRow(ctx, loadMemberPermissions)
+	var perms []string
+	err := row.Scan(&perms)
+	return perms, err
+}
+
 const loadPermissions = `-- name: LoadPermissions :one
 WITH effective AS (
     SELECT r.id, r.is_superuser
