@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 )
 
@@ -147,5 +148,20 @@ func TestMailScreenOffersATestSendToTheAdminOnly(t *testing.T) {
 	}
 	if strings.Contains(form, `name="to"`) || strings.Contains(form, `type="email"`) {
 		t.Error("시험 발송 폼이 받는 주소를 받는다 — 임의 주소로 쏘는 중계가 된다 (D13)")
+	}
+}
+
+// 비활성 계정의 상세에는 「활성화」가, 활성 계정에는 「비활성화」가 있다 — 이미 비활성인
+// 계정에 「비활성화」만 있던 화면이다.
+func TestUserDetailOffersTheOppositeState(t *testing.T) {
+	for _, tc := range []struct {
+		active    bool
+		want, not string
+	}{{false, "/activate", "/deactivate"}, {true, "/deactivate", "/activate"}} {
+		out := renderAdmin(t, "admin/user-detail.html", map[string]any{
+			"User": &auth.User{ID: "u1", Email: "a@example.com", IsActive: tc.active}})
+		if !strings.Contains(out, "/admin/users/u1"+tc.want) || strings.Contains(out, "/admin/users/u1"+tc.not+`"`) {
+			t.Errorf("활성 %v: %s 가 있고 %s 가 없어야 한다", tc.active, tc.want, tc.not)
+		}
 	}
 }

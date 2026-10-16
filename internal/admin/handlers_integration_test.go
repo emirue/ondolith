@@ -181,6 +181,7 @@ func TestEachHandlerChecksItsOwnPermission(t *testing.T) {
 		"페이지 발행":  d.PagePublish,
 		"페이지 삭제":  d.PageDelete,
 		"사용자 비활성": d.UserDeactivate,
+		"사용자 활성":  d.UserActivate,
 		"시스템 정보":  d.System,
 	}
 	for name, h := range cases {
@@ -1952,5 +1953,41 @@ func TestPaymentVerifyReportsWithoutRevealingTheKey(t *testing.T) {
 	rec := postAdmin(t, d.PaymentSettingsSave, "/admin/settings/payment", nil, url.Values{"action": {"verify"}})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("결제사 없음 → HTTP %d, want 422", rec.Code)
+	}
+}
+
+// **비활성 계정을 다시 살린다** (D19 A-402, FR-207). 비활성화만 있고 되돌릴 길이 없어,
+// 탈퇴 안내의 「다시 이용하시려면 관리자에게 문의」가 거짓이었다 — 관리자도 살릴 수
+// 없었다. 두 동작 모두 끝나면 상세 화면으로 돌아와 바뀐 상태를 보인다.
+func TestDeactivatedAccountCanBeReactivated(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"user.update": true}, id: "me"})
+	ctx := context.Background()
+	target, err := d.Auth.CreateUser(ctx, "back@example.com", "h", "돌아온 회원")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(h http.HandlerFunc, action string) {
+		req := httptest.NewRequest(http.MethodPost, "/admin/users/"+target+"/"+action, nil)
+		req.SetPathValue("id", target)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/users/"+target {
+			t.Fatalf("%s = HTTP %d → %q, want 303 → 상세", action, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+	active := func() bool {
+		u, err := d.Auth.FindUserByID(ctx, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.IsActive
+	}
+	run(d.UserDeactivate, "deactivate")
+	if active() {
+		t.Fatal("비활성화가 반영되지 않았다")
+	}
+	run(d.UserActivate, "activate")
+	if !active() {
+		t.Error("다시 활성화되지 않았다")
 	}
 }

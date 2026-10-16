@@ -904,7 +904,28 @@ func (d *Deps) UserDeactivate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+	// 상세로 돌아간다 — 바뀐 상태가 거기 보인다. 목록으로 보내면 무엇이 됐는지 모른다.
+	http.Redirect(w, r, "/admin/users/"+target, http.StatusSeeOther)
+}
+
+// UserActivate brings a deactivated account back (A-402). 비활성화(관리자) ·
+// 탈퇴(본인, P-110) 모두 비활성으로 끝나는데 되돌릴 길이 없어서, 탈퇴 안내의
+// 「관리자에게 문의」를 받은 관리자도 살릴 수 없었다. 비활성화와 같은 문턱(재인증·
+// 자기 계정 금지·superuser 보유자는 superuser 만)을 지난다.
+func (d *Deps) UserActivate(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "user.update")
+	if !ok {
+		return
+	}
+	target := r.PathValue("id")
+	if !d.guardAccountOp(w, r, c, target) {
+		return
+	}
+	if err := d.Auth.SetActive(r.Context(), target, true); err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/users/"+target, http.StatusSeeOther)
 }
 
 // UserDelete needs user.delete — reaching A-402 with user.update is not enough,

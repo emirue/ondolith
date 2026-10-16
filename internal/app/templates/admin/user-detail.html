@@ -19,10 +19,19 @@
 <div class="adm-card">
   <h2>동작</h2>
   <div class="adm-actions" style="flex-direction:column;align-items:flex-start">
+    {{/* 지금 상태의 반대만 낸다. 비활성 계정에 「비활성화」만 있던 화면이다 — 탈퇴한
+         회원도 여기서 「활성화」로 돌아온다. */}}
+    {{if .IsActive}}
     <form method="post" action="/admin/users/{{.ID}}/deactivate">
       {{template "reauth-field" .}}
       <button class="adm-btn">비활성화</button>
     </form>
+    {{else}}
+    <form method="post" action="/admin/users/{{.ID}}/activate">
+      {{template "reauth-field" .}}
+      <button class="adm-btn adm-btn--primary">활성화</button>
+    </form>
+    {{end}}
     <form method="post" action="/admin/users/{{.ID}}/reset-password">
       {{template "reauth-field" .}}
       <button class="adm-btn">비밀번호 재설정 강제</button>
