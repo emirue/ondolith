@@ -905,8 +905,10 @@ dl { margin: 0 0 var(--s20); }
 /* 수량은 두세 자리다. 폼 기본 폭이면 줄을 다 차지한다. */
 .adm-qty { width: 5.5rem; flex: none; text-align: center; }
 
+/* 좁은 화면의 여백은 안·다크 블록(명시도 0,2,0)을 이겨야 한다. 맨 `:root`(0,1,0)였을 때는
+ * 안을 고르거나 다크면 휴대폰에서도 28~40px 로 남았다. 둘을 합치면 모든 경우를 덮는다. */
 @media (max-width: 1199px) {
-  :root { --pad: 24px; --gap: 18px; }
+  :root[data-admin-theme], :root:not([data-admin-theme]) { --pad: 24px; --gap: 18px; }
   .adm-body { grid-template-columns: 184px minmax(0, 1fr); }
 }
 
@@ -935,7 +937,7 @@ dl { margin: 0 0 var(--s20); }
 }
 
 @media (max-width: 767px) {
-  :root { --pad: 16px; --gap: 14px; }
+  :root[data-admin-theme], :root:not([data-admin-theme]) { --pad: 16px; --gap: 14px; }
   /* iOS Safari 는 글자가 16px 미만인 칸에 초점이 가면 화면을 확대한다(14px 였다). 플랫폼의
      문턱이라 더 구체적인 규칙(필터줄 13px 등)도 이기도록 !important 다. */
   input, select, textarea { font-size: 16px !important; }

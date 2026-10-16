@@ -750,6 +750,63 @@ func TestNarrowInputsDoNotTriggerZoom(t *testing.T) {
 	}
 }
 
+// **좁은 화면의 여백(--pad·--gap)은 어느 안·다크에서도 줄어든다.** 1199px·767px 블록이
+// `:root`(명시도 0,1,0)로 줄였는데, 안 블록 `:root[data-admin-theme="1c"]` 와 다크 블록
+// `:root:not([data-admin-theme])` 는 0,2,0 이라 순서와 상관없이 이겼다 — 다크 휴대폰은 본문
+// 좌우가 16px 이 아니라 28px 로 남아, 라이트에서 맞던 주문 상세가 다크에서만 옆으로 밀렸다(CI).
+// 명시도는 이 파일의 선택자 모양(:root·속성·:not(속성))만 센다.
+func TestNarrowSpacingBeatsEveryTheme(t *testing.T) {
+	raw, err := adminFS.ReadFile("templates/admin/admin.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(string(raw), "")
+	spec := func(sel string) int { return strings.Count(sel, ":root") + strings.Count(sel, "[") }
+	padRule := regexp.MustCompile(`([^{}]+)\{[^{}]*--pad:`)
+	var narrow [][]string
+	rest := css
+	for _, q := range []string{"@media (max-width: 1199px)", "@media (max-width: 767px)"} {
+		at := strings.Index(rest, q)
+		if at < 0 {
+			t.Fatalf("%s 블록이 없다", q)
+		}
+		end := at + strings.Index(rest[at:], "\n}") + 2
+		m := padRule.FindStringSubmatch(rest[at+len(q)+2 : end])
+		if m == nil {
+			t.Fatalf("%s 블록이 --pad 를 줄이지 않는다", q)
+		}
+		sels := strings.Split(m[1], ",")
+		for i := range sels {
+			sels[i] = strings.TrimSpace(sels[i])
+		}
+		narrow = append(narrow, sels)
+		rest = rest[:at] + rest[end:]
+	}
+	var themes []string
+	for _, m := range padRule.FindAllStringSubmatch(rest, -1) {
+		themes = append(themes, strings.Split(m[1], ",")...)
+	}
+	if len(themes) < 6 {
+		t.Fatalf("--pad 를 정하는 안 선택자가 %d 개다 — 다섯 안과 다크를 찾지 못했다", len(themes))
+	}
+	for _, sels := range narrow {
+		low, bare, themed := 99, false, false
+		for _, s := range sels {
+			low = min(low, spec(s))
+			bare = bare || strings.Contains(s, ":not([data-admin-theme])")
+			themed = themed || s == ":root[data-admin-theme]"
+		}
+		for _, th := range themes {
+			if spec(th) > low {
+				t.Errorf("좁은 화면 규칙 %q 가 %q 에 진다 — 그 안에서는 여백이 줄지 않는다", strings.Join(sels, ","), strings.TrimSpace(th))
+			}
+		}
+		if !bare || !themed {
+			t.Errorf("좁은 화면 규칙 %q 가 안을 고른 경우와 고르지 않은 경우를 다 덮지 않는다", strings.Join(sels, ","))
+		}
+	}
+}
+
 // **같은 개념은 관리자 화면 어디서나 같은 말로 부른다.**
 //
 // 게시판 「주소」 / 페이지 「슬러그」 / 상품 「주소(slug)」, 공개 / 노출 / 발행, 추가 / 생성 /
