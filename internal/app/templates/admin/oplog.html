@@ -25,7 +25,7 @@
     </table>
   </div>
   <div class="adm-pagination">
-    <span class="adm-count">{{number .Count}}건 · {{.PageNo}}쪽</span>
+    <span class="adm-count">{{.PageNo}}쪽 · 전체 {{number .Count}}건</span>
     {{with .PrevURL}}<a href="{{.}}" aria-label="이전">‹</a>{{end}}
     <span class="adm-page adm-page--current">{{.PageNo}}</span>
     {{with .NextURL}}<a href="{{.}}" aria-label="다음">›</a>{{end}}

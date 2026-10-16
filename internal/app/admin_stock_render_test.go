@@ -557,3 +557,12 @@ func TestOrderSubScreensLinkBackToTheOrder(t *testing.T) {
 		t.Error("주문 상세의 처리 버튼이 「배송」 카드 안에 있다")
 	}
 }
+
+// **관리자 목록의 쪽 표시는 「N쪽」이 먼저다.** 작업 로그만 「49건 · 1쪽」으로 순서가 거꾸로였고
+// 49건이 전체인지 이 쪽인지 말하지 않았다(사용자 목록은 「1쪽 · 이 쪽 4명」, 나머지는 「1쪽」).
+func TestOpLogPageLabelMatchesOtherLists(t *testing.T) {
+	html := renderAdmin(t, "admin/oplog.html", map[string]any{"Count": int64(49), "PageNo": 1})
+	if !strings.Contains(html, `<span class="adm-count">1쪽 · 전체 49건</span>`) {
+		t.Error("작업 로그의 쪽 표시가 다른 목록과 다르다")
+	}
+}
