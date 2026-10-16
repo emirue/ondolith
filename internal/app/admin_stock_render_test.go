@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/emirue/ondolith/internal/commerce"
+	"github.com/emirue/ondolith/internal/content"
 )
 
 // renderAdmin 은 관리자 템플릿 하나를 실제 렌더러로 그린다. DB 가 필요 없다.
@@ -170,5 +171,22 @@ func TestThemesScreenListsInstalledThemes(t *testing.T) {
 	}
 	if strings.Contains(out, `name="theme" value="warm"`) {
 		t.Error("이미 쓰는 테마에 「활성화」가 있다")
+	}
+}
+
+// 메뉴 화면은 순서 칸과, 부모를 제목으로 고르는 목록을 둔다 — 부모 칸에 화면 어디에도
+// 안 보이는 UUID 를 쳐야 해서 하위 메뉴를 사실상 만들 수 없었다.
+func TestMenusScreenPicksParentsByTitle(t *testing.T) {
+	out := renderAdmin(t, "admin/menus.html", map[string]any{"Items": []content.MenuItem{
+		{ID: "m1", Title: "고객센터", URL: "/help", Sort: 3},
+		{ID: "m2", Title: "공지", URL: "/board/notice", ParentID: "m1", Sort: 1}}})
+	for _, want := range []string{`name="sort_order"`, `value="3"`, `<option value="m1">고객센터</option>`,
+		`<option value="m1" selected>고객센터</option>`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("메뉴 화면에 %q 가 없다", want)
+		}
+	}
+	if strings.Contains(out, `placeholder="(최상위)"`) {
+		t.Error("부모를 아직 텍스트(UUID)로 받는다")
 	}
 }

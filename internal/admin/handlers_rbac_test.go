@@ -497,3 +497,47 @@ func TestThemeListPassesInstalledThemes(t *testing.T) {
 		t.Errorf("설치된 테마 = %v, want [warm]", got)
 	}
 }
+
+// **메뉴 순서는 화면에서 정한다** (D19 A-204). 폼에 순서 칸이 없어 sort_order 가 모두 0
+// 이었고, 메뉴는 추가한 순서와 무관하게 id(UUID) 순으로 나왔다. 수정할 때마다 순서가
+// 0 으로 돌아가는 것도 같은 원인이었다.
+func TestMenuOrderIsSetFromTheScreen(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"menu.manage": true}})
+	ctx := context.Background()
+	for _, m := range []struct{ title, sort string }{{"회사 소개", "2"}, {"상품", "1"}} {
+		if rec := post(d.MenuCreate, "/admin/menus", url.Values{
+			"title": {m.title}, "url": {"/"}, "sort_order": {m.sort}}); rec.Code != http.StatusSeeOther {
+			t.Fatalf("%s 추가 = HTTP %d", m.title, rec.Code)
+		}
+	}
+	titles := func() string {
+		items, err := d.Content.MenuItems(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, it := range items {
+			out = append(out, it.Title)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := titles(); got != "상품,회사 소개" {
+		t.Errorf("순서 = %s, want 상품,회사 소개", got)
+	}
+	if rec := post(d.MenuCreate, "/admin/menus", url.Values{
+		"title": {"x"}, "url": {"/"}, "sort_order": {"첫째"}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("숫자 아닌 순서 = HTTP %d, want 422", rec.Code)
+	}
+
+	items, _ := d.Content.MenuItems(ctx)
+	about := items[1].ID // 회사 소개
+	req := httptest.NewRequest(http.MethodPost, "/admin/menus/"+about, strings.NewReader(url.Values{
+		"title": {"회사 소개"}, "url": {"/"}, "sort_order": {"0"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("id", about)
+	rec := httptest.NewRecorder()
+	d.MenuUpdate(rec, req)
+	if rec.Code != http.StatusSeeOther || titles() != "회사 소개,상품" {
+		t.Errorf("순서 수정 = HTTP %d, 순서 %s", rec.Code, titles())
+	}
+}

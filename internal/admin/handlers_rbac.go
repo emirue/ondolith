@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/emirue/ondolith/internal/auth"
@@ -51,6 +52,12 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"Error": "메뉴 제목은 1~50자입니다."})
 		return
 	}
+	var ok bool
+	if item.Sort, ok = menuSort(r); !ok {
+		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": "순서는 정수로 입력하세요."})
+		return
+	}
 
 	// No cycle pre-check here, deliberately: a new leaf cannot close a loop,
 	// and a parent that does not exist is refused by the foreign key. The check
@@ -61,6 +68,17 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
+}
+
+// menuSort reads A-204's 순서. 비면 0 이다. 이 칸이 없던 때 sort_order 는 모두 0 이었고
+// 메뉴는 id(UUID) 순 — 추가한 순서와 무관하게 — 로 나왔다.
+func menuSort(r *http.Request) (int, bool) {
+	v := strings.TrimSpace(r.PostFormValue("sort_order"))
+	if v == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(v)
+	return n, err == nil
 }
 
 // MenuUpdate edits an entry, re-parenting included.
@@ -89,6 +107,12 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 	if item.Title == "" || content.TooLong(item.Title, content.MaxMenuTitleLen) {
 		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
 			map[string]any{"Error": "메뉴 제목은 1~50자입니다."})
+		return
+	}
+	var ok bool
+	if item.Sort, ok = menuSort(r); !ok {
+		d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity,
+			map[string]any{"Error": "순서는 정수로 입력하세요."})
 		return
 	}
 
