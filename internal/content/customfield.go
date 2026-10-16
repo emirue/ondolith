@@ -314,6 +314,23 @@ type FieldInput struct {
 	Value any
 }
 
+// Has reports whether opt is among the stored choices — 「여러 개 선택」은 값이
+// 목록이고, 「하나 선택」은 문자열이다. 폼이 이것으로 selected 를 되살린다: 되살리지
+// 않으면 아무것도 고르지 않은 채 그려지고, 그대로 저장하면 값이 지워진다.
+func (in FieldInput) Has(opt string) bool {
+	switch v := in.Value.(type) {
+	case []any:
+		for _, x := range v {
+			if x == opt {
+				return true
+			}
+		}
+	case string:
+		return v == opt
+	}
+	return false
+}
+
 // FieldInputs zips a board's schema with a post's stored values, in schema
 // order. A value whose field was deleted is not returned — it is preserved in
 // the database (D14 3절 규칙 4) but there is no input to draw for it.

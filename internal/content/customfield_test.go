@@ -289,3 +289,20 @@ func manyOptions(n int) []string {
 	}
 	return out
 }
+
+// 「여러 개 선택」의 저장값을 수정 폼이 되살린다 — 되살리지 않으면 아무것도 고르지
+// 않은 채 그려지고, 제목만 고쳐 저장해도 값이 지워졌다.
+func TestFieldInputHas(t *testing.T) {
+	multi := FieldInput{Value: []any{"빨강", "파랑"}}
+	single := FieldInput{Value: "빨강"}
+	for _, tc := range []struct {
+		in   FieldInput
+		opt  string
+		want bool
+	}{{multi, "빨강", true}, {multi, "파랑", true}, {multi, "초록", false},
+		{single, "빨강", true}, {single, "파랑", false}, {FieldInput{}, "빨강", false}} {
+		if got := tc.in.Has(tc.opt); got != tc.want {
+			t.Errorf("%v.Has(%q) = %v, want %v", tc.in.Value, tc.opt, got, tc.want)
+		}
+	}
+}

@@ -13,7 +13,8 @@
   </select>
 {{else if eq $f.Type "multiselect"}}
   <select id="f-{{$f.Key}}" name="{{$f.Key}}" multiple{{if $f.Required}} required{{end}}>
-    {{range $f.Options}}<option value="{{.}}">{{.}}</option>{{end}}
+    {{/* 저장된 선택을 되살린다 — 안 하면 고친 글을 저장할 때 값이 지워진다. */}}
+    {{range $f.Options}}<option value="{{.}}"{{if $.Has .}} selected{{end}}>{{.}}</option>{{end}}
   </select>
 {{else if eq $f.Type "checkbox"}}
   <input type="checkbox" id="f-{{$f.Key}}" name="{{$f.Key}}" value="1"{{if $v}} checked{{end}}>

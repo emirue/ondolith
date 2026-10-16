@@ -589,7 +589,8 @@ a:focus-visible {
 }
 
 .custom-fields dt { opacity: .55; }
-.custom-fields dd { margin: 0; }
+/* 여러 줄 필드(textarea)의 줄바꿈을 살린다 — 없으면 한 문단으로 붙는다. */
+.custom-fields dd { margin: 0; white-space: pre-line; }
 
 /* ═══ 댓글 ═════════════════════════════════════════════════════════════════ */
 .comments { margin-top: 26px; }

@@ -357,7 +357,7 @@ func payloadFor(name string) any {
 				{Field: fieldLike{Key: "site", Label: "링크", Type: "url"}, Value: "https://example.com"},
 				{Field: fieldLike{Key: "qty", Label: "수량", Type: "number"}, Value: 3},
 				{Field: fieldLike{Key: "tags", Label: "태그", Type: "multiselect",
-					Options: []string{"A", "B"}}, Value: nil},
+					Options: []string{"A", "B"}}, Value: []any{"B"}},
 				{Field: fieldLike{Key: "detail", Label: "상세", Type: "textarea"}, Value: "여러 줄"},
 			},
 			"Fields": []fieldLike{
@@ -479,6 +479,11 @@ type fieldLike struct {
 type inputLike struct {
 	Field fieldLike
 	Value any
+}
+
+// Has mirrors content.FieldInput.Has — field.html 이 부른다 (M14).
+func (in inputLike) Has(opt string) bool {
+	return content.FieldInput{Value: in.Value}.Has(opt)
 }
 
 // 커머스 화면이 받는 모양. 실물 타입을 쓰지 않는 이유는 이 패키지가
@@ -955,5 +960,21 @@ func TestWritingInputsCarryTheirLimits(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("%s 에 %s 가 없다", name, want)
 		}
+	}
+}
+
+// 수정 폼이 「여러 개 선택」의 저장값을 고른 채 그린다 — 안 그리면 제목만 고쳐
+// 저장해도 그 값이 지워졌다 (실측: "tags":["빨강","파랑"] 이 사라짐).
+func TestMultiselectKeepsStoredChoices(t *testing.T) {
+	l := newBuiltinLoader()
+	v := fullView()
+	v.Data = payloadFor("board/form.html") // tags = ["B"]
+	var b bytes.Buffer
+	if err := l.Render(&b, "board/form.html", v); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, `<option value="B" selected>`) || strings.Contains(out, `<option value="A" selected>`) {
+		t.Error("여러 개 선택의 저장값이 되살아나지 않았다")
 	}
 }
