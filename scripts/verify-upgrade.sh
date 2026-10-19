@@ -78,7 +78,8 @@ start_app() {  # $1=바이너리 경로
 	# 것을 못 보고 지나간다.
 	docker logs "$APP" >> "$tmp/all.log" 2>&1 || true
 	docker rm -f "$APP" >/dev/null 2>&1 || true
-	docker run -d --name "$APP" --network "$NET" \
+	# 점이 든 별칭은 아래 ③' 의 쿠키 때문이다 — 그 주석을 본다.
+	docker run -d --name "$APP" --network "$NET" --network-alias "$APP.test" \
 		-v "$1:/ondolith:ro" -v "$tmp:/work" -w /work alpine:3 /ondolith >/dev/null
 	i=0
 	until docker run --rm --network "$NET" alpine:3 \
@@ -174,13 +175,18 @@ esac
 #
 # A-602 의 대기 마이그레이션이 0 인지도 함께 본다 — 부팅이 적용했다는 것과
 # 화면이 그렇게 보고한다는 것은 다른 진술이다 (NFR-302).
+#
+# **점이 든 호스트 이름(`$APP.test`)으로 부른다.** curl 8.22(alpine:3, 2026-10)는
+# 점 없는 호스트(`$APP`)의 쿠키를 쿠키 파일에서 다시 보내지 않는다 — 8.14 는
+# 보냈다. 그러면 로그인은 성공하고 세션도 살아 있는데 /admin/ 이 303 이 되어,
+# 서버가 멀쩡해도 이 검사가 빨갛다. 쿠키를 손으로 실으면 200 이었다.
 adm=$(docker run --rm --network "$NET" alpine:3 sh -c "
 	apk add --no-cache curl >/dev/null 2>&1 || exit 9
-	curl -sS -c /tmp/j -b /tmp/j -o /dev/null -H 'Origin: http://$APP:8080' \
+	curl -sS -c /tmp/j -b /tmp/j -o /dev/null -H 'Origin: http://$APP.test:8080' \
 		-d 'email=a@example.com' -d 'password=correct-horse-battery' \
-		http://$APP:8080/login
-	printf 'admin=%s ' \"\$(curl -sS -b /tmp/j -o /dev/null -w '%{http_code}' http://$APP:8080/admin/)\"
-	printf 'pending=%s' \"\$(curl -sS -b /tmp/j http://$APP:8080/admin/system |
+		http://$APP.test:8080/login
+	printf 'admin=%s ' \"\$(curl -sS -b /tmp/j -o /dev/null -w '%{http_code}' http://$APP.test:8080/admin/)\"
+	printf 'pending=%s' \"\$(curl -sS -b /tmp/j http://$APP.test:8080/admin/system |
 		sed -n '/대기 마이그레이션/,+1p' | grep -o '>[0-9]*<' | tr -d '><' | head -1)\"
 " 2>&1)
 case "$adm" in
