@@ -273,7 +273,7 @@ func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, m
 }
 
 func (d *Deps) renderPaymentWith(w http.ResponseWriter, r *http.Request, code int, msg, notice string) {
-	kv, err := d.Content.Settings(r.Context(), paymentSettingKeys...)
+	kv, unreadable, err := d.Content.SettingsForForm(r.Context(), paymentSettingKeys...)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
@@ -294,6 +294,10 @@ func (d *Deps) renderPaymentWith(w http.ResponseWriter, r *http.Request, code in
 	// 구매자가 카드를 넣은 뒤에 실패하는 가장 나쁜 순서다.
 	if shown["pg.client_key"] != "" && !saved["pg.secret_key"] {
 		data["Warning"] = "시크릿 키가 없습니다. 결제창은 열리지만 승인이 실패합니다."
+	}
+	// 열지 못한 시크릿은 「없다」보다 먼저 말한다 — 원인과 할 일이 다르다.
+	if warn := unreadableWarning(unreadable); warn != "" {
+		data["Warning"] = warn
 	}
 	d.Render(w, r, "admin/payment.html", code, data)
 }

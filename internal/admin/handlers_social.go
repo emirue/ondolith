@@ -55,7 +55,8 @@ func (d *Deps) SocialSettingsSave(w http.ResponseWriter, r *http.Request) {
 	secretKey := auth.SocialSettingKey(provider, "client_secret")
 	enabledKey := auth.SocialSettingKey(provider, "enabled")
 
-	stored, err := d.Content.Settings(r.Context(), idKey, secretKey)
+	// 열 수 없는 시크릿은 없는 것으로 친다 — 새 시크릿 없이 켜면 아래에서 거부된다.
+	stored, _, err := d.Content.SettingsForForm(r.Context(), idKey, secretKey)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
@@ -109,7 +110,7 @@ func (d *Deps) renderSocial(w http.ResponseWriter, r *http.Request, code int, ms
 			auth.SocialSettingKey(p, "client_secret"),
 			auth.SocialSettingKey(p, "enabled"))
 	}
-	stored, err := d.Content.Settings(r.Context(), keys...)
+	stored, unreadable, err := d.Content.SettingsForForm(r.Context(), keys...)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
@@ -139,5 +140,6 @@ func (d *Deps) renderSocial(w http.ResponseWriter, r *http.Request, code int, ms
 	}
 	d.Render(w, r, "admin/social.html", code, map[string]any{
 		"Providers": configs, "Callbacks": callbacks, "Error": msg,
+		"Warning": unreadableWarning(unreadable),
 	})
 }

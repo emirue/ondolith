@@ -241,6 +241,19 @@ func (s *Store) deleteWithMenus(ctx context.Context, del func(*contentq.Queries)
 // Settings are key/value. The caller names the keys it wants; there is no
 // "fetch everything" because each screen owns its own keys (D30 settings).
 func (s *Store) Settings(ctx context.Context, keys ...string) (map[string]string, error) {
+	return s.settings(ctx, keys, nil)
+}
+
+// SettingsForForm is Settings for a settings screen, which only draws whether a
+// secret is saved. 열리지 않는 시크릿은 값에서 빠지고(없는 것과 같다) 이름이
+// unreadable 에 실린다. Settings 처럼 오류로 끝내면 그 시크릿을 **다시 입력할
+// 화면이 500** 이 된다 — D60 이 secret_key 를 잃은 운영자에게 하라는 일이 그것이다.
+func (s *Store) SettingsForForm(ctx context.Context, keys ...string) (kv map[string]string, unreadable []string, err error) {
+	kv, err = s.settings(ctx, keys, &unreadable)
+	return kv, unreadable, err
+}
+
+func (s *Store) settings(ctx context.Context, keys []string, unreadable *[]string) (map[string]string, error) {
 	rows, err := s.q.Settings(ctx, keys)
 	if err != nil {
 		return nil, err
@@ -254,7 +267,11 @@ func (s *Store) Settings(ctx context.Context, keys ...string) (map[string]string
 			// 실패가 난다. 오류가 원인을 말한다.
 			pt, _, err := s.sealer.Open(r.Key, v)
 			if err != nil {
-				return nil, fmt.Errorf("설정 %s: %w", r.Key, err)
+				if unreadable == nil {
+					return nil, fmt.Errorf("설정 %s: %w", r.Key, err)
+				}
+				*unreadable = append(*unreadable, r.Key)
+				continue
 			}
 			v = pt
 		}
