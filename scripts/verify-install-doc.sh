@@ -46,7 +46,8 @@ done
 
 # PID 1 은 sleep 이다. 앱을 PID 1 로 띄우면 D72 로 넘어갈 때 앱을 세우는 순간
 # 컨테이너가 통째로 죽어 이관을 확인할 수 없다.
-docker run -d --name "$APP" --network "$NET" -v "$BIN:/src/ondolith:ro" \
+# 점이 든 별칭은 관리자 로그인 검사의 쿠키 때문이다 — 그 주석을 본다.
+docker run -d --name "$APP" --network "$NET" --network-alias "$APP.test" -v "$BIN:/src/ondolith:ro" \
 	ubuntu:24.04 sleep infinity >/dev/null
 docker exec "$APP" sh -c 'useradd -m op &&
 	apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq sudo >/dev/null 2>&1 &&
@@ -129,13 +130,17 @@ fi
 # **설치됐다 = 관리자가 사이트를 운영할 수 있다.** `/install` 404 는 설정 파일이
 # 써졌다는 뜻일 뿐이고, 마법사가 만든 계정으로 실제로 들어가지는지는 별개다.
 # 제3자 검증이 확인한 것도 「관리자 로그인 및 /admin/ 접근」이었다 (W4-13).
+#
+# 점이 든 호스트 이름(`$APP.test`)으로 부른다. curl 8.22(alpine:3)는 점 없는 호스트의
+# 쿠키를 쿠키 파일에서 다시 보내지 않아, 서버가 멀쩡해도 /admin/ 이 303 이 된다
+# (verify-upgrade.sh ③' 에서 실측).
 adm=$(docker run --rm --network "$NET" alpine:3 sh -c "
 	apk add --no-cache curl >/dev/null 2>&1 || exit 9
-	curl -sS -c /tmp/j -b /tmp/j -o /dev/null -H 'Origin: http://$APP:8080' \
+	curl -sS -c /tmp/j -b /tmp/j -o /dev/null -H 'Origin: http://$APP.test:8080' \
 		-d 'email=a@example.com' -d 'password=correct-horse-battery' \
-		http://$APP:8080/login
-	printf 'admin=%s ' \"\$(curl -sS -b /tmp/j -o /dev/null -w '%{http_code}' http://$APP:8080/admin/)\"
-	printf 'pending=%s' \"\$(curl -sS -b /tmp/j http://$APP:8080/admin/system |
+		http://$APP.test:8080/login
+	printf 'admin=%s ' \"\$(curl -sS -b /tmp/j -o /dev/null -w '%{http_code}' http://$APP.test:8080/admin/)\"
+	printf 'pending=%s' \"\$(curl -sS -b /tmp/j http://$APP.test:8080/admin/system |
 		sed -n '/대기 마이그레이션/,+1p' | grep -o '>[0-9]*<' | tr -d '><' | head -1)\"
 " 2>&1)
 case "$adm" in
