@@ -388,6 +388,17 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 // 이름들을 봐야 한다.
 func isSecretKey(k string) bool { return content.IsSecretSetting(k) }
 
+// unreadableWarning is what a settings screen says when a stored secret no
+// longer opens (content.SettingsForForm). 그 칸은 「미설정」으로 그려지고, 운영자가
+// 무엇을 해야 하는지는 이 줄이 말한다 (D60 「저장된 자격증명」).
+func unreadableWarning(unreadable []string) string {
+	if len(unreadable) == 0 {
+		return ""
+	}
+	return "저장된 비밀값을 열 수 없습니다 — 설정 파일(ondolith.json)의 secret_key 가 바뀌었습니다. " +
+		"「미설정」으로 보이는 비밀값 칸에 다시 입력해 저장하세요."
+}
+
 var mailSettingKeys = []string{
 	"mail.smtp_host", "mail.smtp_port", "mail.smtp_user", "mail.smtp_password",
 	"mail.tls_mode", "mail.from_address", "mail.from_name",
@@ -414,7 +425,7 @@ func (d *Deps) renderSettings(w http.ResponseWriter, r *http.Request,
 func (d *Deps) renderSettingsNotice(w http.ResponseWriter, r *http.Request,
 	screen string, keys []string, code int, msg, notice string,
 ) {
-	kv, err := d.Content.Settings(r.Context(), keys...)
+	kv, unreadable, err := d.Content.SettingsForForm(r.Context(), keys...)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
@@ -428,8 +439,8 @@ func (d *Deps) renderSettingsNotice(w http.ResponseWriter, r *http.Request,
 		}
 		shown[k] = v
 	}
-	d.Render(w, r, screen, code,
-		map[string]any{"Settings": shown, "SecretSaved": saved, "Error": msg, "Notice": notice})
+	d.Render(w, r, screen, code, map[string]any{"Settings": shown, "SecretSaved": saved,
+		"Error": msg, "Notice": notice, "Warning": unreadableWarning(unreadable)})
 }
 
 func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
