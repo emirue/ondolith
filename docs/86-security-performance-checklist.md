@@ -90,7 +90,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 4.8 | 본문 상한: 글 64 MiB(`MaxBytesReader`)·상품 이미지 64 MiB·테마 24 MiB·nginx `client_max_body_size 65m`(D72, 2026-10-07 에 24m 에서 맞춤)·웹훅 64 KiB·토스 응답 1 MiB·첨부 `LimitReader(max+1)` | 각 핸들러 | `grep MaxBytesReader` | ✓ `ParseMultipartForm` 은 모두 `MaxBytesReader` 뒤 |
 | 4.9 | 테마 파일: 템플릿·다운로드·해시가 같은 파일 경계를 사용, 자산은 `static/` 아래만 | `theme/loader.go` `openThemeFile`·`static.go`·`funcs.go` | 경로·심볼릭 링크·해시 단위 테스트 | ✓ 2026-09-30: `os.OpenInRoot`가 파일을 여는 순간의 탈출을 막는다. 해시의 바깥 파일 읽기를 재현하고 수정 |
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
-| 4.12 | 저장된 자격증명(PG 시크릿·SMTP 비밀번호·소셜 client_secret)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |
+| 4.12 | 저장된 자격증명(`content.IsSecretSetting` 의 키)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |
 | 4.13 | 운영자가 넣은 PG 키가 맞는지 **관리자 화면에서** 확인된다 (A-209 「연결 확인」) — 값·응답 본문 비노출, 작업 로그에 결과만 | `admin/handlers_terms.go` `verifyPaymentCredentials`·`commerce/toss.go` `VerifyCredentials` | `TestPaymentVerifyReportsWithoutRevealingTheKey`·`TestVerifyCredentialsReadsAuthFromTheErrorCode` | ✓ 2026-10-01 |
 | 4.11 | 글 삭제가 첨부 **파일**까지 지운다(디스크 고아 없음) | `content/attachment.go` `DeletePost` — P-207·A-307 둘 다 이 경로 | 코드 읽기 | ✓ 행은 CASCADE, 파일은 `os.Root.Remove` |
 

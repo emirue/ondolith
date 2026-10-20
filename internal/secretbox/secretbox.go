@@ -1,5 +1,5 @@
 // Package secretbox seals the credentials the operator types into admin
-// screens (PG 시크릿 키, SMTP 비밀번호, 소셜 client_secret) before they reach
+// screens (the keys content.IsSecretSetting names) before they reach
 // the settings table, and opens them for the code that uses them.
 //
 // **왜 있나.** 그 값들은 DB 에 평문으로 있었다. DB 덤프·백업·`pg_dump` 한 장이

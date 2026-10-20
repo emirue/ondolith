@@ -20,6 +20,10 @@ var ErrNotInstalled = errors.New("config: not installed")
 
 // Config is the whole of Ondolith's persistent configuration. It holds the
 // database password, so it is written with 0600 permissions.
+//
+// 어떤 값이 화면(settings)이 아니라 이 파일에 오는지는 docs/60-security.md
+// 「설정값을 어디에 두는가」가 정한다. 필드를 더하면 docs/20-architecture.md
+// 「설정」 표에도 한 줄 더한다.
 type Config struct {
 	DatabaseURL string    `json:"database_url"`
 	SiteName    string    `json:"site_name"`
@@ -40,9 +44,9 @@ type Config struct {
 	// one Host we can trust — the operator typed it.
 	SiteURL string `json:"site_url"`
 
-	// SecretKey seals the credentials stored in the settings table (PG 시크릿
-	// 키, SMTP 비밀번호, 소셜 client_secret): base64 of 32 random bytes,
-	// generated at install. It lives HERE and not in the database because the
+	// SecretKey seals the credentials stored in the settings table (the keys
+	// content.IsSecretSetting names): base64 of 32 random bytes, generated at
+	// install. It lives HERE and not in the database because the
 	// database is what it protects — a leaked dump opens nothing without this
 	// file. Back the file up with the database (D72 5절); without it the
 	// stored credentials cannot be read and must be typed again.
