@@ -67,7 +67,8 @@ func (s *Store) UseSealer(box Sealer) { s.sealer = box }
 // IsSecretSetting names the settings that never sit in the database as
 // plaintext and never travel back to the browser: **한 곳**이다. admin 의
 // 「다시 보여주지 않는다」와 이 파일의 「봉인한다」가 같은 목록을 봐야, 새 자격
-// 증명을 한쪽에만 등록하는 실수가 다른 쪽에서 드러난다.
+// 증명을 한쪽에만 등록하는 실수가 다른 쪽에서 드러난다. 무엇이 여기 드는지는
+// docs/60-security.md 「설정값을 어디에 두는가」의 ②다.
 func IsSecretSetting(key string) bool {
 	switch key {
 	case "pg.secret_key", "mail.smtp_password", "turnstile.secret_key":
