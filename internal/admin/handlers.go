@@ -944,7 +944,7 @@ func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, 
 		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return false
 	}
-	if target == c.UserID() {
+	if auth.SameID(target, c.UserID()) {
 		// Locking yourself out, or deleting the actor the log points at.
 		d.refuse(w, r, http.StatusForbidden, "자기 계정에는 이 작업을 할 수 없습니다.")
 		return false

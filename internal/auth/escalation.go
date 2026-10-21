@@ -1,6 +1,9 @@
 package auth
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // The ladder blocks of D15 5.1. Every one of them answers the same question:
 // can the caller end up with more power than they started with? A hole in any
@@ -47,13 +50,25 @@ type Role struct {
 	Assignable bool
 }
 
+// SameID reports whether two user ids name the same uuid.
+//
+// PostgreSQL accepts one uuid in several spellings — 대문자, 중괄호, 하이픈 생략 —
+// and a string `==` reads them as two people: a request that names itself in
+// capitals walked past R1 and the last-superuser guard. Ids from the database
+// are already canonical; ids from a request path are not.
+func SameID(a, b string) bool { return canonicalID(a) == canonicalID(b) }
+
+var idNoise = strings.NewReplacer("-", "", "{", "", "}", "")
+
+func canonicalID(s string) string { return strings.ToLower(idNoise.Replace(s)) }
+
 // CanAssignRole applies R1, R2 and R3 to "give target this role" and to
 // "take it away" alike — R1 says both directions, and R3 says 부여·회수.
 func CanAssignRole(actor Actor, targetUserID string, role Role) error {
 	// R1 first: it has no exception, not even for a superuser. The rule exists
 	// because `role.assign` alone would otherwise be a path to any role at all,
 	// and "I only added it to myself" is exactly that path.
-	if actor.UserID == targetUserID {
+	if SameID(actor.UserID, targetUserID) {
 		return ErrSelfRoleChange
 	}
 	if role.Superuser && !actor.Perms.isSuperuser() {

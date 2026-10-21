@@ -150,3 +150,26 @@ func TestValidateGrantScope(t *testing.T) {
 		})
 	}
 }
+
+// **같은 uuid 의 다른 표기도 같은 사람이다.** PostgreSQL 은 대문자·중괄호·하이픈
+// 생략을 같은 uuid 로 받는데, 문자열 `==` 는 다른 사람으로 봐서 R1(자기 역할 변경
+// 금지)이 비켜 갔다 (2026-10-21 점검).
+func TestSameIDReadsUUIDSpellingsAlike(t *testing.T) {
+	const id = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+	for _, other := range []string{
+		"A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+		"{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}",
+		"a0eebc999c0b4ef8bb6d6bb9bd380a11",
+	} {
+		if !SameID(id, other) {
+			t.Errorf("SameID(%q, %q) = false", id, other)
+		}
+	}
+	if SameID(id, "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11") {
+		t.Error("다른 uuid 를 같다고 했다")
+	}
+	a := actorWith(id, true)
+	if err := CanAssignRole(a, "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11", Role{Key: "editor"}); !errors.Is(err, ErrSelfRoleChange) {
+		t.Errorf("대문자 표기로 자기 역할을 바꿨다: %v", err)
+	}
+}

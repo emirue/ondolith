@@ -249,7 +249,7 @@ func (s *Store) withLastSuperuserGuard(ctx context.Context, userID string, apply
 
 	isHolder := false
 	for _, h := range holders {
-		if h == userID {
+		if SameID(h, userID) {
 			isHolder = true
 			break
 		}
