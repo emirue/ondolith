@@ -248,6 +248,13 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 // Changing one is what makes A-201 call Rebuild.
 var assemblyKeys = []string{"site.type", "admin.theme"}
 
+func orNone(v string) string {
+	if v == "" {
+		return "(없음)"
+	}
+	return v
+}
+
 func changed(kv, prev map[string]string, key string) bool {
 	v, ok := kv[key]
 	return ok && v != prev[key]
@@ -313,7 +320,14 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "관리자 배색은 1a~1e 중 하나여야 합니다.")
 		return
 	}
-	prev, err := d.Content.Settings(r.Context(), append([]string{"turnstile.site_key"}, assemblyKeys...)...)
+	// 비밀이 아닌 키 전부의 이전 값 — 무엇이 바뀌었는지 작업 로그가 적는다.
+	var plain []string
+	for _, k := range siteSettingKeys {
+		if !content.IsSecretSetting(k) {
+			plain = append(plain, k)
+		}
+	}
+	prev, err := d.Content.Settings(r.Context(), plain...)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
@@ -356,6 +370,21 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 자격증명 변경은 작업 로그 대상이다 (D15 7절). 값은 남기지 않는다.
 	if changed(kv, prev, "turnstile.site_key") || kv["turnstile.secret_key"] != "" {
 		d.log(r, c, "settings.update", "settings", "turnstile", "스팸 방지(Turnstile) 키 변경")
+	}
+	// 나머지 저장도 남긴다 (D19 A-201). 바뀐 키 이름만 적되 GA4 ID 는 값까지 적는다 — 방문
+	// 기록이 어느 GA 속성으로 가는지를 정하는 공개값이다 (D60 「설정값을 어디에 두는가」 ①).
+	var names []string
+	for _, k := range plain {
+		if k == "site.type" || k == "turnstile.site_key" || !changed(kv, prev, k) {
+			continue
+		}
+		if k == "analytics.ga4_id" {
+			k += " " + orNone(prev[k]) + " → " + orNone(kv[k])
+		}
+		names = append(names, k)
+	}
+	if len(names) > 0 {
+		d.log(r, c, "settings.update", "settings", "site", "사이트 설정 변경: "+strings.Join(names, ", "))
 	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
 	if !typeChanged && !changed(kv, prev, "admin.theme") {

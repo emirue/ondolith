@@ -292,6 +292,50 @@ func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
 	}
 }
 
+// **A-201 저장은 작업 로그에 남는다** (D19 A-201 「저장 성공 → 남김」, D15 7절).
+//
+// 사이트 유형과 Turnstile 만 남기고 나머지는 흔적이 없었다. GA4 측정 ID 는 방문 기록이
+// 어느 GA 속성으로 가는지를 정한다 — `settings.update` 를 가진 운영자가 자기 속성으로
+// 바꿔도 아무도 몰랐다 (2026-10-21 점검). 그래서 GA4 는 값까지 남긴다(공개값이다).
+func TestSiteSettingsSaveIsLogged(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"})
+	ctx := context.Background()
+	summaries := func() []string {
+		rows, err := pool.Query(ctx, `SELECT summary FROM operation_logs WHERE target_id = 'site' ORDER BY created_at`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-AAAA1111"}})
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-BBBB2222"}, "site.name": {"새 이름"}})
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-BBBB2222"}}) // 바뀐 것 없음
+
+	got := summaries()
+	if len(got) != 2 {
+		t.Fatalf("작업 로그 %d건 %q, want 2 (바뀐 저장만)", len(got), got)
+	}
+	if !strings.Contains(got[0], "G-AAAA1111") {
+		t.Errorf("첫 GA4 지정이 값 없이 남았다: %q", got[0])
+	}
+	if !strings.Contains(got[1], "G-AAAA1111 → G-BBBB2222") || !strings.Contains(got[1], "site.name") {
+		t.Errorf("GA4 교체·이름 변경이 남지 않았다: %q", got[1])
+	}
+	if strings.Contains(got[1], "새 이름") {
+		t.Errorf("GA4 밖의 값까지 남겼다: %q", got[1])
+	}
+}
+
 // **지도 키는 A-201 에서 넣는다** (FR-716). 네이버 ncpKeyId·카카오 JavaScript 키·구글 API
 // 키·Map ID 는 페이지에 실려 나가는 공개값이라 봉인하지 않지만, `<script>` 의 속성이 되므로
 // 영문·숫자·`-`·`_` 만 받는다. 붙여넣은 앞뒤 공백은 떼고, 빈 값은 그 지도를 끈다.
