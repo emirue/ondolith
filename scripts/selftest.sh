@@ -604,11 +604,13 @@ inject "D19 대역 행의 선언 개수가 실제와 다름" docs/19-screen-io.m
 inject "D19 머리말의 화면 개수가 절 수와 다름" docs/19-screen-io.md \
 	'perl -pi -e "s{^## 공개 화면 \\((\\d+)\\)}{sprintf(qq[## 공개 화면 (%d)], \$1-1)}e" docs/19-screen-io.md' \
 	'가 그 구간의 실제 값'
-# A wrong number that is itself a real count: 28 is the admin figure, written
-# over the public one. Set membership passed this — the check now binds each
-# figure to the region it appears in.
+# A wrong number that is itself a real count: the whole-document total, written
+# over the public figure. Set membership passed this — the check now binds each
+# figure to the region it appears in. **관리자 개수를 쓰지 않는다**: 두 구간이 같은
+# 수(36·36, 2026-10-21 A-210)가 되자 바꿔 써도 그대로라 아무것도 심지 못했다. 합은
+# 관리자 화면이 하나라도 있는 한 공개 개수와 다르다.
 inject "D19 개수가 다른 구간의 실제 값으로 바뀜" docs/19-screen-io.md \
-	'perl -0777 -pi -e "my (\$a) = /^## 관리자 화면 \\((\\d+)\\)/m; s/^## 공개 화면 \\(\\d+\\)/## 공개 화면 (\$a)/m" docs/19-screen-io.md' \
+	'perl -0777 -pi -e "my (\$p) = /^## 공개 화면 \\((\\d+)\\)/m; my (\$a) = /^## 관리자 화면 \\((\\d+)\\)/m; my \$t = \$p + \$a; s/^## 공개 화면 \\(\\d+\\)/## 공개 화면 (\$t)/m" docs/19-screen-io.md' \
 	'가 그 구간의 실제 값'
 inject "D19 개수 진술이 하나도 남지 않음" docs/19-screen-io.md \
 	'perl -pi -e "s/화면|대상/스크린/g" docs/19-screen-io.md' \
