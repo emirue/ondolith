@@ -180,6 +180,13 @@ func (d *socialDeps) finishSocialLogin(w http.ResponseWriter, r *http.Request,
 	provider string, gu goth.User) {
 
 	ctx := r.Context()
+	// auth_at 은 연결을 읽기 **전**의 DB 시각이다 (P-101 과 같다). 읽은 뒤 A-402 가 회수하면
+	// 기준 시각이 이 도장보다 뒤로 가 새 세션이 다음 요청에서 끊긴다 (2026-10-21 4차 점검).
+	authAt, err := d.store.Now(ctx)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 	u, err := d.store.UserBySocial(ctx, provider, gu.UserID)
 	if errors.Is(err, auth.ErrNoUser) {
 		d.socialFail(w, r, "연결된 계정이 없습니다. 로그인 후 「연결된 계정」에서 연결하세요.")
@@ -204,13 +211,6 @@ func (d *socialDeps) finishSocialLogin(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	d.sm.Put(ctx, sessUserID, u.ID)
-	// 데이터베이스 시계로 찍는다, time.Now() 가 아니다 — auth.Store.Now 참조.
-	// 첫 소셜 로그인은 계정을 만든 직후이므로 여기가 가장 아슬아슬하다.
-	authAt, err := d.store.Now(ctx)
-	if err != nil {
-		d.serverError(w, r, err)
-		return
-	}
 	stampAuthAt(d.sm, ctx, authAt)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

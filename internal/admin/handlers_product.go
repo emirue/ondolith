@@ -219,7 +219,7 @@ func (d *Deps) renderProduct(w http.ResponseWriter, r *http.Request,
 }
 
 // maxImageUploadBytes 는 이미지 업로드 요청 하나의 상한이다. 여러 장이 함께
-// 오므로 파일 하나의 상한(A-309 `upload.max_bytes`)보다 넉넉하되 무한은
+// 오므로 파일 하나의 상한(`upload.max_bytes`)보다 넉넉하되 무한은
 // 아니다 — 파일별 판정은 검증기가 하고, 이것은 소켓을 멈출 뿐이다.
 const maxImageUploadBytes = 64 << 20
 

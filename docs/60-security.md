@@ -191,6 +191,11 @@ NFR-101의 티어에서 무제한 본문 버퍼링은 그 자체가 DoS 표면�
 | `iframe` — `https://www.youtube(-nocookie).com/embed/…` 만, `sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"` 을 붙여서(보낸 sandbox 는 버린다. 비운 `sandbox=""` 는 플레이어가 돌지 않는다) | 그 밖의 iframe 은 요소째 (키 없는 구글 지도 iframe 도 — 지도는 지도 블록이다) |
 | 지도 블록 `<img data-map data-lat data-lng data-zoom data-label>` (FR-716) — 지도사는 셋 중 하나, 좌표·확대는 숫자 모양, 이름은 `"<>` 없이 100자 | 이미지 밖의 `data-*`, 모양이 다른 값. **본문에 스크립트를 들이지 않는다** — 지도사 SDK 는 테마의 `maps.js` 가 관리자가 넣은 키로 부르고, 블록이 주는 것은 지도사·좌표·확대·이름뿐이다(이름은 `textContent` 로 쓴다) |
 
+**열린 태그는 본문 안에서 닫는다.** bluemonday 는 짝을 맞추지 않으므로, 정화 → 짝 맞추기(`<div>` 문맥
+`html.ParseFragment` + `Render`) → 다시 정화한다. 닫지 않은 `<b style="font-size:0px">` 가 본문 뒤의 댓글·바닥글
+글자를 남의 화면에서 지우거나, 닫지 않은 iframe 이 그 뒤 화면을 삼키지 못한다 (2026-10-21 3차 점검). 마지막
+출력은 늘 정화기를 지난 값이다.
+
 평문(`body`)은 정화된 HTML 에서 글자만 뽑은 것이다 — 블록이 끝나면 줄을 바꾸고 엔티티를
 글자로 돌린다. 검색(`search_vector`)이 태그를 색인하지 않게 하려는 것이다.
 

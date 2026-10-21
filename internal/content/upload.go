@@ -57,14 +57,14 @@ func (e LimitError) Unwrap() error { return e.Err }
 // 1 vCPU and 512MB–1GB; a request that buffers more than this is a denial of
 // service on its own, whatever the file turns out to be.
 //
-// 운영자가 A-309 에서 낮추거나 올릴 수 있다 (`upload.max_bytes`, OPEN-41 결정).
+// `upload.max_bytes` 가 있으면 그것을 쓴다(OPEN-41 결정). 그 키를 쓰는 화면은 아직 없다 (D85 GAP-31).
 const MaxAttachmentBytes = 20 << 20 // 20 MiB
 
 // MaxAttachmentsPerPost bounds how many files one post carries by default
 // (`upload.max_per_post`). 상한이 없으면 글 하나가 디스크를 다 쓴다.
 const MaxAttachmentsPerPost = 10
 
-// 설정 키 (A-309). 값은 UploadLimits 가 읽고 검증한다.
+// 설정 키. 값은 UploadLimits 가 읽고 검증한다 — 쓰는 화면은 아직 없다 (D85 GAP-31).
 const (
 	SettingUploadMaxBytes   = "upload.max_bytes"
 	SettingUploadMaxPerPost = "upload.max_per_post"

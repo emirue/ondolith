@@ -118,14 +118,6 @@ func (s *Store) LinkSocialInSession(ctx context.Context, userID, provider, uid s
 	return tx.Commit(ctx)
 }
 
-// UnlinkAllSocial removes every provider identity on the account and reports
-// how many there were. A-402's forced reset uses it: undoing a takeover means
-// closing every way back in, and a social identity the taker attached is one
-// (D15 5.4).
-func (s *Store) UnlinkAllSocial(ctx context.Context, userID string) (int64, error) {
-	return s.q.UnlinkAllSocial(ctx, userID)
-}
-
 // UnlinkSocial removes one link (P-111).
 //
 // **마지막 로그인 수단은 해제할 수 없다** (FR-213). 비밀번호가 없는 계정에서

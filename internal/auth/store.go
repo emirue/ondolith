@@ -228,13 +228,28 @@ func (s *Store) InvalidateSessions(ctx context.Context, userID string) error {
 	return s.q.InvalidateSessions(ctx, userID)
 }
 
-// RevokeCredentials ends every session AND clears the password, in one UPDATE —
-// A-402's forced reset (D15 5.4). Undoing a takeover with the old password still
-// valid lets whoever knows it log straight back in. Clearing is not setting: the
-// administrator learns nothing, and the owner chooses the next password through
-// the reset mail (D19 「타인의 비밀번호를 설정하지 않는다」).
-func (s *Store) RevokeCredentials(ctx context.Context, userID string) error {
-	return s.q.RevokeCredentials(ctx, userID)
+// RevokeCredentials ends every session, clears the password and removes every
+// social link, in one transaction — A-402's forced reset (D15 5.4). Undoing a
+// takeover with the old password or a taker's social link still valid lets them
+// straight back in, and doing the three apart left a gap a social login could
+// slip through (2026-10-21 4차 점검). Clearing is not setting: the administrator
+// learns nothing, and the owner chooses the next password through the reset mail
+// (D19 「타인의 비밀번호를 설정하지 않는다」). It reports how many links it removed.
+func (s *Store) RevokeCredentials(ctx context.Context, userID string) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	if err := q.RevokeCredentials(ctx, userID); err != nil {
+		return 0, err
+	}
+	n, err := q.UnlinkAllSocial(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit(ctx)
 }
 
 // withLastSuperuserGuard runs apply in a transaction that has every active

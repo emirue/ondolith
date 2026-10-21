@@ -1108,13 +1108,9 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	// Sessions and the password end first, together. Issuing the token first
 	// would leave a window where the takeover being undone is still logged in,
 	// and a password left valid lets the taker log straight back in (D15 5.4).
-	if err := d.Auth.RevokeCredentials(ctx, target); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
-		return
-	}
-	// So do the social links: one the taker attached is a way back in that no
-	// session cutoff closes. The owner re-links at P-111 after the reset.
-	unlinked, err := d.Auth.UnlinkAllSocial(ctx, target)
+	// So do the social links — one the taker attached is a way back in that no
+	// session cutoff closes — in the same transaction. The owner re-links at P-111.
+	unlinked, err := d.Auth.RevokeCredentials(ctx, target)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return

@@ -274,7 +274,7 @@ func TestSetPasswordRefusesARevokedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeCredentials(ctx, u); err != nil {
+	if _, err := s.RevokeCredentials(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	h, _ := HashPassword("taker-sets-this")
