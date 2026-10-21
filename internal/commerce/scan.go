@@ -276,7 +276,8 @@ func CheckPick(lines []PickLine, scanned map[string]int, variantID string, qty i
 		if l.VariantID != variantID {
 			continue
 		}
-		if scanned[variantID]+qty > l.Ordered {
+		// 덧셈이 넘치지 않게 남은 개수와 비교한다.
+		if qty > l.Ordered-scanned[variantID] {
 			return fmt.Errorf("%w: %s 는 %d개 주문인데 %d개째다",
 				ErrPickOverCount, l.ProductName, l.Ordered, scanned[variantID]+qty)
 		}

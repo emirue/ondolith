@@ -3,6 +3,7 @@ package commerce
 import (
 	"context"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -63,6 +64,25 @@ func TestReturnWindowIsEnforced(t *testing.T) {
 	}
 	if _, err := s.OpenReturn(ctx, orderNo, req, "P-511", delivered.AddDate(0, 0, 8)); err != nil {
 		t.Errorf("기간 10일의 8일째 = %v, want 접수", err)
+	}
+}
+
+// 반품 수량도 소진 + 요청이 넘치면 상한을 통과했다 — 그 뒤의 DB CHECK 가 우연히
+// 막고 있었다 (2026-10-21 점검). 상한이 스스로 거부해야 한다.
+func TestReturnRefusesAnOverflowingQuantity(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+	// 넘침은 이미 소진한 수량이 있을 때 생긴다(1 + 최댓값). 부분 환불 하나를 흉내 낸다.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE order_items SET settled_quantity = 1 WHERE id = $1`, items[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.OpenReturn(context.Background(), orderNo, ReturnRequest{
+		Kind: KindReturn, Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: math.MaxInt}},
+	}, "P-511", time.Now())
+	if !errors.Is(err, ErrRefundQuantity) {
+		t.Errorf("넘치는 반품 수량 = %v, want ErrRefundQuantity", err)
 	}
 }
 

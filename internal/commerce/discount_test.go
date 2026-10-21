@@ -2,6 +2,7 @@ package commerce
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -195,6 +196,11 @@ func TestRefundableAmountRefusesOverRefund(t *testing.T) {
 	}
 	if _, err := RefundableAmount(1000, 2000, 1, 0, 1); !errors.Is(err, ErrPriceNegative) {
 		t.Errorf("할인이 금액 초과 = %v", err)
+	}
+	// **소진 + 요청이 넘치면 음수가 되어 상한을 통과했다** (2026-10-21 점검). 구매자가
+	// 폼의 qty 에 int 최댓값을 보내면 된다 — 지금까지는 DB CHECK 가 우연히 막았다.
+	if _, err := RefundableAmount(26000, 0, 2, 1, math.MaxInt); !errors.Is(err, ErrRefundQuantity) {
+		t.Errorf("넘치는 수량 = %v, want ErrRefundQuantity", err)
 	}
 }
 

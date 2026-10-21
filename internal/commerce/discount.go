@@ -112,7 +112,9 @@ func RefundableAmount(lineAmount, discount, quantity, settled, qty int) (int, er
 	if qty < 1 {
 		return 0, fmt.Errorf("%w: 환불 수량 %d", ErrQuantityRange, qty)
 	}
-	if settled < 0 || settled+qty > quantity {
+	// `qty > 남은 수량` 으로 쓴다. `소진+qty > 수량` 은 qty 가 크면 덧셈이 넘쳐 음수가
+	// 되어 통과한다 — qty 는 구매자 폼에서 온다.
+	if settled < 0 || qty > quantity-settled {
 		return 0, fmt.Errorf("%w: 소진 %d + 요청 %d > 주문 %d",
 			ErrRefundQuantity, settled, qty, quantity)
 	}

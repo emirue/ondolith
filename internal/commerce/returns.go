@@ -251,7 +251,8 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		}
 		got.productID, got.quantity, got.settled, got.oldDelta =
 			r.ProductID, int(r.Quantity), int(r.SettledQuantity), int(r.PriceDelta)
-		if got.settled+got.qty > got.quantity {
+		// 덧셈이 넘치지 않게 남은 수량과 비교한다 (RefundableAmount 와 같다).
+		if got.qty > got.quantity-got.settled {
 			return nil, fmt.Errorf("%w: 소진 %d + 요청 %d > 주문 %d",
 				ErrRefundQuantity, got.settled, got.qty, got.quantity)
 		}
