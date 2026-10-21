@@ -22,7 +22,7 @@
       <tbody>
         {{range .Items}}
         <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-            <td>{{money .UnitPrice}}</td><td>{{.Quantity}}{{if .Settled}} <small>(환불·반품 {{.Settled}} · 남은 {{.RemainingQty}} — 재고는 자동으로 돌아가지 않는다, A-514 입고)</small>{{end}}</td><td>{{money .LineAmount}}</td></tr>
+            <td>{{money .UnitPrice}}</td><td>{{.Quantity}}{{if .Settled}} <small>(환불·반품 {{.Settled}} · 남은 {{.RemainingQty}}{{if not (eq (print $.Order.Status) "결제완료" "배송준비" "취소")}} — 소진된 몫의 재고는 자동으로 돌아가지 않는다, A-514 입고{{end}})</small>{{end}}</td><td>{{money .LineAmount}}</td></tr>
         {{end}}
       </tbody>
     </table>

@@ -71,6 +71,8 @@ INSERT INTO refunds (order_id, payment_id, status, requester, amount, reason, re
 VALUES ($1, $2, '요청', $3, $4, '주문 취소', $5) RETURNING id;
 
 -- name: OrderItemStock :many
+-- 배송 전에 닫히는 주문(취소·전액 환불)은 원래 수량을 전부 되돌린다 — 배송 전 부분 환불로
+-- 소진된 몫도 창고를 떠난 적이 없다 (D50 「배송 전 부분 환불의 재고」).
 SELECT variant_id, quantity FROM order_items WHERE order_id = $1;
 
 -- name: ApprovedPaymentAmounts :one

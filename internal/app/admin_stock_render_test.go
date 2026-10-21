@@ -575,3 +575,22 @@ func TestDashboardNamesAWithdrawnAuthorLikeTheList(t *testing.T) {
 		t.Error("대시보드 최근 글의 빈 작성자가 「(탈퇴)」가 아니다")
 	}
 }
+
+// **입고 안내는 발송 뒤에만 뜬다** (D50 「배송 전 부분 환불의 재고」). 배송 전에 환불된 몫은 주문이
+// 닫히면(취소·전액 환불) 자동으로 돌아오므로, 그 전에 「A-514 입고」를 권하면 따른 운영자의 재고가
+// 두 번 늘어 없는 물건이 팔렸다 (2026-10-21 4차 점검).
+func TestOrderDetailSuggestsRestockOnlyAfterShipping(t *testing.T) {
+	render := func(st commerce.Status) string {
+		return renderAdmin(t, "admin/order.html", map[string]any{"Order": &commerce.OrderDetail{
+			OrderNo: "N1", Status: st, Total: 2000,
+			Items: []commerce.OrderItem{{ProductName: "티", UnitPrice: 1000, Quantity: 2, Settled: 1, LineAmount: 2000}}}})
+	}
+	for _, st := range []commerce.Status{commerce.StatusPaid, commerce.StatusPreparing, commerce.StatusCancelled} {
+		if out := render(st); strings.Contains(out, "A-514") {
+			t.Errorf("%s 주문에 입고 안내가 떴다 — 닫히면 자동으로 돌아오는 몫이다", st)
+		}
+	}
+	if out := render(commerce.StatusShipping); !strings.Contains(out, "A-514") {
+		t.Error("발송된 주문에 입고 안내가 없다 — 환불된 몫이 창고에 남는다")
+	}
+}

@@ -282,6 +282,8 @@ type OrderItemStockRow struct {
 	Quantity  int32
 }
 
+// 배송 전에 닫히는 주문(취소·전액 환불)은 원래 수량을 전부 되돌린다 — 배송 전 부분 환불로
+// 소진된 몫도 창고를 떠난 적이 없다 (D50 「배송 전 부분 환불의 재고」).
 func (q *Queries) OrderItemStock(ctx context.Context, orderID string) ([]OrderItemStockRow, error) {
 	rows, err := q.db.Query(ctx, orderItemStock, orderID)
 	if err != nil {
