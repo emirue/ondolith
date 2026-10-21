@@ -187,7 +187,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	//
 	// 여기서 하는 이유: 경로는 설정값이고(NFR-304) 운영자가 옮길 수 있으므로,
 	// 설치 한 번이 아니라 **뜰 때마다** 확인해야 한다.
-	if err := os.MkdirAll(cfg.Uploads(), 0o755); err != nil {
+	if err := os.MkdirAll(cfg.Uploads(), 0o700); err != nil {
 		return fail(fmt.Errorf("업로드 디렉터리를 만들 수 없다 (%s): %w", cfg.Uploads(), err))
 	}
 	// 업로드 폴더는 백업에 통째로 들어간다 — 그 안에 백업 폴더가 있으면 다음 백업이 이전
@@ -456,6 +456,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 인가 코드를 다른 곳으로 돌릴 수 있고, 그것이 D19 A-206 이 콜백 URL 을
 	// 받지 않기로 한 이유다.
 	soc := &socialDeps{publicDeps: pub, sm: sessions, store: authStore, unverified: acc.refuseUnverified,
+		confirm: acc.confirmPassword,
 		provider: func(r *http.Request, name string) (goth.Provider, error) {
 			cfg := socialConfigOf(name)
 			// **꺼진 프로바이더는 없는 것과 같다** (FR-709). 자격증명이
@@ -564,7 +565,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 	}))
 
-	// 결제대기 만료 (D14: 결제대기 → 결제실패, 시스템). NFR-103 대로 고루틴이다.
+	// 결제대기·입금대기 만료 (D14: → 결제실패, 시스템). NFR-103 대로 고루틴이다.
 	// AuthWindow 가 지난 주문은 P-408 이 승인을 거부하므로 결제될 길이 없는데,
 	// 그 주문이 차감한 재고는 잡혀 있었다 — 결제 없이 떠난 장바구니마다 재고가
 	// 하나씩 사라졌다. 1분마다 최대 100건.
@@ -580,6 +581,14 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 					log.Warn("결제대기 만료", "err", err)
 				} else if n > 0 {
 					log.Info("결제대기 만료", "orders", n)
+				}
+				// 입금 기한이 지난 가상계좌 주문 (D14: 입금대기 → 결제실패). 기한이 지난 것은 PG 에
+				// 묻고(결제사가 꺼져 있으면 건너뛴다), 결제가 이미 닫힌 입금대기는 그냥 놓는다.
+				_, gw := pgAdapter()
+				if n, err := commerceStore.ExpireDepositOrders(settingCtx, gw, time.Now(), 20); err != nil {
+					log.Warn("입금 기한 만료", "err", err)
+				} else if n > 0 {
+					log.Info("입금 기한 만료", "orders", n)
 				}
 				select {
 				case <-stopExpire:

@@ -9,8 +9,10 @@ import (
 
 // 커머스 정책 키 (A-512). 값의 단일 출처는 `settings` 이고, 읽는 쪽은
 // 그때그때 읽는다 — 부팅 시점에 잡으면 "바꾸려면 재시작" 이 된다.
+// 반품 기간은 commerce 가 OpenReturn 에서 읽으므로 그쪽 상수를 쓴다 — 두 벌이면
+// 한쪽 이름만 바뀌는 날 기간이 조용히 기본값으로 돌아간다.
 const (
-	settingReturnDays  = "order.return_days"
+	settingReturnDays  = commerce.SettingReturnDays
 	settingConfirmDays = "order.confirm_days"
 )
 

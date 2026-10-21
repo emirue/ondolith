@@ -7,6 +7,7 @@ package authq
 
 import (
 	"context"
+	"time"
 )
 
 const countSocialAccounts = `-- name: CountSocialAccounts :one
@@ -44,6 +45,24 @@ type LinkSocialParams struct {
 func (q *Queries) LinkSocial(ctx context.Context, arg LinkSocialParams) error {
 	_, err := q.db.Exec(ctx, linkSocial, arg.UserID, arg.Provider, arg.ProviderUid)
 	return err
+}
+
+const lockSessionValid = `-- name: LockSessionValid :one
+SELECT is_active AND sessions_valid_from <= $1 AS valid
+FROM users WHERE id = $2 FOR UPDATE
+`
+
+type LockSessionValidParams struct {
+	AuthAt time.Time
+	ID     string
+}
+
+// 사용자 행을 잠그고, auth_at 에 로그인한 세션이 아직 유효한지 답한다 (A-402 회수와 직렬화).
+func (q *Queries) LockSessionValid(ctx context.Context, arg LockSessionValidParams) (*bool, error) {
+	row := q.db.QueryRow(ctx, lockSessionValid, arg.AuthAt, arg.ID)
+	var valid *bool
+	err := row.Scan(&valid)
+	return valid, err
 }
 
 const lockUserHasPassword = `-- name: LockUserHasPassword :one
@@ -87,6 +106,18 @@ func (q *Queries) SocialAccounts(ctx context.Context, userID string) ([]SocialAc
 	return items, nil
 }
 
+const unlinkAllSocial = `-- name: UnlinkAllSocial :execrows
+DELETE FROM social_accounts WHERE user_id = $1
+`
+
+func (q *Queries) UnlinkAllSocial(ctx context.Context, userID string) (int64, error) {
+	result, err := q.db.Exec(ctx, unlinkAllSocial, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const unlinkSocial = `-- name: UnlinkSocial :execrows
 DELETE FROM social_accounts WHERE user_id = $1 AND provider = $2
 `
@@ -104,18 +135,38 @@ func (q *Queries) UnlinkSocial(ctx context.Context, arg UnlinkSocialParams) (int
 	return result.RowsAffected(), nil
 }
 
-const userIDBySocial = `-- name: UserIDBySocial :one
-SELECT user_id FROM social_accounts WHERE provider = $1 AND provider_uid = $2
+const userBySocialLink = `-- name: UserBySocialLink :one
+SELECT u.id, u.email, u.display_name, u.is_active, u.sessions_valid_from, u.email_verified_at
+FROM social_accounts s JOIN users u ON u.id = s.user_id
+WHERE s.provider = $1 AND s.provider_uid = $2
 `
 
-type UserIDBySocialParams struct {
+type UserBySocialLinkParams struct {
 	Provider    string
 	ProviderUid string
 }
 
-func (q *Queries) UserIDBySocial(ctx context.Context, arg UserIDBySocialParams) (string, error) {
-	row := q.db.QueryRow(ctx, userIDBySocial, arg.Provider, arg.ProviderUid)
-	var user_id string
-	err := row.Scan(&user_id)
-	return user_id, err
+type UserBySocialLinkRow struct {
+	ID                string
+	Email             string
+	DisplayName       string
+	IsActive          bool
+	SessionsValidFrom time.Time
+	EmailVerifiedAt   *time.Time
+}
+
+// 연결과 사용자(기준 시각 포함)를 한 문장으로 읽는다 — 둘 사이에 A-402 회수가 커밋되면 연결은
+// 옛 것, 기준 시각은 새 것을 읽어 회수 뒤에도 사는 세션이 나온다 (User.Cutoff).
+func (q *Queries) UserBySocialLink(ctx context.Context, arg UserBySocialLinkParams) (UserBySocialLinkRow, error) {
+	row := q.db.QueryRow(ctx, userBySocialLink, arg.Provider, arg.ProviderUid)
+	var i UserBySocialLinkRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.DisplayName,
+		&i.IsActive,
+		&i.SessionsValidFrom,
+		&i.EmailVerifiedAt,
+	)
+	return i, err
 }

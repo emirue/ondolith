@@ -66,8 +66,9 @@
   만료 30분, 1회용. rate limit
 
 ### P-105 비밀번호 재설정 수행
-- **입력**: `token`(경로), `password`, `password_confirm`
-- **보안**: 토큰 해시 대조 + 만료 확인 → 비밀번호 변경 → **`users.sessions_valid_from = now()`로
+- **입력**: `token`(쿠키 — 메일의 `/password/reset/{token}` 이 옮기고 `/password/new` 로 보낸다), `password`, `password_confirm`
+- **토큰이 든 주소에서는 그리지 않는다**: 그 화면의 스크립트(GA4 등)가 주소째 밖으로 보낸다 ([D60](60-security.md) 「비밀이 든 주소」)
+- **보안**: 토큰 해시 대조 + 만료 확인 → 비밀번호 변경 → **기준 시각(`users.sessions_valid_from`)을 앞으로 옮겨
   기존 세션 전부 무효화** ([D15](15-access-control.md) 5.4). 토큰은 즉시 소모
 
 ### P-106 소셜 로그인 시작

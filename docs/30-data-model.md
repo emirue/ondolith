@@ -474,19 +474,26 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `auth.signup_closed` | bool — 빈 값이 「받음」 (FR-217) | A-201 | 6 |
 | `turnstile.site_key` · `turnstile.secret_key` | text / **자격증명** | A-201 | 6 |
 | `analytics.ga4_id` | text (`G-…`) | A-201 | 6 |
+| `admin.theme` | 빈 값(기본 배색) \| `1a`~`1e` | A-201 | 6 |
+| `theme.active` | text — 테마 폴더 이름 | A-202 | 1 |
 | `map.naver_key` · `map.kakao_key` · `map.google_key` · `map.google_map_id` | text — 공개값 (FR-716) | A-201 | 6 |
 | `backup.auto` · `backup.hour` · `backup.keep` | bool / int 0~23 (기본 0) / int 1~30 (기본 7) | A-604 | 6 |
 | `mail.smtp_host` · `smtp_port` · `smtp_user` · `smtp_password` · `tls_mode` · `from_address` · `from_name` | text / int / text / **자격증명** / `none`\|`starttls`\|`tls` / text / text | A-205 | 1 |
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
 | `business.*` | text | A-208 | 3 |
-| `commerce.return_window_days` · `auto_confirm_days` · `return_shipping_payer` · `return_shipping_fee` | int(7) / int(8) / `차감`\|`별도청구` / int(0) | A-512 | 3 |
+| `pg.provider` · `pg.client_key` · `pg.secret_key` | `toss` \| 빈 값(사용 안 함) / text — 공개값 / **자격증명** | A-209 | 3 |
+| `upload.max_bytes` · `upload.max_per_post` · `upload.deny_ext` | int / int / text | **쓰는 화면이 없다** — 코드 기본값 ([GAP-31](85-gaps.md)) | 2 |
+| `order.return_days` · `order.confirm_days` · `order.return_fee_policy` · `order.return_fee_amount` · `shipping.flat_fee` · `shipping.free_threshold` | int(7) / int(8) / `차감`\|`별도청구` / int(0) / int(0) / int(0) | A-512 | 3 |
+
+**자격증명** 표시는 이 표의 설명이고, 무엇이 봉인되는지의 단일 출처는 `content.IsSecretSetting` 이다
+([D60](60-security.md) 「설정값을 어디에 두는가」 ②).
 
 **PK가 `uuid`가 아니라 `key`다 — 3절 규칙의 의도적 예외다.** 이 행은 어떤 FK의 대상도 아니고
 모든 접근이 `WHERE key = $1`이다. uuid를 얹으면 식별자가 둘이 되고 upsert의 `ON CONFLICT`
 대상과 PK가 갈라진다.
 
 **`type`·`is_secret` 컬럼을 두지 않는다.** 어느 키가 어떤 타입이고 어느 것이 자격증명인지는
-**코드가 안다** — 범용 설정 편집 화면이 없고 A-201/205/206/208/512가 각자 자기 키만 쓴다.
+**코드가 안다** — 범용 설정 편집 화면이 없고 A-201/202/205/206/208/209/512/604 가 각자 자기 키만 쓴다.
 컬럼으로 두면 코드 상수와 DB 데이터라는 두 출처가 생기고, `is_secret`이 UI로 뒤집히면
 D15 7절의 "자격증명 값은 로그에 남기지 않는다"가 데이터에 의존하게 된다.
 

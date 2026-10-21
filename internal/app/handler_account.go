@@ -245,7 +245,7 @@ func (d *accountDeps) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		bad("되돌릴 수 없습니다. 확인란을 체크해 주세요.")
 		return
 	}
-	if _, err := d.store.Authenticate(ctx, a.User.Email, r.PostFormValue("password")); err != nil {
+	if !d.confirmPassword(ctx, a, r.PostFormValue("password")) {
 		bad("비밀번호가 올바르지 않습니다.")
 		return
 	}
@@ -505,7 +505,7 @@ func (d *accountDeps) changePassword(w http.ResponseWriter, r *http.Request) {
 	// The current password is required even though the session is already
 	// authenticated: a session left open on a shared machine must not be enough
 	// to take the account (D15 5.3-1).
-	if _, err := d.store.Authenticate(ctx, a.User.Email, current); err != nil {
+	if !d.confirmPassword(ctx, a, current) {
 		d.render(w, r, "account/password.html", http.StatusBadRequest,
 			map[string]any{"Error": "현재 비밀번호가 올바르지 않습니다."})
 		return
@@ -522,7 +522,13 @@ func (d *accountDeps) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// SetPassword also moves sessions_valid_from, ending every OTHER session,
 	// and hands back the cutoff it wrote.
-	cutoff, err := d.store.SetPassword(ctx, a.User.ID, hash)
+	cutoff, err := d.store.SetPassword(ctx, a.User.ID, hash, a.AuthAt)
+	if errors.Is(err, auth.ErrSessionRevoked) {
+		// 확인한 뒤 이 세션이 회수됐다(A-402·다른 기기의 변경). 바꾸지 않았고, 이 세션도 끝이다.
+		_ = d.sm.Destroy(ctx)
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
+		return
+	}
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return

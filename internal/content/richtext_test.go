@@ -114,3 +114,44 @@ func TestCoverOfPicksTheFirstUploadedPhoto(t *testing.T) {
 		}
 	}
 }
+
+// **허용 밖 주소의 iframe 은 요소째 빠진다.** 다른 허용 속성(id·title)이 있으면 src 만
+// 빠진 빈 iframe 이 sandbox 를 달고 남았다 — 실을 것은 없지만 주석이 말한 동작이 아니었다
+// (2026-10-21 점검에서 실행으로 확인).
+func TestDisallowedIframeLeavesNothing(t *testing.T) {
+	for _, in := range []string{
+		`<iframe id="x" src="https://evil.example/x"></iframe>`,
+		`<iframe title="t" src="https://evil.example/x">대체 글</iframe>`,
+		`<p>앞</p><iframe id="y"></iframe><p>뒤</p>`,
+		`<p>앞</p><iframe id="z">`, // 닫는 태그 없이 끝나도
+	} {
+		if got := SanitizeRichText(in); strings.Contains(got, "<iframe") {
+			t.Errorf("%q → %q — 빈 iframe 이 남았다", in, got)
+		}
+	}
+	yt := `<iframe id="v" src="https://www.youtube.com/embed/abc123"></iframe>`
+	if got := SanitizeRichText(yt); !strings.Contains(got, `src="https://www.youtube.com/embed/abc123"`) {
+		t.Errorf("유튜브가 빠졌다: %q", got)
+	}
+}
+
+// **본문의 태그는 본문 안에서 닫힌다.** bluemonday 는 짝을 맞추지 않는다 — 닫지 않은
+// `<b style="font-size:0px">` 는 브라우저가 본문 뒤의 댓글·버튼·바닥글 글자마다 다시 만들어
+// 다른 방문자에게 안 보이게 했고, 닫지 않은 유튜브 iframe 은 그 뒤 화면 전체를 iframe 의 글자로
+// 삼켰다 (2026-10-21 3차 점검). 스크립트는 아니지만 남의 화면을 바꾸는 길이다.
+func TestRichTextClosesWhatItOpens(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`<p>글</p><b style="font-size:0px">`, `</b>`},
+		{`<p>글</p><span style="color:#ffffff">`, `</span>`},
+		{`<iframe src="https://www.youtube.com/embed/abc123">`, `</iframe>`},
+		{`<ul><li>하나`, `</ul>`},
+	} {
+		if got := SanitizeRichText(tc.in); !strings.HasSuffix(got, tc.want) {
+			t.Errorf("%q → %q — %s 로 닫히지 않았다", tc.in, got, tc.want)
+		}
+	}
+	// 남는 닫는 태그도 본문 밖의 요소를 닫지 못한다.
+	if got := SanitizeRichText(`글</div></main><p>밖</p>`); strings.Contains(got, "</div>") || strings.Contains(got, "</main>") {
+		t.Errorf("짝 없는 닫는 태그가 남았다: %q", got)
+	}
+}

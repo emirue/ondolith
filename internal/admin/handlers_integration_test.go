@@ -292,6 +292,82 @@ func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
 	}
 }
 
+// **A-201 저장은 작업 로그에 남는다** (D19 A-201 「저장 성공 → 남김」, D15 7절).
+//
+// 사이트 유형과 Turnstile 만 남기고 나머지는 흔적이 없었다. GA4 측정 ID 는 방문 기록이
+// 어느 GA 속성으로 가는지를 정한다 — `settings.update` 를 가진 운영자가 자기 속성으로
+// 바꿔도 아무도 몰랐다 (2026-10-21 점검). 그래서 GA4 는 값까지 남긴다(공개값이다).
+func TestSiteSettingsSaveIsLogged(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"})
+	ctx := context.Background()
+	summaries := func() []string {
+		rows, err := pool.Query(ctx, `SELECT summary FROM operation_logs WHERE target_id = 'site' ORDER BY created_at`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-AAAA1111"}})
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-BBBB2222"}, "site.name": {"새 이름"}})
+	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-BBBB2222"}}) // 바뀐 것 없음
+
+	got := summaries()
+	if len(got) != 2 {
+		t.Fatalf("작업 로그 %d건 %q, want 2 (바뀐 저장만)", len(got), got)
+	}
+	if !strings.Contains(got[0], "G-AAAA1111") {
+		t.Errorf("첫 GA4 지정이 값 없이 남았다: %q", got[0])
+	}
+	if !strings.Contains(got[1], "G-AAAA1111 → G-BBBB2222") || !strings.Contains(got[1], "site.name") {
+		t.Errorf("GA4 교체·이름 변경이 남지 않았다: %q", got[1])
+	}
+	if strings.Contains(got[1], "새 이름") {
+		t.Errorf("GA4 밖의 값까지 남겼다: %q", got[1])
+	}
+}
+
+// **A-201 은 D19 가 적은 검사를 한다** — 사이트 이름 1~100자(공백만은 거부), 메타 설명
+// 300자, OG 이미지 http·https 또는 내부 경로. 명세에만 있고 구현이 없었다 (2026-10-21
+// 점검). OG 이미지는 `<meta content>` 에 이스케이프돼 들어가 XSS 는 아니지만,
+// `javascript:`·`//남의호스트` 같은 값이 링크 미리보기에 그대로 실렸다.
+func TestSiteSettingsValidateTheD19Fields(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	for _, bad := range []url.Values{
+		{"site.name": {"   "}},
+		{"site.name": {strings.Repeat("가", 101)}},
+		{"site.meta_description": {strings.Repeat("a", 301)}},
+		{"site.og_image": {"javascript:alert(1)"}},
+		{"site.og_image": {"//evil.example/x.png"}},
+		{"site.og_image": {"ftp://example.com/x.png"}},
+		{"site.og_image": {`/\evil.example/x.png`}},
+	} {
+		if rec := post(d.SettingsSave, "/admin/settings", bad); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%v = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	for _, ok := range []url.Values{
+		{"site.name": {strings.Repeat("가", 100)}},
+		{"site.meta_description": {strings.Repeat("가", 300)}},
+		{"site.og_image": {"https://cdn.example.com/og.png"}},
+		{"site.og_image": {"/media/0e7f0c3a-0000-4000-8000-000000000000"}},
+		{"site.og_image": {""}},
+	} {
+		if rec := post(d.SettingsSave, "/admin/settings", ok); rec.Code != http.StatusSeeOther {
+			t.Errorf("%v = HTTP %d, want 303 (%s)", ok, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // **지도 키는 A-201 에서 넣는다** (FR-716). 네이버 ncpKeyId·카카오 JavaScript 키·구글 API
 // 키·Map ID 는 페이지에 실려 나가는 공개값이라 봉인하지 않지만, `<script>` 의 속성이 되므로
 // 영문·숫자·`-`·`_` 만 받는다. 붙여넣은 앞뒤 공백은 떼고, 빈 값은 그 지도를 끈다.
@@ -871,11 +947,19 @@ func TestLastSuperuserCannotBeDeleted(t *testing.T) {
 
 // D19: 타인의 비밀번호를 설정하지 않는다 — 재설정 강제만 있다. The administrator
 // never learns a credential they could then use as that user.
+//
+// **옛 비밀번호는 비운다** (D15 5.4). 탈취를 되돌리는 동작인데 해시를 그대로 두면,
+// 비밀번호를 아는 탈취자가 세션이 끊긴 그 자리에서 다시 로그인하고 소셜 계정까지 다시
+// 붙인다 (2026-10-21 재점검). 비우는 것은 설정하는 것이 아니다 — 관리자는 아무것도 모른다.
 func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	d, pool := fixture(t, nil)
 	ctx := context.Background()
 	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
-	target, err := d.Auth.CreateUser(ctx, "t@example.com", "원래해시", "대상")
+	oldHash, err := auth.HashPassword("taker-knows-this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := d.Auth.CreateUser(ctx, "t@example.com", oldHash, "대상")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -889,17 +973,21 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mailReady(t, d)
 	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
 
-	// The hash is untouched: forcing a reset is not setting a password.
+	// The hash is cleared, not replaced: nothing the administrator could know.
 	var hash string
 	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, target).Scan(&hash); err != nil {
 		t.Fatal(err)
 	}
-	if hash != "원래해시" {
-		t.Errorf("관리자가 타인의 비밀번호를 바꿨다: %q", hash)
+	if hash != "" {
+		t.Errorf("재설정 강제 뒤 해시 %q — 비우지 않았거나 관리자가 새 값을 넣었다", hash)
+	}
+	if _, err := d.Auth.Authenticate(ctx, "t@example.com", "taker-knows-this"); err == nil {
+		t.Error("재설정 강제 뒤에도 옛 비밀번호로 로그인된다 — 탈취자가 그대로 돌아온다")
 	}
 	// ...and every existing session is over (D15 5.4).
 	after, err := d.Auth.FindUserByID(ctx, target)
@@ -926,6 +1014,75 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	}
 }
 
+// mailReady 는 A-205 에 SMTP 호스트를 넣는다 — 재설정 강제는 메일이 나갈 때만 한다.
+func mailReady(t *testing.T, d *Deps) {
+	t.Helper()
+	if err := d.Content.PutSettings(context.Background(), map[string]string{"mail.smtp_host": "smtp.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// **메일을 보낼 수 없는 사이트에서는 재설정 강제를 하지 않는다.** 강제는 비밀번호를 비우고
+// 소셜 연결을 끊은 뒤 재설정 메일로 주인을 돌려보내는데, 메일이 안 나가면 그 계정은 들어갈
+// 길이 하나도 없다 (2026-10-21 3차 점검).
+func TestForcedResetNeedsMail(t *testing.T) {
+	d, pool := fixture(t, nil)
+	ctx := context.Background()
+	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	target, err := d.Auth.CreateUser(ctx, "t@example.com", "원래해시", "대상")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
+	}
+	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("메일 없는 재설정 강제 = HTTP %d, want 409", rec.Code)
+	}
+	var hash string
+	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, target).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	if hash != "원래해시" {
+		t.Errorf("거부했는데 해시가 %q 가 됐다 — 계정이 잠겼다", hash)
+	}
+}
+
+// **재설정 강제는 소셜 연결도 끊는다** (D15 5.4). 탈취를 되돌리는 동작인데, 연결이
+// 남으면 탈취한 사람이 붙여 둔 소셜 계정으로 다시 들어온다 — 세션만 끊고 「되돌렸다」고
+// 말하던 것이 2026-10-21 점검에서 확인됐다. 주인은 재설정 뒤 P-111 에서 다시 잇는다.
+func TestForcedResetAlsoCutsSocialLinks(t *testing.T) {
+	d, pool := fixture(t, nil)
+	ctx := context.Background()
+	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	target, err := d.Auth.CreateUser(ctx, "t@example.com", "h", "대상")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"google", "kakao"} {
+		if err := d.Auth.LinkSocial(ctx, target, p, p+"-attacker"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
+	}
+	mailReady(t, d)
+	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
+		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
+	}
+	if links, err := d.Auth.SocialAccounts(ctx, target); err != nil || len(links) != 0 {
+		t.Errorf("재설정 강제 뒤 소셜 연결 %+v (%v) — 그 연결로 다시 들어온다", links, err)
+	}
+	var summary string
+	if err := pool.QueryRow(ctx, `SELECT summary FROM operation_logs WHERE action = 'user.reset_password'`).Scan(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "소셜 연결 2") {
+		t.Errorf("작업 로그가 끊은 연결을 말하지 않는다: %q", summary)
+	}
+}
+
 // 비활성 계정에 대한 재설정 강제는 거부하지 않는다 — 복귀 절차의 일부다 (D19).
 func TestForcedResetWorksOnAnInactiveAccount(t *testing.T) {
 	d, _ := fixture(t, nil)
@@ -940,6 +1097,7 @@ func TestForcedResetWorksOnAnInactiveAccount(t *testing.T) {
 	}
 	d.SendReset = func(string, string) {}
 
+	mailReady(t, d)
 	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
 		t.Errorf("비활성 계정 재설정이 HTTP %d 로 거부됐다", rec.Code)
 	}
@@ -2029,6 +2187,7 @@ func TestAccountOperationsAreLogged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mailReady(t, d)
 	for _, h := range []http.HandlerFunc{d.UserDeactivate, d.UserActivate, d.UserResetPassword, d.UserDelete} {
 		if rec := postID(h, u.ID, url.Values{"password": {"pw"}}); rec.Code != http.StatusSeeOther {
 			t.Fatalf("계정 조작 = HTTP %d (%s)", rec.Code, rec.Body.String())
@@ -2047,7 +2206,7 @@ func TestAccountOperationsAreLogged(t *testing.T) {
 		}
 		got = append(got, s)
 	}
-	want := []string{"사용자 생성: new@example.com", "사용자 비활성화", "사용자 활성화", "재설정 강제 (세션 종료·재설정 메일 발송)", "사용자 삭제"}
+	want := []string{"사용자 생성: new@example.com", "사용자 비활성화", "사용자 활성화", "재설정 강제 (세션 종료·로그인 수단 회수·소셜 연결 0개 해제·재설정 메일 발송)", "사용자 삭제"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("작업 로그 = %v, want %v", got, want)
 	}

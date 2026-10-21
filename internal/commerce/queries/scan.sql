@@ -47,6 +47,8 @@ UPDATE product_variants SET stock = stock + sqlc.arg('delta'), updated_at = now(
 WHERE id = sqlc.arg('id') AND stock = sqlc.arg('ledger');
 
 -- name: PickList :many
-SELECT oi.variant_id, oi.product_name, oi.option_label, oi.quantity
+-- 보낼 것은 남은 수량이다 — 배송 전 부분 환불(FR-625)이 소진한 것은 상자에 넣지 않는다.
+SELECT oi.variant_id, oi.product_name, oi.option_label,
+       (oi.quantity - oi.settled_quantity)::int AS quantity
 FROM order_items oi JOIN orders o ON o.id = oi.order_id
-WHERE o.order_no = $1 ORDER BY oi.product_name;
+WHERE o.order_no = $1 AND oi.quantity > oi.settled_quantity ORDER BY oi.product_name;

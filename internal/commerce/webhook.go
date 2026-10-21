@@ -159,6 +159,10 @@ func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent
 	if got == nil || got.Status != PaymentApproved {
 		return nil // 아직 입금 전이다. 다음 알림이 다시 묻는다.
 	}
+	// 조회한 결제가 이 주문의 것인지도 본다 — 승인·결과 불명 분기와 같은 대조다.
+	if got.OrderNo != ev.OrderNo {
+		return fmt.Errorf("commerce: 조회한 결제의 주문 %q 가 알림의 주문 %q 와 다릅니다", got.OrderNo, ev.OrderNo)
+	}
 	if err := VerifyAmount(total, got.Amount); err != nil {
 		return err
 	}
@@ -407,6 +411,17 @@ func (s *Store) ResolvePendingPayment(ctx context.Context, gw Gateway, paymentID
 		if err := q.DeclinePayment(ctx, commerceq.DeclinePaymentParams{
 			ID: paymentID, RawResponse: MaskCardFields(got.Raw)}); err != nil {
 			return "", err
+		}
+		// 입금대기 주문은 여기서 놓는다. 결제대기는 10분 만료가 집지만, 입금대기는 어느
+		// 만료도 '실패' 결제를 집지 않아 재고를 잡은 채 남는다 (ExpireDepositOrders).
+		st, err := q.LockOrderStatus(ctx, p.OrderID)
+		if err != nil {
+			return "", err
+		}
+		if Status(st) == StatusDepositPending {
+			if err := s.releaseUnpaid(ctx, tx, p.OrderID, StatusDepositPending); err != nil {
+				return "", err
+			}
 		}
 		return "", tx.Commit(ctx)
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // richPolicy is the allow-list every rich-text body passes through (FR-513, D60).
@@ -19,8 +20,9 @@ import (
 //     `url(`·`expression(` 이 들어갈 자리가 없다
 //   - `class` 는 없다(UGC 기본). 사이트의 클래스(`adm-alert` 등)를 빌려 화면을
 //     흉내 내는 길이다
-//   - iframe 은 **유튜브 embed 주소일 때만** 남는다. src 가 허용 밖이면 남는 속성이
-//     없어 요소째 빠진다
+//   - iframe 은 **유튜브 embed 주소일 때만** 남는다. src 가 허용 밖이면 요소째 빠진다 —
+//     다른 허용 속성(id·title)이 있으면 정책만으로는 빈 iframe 이 남아서 dropSrclessIframes
+//     가 마저 뺀다
 //   - 지도는 **지도 블록**이다(FR-716): `<img data-map=… data-lat=… data-lng=…>` 자리표시를
 //     테마의 maps.js 가 관리자가 넣은 키로 그 지도사 SDK 를 불러 바꾼다. 본문에 스크립트가
 //     들어갈 자리는 없고, 지도사·좌표·확대·이름은 값 모양까지 본다
@@ -67,7 +69,47 @@ func SanitizeRichText(raw string) string {
 	// bluemonday 의 RequireSandboxOnIFrame 은 **있는** sandbox 의 값을 거를 뿐, 없으면 전부 금지인
 	// `sandbox=""` 를 붙인다(v1.0.27 sanitize.go). 그대로 두면 모든 유튜브가 「자바스크립트를 실행할
 	// 수 없습니다」다. 정화 뒤의 `sandbox=""` 는 iframe 에만 있다 — 글자·다른 속성 값의 따옴표는 &#34; 로 나간다.
-	return strings.TrimSpace(strings.ReplaceAll(richPolicy.Sanitize(raw), `sandbox=""`, iframeSandbox))
+	//
+	// 정화한 뒤 짝을 맞추고(balance) 한 번 더 정화한다 — 짝을 맞춘 모양도 정책 안에 있어야 하고,
+	// 마지막 출력은 늘 정화기를 지난 값이다.
+	clean := richPolicy.Sanitize(balance(richPolicy.Sanitize(raw)))
+	return strings.TrimSpace(dropSrclessIframes(strings.ReplaceAll(clean, `sandbox=""`, iframeSandbox)))
+}
+
+// balance closes what the HTML opened and drops closing tags with no opener, by
+// parsing it as a browser parses the inside of a <div> and rendering it back.
+//
+// bluemonday 는 짝을 맞추지 않는다(README: mismatched elements "will remain"). 닫지 않은
+// `<b style="font-size:0px">` 는 브라우저가 본문 뒤의 댓글·바닥글 글자마다 다시 만들어 남의
+// 화면에서 지웠고, 닫지 않은 iframe 은 그 뒤 화면 전체를 삼켰다 (2026-10-21 3차 점검).
+func balance(s string) string {
+	nodes, err := html.ParseFragment(strings.NewReader(s),
+		&html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div})
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, n := range nodes {
+		if err := html.Render(&b, n); err != nil {
+			return ""
+		}
+	}
+	return b.String()
+}
+
+// iframeElem matches one iframe in SANITISED html — 닫는 태그가 없으면 여는 태그만. 정화
+// 뒤의 값이라 속성 값의 `>`·`"` 는 엔티티로 나가므로 태그 경계를 정규식으로 읽어도 된다.
+// 정화되지 않은 입력에는 쓰지 않는다.
+var iframeElem = regexp.MustCompile(`(?s)<iframe\b([^>]*)>(?:.*?</iframe>)?`)
+
+// dropSrclessIframes removes the iframes whose src the allow-list took away.
+func dropSrclessIframes(s string) string {
+	return iframeElem.ReplaceAllStringFunc(s, func(m string) string {
+		if strings.Contains(iframeElem.FindStringSubmatch(m)[1], ` src="`) {
+			return m
+		}
+		return ""
+	})
 }
 
 // blockTags end a line in the plain-text form.

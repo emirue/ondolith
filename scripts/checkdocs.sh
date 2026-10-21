@@ -1413,6 +1413,7 @@ route_unlinked_reason() {
 	"POST /board/{slug}/media" | "POST /admin/pages/media") echo "에디터가 사진을 XHR 로 올린다 (data-upload)" ;;
 	"GET /shop/p/{slug}/variant") echo "htmx 가 부른다" ;;
 	"GET /verify/{token}" | "GET /password/reset/{token}") echo "메일의 링크로 들어온다" ;;
+	"GET /password/new") echo "메일의 재설정 링크가 토큰을 쿠키로 옮기고 보낸다 (D60 「비밀이 든 주소」)" ;;
 	"POST /board/{slug}/{id}/comments") echo "폼 action 을 핸들러가 넘긴다 (CommentForm.Action)" ;;
 	*) echo "" ;;
 	esac

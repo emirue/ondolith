@@ -2,6 +2,7 @@ package commerce
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 )
@@ -124,5 +125,13 @@ func TestVariantMatchesOnePicksOnlyASingleExactMatch(t *testing.T) {
 	}
 	if _, err := (&VariantMatches{}).One(); !errors.Is(err, ErrPickNotInOrder) {
 		t.Errorf("일치 없음 = %v, want ErrPickNotInOrder", err)
+	}
+}
+
+// 누적 + 이번 개수가 넘쳐 음수가 되면 상한을 통과했다 (2026-10-21 점검).
+func TestCheckPickRefusesAnOverflowingCount(t *testing.T) {
+	lines := []PickLine{{VariantID: "v1", ProductName: "티셔츠", Ordered: 3}}
+	if err := CheckPick(lines, map[string]int{"v1": 2}, "v1", math.MaxInt); !errors.Is(err, ErrPickOverCount) {
+		t.Errorf("넘치는 개수 = %v, want ErrPickOverCount", err)
 	}
 }

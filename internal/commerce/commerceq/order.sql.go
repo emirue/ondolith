@@ -85,6 +85,61 @@ func (q *Queries) ClearCart(ctx context.Context, arg ClearCartParams) error {
 	return err
 }
 
+const dueDepositOrders = `-- name: DueDepositOrders :many
+SELECT o.id AS order_id, o.order_no, p.id AS payment_id, p.payment_key
+FROM orders o
+JOIN payments p ON p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기'
+CROSS JOIN LATERAL (SELECT p.raw_response #>> '{virtualAccount,dueDate}' AS d) v
+WHERE o.status = $1
+  AND CASE
+        WHEN v.d ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$' THEN v.d::timestamptz
+        WHEN v.d ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$' THEN v.d::timestamp AT TIME ZONE 'Asia/Seoul'
+      END < $2::timestamptz
+ORDER BY p.updated_at LIMIT $3::int
+`
+
+type DueDepositOrdersParams struct {
+	Status string
+	Before time.Time
+	Limit  int32
+}
+
+type DueDepositOrdersRow struct {
+	OrderID    string
+	OrderNo    string
+	PaymentID  string
+	PaymentKey string
+}
+
+// 입금 기한(발급 응답 원문의 virtualAccount.dueDate)이 before 보다 앞인 입금대기 주문과 그 살아
+// 있는 결제. 기한은 오프셋이 있으면 그대로, 없으면 한국 시각으로 읽고, 모양이 아니면 고르지
+// 않는다(잴 수 없는 것은 닫지 않는다). **확인 시각(updated_at) 순이다** — 확인하고 닫지 못한
+// 것은 TouchPayment 가 뒤로 보내, 앞줄 몇 건이 나머지를 영영 막지 않는다.
+func (q *Queries) DueDepositOrders(ctx context.Context, arg DueDepositOrdersParams) ([]DueDepositOrdersRow, error) {
+	rows, err := q.db.Query(ctx, dueDepositOrders, arg.Status, arg.Before, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DueDepositOrdersRow{}
+	for rows.Next() {
+		var i DueDepositOrdersRow
+		if err := rows.Scan(
+			&i.OrderID,
+			&i.OrderNo,
+			&i.PaymentID,
+			&i.PaymentKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const expirablePendingOrders = `-- name: ExpirablePendingOrders :many
 SELECT o.id FROM orders o
 WHERE o.status = $1 AND o.created_at < $2
@@ -173,6 +228,18 @@ func (q *Queries) GuestOrder(ctx context.Context, arg GuestOrderParams) (GuestOr
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const hasLiveOrderPayment = `-- name: HasLiveOrderPayment :one
+SELECT EXISTS (SELECT 1 FROM payments
+               WHERE order_id = $1 AND kind = '주문결제' AND status IN ('대기', '승인'))
+`
+
+func (q *Queries) HasLiveOrderPayment(ctx context.Context, orderID string) (bool, error) {
+	row := q.db.QueryRow(ctx, hasLiveOrderPayment, orderID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const hasPendingOrderPayment = `-- name: HasPendingOrderPayment :one
@@ -395,18 +462,19 @@ func (q *Queries) LockCartForOrder(ctx context.Context, arg LockCartForOrderPara
 }
 
 const lockOrderByNo = `-- name: LockOrderByNo :one
-SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE
+SELECT id, status, delivered_at FROM orders WHERE order_no = $1 FOR UPDATE
 `
 
 type LockOrderByNoRow struct {
-	ID     string
-	Status string
+	ID          string
+	Status      string
+	DeliveredAt *time.Time
 }
 
 func (q *Queries) LockOrderByNo(ctx context.Context, orderNo string) (LockOrderByNoRow, error) {
 	row := q.db.QueryRow(ctx, lockOrderByNo, orderNo)
 	var i LockOrderByNoRow
-	err := row.Scan(&i.ID, &i.Status)
+	err := row.Scan(&i.ID, &i.Status, &i.DeliveredAt)
 	return i, err
 }
 
@@ -754,6 +822,41 @@ func (q *Queries) Shipments(ctx context.Context, orderID string) ([]ShipmentsRow
 	return items, nil
 }
 
+const strandedDepositOrders = `-- name: StrandedDepositOrders :many
+SELECT o.id FROM orders o
+WHERE o.status = $1
+  AND NOT EXISTS (SELECT 1 FROM payments p
+                  WHERE p.order_id = o.id AND p.kind = '주문결제' AND p.status IN ('대기', '승인'))
+ORDER BY o.created_at LIMIT $2::int
+`
+
+type StrandedDepositOrdersParams struct {
+	Status string
+	Limit  int32
+}
+
+// 입금대기인데 살아 있는 결제(대기·승인)가 없는 주문 — 이 개정 전의 A-508 이 결제만 '실패' 로
+// 내린 것. 어느 만료도 집지 않아 재고를 잡고 있다.
+func (q *Queries) StrandedDepositOrders(ctx context.Context, arg StrandedDepositOrdersParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, strandedDepositOrders, arg.Status, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const termsInForce = `-- name: TermsInForce :many
 SELECT DISTINCT ON (kind) id, kind, version, body, is_required
 FROM terms WHERE effective_at <= $1
@@ -792,4 +895,13 @@ func (q *Queries) TermsInForce(ctx context.Context, now time.Time) ([]TermsInFor
 		return nil, err
 	}
 	return items, nil
+}
+
+const touchPayment = `-- name: TouchPayment :exec
+UPDATE payments SET updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) TouchPayment(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, touchPayment, id)
+	return err
 }

@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
@@ -244,9 +246,25 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 	d.renderSettings(w, r, "admin/settings.html", siteSettingKeys, http.StatusOK, "")
 }
 
-// assemblyKeys are read when the operating tree is built, not per request.
-// Changing one is what makes A-201 call Rebuild.
-var assemblyKeys = []string{"site.type", "admin.theme"}
+// ogImageURL is D19 A-201's 「스킴 허용목록 http/https 또는 내부 상대경로」. 빈 값은
+// 「없음」이다. `//호스트`·`/\호스트` 는 브라우저가 다른 호스트로 읽는 경로라 내부가 아니다.
+func ogImageURL(v string) bool {
+	if v == "" {
+		return true
+	}
+	if strings.HasPrefix(v, "/") {
+		return !strings.HasPrefix(v, "//") && !strings.Contains(v, `\`)
+	}
+	u, err := url.Parse(v)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+func orNone(v string) string {
+	if v == "" {
+		return "(없음)"
+	}
+	return v
+}
 
 func changed(kv, prev map[string]string, key string) bool {
 	v, ok := kv[key]
@@ -271,6 +289,22 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 비밀키 빈 칸은 「그대로 두라」다 (MailSettingsSave 와 같은 이유). 끄려면 사이트 키를 비운다.
 	if kv["turnstile.secret_key"] == "" {
 		delete(kv, "turnstile.secret_key")
+	}
+	// D19 A-201 의 길이·형식. 사이트 이름은 P-001 의 site_name 과 같은 상한이다.
+	if v, ok := kv["site.name"]; ok && (strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > 100) {
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "사이트 이름은 1~100자입니다.")
+		return
+	}
+	if utf8.RuneCountInString(kv["site.meta_description"]) > 300 {
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "기본 메타 설명은 300자 이내입니다.")
+		return
+	}
+	if !ogImageURL(kv["site.og_image"]) {
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "OG 이미지는 http·https 주소이거나 /로 시작하는 이 사이트의 경로여야 합니다.")
+		return
 	}
 	// 붙여넣은 공백·소문자는 고쳐 받는다. 빈 값은 끄기다.
 	if v, ok := kv["analytics.ga4_id"]; ok {
@@ -313,7 +347,14 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "관리자 배색은 1a~1e 중 하나여야 합니다.")
 		return
 	}
-	prev, err := d.Content.Settings(r.Context(), append([]string{"turnstile.site_key"}, assemblyKeys...)...)
+	// 비밀이 아닌 키 전부의 이전 값 — 무엇이 바뀌었는지 작업 로그가 적는다.
+	var plain []string
+	for _, k := range siteSettingKeys {
+		if !content.IsSecretSetting(k) {
+			plain = append(plain, k)
+		}
+	}
+	prev, err := d.Content.Settings(r.Context(), plain...)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
@@ -356,6 +397,21 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 자격증명 변경은 작업 로그 대상이다 (D15 7절). 값은 남기지 않는다.
 	if changed(kv, prev, "turnstile.site_key") || kv["turnstile.secret_key"] != "" {
 		d.log(r, c, "settings.update", "settings", "turnstile", "스팸 방지(Turnstile) 키 변경")
+	}
+	// 나머지 저장도 남긴다 (D19 A-201). 바뀐 키 이름만 적되 GA4 ID 는 값까지 적는다 — 방문
+	// 기록이 어느 GA 속성으로 가는지를 정하는 공개값이다 (D60 「설정값을 어디에 두는가」 ①).
+	var names []string
+	for _, k := range plain {
+		if k == "site.type" || k == "turnstile.site_key" || !changed(kv, prev, k) {
+			continue
+		}
+		if k == "analytics.ga4_id" {
+			k += " " + orNone(prev[k]) + " → " + orNone(kv[k])
+		}
+		names = append(names, k)
+	}
+	if len(names) > 0 {
+		d.log(r, c, "settings.update", "settings", "site", "사이트 설정 변경: "+strings.Join(names, ", "))
 	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
 	if !typeChanged && !changed(kv, prev, "admin.theme") {
@@ -915,7 +971,7 @@ func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, 
 		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return false
 	}
-	if target == c.UserID() {
+	if auth.SameID(target, c.UserID()) {
 		// Locking yourself out, or deleting the actor the log points at.
 		d.refuse(w, r, http.StatusForbidden, "자기 계정에는 이 작업을 할 수 없습니다.")
 		return false
@@ -1033,9 +1089,25 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
-	// Sessions end first. Issuing the token first would leave a window where
-	// the takeover being undone is still logged in (D15 5.4).
-	if err := d.Auth.InvalidateSessions(ctx, target); err != nil {
+	// 메일이 나가지 않으면 하지 않는다. 비밀번호를 비우고 연결을 끊은 뒤 주인이 돌아올
+	// 길은 재설정 메일 하나뿐이다 — 그것이 없으면 계정이 잠긴다.
+	kv, err := d.Content.Settings(ctx, "mail.smtp_host")
+	if err != nil {
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		return
+	}
+	if kv["mail.smtp_host"] == "" {
+		d.refuse(w, r, http.StatusConflict,
+			"메일을 보낼 수 없어 재설정을 강제하면 이 계정에 들어갈 방법이 없어집니다. 메일 설정(A-205)을 먼저 하세요.")
+		return
+	}
+	// Sessions and the password end first, together. Issuing the token first
+	// would leave a window where the takeover being undone is still logged in,
+	// and a password left valid lets the taker log straight back in (D15 5.4).
+	// So do the social links — one the taker attached is a way back in that no
+	// session cutoff closes — in the same transaction. The owner re-links at P-111.
+	unlinked, err := d.Auth.RevokeCredentials(ctx, target)
+	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
@@ -1049,7 +1121,8 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// 토큰·링크는 넣지 않는다 (D15 7절 「절대 기록하지 않음」). 「비밀번호」가 든 요약은
 	// 작업 로그가 자격증명으로 보고 가리므로(content.Redacted) 낱말을 피한다.
-	d.log(r, c, "user.reset_password", "user", target, "재설정 강제 (세션 종료·재설정 메일 발송)")
+	d.log(r, c, "user.reset_password", "user", target,
+		"재설정 강제 (세션 종료·로그인 수단 회수·소셜 연결 "+strconv.FormatInt(unlinked, 10)+"개 해제·재설정 메일 발송)")
 	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 

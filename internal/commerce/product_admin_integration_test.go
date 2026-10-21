@@ -312,6 +312,37 @@ func TestStocktakeWithNoDifferenceStillChecksTheLedger(t *testing.T) {
 //
 // 건드리면 재고는 P-406 에서 이미 차감됐으므로 이중 차감이 되고, 상태는
 // A-506 이 옮기는 것이라 유령 전이가 생긴다.
+// **피킹 목록은 환불·반품으로 소진된 수량을 빼고 보낸다.** 배송 전에 2개 중 1개를
+// 부분 환불하면(FR-625) 주문은 결제완료로 남는데, 목록이 원래 수량 2개를 요구해 환불한
+// 물건까지 상자에 들어갔다 (2026-10-21 재점검).
+func TestPickListLeavesOutWhatWasRefunded(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _, _ := paidOrder(t, s, pool, "tee-refunded", 2)
+	if _, err := pool.Exec(ctx, `UPDATE order_items SET settled_quantity = 1
+		WHERE order_id = (SELECT id FROM orders WHERE order_no = $1)`, orderNo); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := s.PickList(ctx, orderNo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 || lines[0].Ordered != 1 {
+		t.Fatalf("부분 환불 뒤 피킹 목록 %+v, want 남은 1개", lines)
+	}
+	// 다 소진되면 보낼 것이 없다 — 「주문이 없다」(404)가 아니다. 없는 주문만 ErrNotFound 다.
+	if _, err := pool.Exec(ctx, `UPDATE order_items SET settled_quantity = quantity
+		WHERE order_id = (SELECT id FROM orders WHERE order_no = $1)`, orderNo); err != nil {
+		t.Fatal(err)
+	}
+	if lines, err := s.PickList(ctx, orderNo); err != nil || len(lines) != 0 {
+		t.Errorf("다 소진된 주문의 피킹 목록 = %+v, %v — 빈 목록이어야 한다", lines, err)
+	}
+	if _, err := s.PickList(ctx, "NO-SUCH-ORDER"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("없는 주문 = %v, want ErrNotFound", err)
+	}
+}
+
 func TestPickListTouchesNothing(t *testing.T) {
 	s, pool := testStore(t)
 	ctx := context.Background()

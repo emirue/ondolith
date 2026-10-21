@@ -3,7 +3,7 @@ UPDATE password_reset_tokens SET used_at = now(), updated_at = now()
 WHERE user_id = $1 AND used_at IS NULL;
 
 -- name: ResetActiveUserPassword :one
-UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
+UPDATE users SET password_hash = $2, sessions_valid_from = GREATEST(now(), sessions_valid_from + interval '1 microsecond'), updated_at = now()
 WHERE id = $1 AND is_active RETURNING sessions_valid_from;
 
 -- name: VerifyTokenSpent :one

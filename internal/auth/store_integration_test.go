@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -247,6 +248,10 @@ func TestLastSuperuserCannotBeDeactivated(t *testing.T) {
 
 	if err := s.SetActive(ctx, a, false); !errors.Is(err, ErrLastSuperuser) {
 		t.Fatalf("마지막 관리자가 비활성화됐다: %v", err)
+	}
+	// 같은 uuid 의 대문자 표기도 같은 사람이다 — 문자열로 비교하면 「보유자가 아니다」가 된다.
+	if err := s.SetActive(ctx, strings.ToUpper(a), false); !errors.Is(err, ErrLastSuperuser) {
+		t.Fatalf("대문자 표기로 마지막 관리자가 비활성화됐다: %v", err)
 	}
 	// A second holder makes it allowed again.
 	b := mkUser(t, s, "admin2@example.com")

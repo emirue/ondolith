@@ -20,7 +20,7 @@ import (
 //	1. extension allow-list  — a deny-list cannot enumerate .php5, .phtml, .svg…
 //	2. magic bytes           — the client's Content-Type is a claim, not a fact
 //	3. regenerated filename  — kills path traversal and executable placement
-//	4. no execute bit (0644) — belt to the braces of storing outside the web root
+//	4. no execute bit (0600) — belt to the braces of storing outside the web root
 //
 // Dropping any one of them re-opens the hole the other three were closing from
 // a different side: an allow-list without magic bytes accepts a .php renamed to
@@ -57,14 +57,14 @@ func (e LimitError) Unwrap() error { return e.Err }
 // 1 vCPU and 512MB–1GB; a request that buffers more than this is a denial of
 // service on its own, whatever the file turns out to be.
 //
-// 운영자가 A-309 에서 낮추거나 올릴 수 있다 (`upload.max_bytes`, OPEN-41 결정).
+// `upload.max_bytes` 가 있으면 그것을 쓴다(OPEN-41 결정). 그 키를 쓰는 화면은 아직 없다 (D85 GAP-31).
 const MaxAttachmentBytes = 20 << 20 // 20 MiB
 
 // MaxAttachmentsPerPost bounds how many files one post carries by default
 // (`upload.max_per_post`). 상한이 없으면 글 하나가 디스크를 다 쓴다.
 const MaxAttachmentsPerPost = 10
 
-// 설정 키 (A-309). 값은 UploadLimits 가 읽고 검증한다.
+// 설정 키. 값은 UploadLimits 가 읽고 검증한다 — 쓰는 화면은 아직 없다 (D85 GAP-31).
 const (
 	SettingUploadMaxBytes   = "upload.max_bytes"
 	SettingUploadMaxPerPost = "upload.max_per_post"
@@ -213,14 +213,14 @@ func StoreUpload(root, name string, r io.Reader, now time.Time, limits UploadLim
 	}
 	defer rt.Close()
 
-	// 0755 on the directory: readable and traversable, and the execute bit on a
-	// directory is what "traversable" means — it is not the executable bit D60
-	// §4 is about, which is the file's.
-	if err := rt.MkdirAll(dir, 0o755); err != nil {
+	// **앱 계정만** — 폴더 0700·파일 0600, 자동 백업과 같은 기준이다 (D60 3절).
+	// 비공개 게시판의 첨부도 여기 있고, 읽는 길은 권한을 확인하는 핸들러 하나뿐이다.
+	// 폴더의 x 비트는 「들어갈 수 있다」는 뜻이지 D60 4절이 말하는 실행 비트가 아니다.
+	if err := rt.MkdirAll(dir, 0o700); err != nil {
 		return StoredUpload{}, err
 	}
 
-	f, err := rt.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := rt.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return StoredUpload{}, err
 	}

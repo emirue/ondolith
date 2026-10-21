@@ -12,7 +12,14 @@
 **상태 기호** — ✓ 확인됨 (무엇으로 확인했는지 함께) · △ 열림 (아직 안 했거나 못 잰 것) ·
 — 하지 않기로 함 (이유 함께)
 
-**마지막 전수 점검: 2026-09-14** (`370e9d9` 이후 이 문서의 △ 를 닫는 작업까지). 방법: 다섯 갈래(인증·세션·RBAC / 파일·
+**마지막 보안 전수 점검: 2026-10-21** (`370e9d9` 이후 216커밋, v0.3.1 기준). 방법: 네 갈래(인증·세션·RBAC /
+파일·템플릿·XSS / SQL·결제·웹훅 / 자격증명·설정·외부 요청)로 바뀐 코드를 읽고 `govulncheck`·`staticcheck`·`gosec` 을
+돌렸다. 고친 뒤 같은 방법으로 재점검을 일곱 번 돌렸다 — 회차마다 고친 곳과 그 형제 경로를 다시 읽었고, 마지막 회차에
+남은 문제가 없었다. 고친 것은 [CHANGELOG](../CHANGELOG.md) Unreleased 「Security」「Fixed」와 이 표의 2026-10-21 행에
+있다. `make check`·`make test-integration`(1508건, SKIP 없음)·`govulncheck`(0건) 통과. 성능 갈래(DB·HTTP)는 아래
+2026-09-14 그대로다.
+
+**마지막 전수 점검(보안·성능): 2026-09-14** (`370e9d9` 이후 이 문서의 △ 를 닫는 작업까지). 방법: 다섯 갈래(인증·세션·RBAC / 파일·
 템플릿·XSS / SQL·결제·웹훅 / DB 성능 / HTTP·런타임)로 코드 전체를 읽고, `govulncheck`·
 `staticcheck`·`gosec` 을 돌리고, 결함으로 확인된 것은 고친 뒤 실제 PostgreSQL 로 재현·
 검증했다. 결과는 [CHANGELOG](../CHANGELOG.md) v0.2.0 「Security」「Performance」에 있다.
@@ -43,6 +50,10 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 1.12 | **프록시 뒤에서 IP 별 제한이 사이트 전체 제한이 된다** | `middleware_gate.go` `withProxyClientIP`·`clientIP`, 설정 `proxy_ip_header` | `TestLoginRateLimitIsPerVisitorBehindTheProxy`·`TestProxyClientIPIsTrustedOnlyFromLoopback` | ✓ 2026-10-07 고침. 앞의 「— 프록시의 limit_req 가 맡는다」는 틀렸다 — 앱 안의 전역 버킷이 남아 익명 한 명이 모든 로그인을 막을 수 있었다. 이제 루프백에서 온 연결에 한해 설정한 헤더(`X-Real-IP`)를 클라이언트로 본다. 로그인 성공이 IP 버킷을 지우던 것도 함께 고침 |
 | 1.13 | 재인증 창 15분, 위험 작업(테마 업로드·환불·계정 조작·결제 설정)에 요구 | `internal/app/reauth.go`·각 핸들러 | 코드 읽기 | ✓ |
 | 1.14 | FR-214: 켜져 있으면 미인증 계정은 글·댓글·주문 불가 | `handler_board.go`·`handler_comment.go`·`handler_checkout.go` | `TestUnverifiedAccountCannotWriteWhenRequired` | ✓ 2026-09-13 에 고침 |
+| 1.16 | **비밀이 든 주소에서 화면을 그리지 않는다** — 재설정 링크는 토큰을 HttpOnly 쿠키로 옮기고 303, 소셜 콜백 실패도 303 ([D60](60-security.md) 「비밀이 든 주소」) | `handler_reset.go`·`handler_social.go` `socialFail` | `TestResetLinkLeavesTheTokenURLBeforeRendering`·`TestSocialCallbackRefusesBadState` | ✓ 2026-10-21 에 고침 — GA4 의 `page_location` 이 재설정 토큰·인가 code 를 밖으로 보냈다 |
+| 1.17 | P-111 연결·해제, P-109·P-110 은 **매번** 비밀번호(비밀번호 없는 계정은 15분 안 로그인), 관리자 재인증과 같은 계정당 5회/분 | `handler_social.go` `ownerConfirmed`·`reauth.go` `confirmPassword` | `TestSocialLinkAsksForThePassword`·`TestSocialUnlinkAsksForThePassword`·`TestOwnPasswordChecksShareTheReauthLimit` | ✓ 2026-10-21 에 고침 — 연결은 재확인이, P-109·P-110 은 제한이 없었다 |
+| 1.18 | A-402 재설정 강제가 옛 비밀번호를 비우고 소셜 연결까지 끊는다 | `admin/handlers.go` `UserResetPassword`·`auth.RevokeCredentials` | `TestForcedResetEndsSessionsAndNeverSetsAPassword`·`TestForcedResetAlsoCutsSocialLinks` | ✓ 2026-10-21 에 고침 |
+| 1.19 | 자격증명 쓰기는 그 세션이 아직 유효할 때만(같은 문장), 로그인(P-101·P-107)은 자격증명과 같은 문장에서 읽은 기준 시각을 `auth_at` 으로 찍고, A-402 회수는 한 트랜잭션, 기준 시각은 뒤로 가지 않는다(`GREATEST`) | `auth.SetPassword`·`auth.LinkSocialInSession`·`auth.User.Cutoff`·`handler_login.go`·`handler_social.go` | `TestSetPasswordRefusesARevokedSession`·`TestLinkSocialInSessionRefusesARevokedSession`·`TestLoginDuringAnUncommittedRevokeDoesNotSurviveIt`·`TestSocialLoginDuringAnUncommittedRevokeDoesNotSurviveIt`·`TestCutoffNeverMovesBackwards` | ✓ 2026-10-21 에 고침(회수와의 경합) |
 | 1.15 | OAuth 외부 요청 시한 | `auth/social_provider.go` | `TestSocialProvidersBoundOutboundRequests` | ✓ 2026-09-30: 세 프로바이더의 코드 교환·프로필 조회에 요청당 15초 |
 
 ## 2. 권한(RBAC)
@@ -58,6 +69,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 2.6 | 소유권은 **SQL 술어**로: 주문·환불·반품·댓글·글·첨부 | `commerce/order.go`·`returns.go`·`handler_board.go`·`handler_comment.go` | 통합 테스트(`TestOrderDetailNeedsAGrantOrOwnership` 등) | ✓ |
 | 2.7 | `{id}` 경로는 uuid 만(`guardID`), 형식 불량은 404 | `internal/app/routes.go` | 통합 테스트 | ✓ |
 | 2.8 | 관리자 트리 IP 제한 60/분 | `middleware_gate.go` | 코드 읽기 | ✓ (1.12 의 한계 동일) |
+| 2.10 | 사용자 id 비교는 uuid 표기를 맞춘 뒤(`auth.SameID`) — R1·마지막 관리자·자기 계정 금지 | `auth/escalation.go`·`auth/store.go`·`admin/handlers.go` `guardAccountOp` | `TestSameIDReadsUUIDSpellingsAlike`·`TestLastSuperuserCannotBeDeactivated` | ✓ 2026-10-21 에 고침 — 대문자 경로로 마지막 관리자를 비활성화할 수 있었다 |
 | 2.9 | 글·댓글 작성에 속도 제한 없음 | [D15](15-access-control.md) 4.3-2 표에 없다 | — | — 표가 정한 것이 아니다. 인증 계정(FR-214)과 게시판 권한이 문이고, 스팸은 중재(A-307)의 몫. 필요해지면 D15 표에 행을 먼저 더한다 |
 
 ## 3. CSRF·출력 인코딩·헤더
@@ -67,9 +79,9 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 3.1 | `net/http.CrossOriginProtection` 이 설치·운영 **두 트리 전체**를 감싼다 | `app.go`·`install.go` | 코드 읽기 | ✓ 우회 등록 없음 |
 | 3.2 | 상태를 바꾸는 GET 은 비밀에 묶인다 | `tree.go` — `/checkout/success`(세션 `pending_order`), `/auth/{provider}/callback`(state), `/verify/{token}`(토큰) | 기동 자체 점검이 SC-5/SC-6 GET 에 사유를 요구 | ✓ 셋뿐 |
 | 3.3 | 테마 렌더링은 `html/template` 만, `text/template` 없음 | 전체 | `grep '"text/template"'` | ✓ 0건 |
-| 3.4 | `template.HTML` 생성 지점이 **셋**이고 각각 출처가 신뢰됨 | `admin_render.go`(내장 로고)·`handlers_scan.go`(정수 좌표만 찍는 QR SVG)·`theme/funcs.go`(`nl2br`, 이스케이프 뒤) | `grep 'template.HTML('` | ✓ |
+| 3.4 | `template.HTML` 생성 지점이 **넷**이고 각각 출처가 신뢰됨 | `admin_render.go`(내장 로고·CSS)·`handlers_scan.go`(정수 좌표만 찍는 QR SVG)·`theme/funcs.go`(`nl2br`, 이스케이프 뒤)·`content/richtext.go` `renderRich`(그릴 때마다 다시 정화) | `grep 'template.HTML('` | ✓ 2026-10-21 (넷째는 FR-513) |
 | 3.5 | FuncMap 에 `raw`·`safeHTML`·`js`·`html` 없음 | `theme/funcs.go` | 테스트 `ForbiddenFuncNames` | ✓ |
-| 3.6 | 본문 렌더링 파이프라인(마크다운·리치텍스트) | 없음 — 글·페이지 본문은 `nl2br` 뿐 | 코드 읽기 | ✓ 살균기가 필요 없다 |
+| 3.6 | 리치텍스트 본문(FR-513): bluemonday UGC + 값까지 검사하는 스타일·유튜브 embed iframe·지도 블록, 저장·렌더 두 번 정화, 허용 밖 iframe 은 요소째 빼고, **열린 태그는 본문 안에서 닫는다**(짝 맞춘 뒤 다시 정화) | `content/richtext.go` | `richtext_test.go`(`TestDisallowedIframeLeavesNothing`·`TestRichTextClosesWhatItOpens` 등) | ✓ 2026-10-21 — 「파이프라인 없음」은 FR-513 이전의 기록이었다 |
 | 3.7 | 보안 헤더: `X-Frame-Options: DENY`·`nosniff`·`Referrer-Policy`·CSP | `internal/httpsec/headers.go` | 단위 테스트 | ✓ 정적 자산·첨부에도 (트리 밖으로 옮기며 유지) |
 | 3.8 | CSP 에 `script-src`/`default-src` 없음 (인라인 스크립트 허용) | `headers.go` | — | — 의도적. XSS 방어는 3.3~3.5 에 있다. 테마가 인라인을 쓴다 |
 | 3.9 | `Host`·`X-Forwarded-Host` 신뢰 | `handler_seo.go`(사이트맵 origin)·`app.go`(OAuth `redirect_uri`) | `grep X-Forwarded-Host` | ✓ `X-Forwarded-Host` 0건. 메일 링크와 사이트맵·robots 는 요청이 아니라 `site_url`(4.6, 사이트맵은 2026-10-07 부터) |
@@ -92,6 +104,9 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 4.10 | SMTP 목적지가 `169.254.0.0/16`(메타데이터)이면 거부 | `internal/app/mail.go` `blockMetadataAddr` | 단위 테스트 | ✓ 해석된 주소로 판정 |
 | 4.12 | 저장된 자격증명(`content.IsSecretSetting` 의 키)이 DB 에 평문으로 없다; 봉인 키는 `ondolith.json` | `internal/secretbox`·`content.IsSecretSetting`·`SealLegacySecrets` | `TestSecretSettingsAreSealedAtRest`·`TestBootSealsLegacyPlaintextSecrets` | ✓ 2026-09-15 (그 전엔 평문이었다) |
 | 4.13 | 운영자가 넣은 PG 키가 맞는지 **관리자 화면에서** 확인된다 (A-209 「연결 확인」) — 값·응답 본문 비노출, 작업 로그에 결과만 | `admin/handlers_terms.go` `verifyPaymentCredentials`·`commerce/toss.go` `VerifyCredentials` | `TestPaymentVerifyReportsWithoutRevealingTheKey`·`TestVerifyCredentialsReadsAuthFromTheErrorCode` | ✓ 2026-10-01 |
+| 4.14 | 첨부·본문 사진·상품 이미지는 앱 계정만 읽는다(파일 0600·폴더 0700) | `content/upload.go`·`content/media.go`·`app.go` | `TestStoredFileHasNoExecuteBit`·`TestMediaSaveStoresDisplayAndThumbnail` | ✓ 2026-10-21 에 고침(0644·0755 였다) |
+| 4.15 | A-201 저장이 작업 로그에 남고(GA4 ID 는 값까지) 이름·설명·OG 이미지를 D19 대로 검사 | `admin/handlers.go` `SettingsSave` | `TestSiteSettingsSaveIsLogged`·`TestSiteSettingsValidateTheD19Fields` | ✓ 2026-10-21 에 고침 |
+| 4.16 | 옛 평문 봉인도 `IsSecretSetting` 한 곳을 본다 | `content/store.go` `SealLegacySecrets` | `TestSealLegacySecretsUsesTheOneList` | ✓ 2026-10-21 (SQL 의 목록이 Turnstile 을 빠뜨렸다) |
 | 4.11 | 글 삭제가 첨부 **파일**까지 지운다(디스크 고아 없음) | `content/attachment.go` `DeletePost` — P-207·A-307 둘 다 이 경로 | 코드 읽기 | ✓ 행은 CASCADE, 파일은 `os.Root.Remove` |
 
 ## 5. 결제·커머스
@@ -112,6 +127,12 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 5.12 | 취소 API 호출: 접수(A-507)·취소(P-506)·반품 정산(A-511)이 `ExecuteRefund` 로 PG 를 부르고 `완료` 로 확정 | `commerce/refund.go` `ExecuteRefund` | `TestExecuteRefundCallsThePGOnceAndCompletes`·`…KeepsUnknownResultsAndRetriesDeclines` | ✓ 2026-09-14 에 넣음(이전엔 호출처 0 — 돈이 나가지 않았다). 실제 토스 왕복은 [GAP-03](85-gaps.md) |
 | 5.13 | `결제대기` 만료: 재고 복원 전 진행 중인 결제를 주문 잠금 안에서 다시 확인. 결제 선점도 같은 주문을 잠그고 상태 검사 | `commerce/order.go`·`payment.go` | 기존 만료 테스트 + `TestConfirmRefusesOrderChangedAfterCheckout`·`TestExpiryRechecksPaymentReservedAfterSelection` | △ 2026-09-30: 경쟁 상황 수정 후 PostgreSQL 실행 검증이 남음 ([GAP-09](85-gaps.md)) |
 | 5.14 | `payments_pg_key_idx` 가 부분 인덱스가 아님 | `00013` | 코드 읽기 | — 그대로 둔다. 토스 `paymentKey` 는 결제 시도마다 새 값이라 실패 행이 키를 점유해도 정상 재결제는 막히지 않고, 다른 주문에서 같은 키가 오는 것(`ErrPaymentKeyReused`)을 잡는 쪽이 더 값지다 |
+| 5.17 | 반품·교환 기간(A-512)을 서버가 배송완료 시각부터 잰다 | `commerce/returns.go` `OpenReturn` | `TestReturnWindowIsEnforced` | ✓ 2026-10-21 에 고침(저장만 되고 읽는 곳이 없었다) |
+| 5.18 | 수량 상한은 `요청 > 주문-소진` — 덧셈이 넘치지 않게 | `discount.go`·`returns.go`·`scan.go` | `TestRefundableAmountRefusesOverRefund`·`TestReturnRefusesAnOverflowingQuantity`·`TestCheckPickRefusesAnOverflowingCount` | ✓ 2026-10-21 에 고침(DB CHECK 가 우연히 막고 있었다) |
+| 5.19 | 웹훅 입금 확인이 조회한 결제의 주문번호를 대조 | `commerce/webhook.go` | `TestDepositWebhookChecksTheLookedUpOrder` | ✓ 2026-10-21 (다층 방어) |
+| 5.20 | 입금 기한이 지난 가상계좌 주문은 결제실패·재고 복원(D14 입금대기 → 결제실패), A-508 실패 반영도 같은 정리 | `commerce/order.go` `ExpireDepositOrders`·`webhook.go` `ResolvePendingPayment` | `TestDepositOrderExpiresAfterItsDueDate`·`TestDepositOrderPaidAtTheGatewayIsNotExpired`·`TestResolvingAFailedDepositReleasesTheOrder` | ✓ 2026-10-21 에 고침(화살표가 표에만 있어 재고를 영원히 잡았다) |
+| 5.22 | 배송 전 부분 환불은 재고를 되돌리지 않는다(정한 동작, D50 「배송 전 부분 환불의 재고」) — A-505 가 소진·남은 수량과 입고 안내를 보인다 | `commerce/refund.go`·`templates/admin/order.html` | 코드 읽기 | — 2026-10-21 에 정함. 거부 시 음수 재고·취소와의 이중 복원을 피한다 |
+| 5.21 | 피킹 목록은 환불·반품으로 소진된 수량을 뺀다 | `commerce/queries/scan.sql` `PickList` | `TestPickListLeavesOutWhatWasRefunded` | ✓ 2026-10-21 에 고침(환불한 물건까지 출고됐다) |
 | 5.15 | 웹훅 서명 실패 응답 400 | `handler_webhook.go`·[D19](19-screen-io.md) P-905 | 토스 웹훅 가이드(200 만 성공, 최대 7회 재전송) | ✓ 2026-09-14 확정 |
 | 5.16 | 접수된 환불 건(P-507 구매자 요청·PG 거절로 돌아온 건·결과 불명 건)의 실행·거부 | A-507 `action=execute\|reject` · `commerce/refund.go` `RetryRefund` | `TestAdminExecutesOrRejectsAPendingRefund`·`TestAdminPendingRefundActionsAreReauthedAndScoped`·`TestAdminResendsAnUnknownRefundOnlyWhileTheKeyLives`·`TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives` | ✓ 2026-10-07. 결과 불명(`승인`)은 같은 멱등키로 접수 14일 안에서만 다시 보낸다(토스 키 15일) |
 
@@ -122,8 +143,8 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 6.1 | systemd: `User=ondolith`·`ProtectSystem=strict`·`ReadWritePaths` | [D72](72-deploy-lightsail.md) 2절 | Lightsail 실기(2026-09-02) | ✓ 재부팅 후 자동 기동까지 |
 | 6.2 | 설치 페이지 노출 창을 **인스턴스 방화벽**으로 막는다(`ufw` 는 inactive) | [D71](71-install-guide.md) 3절 | Lightsail 실기 | ✓ 문서 고침 |
 | 6.3 | 백업 3종(DB·설정·업로드)이 실제로 떠지고 복원된다 | [D72](72-deploy-lightsail.md) 5절·`make verify-upgrade` ⑥ | 실기 | ✓ |
-| 6.4 | 의존성·툴체인 취약점 | `make vuln` (`govulncheck`) | 릴리즈마다, CI `vuln` 잡 | ✓ 2026-09-13: 호출 경로 0건. 모듈에 남은 것은 [GAP-04](85-gaps.md) |
-| 6.5 | 정적 분석 | `staticcheck`·`gosec` | 손으로: `go run honnef.co/go/tools/cmd/staticcheck@latest ./...` · `go run github.com/securego/gosec/v2/cmd/gosec@latest ./...` | ✓ 2026-09-13: staticcheck 는 스타일뿐, gosec HIGH 2건은 오탐(4.4) |
+| 6.4 | 의존성·툴체인 취약점 | `make vuln` (`govulncheck`) | 릴리즈마다, CI `vuln` 잡 | ✓ 2026-10-21: `go1.26.9` 의 `GO-2026-6809`(crypto/x509) 1건 → `go1.26.10` 으로 올려 호출 경로 0건. 모듈에 남은 것은 [GAP-04](85-gaps.md) |
+| 6.5 | 정적 분석 | `staticcheck`·`gosec` | 손으로: `go run honnef.co/go/tools/cmd/staticcheck@latest ./...` · `go run github.com/securego/gosec/v2/cmd/gosec@latest ./...` | ✓ 2026-10-21: staticcheck 는 스타일·테스트 코드뿐. gosec 132건 — G115(정수 변환) 77건은 변환 앞의 상한 검사로 막히고 덧셈이 넘치던 상한 3곳은 고쳤다(5.18), G710(리다이렉트) 16건·G101(자격증명) 15건은 오탐(고정 접두사·sqlc 질의 이름), G203 4건은 출처가 신뢰(3.4), G120(폼 크기) 3건은 DoS 범주 |
 | 6.6 | 로그에 DSN·비밀번호·토큰 없음 | 실기동 로그 | `make verify-upgrade` ⑤ | ✓ |
 | 6.7 | 세션 테이블 정리 | `pgxstore.New`(기본 5분 주기), 종료 시 `StopCleanup` | 코드 읽기 | ✓ |
 

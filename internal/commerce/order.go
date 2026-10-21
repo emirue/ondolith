@@ -644,6 +644,153 @@ func (s *Store) ExpirePendingOrders(ctx context.Context, before time.Time, limit
 	return n, nil
 }
 
+// DepositGrace is how long after a virtual account's due date the expiry waits
+// before asking the gateway — 입금 알림은 늦게 올 수 있다.
+const DepositGrace = 10 * time.Minute
+
+// ExpireDepositOrders moves 입금대기 orders past their deposit deadline to
+// 결제실패 and puts their stock back (D14: 입금대기 → 결제실패, 시스템 「입금 기한 초과」).
+//
+// 그 화살표는 표에만 있었다 — 입금하지 않는 가상계좌 주문이 재고를 영원히 잡았고,
+// 그것은 돈 없이 재고를 잠그는 길이었다 (2026-10-21 재점검).
+//
+// 기한은 발급 응답의 virtualAccount.dueDate 이고 SQL 이 거른다(DueDepositOrders). 기한 +
+// DepositGrace 가 지난 것만 PG 에 묻고, PG 가 입금됐다(DONE)고 하지 않을 때만 놓는다 —
+// 기한이 지난 가상계좌에는 입금할 수 없으므로 그 뒤의 「대기」는 오지 않을 입금이다.
+// 묻고도 닫지 못한 것(조회 실패, DONE 인데 웹훅이 아직)은 뒤로 보내 앞줄이 나머지를 막지
+// 않게 한다. 한 건의 실패가 나머지를 막지 않고, 첫 오류를 돌려준다.
+//
+// 결제가 이미 닫혔는데 입금대기에 남은 주문(이 개정 전의 A-508)도 여기서 놓는다 — 그쪽은
+// PG 에 물을 것이 없어 gw 가 없어도 돈다.
+func (s *Store) ExpireDepositOrders(ctx context.Context, gw Gateway, now time.Time, limit int) (int, error) {
+	n := 0
+	var first error
+	keep := func(err error) {
+		if first == nil {
+			first = err
+		}
+	}
+	if gw != nil {
+		rows, err := s.q.DueDepositOrders(ctx, commerceq.DueDepositOrdersParams{
+			Status: string(StatusDepositPending), Before: now.Add(-DepositGrace), Limit: int32(limit)})
+		if err != nil {
+			return 0, err
+		}
+		for _, r := range rows {
+			callCtx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
+			got, err := gw.Get(callCtx, r.PaymentKey)
+			cancel()
+			// 다른 주문의 답이거나 입금됐으면 놓지 않는다 — 결제완료는 웹훅·A-508 이 옮긴다.
+			if err != nil || got == nil || got.OrderNo != r.OrderNo || got.Status == PaymentApproved {
+				if err != nil {
+					keep(err)
+				}
+				if terr := s.q.TouchPayment(ctx, r.PaymentID); terr != nil {
+					keep(terr)
+				}
+				continue
+			}
+			released, err := s.expireDeposit(ctx, r.OrderID, r.PaymentID, got.Raw)
+			if err != nil {
+				keep(err)
+				continue
+			}
+			if released {
+				n++
+			}
+		}
+	}
+	ids, err := s.q.StrandedDepositOrders(ctx, commerceq.StrandedDepositOrdersParams{
+		Status: string(StatusDepositPending), Limit: int32(limit)})
+	if err != nil {
+		keep(err)
+		return n, first
+	}
+	for _, id := range ids {
+		released, err := s.releaseStranded(ctx, id)
+		if err != nil {
+			keep(err)
+			continue
+		}
+		if released {
+			n++
+		}
+	}
+	return n, first
+}
+
+// releaseStranded lets go of a 입금대기 order that no live payment can close.
+func (s *Store) releaseStranded(ctx context.Context, orderID string) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	status, err := q.LockOrderStatus(ctx, orderID)
+	if err != nil {
+		return false, err
+	}
+	if Status(status) != StatusDepositPending {
+		return false, nil
+	}
+	// 고른 뒤 결제가 다시 살아났을 수 있다(재결제는 없지만 손으로 고친 DB). 잠금 아래에서 다시 본다.
+	live, err := q.HasLiveOrderPayment(ctx, orderID)
+	if err != nil || live {
+		return false, err
+	}
+	if err := s.releaseUnpaid(ctx, tx, orderID, StatusDepositPending); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
+}
+
+// expireDeposit closes one 입금대기 order under its lock. released is false when
+// something else got there first (웹훅이 승인으로 닫았거나 상태가 바뀌었다).
+func (s *Store) expireDeposit(ctx context.Context, orderID, paymentID string, raw []byte) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	status, err := q.LockOrderStatus(ctx, orderID)
+	if err != nil {
+		return false, err
+	}
+	if Status(status) != StatusDepositPending {
+		return false, nil
+	}
+	n, err := q.DeclinePendingPayment(ctx, commerceq.DeclinePendingPaymentParams{
+		ID: paymentID, RawResponse: MaskCardFields(raw)})
+	if err != nil || n == 0 {
+		return false, err
+	}
+	if err := s.releaseUnpaid(ctx, tx, orderID, StatusDepositPending); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
+}
+
+// releaseUnpaid puts an unpaid order's stock back and moves it to 결제실패, inside
+// the caller's transaction and under its order lock. 결제대기 만료·입금 기한 만료·A-508
+// 의 실패 반영이 같은 길을 쓴다.
+func (s *Store) releaseUnpaid(ctx context.Context, tx pgx.Tx, orderID string, from Status) error {
+	if err := CanTransition(from, StatusPaymentFailed, ActorSystem); err != nil {
+		return err
+	}
+	deltas, err := restockDeltas(ctx, tx, orderID)
+	if err != nil {
+		return err
+	}
+	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
+		return err
+	}
+	_, err = s.q.WithTx(tx).MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
+		ID: orderID, ToStatus: string(StatusPaymentFailed), FromStatus: string(from)})
+	return err
+}
+
 func (s *Store) expireOne(ctx context.Context, orderID string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -667,18 +814,7 @@ func (s *Store) expireOne(ctx context.Context, orderID string) error {
 	if pending {
 		return nil
 	}
-	if err := CanTransition(StatusPaymentPending, StatusPaymentFailed, ActorSystem); err != nil {
-		return err
-	}
-	deltas, err := restockDeltas(ctx, tx, orderID)
-	if err != nil {
-		return err
-	}
-	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
-		return err
-	}
-	if _, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
-		ID: orderID, ToStatus: string(StatusPaymentFailed), FromStatus: string(StatusPaymentPending)}); err != nil {
+	if err := s.releaseUnpaid(ctx, tx, orderID, StatusPaymentPending); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

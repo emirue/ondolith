@@ -42,6 +42,17 @@ type User struct {
 	EmailVerifiedAt   *time.Time
 }
 
+// Cutoff is the sessions_valid_from this read saw, as the value a new session's
+// auth_at must carry (D15 5.4).
+//
+// A login stamps THIS, not the time of the login. A revoke is a transaction
+// whose cutoff is its start time and whose changes other connections see only
+// at commit — a login in between reads the old hash, and stamped "now" it would
+// sit after the new cutoff and outlive the revoke (2026-10-21 5차 점검). Stamped
+// with the cutoff it read alongside the credential, any later move of the
+// cutoff — a revoke, a password change elsewhere, a deactivation — ends it.
+func (u *User) Cutoff() DBTime { return DBTime{u.SessionsValidFrom} }
+
 // LoadPermissions returns the caller's whole permission set in ONE query.
 //
 // One query is the reason D15 4.3 can say "judging every menu entry costs no
@@ -228,6 +239,30 @@ func (s *Store) InvalidateSessions(ctx context.Context, userID string) error {
 	return s.q.InvalidateSessions(ctx, userID)
 }
 
+// RevokeCredentials ends every session, clears the password and removes every
+// social link, in one transaction — A-402's forced reset (D15 5.4). Undoing a
+// takeover with the old password or a taker's social link still valid lets them
+// straight back in, and doing the three apart left a gap a social login could
+// slip through (2026-10-21 4차 점검). Clearing is not setting: the administrator
+// learns nothing, and the owner chooses the next password through the reset mail
+// (D19 「타인의 비밀번호를 설정하지 않는다」). It reports how many links it removed.
+func (s *Store) RevokeCredentials(ctx context.Context, userID string) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	if err := q.RevokeCredentials(ctx, userID); err != nil {
+		return 0, err
+	}
+	n, err := q.UnlinkAllSocial(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit(ctx)
+}
+
 // withLastSuperuserGuard runs apply in a transaction that has every active
 // superuser holder locked FOR UPDATE, refusing when userID is the last one.
 //
@@ -249,7 +284,7 @@ func (s *Store) withLastSuperuserGuard(ctx context.Context, userID string, apply
 
 	isHolder := false
 	for _, h := range holders {
-		if h == userID {
+		if SameID(h, userID) {
 			isHolder = true
 			break
 		}

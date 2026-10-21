@@ -96,10 +96,11 @@ func (m *MediaStore) write(dir, rel string, b []byte) error {
 		return err
 	}
 	defer rt.Close()
-	if err := rt.MkdirAll(filepath.FromSlash(dir), 0o755); err != nil {
+	// 첨부와 같이 앱 계정만 읽는다 (StoreUpload, D60 3절).
+	if err := rt.MkdirAll(filepath.FromSlash(dir), 0o700); err != nil {
 		return err
 	}
-	f, err := rt.OpenFile(filepath.FromSlash(rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := rt.OpenFile(filepath.FromSlash(rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}

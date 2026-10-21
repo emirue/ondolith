@@ -3,6 +3,7 @@ package commerce
 import (
 	"context"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,6 +36,54 @@ func deliveredOrder(t *testing.T, s *Store, pool *pgxpool.Pool, slug string, qty
 		}
 	}
 	return orderNo, goods
+}
+
+// **반품·교환은 배송완료 뒤 A-512 기간 안에만 받는다** (FR-617·FR-618, D19 P-511).
+//
+// 기간(order.return_days)은 저장만 되고 읽는 곳이 없었다 — 몇 달 뒤의 교환 요청이
+// 새 조합의 재고를 관리자가 거부할 때까지 묶었다 (2026-10-21 점검).
+func TestReturnWindowIsEnforced(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+	req := ReturnRequest{Kind: KindReturn, Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}}
+	var delivered time.Time
+	if err := pool.QueryRow(ctx, `SELECT delivered_at FROM orders WHERE order_no = $1`, orderNo).Scan(&delivered); err != nil {
+		t.Fatal(err)
+	}
+
+	// 기본 7일 — 8일째는 받지 않는다.
+	if _, err := s.OpenReturn(ctx, orderNo, req, "P-511", delivered.AddDate(0, 0, 8)); !errors.Is(err, ErrReturnWindow) {
+		t.Fatalf("배송완료 8일 뒤 = %v, want ErrReturnWindow", err)
+	}
+	// A-512 에서 10일로 늘리면 같은 날 받는다 — 상수가 아니라 설정을 읽는다.
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES ($1, '10')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, SettingReturnDays); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenReturn(ctx, orderNo, req, "P-511", delivered.AddDate(0, 0, 8)); err != nil {
+		t.Errorf("기간 10일의 8일째 = %v, want 접수", err)
+	}
+}
+
+// 반품 수량도 소진 + 요청이 넘치면 상한을 통과했다 — 그 뒤의 DB CHECK 가 우연히
+// 막고 있었다 (2026-10-21 점검). 상한이 스스로 거부해야 한다.
+func TestReturnRefusesAnOverflowingQuantity(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+	// 넘침은 이미 소진한 수량이 있을 때 생긴다(1 + 최댓값). 부분 환불 하나를 흉내 낸다.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE order_items SET settled_quantity = 1 WHERE id = $1`, items[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.OpenReturn(context.Background(), orderNo, ReturnRequest{
+		Kind: KindReturn, Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: math.MaxInt}},
+	}, "P-511", time.Now())
+	if !errors.Is(err, ErrRefundQuantity) {
+		t.Errorf("넘치는 반품 수량 = %v, want ErrRefundQuantity", err)
+	}
 }
 
 // **수거 확인 없이 환불이 나가지 않는다** (D14 「수거 우선」).

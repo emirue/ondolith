@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/alexedwards/scs/v2"
 
@@ -44,9 +45,14 @@ func (d *loginDeps) loginForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, auth.SafeNext(r.URL.Query().Get("next")), http.StatusSeeOther)
 		return
 	}
-	d.render(w, r, "auth/login.html", http.StatusOK, map[string]any{
+	data := map[string]any{
 		"Next": auth.SafeNext(r.URL.Query().Get("next")), "Social": d.socialButtons(),
-	})
+	}
+	// 소셜 콜백이 실패하면 안내를 세션에 담아 여기로 보낸다 (socialFail).
+	if msg := d.sm.PopString(r.Context(), sessSocialError); msg != "" {
+		data["Error"] = msg
+	}
+	d.render(w, r, "auth/login.html", http.StatusOK, data)
 }
 
 // P-102 POST: end the session.
@@ -129,13 +135,10 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.sm.Put(ctx, sessUserID, u.ID)
-	// Stamped from the database clock, never time.Now() — see auth.Store.Now.
-	authAt, err := d.store.Now(ctx)
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-		return
-	}
-	stampAuthAt(d.sm, ctx, authAt)
+	// auth_at 은 해시와 같은 문장에서 읽은 기준 시각이다 (auth.User.Cutoff) — 그 뒤의 회수가
+	// 커밋되면 이 세션이 끊긴다. 재인증 창(15분)은 로그인한 지금부터 잰다.
+	stampAuthAt(d.sm, ctx, u.Cutoff())
+	putTime(d.sm, ctx, sessReauth, time.Now())
 
 	// Successful login clears the ACCOUNT counter: someone who mistyped four
 	// times must not stay throttled afterwards. **IP 버킷은 지우지 않는다** — 지우면

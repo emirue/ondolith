@@ -169,17 +169,20 @@ want "결제 기록이 생겼다" 1 "$(sql "select count(*) from payments")"
 
 # **환불 요청이 있어야 A-507 의 표를 잰다.** 리뷰어가 지적한 자리다 — 같은
 # 커밋에서 스크롤 감싸미를 새로 붙여 놓고 정작 빈 표로만 그렸다.
-# 화면을 지나서 만든다: 구매자가 P-506 으로 취소를 넣는다.
+# 화면을 지나서 만든다: 구매자가 P-507 로 2개 중 1개의 부분 환불을 넣는다. **전체 취소(P-506)가
+# 아니다** — 그러면 품목이 다 소진돼 A-516 피킹 표가 비고, 빈 표는 레이아웃을 재지 못한다.
 JAR_ADMIN2=$JAR
 JAR=$WORK/jar-member
 ITEM_ID=$(sql "select oi.id from order_items oi join orders o on o.id=oi.order_id
                where o.order_no='$ORDER_NO' limit 1")
 sql "update orders set status='결제완료' where order_no='$ORDER_NO'" >/dev/null
-code POST "/orders/$ORDER_NO/cancel" --data-urlencode "item_id=$ITEM_ID" \
+code POST "/orders/$ORDER_NO/refund" --data-urlencode "item_id=$ITEM_ID" \
 	--data-urlencode "qty_$ITEM_ID=1" --data-urlencode "reason=단순 변심" >/dev/null
 sql "update orders set status='배송완료' where order_no='$ORDER_NO'" >/dev/null
 JAR=$JAR_ADMIN2
 want "환불 요청이 생겼다" 1 "$(sql "select count(*) from refunds")"
+want "피킹할 품목이 남았다" 1 "$(sql "select count(*) from order_items oi join orders o on o.id=oi.order_id
+               where o.order_no='$ORDER_NO' and oi.quantity > oi.settled_quantity")"
 
 # 첨부 관리(A-309)·댓글 관리(A-308)·글 관리(A-307) 는 이미 만든 것이 보인다 —
 # 첨부는 lib-seed 의 글쓰기가, 댓글은 위에서, 글은 그 글이 채운다. 관리 화면이

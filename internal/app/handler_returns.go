@@ -106,6 +106,11 @@ func (d *shopDeps) returnKindCreate(w http.ResponseWriter, r *http.Request,
 		d.renderReturnForm(w, r, order, kind, http.StatusUnprocessableEntity,
 			"지금은 반품·교환을 요청할 수 없는 주문입니다.")
 		return
+	case errors.Is(err, commerce.ErrReturnWindow):
+		// D19 P-511: 기간이 지나면 400.
+		d.renderReturnForm(w, r, order, kind, http.StatusBadRequest,
+			"반품·교환 요청 기간이 지났습니다.")
+		return
 	case errors.Is(err, commerce.ErrReturnInProgress):
 		d.renderReturnForm(w, r, order, kind, http.StatusUnprocessableEntity,
 			"이미 처리 중인 요청이 있습니다.")

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"github.com/emirue/ondolith/internal/auth/authq"
 	"strings"
 	"sync"
 	"testing"
@@ -156,7 +157,7 @@ func TestSetPasswordInvalidatesOtherSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, _ := HashPassword("brand-new-password")
-	if _, err := s.SetPassword(ctx, u, h); err != nil {
+	if _, err := s.SetPassword(ctx, u, h, before.SessionsValidFrom); err != nil {
 		t.Fatal(err)
 	}
 	after, err := s.FindUserByID(ctx, u)
@@ -259,5 +260,73 @@ func TestIssuingATokenLeavesOtherUsersAlone(t *testing.T) {
 	}
 	if _, err := s.ConsumeToken(ctx, KindPasswordReset, victim); err != nil {
 		t.Errorf("남의 발급이 이 토큰을 태웠다: %v", err)
+	}
+}
+
+// **회수된 세션은 비밀번호를 다시 쓸 수 없다** (D15 5.4). P-109 는 현재 비밀번호를 확인한
+// 뒤 새 해시를 쓰는데, 그 사이 A-402 가 자격증명을 회수하면 비워진 해시를 덮어쓰고 세션까지
+// 살렸다 — 열린 세션과 비밀번호를 가진 탈취자가 P-109 를 돌리면 회수를 이겼다 (2026-10-21
+// 3차 점검). 쓰는 문장 안에서 그 세션이 아직 유효한지 본다.
+func TestSetPasswordRefusesARevokedSession(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "r@example.com")
+	authAt, err := s.Now(ctx) // 이 시각에 로그인한 세션
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RevokeCredentials(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := HashPassword("taker-sets-this")
+	if _, err := s.SetPassword(ctx, u, h, authAt.Time()); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("회수된 세션의 비밀번호 변경 = %v, want ErrSessionRevoked", err)
+	}
+	if _, err := s.Authenticate(ctx, "r@example.com", "taker-sets-this"); err == nil {
+		t.Error("회수 뒤에 탈취자가 정한 비밀번호가 들어갔다")
+	}
+}
+
+// **기준 시각은 뒤로 가지 않는다** (D15 5.4). 옮기는 쓰기가 `now()`(트랜잭션 시작 시각)를 쓰면,
+// 먼저 BEGIN 한 회수가 그 사이 커밋된 P-109 의 기준 시각보다 앞선 값을 써서 — 기준 시각이 과거로
+// 돌아가 — P-109 로 다시 찍힌 탈취자의 세션이 회수 뒤에도 살았다 (2026-10-21 6차 점검).
+func TestCutoffNeverMovesBackwards(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "mono@example.com")
+	before, err := s.FindUserByID(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 회수가 먼저 BEGIN 한다(now() 가 여기서 정해진다).
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1`); err != nil {
+		t.Fatal(err)
+	}
+	// 그 사이 다른 세션의 P-109 가 커밋된다.
+	h, _ := HashPassword("taker-sets-this")
+	cutoff, err := s.SetPassword(ctx, u, h, before.SessionsValidFrom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 이제 회수의 UPDATE 가 돌고 커밋된다.
+	if err := authq.New(tx).RevokeCredentials(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.FindUserByID(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.SessionsValidFrom.After(cutoff.Time()) {
+		t.Errorf("회수 뒤 기준 시각 %v 가 P-109 가 찍은 %v 보다 앞서거나 같다 — 그 세션이 산다",
+			after.SessionsValidFrom, cutoff.Time())
 	}
 }

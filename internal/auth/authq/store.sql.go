@@ -100,7 +100,7 @@ func (q *Queries) DBNow(ctx context.Context) (time.Time, error) {
 }
 
 const deactivateUser = `-- name: DeactivateUser :exec
-UPDATE users SET is_active = false, sessions_valid_from = now(), updated_at = now() WHERE id = $1
+UPDATE users SET is_active = false, sessions_valid_from = GREATEST(now(), sessions_valid_from + interval '1 microsecond'), updated_at = now() WHERE id = $1
 `
 
 // 세션 기준 시각도 옮긴다 — 그대로 두면 비활성 동안 쓰이지 않은 세션이 재활성화와 함께
@@ -216,9 +216,13 @@ func (q *Queries) HoldsSuperuser(ctx context.Context, userID string) (bool, erro
 }
 
 const invalidateSessions = `-- name: InvalidateSessions :exec
-UPDATE users SET sessions_valid_from = now(), updated_at = now() WHERE id = $1
+UPDATE users SET sessions_valid_from = GREATEST(now(), sessions_valid_from + interval '1 microsecond'), updated_at = now() WHERE id = $1
 `
 
+// 기준 시각(sessions_valid_from)은 **뒤로 가지 않는다** — 옮기는 쓰기 다섯 곳 모두
+// GREATEST(now(), 이전 값 + 1µs). now() 는 트랜잭션 시작 시각이라, 먼저 BEGIN 한 회수가 그 사이
+// 커밋된 비밀번호 변경보다 앞선 값을 써서 그 뒤에 찍힌 세션을 살려 두었다 (2026-10-21 6차 점검).
+// 잠금을 기다린 UPDATE 는 최신 행으로 다시 계산되므로 늘 엄격히 커진다.
 func (q *Queries) InvalidateSessions(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, invalidateSessions, id)
 	return err
@@ -378,6 +382,15 @@ func (q *Queries) PermissionIsScoped(ctx context.Context, key string) (bool, err
 	var is_scoped bool
 	err := row.Scan(&is_scoped)
 	return is_scoped, err
+}
+
+const revokeCredentials = `-- name: RevokeCredentials :exec
+UPDATE users SET password_hash = '', sessions_valid_from = GREATEST(now(), sessions_valid_from + interval '1 microsecond'), updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) RevokeCredentials(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, revokeCredentials, id)
+	return err
 }
 
 const roleByKey = `-- name: RoleByKey :one

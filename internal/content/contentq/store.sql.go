@@ -91,37 +91,6 @@ func (q *Queries) DeletePage(ctx context.Context, id string) (string, error) {
 	return slug, err
 }
 
-const legacySecretSettings = `-- name: LegacySecretSettings :many
-SELECT key, value FROM settings
-WHERE (key IN ('pg.secret_key', 'mail.smtp_password') OR key LIKE 'social.%.client_secret')
-  AND value <> '' AND value NOT LIKE 'enc:v1:%'
-`
-
-type LegacySecretSettingsRow struct {
-	Key   string
-	Value string
-}
-
-func (q *Queries) LegacySecretSettings(ctx context.Context) ([]LegacySecretSettingsRow, error) {
-	rows, err := q.db.Query(ctx, legacySecretSettings)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []LegacySecretSettingsRow{}
-	for rows.Next() {
-		var i LegacySecretSettingsRow
-		if err := rows.Scan(&i.Key, &i.Value); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const liftMenuChildren = `-- name: LiftMenuChildren :exec
 UPDATE menus m SET parent_id = d.parent_id, updated_at = now()
 FROM menus d
@@ -374,6 +343,37 @@ func (q *Queries) Settings(ctx context.Context, keys []string) ([]SettingsRow, e
 	items := []SettingsRow{}
 	for rows.Next() {
 		var i SettingsRow
+		if err := rows.Scan(&i.Key, &i.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unsealedSettings = `-- name: UnsealedSettings :many
+SELECT key, value FROM settings WHERE value <> '' AND value NOT LIKE 'enc:v1:%'
+`
+
+type UnsealedSettingsRow struct {
+	Key   string
+	Value string
+}
+
+// 어느 키가 시크릿인지는 고르지 않는다 — content.IsSecretSetting 한 곳이 정한다.
+// SQL 에 목록을 옮겨 적으면 낡는다(Turnstile 비밀 키가 그렇게 빠졌었다).
+func (q *Queries) UnsealedSettings(ctx context.Context) ([]UnsealedSettingsRow, error) {
+	rows, err := q.db.Query(ctx, unsealedSettings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UnsealedSettingsRow{}
+	for rows.Next() {
+		var i UnsealedSettingsRow
 		if err := rows.Scan(&i.Key, &i.Value); err != nil {
 			return nil, err
 		}

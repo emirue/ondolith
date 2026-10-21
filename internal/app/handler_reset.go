@@ -82,14 +82,36 @@ func (d *accountDeps) resetRequest(w http.ResponseWriter, r *http.Request) {
 	d.render(w, r, "auth/password-reset-sent.html", http.StatusOK, nil)
 }
 
-// P-105 GET — the new-password form.
+// newPasswordPath 는 P-105 의 폼 주소다. **토큰이 없다.** 화면을 그리는 주소에 토큰이
+// 있으면 그 화면에 붙은 스크립트가 주소째 밖으로 보낸다 — GA4 의 page_location 이
+// 그렇고, Referrer-Policy 는 Referer 만 막는다 (D60 「비밀이 든 주소」).
+const newPasswordPath = "/password/new"
+
+// resetCookie 는 메일 링크에서 옮겨 온 재설정 토큰이다. **세션이 아니라 쿠키다** —
+// 세션은 DB(pgxstore)에 있고, 토큰 원문은 DB에 두지 않는다 (D19 P-105). 쿠키는
+// 폼 주소에만 실리고(Path) 스크립트가 읽지 못한다(HttpOnly).
+const resetCookie = "reset_token"
+
+func (d *accountDeps) setResetCookie(w http.ResponseWriter, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{Name: resetCookie, Value: value, Path: newPasswordPath,
+		MaxAge: maxAge, HttpOnly: true, Secure: d.sm.Cookie.Secure, SameSite: http.SameSiteLaxMode})
+}
+
+// P-105 GET /password/reset/{token} — the link in the mail.
 //
-// The token is not checked here. Checking it would answer "is this link
-// live?" to anyone who pastes one, and the answer is due at POST anyway; a
-// dead link fails then, with the same sentence as every other failure.
+// It renders nothing: the token moves into resetCookie and the browser goes to
+// newPasswordPath. The token is not checked here either. Checking it would
+// answer "is this link live?" to anyone who pastes one, and the answer is due
+// at POST anyway; a dead link fails then, with the same sentence as every other
+// failure.
+func (d *accountDeps) resetLink(w http.ResponseWriter, r *http.Request) {
+	d.setResetCookie(w, r.PathValue("token"), int(auth.PasswordResetTTL.Seconds()))
+	http.Redirect(w, r, newPasswordPath, http.StatusSeeOther)
+}
+
+// P-105 GET /password/new — the new-password form.
 func (d *accountDeps) resetForm(w http.ResponseWriter, r *http.Request) {
-	d.render(w, r, "auth/password-reset.html", http.StatusOK,
-		map[string]any{"Token": r.PathValue("token")})
+	d.render(w, r, "auth/password-reset.html", http.StatusOK, nil)
 }
 
 // P-105 POST — set the password.
@@ -99,15 +121,18 @@ func (d *accountDeps) resetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	// The token comes from the path. `email` and `user_id` are not read: the
-	// token names the account, and a form field that could name a different one
-	// turns a valid link of your own into anyone's password (D19 P-105).
-	token := r.PathValue("token")
+	// The token comes from resetCookie (resetLink). `email` and `user_id` are
+	// not read: the token names the account, and a form field that could name a
+	// different one turns a valid link of your own into anyone's password
+	// (D19 P-105). A field error leaves the cookie for the retry.
+	var token string
+	if c, err := r.Cookie(resetCookie); err == nil {
+		token = c.Value
+	}
 	pw := r.PostFormValue("password")
 
 	fail := func(msg string, code int) {
-		d.render(w, r, "auth/password-reset.html", code,
-			map[string]any{"Error": msg, "Token": token})
+		d.render(w, r, "auth/password-reset.html", code, map[string]any{"Error": msg})
 	}
 	if pw != r.PostFormValue("password_confirm") {
 		fail("두 비밀번호가 일치하지 않습니다.", http.StatusBadRequest)
@@ -129,6 +154,7 @@ func (d *accountDeps) resetPassword(w http.ResponseWriter, r *http.Request) {
 		fail("링크가 유효하지 않거나 만료되었습니다.", http.StatusBadRequest)
 		return
 	}
+	d.setResetCookie(w, "", -1)
 
 	// No session is opened. ResetPassword moved sessions_valid_from, so every
 	// session that existed is dead; handing this browser a fresh one would

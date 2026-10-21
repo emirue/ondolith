@@ -160,11 +160,21 @@ func TestStoredFileHasNoExecuteBit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Mode().Perm() != 0o644 {
-		t.Errorf("권한 %v, want 0644", st.Mode().Perm())
+	// **앱 계정만 읽는다** — 파일 0600·폴더 0700, 자동 백업과 같은 기준 (D60 3절). 비공개
+	// 게시판의 첨부도 여기 있는데 0644·0755 였다 — 서버의 다른 계정(nginx·postgres 등)이
+	// 읽을 수 있었다 (2026-10-21 점검).
+	if st.Mode().Perm() != 0o600 {
+		t.Errorf("권한 %v, want 0600", st.Mode().Perm())
 	}
 	if st.Mode().Perm()&0o111 != 0 {
 		t.Errorf("실행 권한이 붙었다: %v", st.Mode().Perm())
+	}
+	dir, err := os.Stat(filepath.Dir(filepath.Join(root, filepath.FromSlash(got.StoredPath))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir.Mode().Perm() != 0o700 {
+		t.Errorf("폴더 권한 %v, want 0700", dir.Mode().Perm())
 	}
 }
 

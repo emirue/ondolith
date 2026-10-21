@@ -696,3 +696,34 @@ func TestPaymentMethodForTheReceipt(t *testing.T) {
 		t.Errorf("결제 없는 주문의 결제수단 = %q, %v — want 빈 값", got, err)
 	}
 }
+
+// **배송 전에 닫히는 주문은 부분 환불로 소진된 몫까지 전부 되돌린다** (D50 「배송 전 부분 환불의
+// 재고」). 배송 전에 환불된 물건은 창고를 떠난 적이 없다 — 그래서 A-505 는 그 몫의 입고 안내를
+// 발송 뒤에만 띄운다(배송 전에 입고하면 이 복원과 겹쳤다, 2026-10-21 4차 점검).
+func TestCancelBeforeShippingRestocksTheRefundedUnitsToo(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _, _ := paidOrder(t, s, pool, "tee-cancel-settled", 2)
+	var variant string
+	var before int
+	if err := pool.QueryRow(ctx, `SELECT v.id, v.stock FROM product_variants v
+		JOIN order_items oi ON oi.variant_id = v.id JOIN orders o ON o.id = oi.order_id
+		WHERE o.order_no = $1`, orderNo).Scan(&variant, &before); err != nil {
+		t.Fatal(err)
+	}
+	// 1개는 배송 전 부분 환불로 이미 소진됐다.
+	if _, err := pool.Exec(ctx, `UPDATE order_items SET settled_quantity = 1
+		WHERE order_id = (SELECT id FROM orders WHERE order_no = $1)`, orderNo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelOrder(ctx, orderNo, "P-506", "cancel-settled"); err != nil {
+		t.Fatal(err)
+	}
+	var after int
+	if err := pool.QueryRow(ctx, `SELECT stock FROM product_variants WHERE id = $1`, variant).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before+2 {
+		t.Errorf("취소 뒤 재고 %d, want %d — 창고에 있는 두 개가 다 돌아와야 한다", after, before+2)
+	}
+}

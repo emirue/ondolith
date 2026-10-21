@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -252,5 +254,49 @@ func TestSuccessfulLoginDoesNotResetTheIPBucket(t *testing.T) {
 	rec := postForm(h, "/login", url.Values{"email": {"v3@example.com"}, "password": {"guess"}}, nil)
 	if rec.Code != http.StatusTooManyRequests {
 		t.Errorf("IP 한도를 넘긴 네 번째 시도 = HTTP %d, want 429 — 성공한 로그인이 IP 버킷을 지웠다", rec.Code)
+	}
+}
+
+// **회수가 커밋되기 전에 로그인한 세션도 회수 뒤에는 죽는다** (D15 5.4).
+//
+// A-402 의 회수는 트랜잭션이고 기준 시각은 그 시작 시각(now())이다. 커밋 전에는 다른 연결이 옛
+// 해시를 읽으므로, 그 사이의 로그인은 성공한다. 로그인이 「지금」을 auth_at 으로 찍으면 그 값이
+// 기준 시각보다 뒤라서 회수 뒤에도 살아남았다 (2026-10-21 5차 점검). 로그인은 해시와 같은 문장에서
+// 읽은 기준 시각 자체를 찍는다 — 회수가 그 값을 옮기면 세션이 끊긴다.
+func TestLoginDuringAnUncommittedRevokeDoesNotSurviveIt(t *testing.T) {
+	_, h, store, _ := accountFixture(t, false)
+	id := mkAccount(t, store, "race@example.com", "correct-horse-battery")
+	pool, err := pgxpool.New(context.Background(), os.Getenv(dsnEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	// 회수를 시작하고 아직 커밋하지 않는다.
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(context.Background(),
+		`UPDATE users SET password_hash = '', sessions_valid_from = now() WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	login := postForm(h, "/login", url.Values{"email": {"race@example.com"}, "password": {"correct-horse-battery"}}, nil)
+	c := sessionCookie(login)
+	if c == nil {
+		t.Fatalf("회수가 커밋되기 전의 로그인 = HTTP %d — 이 시험의 전제(옛 해시가 보인다)가 깨졌다", login.Code)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	req.AddCookie(c)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Error("회수가 커밋된 뒤에도 그 전에 로그인한 세션이 살아 있다")
 	}
 }

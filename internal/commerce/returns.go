@@ -49,7 +49,12 @@ const (
 	// SettingReturnFeePolicy·SettingReturnFeeAmount 는 A-512 가 쓰는 키다.
 	SettingReturnFeePolicy = "order.return_fee_policy"
 	SettingReturnFeeAmount = "order.return_fee_amount"
+	// SettingReturnDays 는 반품·교환을 받는 기간(배송완료 뒤 일 수)이다 (A-512, FR-617).
+	SettingReturnDays = "order.return_days"
 )
+
+// ErrReturnWindow 는 배송완료 뒤 반품·교환 기간이 지났다는 뜻이다 (D19 P-511).
+var ErrReturnWindow = errors.New("commerce: 반품·교환 기간이 지났습니다")
 
 // ErrFeeSetting 은 A-512 정책값이 허용 범위를 벗어났다는 뜻이다. A-512 가
 // 저장 시점에 막지만, 손으로 고친 DB 가 500 을 그리게 두지 않는다.
@@ -84,6 +89,24 @@ func returnFeeSetting(ctx context.Context, tx pgx.Tx) (policy string, amount int
 		}
 	}
 	return policy, amount, nil
+}
+
+// returnDays reads A-512's 반품·교환 기간 inside the caller's transaction.
+// 기본값은 D19 A-512 의 7일이다. 설정을 읽는 질의는 배송비 정책과 같은 것을 쓴다.
+func returnDays(ctx context.Context, tx pgx.Tx) (int, error) {
+	rows, err := commerceq.New(tx).ReturnFeeSettings(ctx, []string{SettingReturnDays})
+	if err != nil {
+		return 0, err
+	}
+	days := 7
+	for _, r := range rows {
+		n, cerr := strconv.Atoi(r.Value)
+		if cerr != nil || n < 1 {
+			return 0, fmt.Errorf("%w: 반품 기간 %q", ErrFeeSetting, r.Value)
+		}
+		days = n
+	}
+	return days, nil
 }
 
 // Return is one row of returns, as P-513/A-511 draw it.
@@ -184,6 +207,17 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	if err := CanTransition(Status(status), target, actor); err != nil {
 		return nil, err
 	}
+	// 기간은 배송완료 시각부터 잰다 (D19 A-512). 시각이 없는 옛 주문은 잴 수 없으니
+	// 받는다 — 거부하면 그 주문은 반품할 길이 없다.
+	if o.DeliveredAt != nil {
+		days, err := returnDays(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		if now.After(o.DeliveredAt.AddDate(0, 0, days)) {
+			return nil, fmt.Errorf("%w (배송완료 후 %d일)", ErrReturnWindow, days)
+		}
+	}
 
 	// 품목 확인. 남은 수량은 settled_quantity 기준이다 — 부분 환불과 반품이
 	// 같은 잔량을 나눠 쓴다.
@@ -217,7 +251,8 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 		}
 		got.productID, got.quantity, got.settled, got.oldDelta =
 			r.ProductID, int(r.Quantity), int(r.SettledQuantity), int(r.PriceDelta)
-		if got.settled+got.qty > got.quantity {
+		// 덧셈이 넘치지 않게 남은 수량과 비교한다 (RefundableAmount 와 같다).
+		if got.qty > got.quantity-got.settled {
 			return nil, fmt.Errorf("%w: 소진 %d + 요청 %d > 주문 %d",
 				ErrRefundQuantity, got.settled, got.qty, got.quantity)
 		}

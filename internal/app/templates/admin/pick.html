@@ -15,12 +15,16 @@
           <td>{{.ProductName}}</td><td>{{.OptionLabel}}</td><td>{{.Ordered}}</td>
           <td>{{index $s .VariantID}}</td>
         </tr>
+      {{else}}
+        {{/* 다 환불·반품돼 상자에 넣을 것이 없다 (FR-623·FR-625). */}}
+        <tr><td colspan="4" class="adm-empty">보낼 품목이 없습니다 — 모두 환불·반품됐습니다.</td></tr>
       {{end}}
       </tbody>
     </table>
   </div>
 </div>
 
+{{if .Lines}}
 <div class="adm-card">
   <form method="post" action="/admin/orders/{{.OrderNo}}/pick">
     {{range .Lines}}
@@ -42,4 +46,5 @@
     작업 로그에 남습니다.
   </p>
 </div>
+{{end}}
 {{end}}
