@@ -87,6 +87,18 @@ func (q *Queries) SocialAccounts(ctx context.Context, userID string) ([]SocialAc
 	return items, nil
 }
 
+const unlinkAllSocial = `-- name: UnlinkAllSocial :execrows
+DELETE FROM social_accounts WHERE user_id = $1
+`
+
+func (q *Queries) UnlinkAllSocial(ctx context.Context, userID string) (int64, error) {
+	result, err := q.db.Exec(ctx, unlinkAllSocial, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const unlinkSocial = `-- name: UnlinkSocial :execrows
 DELETE FROM social_accounts WHERE user_id = $1 AND provider = $2
 `

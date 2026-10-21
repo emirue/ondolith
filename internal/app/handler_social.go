@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/markbates/goth"
@@ -52,6 +53,10 @@ type socialDeps struct {
 	enabled func() []auth.SocialConfig
 	// unverified 는 로그인과 같은 판정이다 (loginDeps.unverified, FR-214).
 	unverified func(ctx context.Context, u *auth.User) (refused, sent bool)
+	// confirm 은 P-111 의 비밀번호 재확인이다 (loginDeps.confirmPassword, D15 5.3-1).
+	confirm func(ctx context.Context, a *Actor, password string) bool
+	// now 는 비밀번호 없는 계정의 재인증 창을 잰다. nil 이면 time.Now.
+	now func() time.Time
 }
 
 // oauthState makes an unguessable state value.
@@ -77,6 +82,14 @@ func (d *socialDeps) socialBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 로그인한 사람이 시작하면 「연결」이다 (P-111). 연결은 본인 확인을 먼저 한다 —
+	// state 를 심기 전에.
+	ctx := r.Context()
+	link := ActorFrom(ctx).IsAuthenticated()
+	if link && !d.ownerConfirmed(w, r) {
+		return
+	}
+
 	state, err := oauthState()
 	if err != nil {
 		d.serverError(w, r, err)
@@ -93,12 +106,9 @@ func (d *socialDeps) socialBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
 	d.sm.Put(ctx, sessOAuthState, state)
 	d.sm.Put(ctx, sessOAuthSession, sess.Marshal())
 	d.sm.Put(ctx, sessOAuthProvider, name)
-	// 로그인한 사람이 시작하면 「연결」이다 (P-111). 아니면 「로그인」이다.
-	link := ActorFrom(ctx).IsAuthenticated()
 	d.sm.Put(ctx, sessOAuthLink, link)
 
 	http.Redirect(w, r, authURL, http.StatusSeeOther)
@@ -224,6 +234,38 @@ func (d *socialDeps) finishLink(w http.ResponseWriter, r *http.Request, provider
 	}
 }
 
+// ownerConfirmed is P-111's re-check that the person at the keyboard owns the
+// account (D15 5.3-1), answering with the connections screen when it fails.
+//
+// An account with a password types it every time, like P-109 and P-110 — an
+// unattended open session must not be enough to attach someone else's social
+// identity, which would outlive a password change. An account without one has
+// nothing to type, so it must have logged in within the re-auth window.
+func (d *socialDeps) ownerConfirmed(w http.ResponseWriter, r *http.Request) bool {
+	a := ActorFrom(r.Context())
+	has, err := d.store.HasPassword(r.Context(), a.User.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return false
+	}
+	if !has {
+		now := time.Now
+		if d.now != nil {
+			now = d.now
+		}
+		if NeedsReauth(a, now()) {
+			d.renderConnections(w, r, http.StatusBadRequest, "보안을 위해 다시 로그인한 뒤 시도하세요.")
+			return false
+		}
+		return true
+	}
+	if d.confirm == nil || !d.confirm(r.Context(), a, r.PostFormValue("password")) {
+		d.renderConnections(w, r, http.StatusBadRequest, "비밀번호가 올바르지 않습니다.")
+		return false
+	}
+	return true
+}
+
 // connectionsPage is P-111 GET /me/connections.
 func (d *socialDeps) connectionsPage(w http.ResponseWriter, r *http.Request) {
 	d.renderConnections(w, r, http.StatusOK, d.sm.PopString(r.Context(), sessSocialError))
@@ -238,6 +280,9 @@ func (d *socialDeps) connectionsAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "잘못된 요청입니다.", http.StatusBadRequest)
+		return
+	}
+	if !d.ownerConfirmed(w, r) {
 		return
 	}
 	provider := strings.TrimSpace(r.PostFormValue("provider"))
@@ -296,7 +341,7 @@ func (d *socialDeps) renderConnections(w http.ResponseWriter, r *http.Request, c
 	}
 	d.renderPage(w, r, "account/connections.html", code,
 		d.socialView(r, "연결된 계정", map[string]any{
-			"Connections": rows, "Error": msg,
+			"Connections": rows, "Error": msg, "HasPassword": hasPassword,
 		}))
 }
 

@@ -970,6 +970,40 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	}
 }
 
+// **재설정 강제는 소셜 연결도 끊는다** (D15 5.4). 탈취를 되돌리는 동작인데, 연결이
+// 남으면 탈취한 사람이 붙여 둔 소셜 계정으로 다시 들어온다 — 세션만 끊고 「되돌렸다」고
+// 말하던 것이 2026-10-21 점검에서 확인됐다. 주인은 재설정 뒤 P-111 에서 다시 잇는다.
+func TestForcedResetAlsoCutsSocialLinks(t *testing.T) {
+	d, pool := fixture(t, nil)
+	ctx := context.Background()
+	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	target, err := d.Auth.CreateUser(ctx, "t@example.com", "h", "대상")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"google", "kakao"} {
+		if err := d.Auth.LinkSocial(ctx, target, p, p+"-attacker"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
+	}
+	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
+		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
+	}
+	if links, err := d.Auth.SocialAccounts(ctx, target); err != nil || len(links) != 0 {
+		t.Errorf("재설정 강제 뒤 소셜 연결 %+v (%v) — 그 연결로 다시 들어온다", links, err)
+	}
+	var summary string
+	if err := pool.QueryRow(ctx, `SELECT summary FROM operation_logs WHERE action = 'user.reset_password'`).Scan(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "소셜 연결 2") {
+		t.Errorf("작업 로그가 끊은 연결을 말하지 않는다: %q", summary)
+	}
+}
+
 // 비활성 계정에 대한 재설정 강제는 거부하지 않는다 — 복귀 절차의 일부다 (D19).
 func TestForcedResetWorksOnAnInactiveAccount(t *testing.T) {
 	d, _ := fixture(t, nil)
@@ -2091,7 +2125,7 @@ func TestAccountOperationsAreLogged(t *testing.T) {
 		}
 		got = append(got, s)
 	}
-	want := []string{"사용자 생성: new@example.com", "사용자 비활성화", "사용자 활성화", "재설정 강제 (세션 종료·재설정 메일 발송)", "사용자 삭제"}
+	want := []string{"사용자 생성: new@example.com", "사용자 비활성화", "사용자 활성화", "재설정 강제 (세션 종료·소셜 연결 0개 해제·재설정 메일 발송)", "사용자 삭제"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("작업 로그 = %v, want %v", got, want)
 	}

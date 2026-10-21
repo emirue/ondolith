@@ -92,6 +92,14 @@ func (s *Store) LinkSocial(ctx context.Context, userID, provider, uid string) er
 //
 // 판단과 삭제가 한 트랜잭션이다: 따로 하면 두 요청이 각자 "아직 하나 더
 // 있다" 를 읽고 둘 다 지운다.
+// UnlinkAllSocial removes every provider identity on the account and reports
+// how many there were. A-402's forced reset uses it: undoing a takeover means
+// closing every way back in, and a social identity the taker attached is one
+// (D15 5.4).
+func (s *Store) UnlinkAllSocial(ctx context.Context, userID string) (int64, error) {
+	return s.q.UnlinkAllSocial(ctx, userID)
+}
+
 func (s *Store) UnlinkSocial(ctx context.Context, userID, provider string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

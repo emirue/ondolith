@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -480,5 +481,31 @@ func TestNotFoundPageSaysNotFound(t *testing.T) {
 	if code != http.StatusNotFound || !strings.Contains(body, "없는 페이지이거나 주소가 바뀌었습니다") ||
 		strings.Contains(body, "요청을 처리하지 못했습니다") {
 		t.Errorf("없는 주소 = HTTP %d, 404 문구가 아니다", code)
+	}
+}
+
+// **본인 계정 화면의 비밀번호 재확인도 계정당 5회/분이다** (D15 4.3-2·5.3-1). 관리자
+// 재인증만 제한이 있었고, P-109·P-110 은 열린 세션 하나로 로그인 제한을 비켜 비밀번호를
+// 맞혀 보는 오라클이었다 (2026-10-21 점검).
+func TestOwnPasswordChecksShareTheReauthLimit(t *testing.T) {
+	_, h, store, _ := accountFixture(t, false)
+	mkAccount(t, store, "lim@example.com", "correct-horse-battery")
+	login := postForm(h, "/login", url.Values{"email": {"lim@example.com"}, "password": {"correct-horse-battery"}}, nil)
+	c := sessionCookie(login)
+	if c == nil {
+		t.Fatalf("로그인 HTTP %d — 세션이 없다", login.Code)
+	}
+	cookies := []*http.Cookie{c}
+	for i := 0; i < 5; i++ {
+		if rec := postForm(h, "/me/password", url.Values{
+			"current_password": {"wrong-guess-" + strconv.Itoa(i)}, "new_password": {"another-passphrase"},
+		}, cookies); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%d번째 틀린 시도 = HTTP %d", i+1, rec.Code)
+		}
+	}
+	if rec := postForm(h, "/me/password", url.Values{
+		"current_password": {"correct-horse-battery"}, "new_password": {"another-passphrase"},
+	}, cookies); rec.Code == http.StatusSeeOther {
+		t.Error("틀린 5번 뒤 6번째가 통과했다 — 재확인에 제한이 없다")
 	}
 }

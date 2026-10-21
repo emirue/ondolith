@@ -1068,6 +1068,13 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
+	// So do the social links: one the taker attached is a way back in that no
+	// session cutoff closes. The owner re-links at P-111 after the reset.
+	unlinked, err := d.Auth.UnlinkAllSocial(ctx, target)
+	if err != nil {
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		return
+	}
 	raw, err := d.Auth.IssueToken(ctx, auth.KindPasswordReset, target)
 	if err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
@@ -1078,7 +1085,8 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// 토큰·링크는 넣지 않는다 (D15 7절 「절대 기록하지 않음」). 「비밀번호」가 든 요약은
 	// 작업 로그가 자격증명으로 보고 가리므로(content.Redacted) 낱말을 피한다.
-	d.log(r, c, "user.reset_password", "user", target, "재설정 강제 (세션 종료·재설정 메일 발송)")
+	d.log(r, c, "user.reset_password", "user", target,
+		"재설정 강제 (세션 종료·소셜 연결 "+strconv.FormatInt(unlinked, 10)+"개 해제·재설정 메일 발송)")
 	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 

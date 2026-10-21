@@ -456,6 +456,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 인가 코드를 다른 곳으로 돌릴 수 있고, 그것이 D19 A-206 이 콜백 URL 을
 	// 받지 않기로 한 이유다.
 	soc := &socialDeps{publicDeps: pub, sm: sessions, store: authStore, unverified: acc.refuseUnverified,
+		confirm: acc.confirmPassword,
 		provider: func(r *http.Request, name string) (goth.Provider, error) {
 			cfg := socialConfigOf(name)
 			// **꺼진 프로바이더는 없는 것과 같다** (FR-709). 자격증명이

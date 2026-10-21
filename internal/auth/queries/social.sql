@@ -19,3 +19,6 @@ DELETE FROM social_accounts WHERE user_id = $1 AND provider = $2;
 
 -- name: HasPassword :one
 SELECT password_hash <> '' AS has_password FROM users WHERE id = $1;
+
+-- name: UnlinkAllSocial :execrows
+DELETE FROM social_accounts WHERE user_id = $1;

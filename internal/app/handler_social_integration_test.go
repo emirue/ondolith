@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/markbates/goth"
@@ -99,7 +100,9 @@ func socialFixture(t *testing.T, p goth.Provider, enabled bool) (*socialDeps, *a
 		log:     log,
 		site:    func() theme.Site { return theme.Site{Name: "테스트", Type: "cms"} },
 	}
-	d := &socialDeps{publicDeps: pub, sm: sm, store: store,
+	// 비밀번호 재확인은 운영과 같은 loginDeps.confirmPassword 다 — 제한기까지.
+	lg := &loginDeps{sm: sm, store: store, limiter: auth.NewLimiter(), limits: auth.DefaultLimits()}
+	d := &socialDeps{publicDeps: pub, sm: sm, store: store, confirm: lg.confirmPassword,
 		provider: func(_ *http.Request, name string) (goth.Provider, error) {
 			// **꺼진 프로바이더는 없는 것과 같다** (FR-709).
 			if !enabled {
@@ -164,9 +167,14 @@ func socialFailure(t *testing.T, sm *scs.SessionManager, store *auth.Store,
 // beginAndGetState starts P-106 and returns the session cookies plus the state
 // the provider was handed.
 func beginAndGetState(t *testing.T, d *socialDeps, sm *scs.SessionManager, store *auth.Store,
-	provider string, cookies []*http.Cookie) ([]*http.Cookie, string) {
+	provider string, cookies []*http.Cookie, form ...url.Values) ([]*http.Cookie, string) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/auth/"+provider, nil)
+	var body url.Values
+	if len(form) > 0 {
+		body = form[0]
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/"+provider, strings.NewReader(body.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("provider", provider)
 	rec := socialRun(t, sm, store, d.socialBegin, req, cookies)
 	if rec.Code != http.StatusSeeOther {
@@ -473,7 +481,8 @@ func TestSocialCallbackLinksWhenStartedWhileLoggedIn(t *testing.T) {
 	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	cookies := rec.Result().Cookies()
 
-	cookies2, state := beginAndGetState(t, d, sm, store, "google", cookies)
+	cookies2, state := beginAndGetState(t, d, sm, store, "google", cookies,
+		url.Values{"password": {"correct horse battery"}})
 	req := httptest.NewRequest(http.MethodGet,
 		"/auth/google/callback?code=x&state="+url.QueryEscape(state), nil)
 	req.SetPathValue("provider", "google")
@@ -516,7 +525,7 @@ func TestConnectionsActionMapsErrors(t *testing.T) {
 
 	post := func(provider string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/me/connections",
-			strings.NewReader(url.Values{"provider": {provider}}.Encode()))
+			strings.NewReader(url.Values{"provider": {provider}, "password": {"correct horse battery"}}.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		return socialRun(t, sm, store, d.connectionsAction, req, cookies)
 	}
@@ -589,5 +598,101 @@ func TestLoginShowsTheSocialFailureOnce(t *testing.T) {
 	}
 	if got := open(); strings.Contains(got, "|") {
 		t.Errorf("안내가 두 번 그려졌다: %q", got)
+	}
+}
+
+// loggedIn 은 uid 로 로그인한 세션 쿠키다.
+func loggedIn(t *testing.T, sm *scs.SessionManager, store *auth.Store, uid string) []*http.Cookie {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		sm.Put(r.Context(), sessUserID, uid)
+		stampAuthAt(sm, r.Context(), loginStamp(t, store))
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	return rec.Result().Cookies()
+}
+
+func formPost(target, provider string, form url.Values) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if provider != "" {
+		req.SetPathValue("provider", provider)
+	}
+	return req
+}
+
+// **P-111 연결은 비밀번호를 다시 받는다** (D15 5.3-1). 열린 채 떠난 세션 하나로 자기
+// 소셜 계정을 붙이면, 피해자가 비밀번호를 바꿔도 그 연결로 계속 들어온다 (2026-10-21 점검).
+func TestSocialLinkAsksForThePassword(t *testing.T) {
+	d, store, sm := socialFixture(t, fakeProvider{name: "google", uid: "u1"}, true)
+	hash, _ := auth.HashPassword("correct horse battery")
+	uid, err := store.CreateUser(context.Background(), "me@example.com", hash, "나")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookies := loggedIn(t, sm, store, uid)
+	start := func(form url.Values) *httptest.ResponseRecorder {
+		return socialRun(t, sm, store, d.socialBegin, formPost("/auth/google", "google", form), cookies)
+	}
+	for _, form := range []url.Values{{}, {"password": {"not the password"}}} {
+		if rec := start(form); rec.Code != http.StatusBadRequest {
+			t.Errorf("비밀번호 %q 로 연결 시작 = HTTP %d (Location %q), want 400",
+				form.Get("password"), rec.Code, rec.Header().Get("Location"))
+		}
+	}
+	rec := start(url.Values{"password": {"correct horse battery"}})
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "https://provider.example.com/") {
+		t.Errorf("맞는 비밀번호 = HTTP %d Location %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+// 해제도 비밀번호를 다시 받는다 (D15 5.3-1 「P-111 소셜 해제」).
+func TestSocialUnlinkAsksForThePassword(t *testing.T) {
+	d, store, sm := socialFixture(t, fakeProvider{name: "google", uid: "u1"}, true)
+	ctx := context.Background()
+	hash, _ := auth.HashPassword("correct horse battery")
+	uid, err := store.CreateUser(ctx, "me@example.com", hash, "나")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkSocial(ctx, uid, "google", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	cookies := loggedIn(t, sm, store, uid)
+	unlink := func(form url.Values) int {
+		return socialRun(t, sm, store, d.connectionsAction, formPost("/me/connections", "", form), cookies).Code
+	}
+	if code := unlink(url.Values{"provider": {"google"}}); code != http.StatusBadRequest {
+		t.Errorf("비밀번호 없이 해제 = HTTP %d, want 400", code)
+	}
+	if links, _ := store.SocialAccounts(ctx, uid); len(links) != 1 {
+		t.Fatalf("거부했는데 연결이 사라졌다: %+v", links)
+	}
+	if code := unlink(url.Values{"provider": {"google"}, "password": {"correct horse battery"}}); code != http.StatusSeeOther {
+		t.Errorf("맞는 비밀번호로 해제 = HTTP %d, want 303", code)
+	}
+}
+
+// 비밀번호가 없는 계정은 받을 비밀번호가 없다 — 방금(15분 안) 로그인했어야 한다.
+func TestPasswordlessAccountLinksOnlyRightAfterLogin(t *testing.T) {
+	d, store, sm := socialFixture(t, fakeProvider{name: "google", uid: "u1"}, true)
+	ctx := context.Background()
+	uid, err := store.CreateUser(ctx, "s@example.com", "", "소셜만")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkSocial(ctx, uid, "kakao", "kakao-uid"); err != nil {
+		t.Fatal(err)
+	}
+	cookies := loggedIn(t, sm, store, uid)
+	start := func() int {
+		return socialRun(t, sm, store, d.socialBegin, formPost("/auth/google", "google", url.Values{}), cookies).Code
+	}
+	if code := start(); code != http.StatusSeeOther {
+		t.Errorf("방금 로그인한 계정 = HTTP %d, want 303", code)
+	}
+	d.now = func() time.Time { return time.Now().Add(20 * time.Minute) }
+	if code := start(); code != http.StatusBadRequest {
+		t.Errorf("로그인 20분 뒤 = HTTP %d, want 400 — 다시 로그인해야 한다", code)
 	}
 }
