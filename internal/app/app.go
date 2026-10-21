@@ -582,15 +582,13 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 				} else if n > 0 {
 					log.Info("결제대기 만료", "orders", n)
 				}
-				// 입금 기한이 지난 가상계좌 주문 (D14: 입금대기 → 결제실패). PG 에 묻는다 —
-				// 결제사가 설정되지 않았으면 입금대기 주문도 생기지 않는다.
-				if _, gw := pgAdapter(); gw != nil {
-					n, err := commerceStore.ExpireDepositOrders(settingCtx, gw, time.Now(), 20)
-					if err != nil {
-						log.Warn("입금 기한 만료", "err", err)
-					} else if n > 0 {
-						log.Info("입금 기한 만료", "orders", n)
-					}
+				// 입금 기한이 지난 가상계좌 주문 (D14: 입금대기 → 결제실패). 기한이 지난 것은 PG 에
+				// 묻고(결제사가 꺼져 있으면 건너뛴다), 결제가 이미 닫힌 입금대기는 그냥 놓는다.
+				_, gw := pgAdapter()
+				if n, err := commerceStore.ExpireDepositOrders(settingCtx, gw, time.Now(), 20); err != nil {
+					log.Warn("입금 기한 만료", "err", err)
+				} else if n > 0 {
+					log.Info("입금 기한 만료", "orders", n)
 				}
 				select {
 				case <-stopExpire:

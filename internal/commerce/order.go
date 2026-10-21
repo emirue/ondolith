@@ -2,7 +2,6 @@ package commerce
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -655,22 +654,15 @@ const DepositGrace = 10 * time.Minute
 // 그 화살표는 표에만 있었다 — 입금하지 않는 가상계좌 주문이 재고를 영원히 잡았고,
 // 그것은 돈 없이 재고를 잠그는 길이었다 (2026-10-21 재점검).
 //
-// 기한은 발급 응답의 virtualAccount.dueDate 다. 기한 + DepositGrace 가 지난 것만 PG 에
-// 묻고, PG 가 입금됐다(DONE)고 하지 않을 때만 놓는다 — 기한이 지난 가상계좌에는
-// 입금할 수 없으므로 그 뒤의 「대기」는 오지 않을 입금이다. 기한을 읽지 못하면 잴 수
-// 없어 손대지 않는다. 한 건의 실패가 나머지를 막지 않는다; 첫 오류를 돌려준다.
+// 기한은 발급 응답의 virtualAccount.dueDate 이고 SQL 이 거른다(DueDepositOrders). 기한 +
+// DepositGrace 가 지난 것만 PG 에 묻고, PG 가 입금됐다(DONE)고 하지 않을 때만 놓는다 —
+// 기한이 지난 가상계좌에는 입금할 수 없으므로 그 뒤의 「대기」는 오지 않을 입금이다.
+// 묻고도 닫지 못한 것(조회 실패, DONE 인데 웹훅이 아직)은 뒤로 보내 앞줄이 나머지를 막지
+// 않게 한다. 한 건의 실패가 나머지를 막지 않고, 첫 오류를 돌려준다.
 //
-// ponytail: 오래된 순 limit 건만 본다. 가상계좌 유효 시간이 같으면 오래된 것이 먼저
-// 기한을 넘긴다; 주문마다 크게 다르면 기한을 열로 저장해 SQL 에서 거른다.
+// 결제가 이미 닫혔는데 입금대기에 남은 주문(이 개정 전의 A-508)도 여기서 놓는다 — 그쪽은
+// PG 에 물을 것이 없어 gw 가 없어도 돈다.
 func (s *Store) ExpireDepositOrders(ctx context.Context, gw Gateway, now time.Time, limit int) (int, error) {
-	if gw == nil {
-		return 0, nil
-	}
-	rows, err := s.q.DepositPendingOrders(ctx, commerceq.DepositPendingOrdersParams{
-		Status: string(StatusDepositPending), Limit: int32(limit)})
-	if err != nil {
-		return 0, err
-	}
 	n := 0
 	var first error
 	keep := func(err error) {
@@ -678,23 +670,44 @@ func (s *Store) ExpireDepositOrders(ctx context.Context, gw Gateway, now time.Ti
 			first = err
 		}
 	}
-	for _, r := range rows {
-		due, ok := depositDue(r.RawResponse)
-		if !ok || now.Before(due.Add(DepositGrace)) {
-			continue
-		}
-		callCtx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
-		got, err := gw.Get(callCtx, r.PaymentKey)
-		cancel()
+	if gw != nil {
+		rows, err := s.q.DueDepositOrders(ctx, commerceq.DueDepositOrdersParams{
+			Status: string(StatusDepositPending), Before: now.Add(-DepositGrace), Limit: int32(limit)})
 		if err != nil {
-			keep(err)
-			continue
+			return 0, err
 		}
-		// 다른 주문의 답이거나 입금됐으면 놓지 않는다 — 결제완료는 웹훅·A-508 이 옮긴다.
-		if got == nil || got.OrderNo != r.OrderNo || got.Status == PaymentApproved {
-			continue
+		for _, r := range rows {
+			callCtx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
+			got, err := gw.Get(callCtx, r.PaymentKey)
+			cancel()
+			// 다른 주문의 답이거나 입금됐으면 놓지 않는다 — 결제완료는 웹훅·A-508 이 옮긴다.
+			if err != nil || got == nil || got.OrderNo != r.OrderNo || got.Status == PaymentApproved {
+				if err != nil {
+					keep(err)
+				}
+				if terr := s.q.TouchPayment(ctx, r.PaymentID); terr != nil {
+					keep(terr)
+				}
+				continue
+			}
+			released, err := s.expireDeposit(ctx, r.OrderID, r.PaymentID, got.Raw)
+			if err != nil {
+				keep(err)
+				continue
+			}
+			if released {
+				n++
+			}
 		}
-		released, err := s.expireDeposit(ctx, r.OrderID, r.PaymentID, got.Raw)
+	}
+	ids, err := s.q.StrandedDepositOrders(ctx, commerceq.StrandedDepositOrdersParams{
+		Status: string(StatusDepositPending), Limit: int32(limit)})
+	if err != nil {
+		keep(err)
+		return n, first
+	}
+	for _, id := range ids {
+		released, err := s.releaseStranded(ctx, id)
 		if err != nil {
 			keep(err)
 			continue
@@ -706,27 +719,30 @@ func (s *Store) ExpireDepositOrders(ctx context.Context, gw Gateway, now time.Ti
 	return n, first
 }
 
-// kst is Toss's clock. dueDate 는 오프셋 없이 오기도 한다(문서의 모양이
-// `yyyy-MM-dd'T'HH:mm:ss`). 고정 오프셋이라 바이너리에 tzdata 가 없어도 된다.
-var kst = time.FixedZone("KST", 9*3600)
-
-// depositDue reads virtualAccount.dueDate from a stored confirm response.
-func depositDue(raw []byte) (time.Time, bool) {
-	var v struct {
-		VirtualAccount *struct {
-			DueDate string `json:"dueDate"`
-		} `json:"virtualAccount"`
+// releaseStranded lets go of a 입금대기 order that no live payment can close.
+func (s *Store) releaseStranded(ctx context.Context, orderID string) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
 	}
-	if json.Unmarshal(raw, &v) != nil || v.VirtualAccount == nil {
-		return time.Time{}, false
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	status, err := q.LockOrderStatus(ctx, orderID)
+	if err != nil {
+		return false, err
 	}
-	if t, err := time.Parse(time.RFC3339, v.VirtualAccount.DueDate); err == nil {
-		return t, true
+	if Status(status) != StatusDepositPending {
+		return false, nil
 	}
-	if t, err := time.ParseInLocation("2006-01-02T15:04:05", v.VirtualAccount.DueDate, kst); err == nil {
-		return t, true
+	// 고른 뒤 결제가 다시 살아났을 수 있다(재결제는 없지만 손으로 고친 DB). 잠금 아래에서 다시 본다.
+	live, err := q.HasLiveOrderPayment(ctx, orderID)
+	if err != nil || live {
+		return false, err
 	}
-	return time.Time{}, false
+	if err := s.releaseUnpaid(ctx, tx, orderID, StatusDepositPending); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }
 
 // expireDeposit closes one 입금대기 order under its lock. released is false when

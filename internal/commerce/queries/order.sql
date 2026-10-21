@@ -123,12 +123,37 @@ WHERE o.status = sqlc.arg('status') AND o.created_at < sqlc.arg('before')
                   WHERE p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기')
 ORDER BY o.created_at LIMIT sqlc.arg('limit')::int;
 
--- name: DepositPendingOrders :many
--- 입금대기 주문과 그 살아 있는 결제. 입금 기한은 발급 응답 원문(virtualAccount.dueDate)에 있다.
-SELECT o.id AS order_id, o.order_no, p.id AS payment_id, p.payment_key, p.raw_response
-FROM orders o JOIN payments p ON p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기'
+-- name: DueDepositOrders :many
+-- 입금 기한(발급 응답 원문의 virtualAccount.dueDate)이 before 보다 앞인 입금대기 주문과 그 살아
+-- 있는 결제. 기한은 오프셋이 있으면 그대로, 없으면 한국 시각으로 읽고, 모양이 아니면 고르지
+-- 않는다(잴 수 없는 것은 닫지 않는다). **확인 시각(updated_at) 순이다** — 확인하고 닫지 못한
+-- 것은 TouchPayment 가 뒤로 보내, 앞줄 몇 건이 나머지를 영영 막지 않는다.
+SELECT o.id AS order_id, o.order_no, p.id AS payment_id, p.payment_key
+FROM orders o
+JOIN payments p ON p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기'
+CROSS JOIN LATERAL (SELECT p.raw_response #>> '{virtualAccount,dueDate}' AS d) v
 WHERE o.status = sqlc.arg('status')
+  AND CASE
+        WHEN v.d ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$' THEN v.d::timestamptz
+        WHEN v.d ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$' THEN v.d::timestamp AT TIME ZONE 'Asia/Seoul'
+      END < sqlc.arg('before')::timestamptz
+ORDER BY p.updated_at LIMIT sqlc.arg('limit')::int;
+
+-- name: TouchPayment :exec
+UPDATE payments SET updated_at = now() WHERE id = $1;
+
+-- name: StrandedDepositOrders :many
+-- 입금대기인데 살아 있는 결제(대기·승인)가 없는 주문 — 이 개정 전의 A-508 이 결제만 '실패' 로
+-- 내린 것. 어느 만료도 집지 않아 재고를 잡고 있다.
+SELECT o.id FROM orders o
+WHERE o.status = sqlc.arg('status')
+  AND NOT EXISTS (SELECT 1 FROM payments p
+                  WHERE p.order_id = o.id AND p.kind = '주문결제' AND p.status IN ('대기', '승인'))
 ORDER BY o.created_at LIMIT sqlc.arg('limit')::int;
+
+-- name: HasLiveOrderPayment :one
+SELECT EXISTS (SELECT 1 FROM payments
+               WHERE order_id = $1 AND kind = '주문결제' AND status IN ('대기', '승인'));
 
 -- name: LockOrderStatus :one
 SELECT status FROM orders WHERE id = $1 FOR UPDATE;

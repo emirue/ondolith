@@ -412,3 +412,92 @@ func TestResolvingAFailedDepositReleasesTheOrder(t *testing.T) {
 		t.Errorf("재고 %d, want %d", got, held+1)
 	}
 }
+
+// keyedGateway 는 결제키마다 다르게 답한다 — fail 의 키는 조회가 실패한다.
+type keyedGateway struct {
+	*fakeGateway
+	fail string
+	resp map[string]*Payment
+}
+
+func (g keyedGateway) Get(_ context.Context, key string) (*Payment, error) {
+	if key == g.fail {
+		return nil, errors.New("조회 실패")
+	}
+	return g.resp[key], nil
+}
+
+// **닫지 못한 앞줄이 뒤의 만료를 막지 않는다.** 오래된 순 몇 건만 보는데, 조회가 늘 실패하는
+// 주문(키를 바꾼 뒤의 옛 결제키 등)이 앞에 쌓이면 그 뒤 가상계좌는 영영 만료되지 않았다
+// (2026-10-21 3차 점검). 확인하고 닫지 못한 것은 뒤로 간다.
+func TestDepositExpiryIsNotBlockedByAnUnanswerableHead(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	due := time.Now().Add(-time.Hour).Truncate(time.Second)
+	head, totalHead := seedOrder(t, s, pool, "va-head", 1)
+	next, totalNext := seedOrder(t, s, pool, "va-next", 1)
+	for _, o := range []struct {
+		no, key string
+		total   int
+	}{{head, "pk-head", totalHead}, {next, "pk-next", totalNext}} {
+		gw := vaGateway("s3cret", due)
+		gw.response.PaymentKey = o.key
+		if _, err := s.ConfirmPayment(ctx, gw, "toss", o.no, o.key, o.total, time.Now()); !errors.Is(err, ErrDepositPending) {
+			t.Fatalf("가상계좌 발급 %s = %v", o.no, err)
+		}
+	}
+	gw := keyedGateway{fakeGateway: &fakeGateway{}, fail: "pk-head",
+		resp: map[string]*Payment{"pk-next": {PaymentKey: "pk-next", OrderNo: next, Status: PaymentPending}}}
+	// 한 번에 한 건씩. 첫 회는 앞줄(조회 실패)에서 멈춘다.
+	if _, err := s.ExpireDepositOrders(ctx, gw, time.Now(), 1); err == nil {
+		t.Fatal("조회 실패가 오류로 올라오지 않았다")
+	}
+	// 둘째 회는 그 뒤의 것을 닫는다.
+	if n, err := s.ExpireDepositOrders(ctx, gw, time.Now(), 1); err != nil || n != 1 {
+		t.Fatalf("둘째 회 = %d, %v — 앞줄이 막고 있다", n, err)
+	}
+	if got := statusOf(t, s, next); got != StatusPaymentFailed {
+		t.Errorf("뒤의 주문 %s, want %s", got, StatusPaymentFailed)
+	}
+	if got := statusOf(t, s, head); got != StatusDepositPending {
+		t.Errorf("조회가 실패한 주문이 %s 가 됐다 — 근거 없이 닫았다", got)
+	}
+}
+
+// **결제가 이미 닫혔는데 입금대기에 남은 주문도 놓는다.** 이 개정 전의 A-508 은 입금대기 주문의
+// 결제를 '실패' 로만 내렸다 — 그 주문은 어느 만료도 집지 않아 재고를 잡은 채 남아 있다.
+func TestStrandedDepositOrderIsReleased(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "va-stranded", 1)
+	held := stockOfOrder(t, pool, orderNo)
+	depositOrder(t, s, pool, orderNo, total, "s3cret")
+	if _, err := pool.Exec(ctx, `UPDATE payments SET status = '실패' WHERE kind = '주문결제'`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.ExpireDepositOrders(ctx, &fakeGateway{}, time.Now(), 10); err != nil || n != 1 {
+		t.Fatalf("고아 입금대기 정리 = %d, %v", n, err)
+	}
+	if got := statusOf(t, s, orderNo); got != StatusPaymentFailed {
+		t.Errorf("주문 %s, want %s", got, StatusPaymentFailed)
+	}
+	if got := stockOfOrder(t, pool, orderNo); got != held+1 {
+		t.Errorf("재고 %d, want %d", got, held+1)
+	}
+}
+
+// 기한이 오프셋과 함께 와도(RFC 3339) 읽는다 — 문서의 모양과 실제 응답이 다를 수 있다.
+func TestDepositDueDateWithAnOffsetIsRead(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "va-offset", 1)
+	gw := pendingGateway("s3cret")
+	gw.response.Raw = []byte(`{"virtualAccount":{"dueDate":"` + time.Now().Add(-time.Hour).Format(time.RFC3339) + `"}}`)
+	if _, err := s.ConfirmPayment(ctx, gw, "toss", orderNo, "pk-va", total, time.Now()); !errors.Is(err, ErrDepositPending) {
+		t.Fatalf("가상계좌 발급 = %v", err)
+	}
+	lookup := &fakeGateway{getResponse: &Payment{PaymentKey: "pk-va", OrderNo: orderNo, Status: PaymentPending}}
+	if n, err := s.ExpireDepositOrders(ctx, lookup, time.Now(), 10); err != nil || n != 1 {
+		t.Fatalf("오프셋이 있는 기한 = %d, %v", n, err)
+	}
+}
