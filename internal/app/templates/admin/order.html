@@ -22,7 +22,7 @@
       <tbody>
         {{range .Items}}
         <tr><td>{{.ProductName}}</td><td>{{.OptionLabel}}</td>
-            <td>{{money .UnitPrice}}</td><td>{{.Quantity}}</td><td>{{money .LineAmount}}</td></tr>
+            <td>{{money .UnitPrice}}</td><td>{{.Quantity}}{{if .Settled}} <small>(환불·반품 {{.Settled}} · 남은 {{.RemainingQty}})</small>{{end}}</td><td>{{money .LineAmount}}</td></tr>
         {{end}}
       </tbody>
     </table>
