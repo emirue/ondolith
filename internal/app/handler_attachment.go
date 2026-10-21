@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -62,11 +63,16 @@ func (d *boardDeps) attachmentDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := d.attachments.Open(at)
-	if err != nil {
+	f, err := d.attachments.Open(ctx, at)
+	if errors.Is(err, fs.ErrNotExist) {
 		// The row exists and the file does not. A-309 allows that state, so it
 		// is a 404 rather than a 500: nothing is broken, the file is gone.
 		d.notFound(w, r)
+		return
+	}
+	if err != nil {
+		// 버킷이 답하지 않는 것은 없는 것이 아니다 (FR-717) — 404 로 그리면 지워진 줄 안다.
+		d.serverError(w, r, err)
 		return
 	}
 	defer f.Close()

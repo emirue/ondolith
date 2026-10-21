@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
-	"path/filepath"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,14 +27,14 @@ type Media struct {
 	CreatedAt  time.Time
 }
 
-// MediaStore keeps editor pictures under the upload root.
+// MediaStore keeps editor pictures where uploads live (Files — upload_dir 또는 버킷, FR-717).
 type MediaStore struct {
 	store *Store
-	root  string
+	files *Files
 }
 
-// MediaIn binds the media table to an upload directory.
-func (s *Store) MediaIn(root string) *MediaStore { return &MediaStore{store: s, root: root} }
+// MediaIn binds the media table to the upload storage.
+func (s *Store) MediaIn(files *Files) *MediaStore { return &MediaStore{store: s, files: files} }
 
 // Save validates, processes and stores one picture.
 //
@@ -63,13 +61,12 @@ func (m *MediaStore) Save(ctx context.Context, uploaderID, name string, r io.Rea
 		return Media{}, err
 	}
 
-	dir := path.Join("media", now.UTC().Format("2006/01"))
-	rel := path.Join(dir, newUUID())
-	if err := m.write(dir, rel, p.Display); err != nil {
+	rel := path.Join("media", now.UTC().Format("2006/01"), newUUID())
+	if err := m.files.Write(ctx, rel, p.Display); err != nil {
 		return Media{}, err
 	}
-	if err := m.write(dir, rel+"-thumb", p.Thumb); err != nil {
-		_ = RemoveUpload(m.root, rel)
+	if err := m.files.Write(ctx, rel+"-thumb", p.Thumb); err != nil {
+		_ = m.files.Remove(ctx, rel)
 		return Media{}, err
 	}
 	thumbMIME := "image/jpeg"
@@ -80,38 +77,13 @@ func (m *MediaStore) Save(ctx context.Context, uploaderID, name string, r io.Rea
 		UploaderID: strPtr(uploaderID), StoredPath: rel, MimeType: p.MIME, ThumbMime: thumbMIME,
 		Width: int32(p.Width), Height: int32(p.Height), ByteSize: int64(len(p.Display))})
 	if err != nil {
-		_ = RemoveUpload(m.root, rel)
-		_ = RemoveUpload(m.root, rel+"-thumb")
+		_ = m.files.Remove(ctx, rel)
+		_ = m.files.Remove(ctx, rel+"-thumb")
 		return Media{}, err
 	}
 	return Media{ID: row.ID, UploaderID: uploaderID, StoredPath: rel, MIMEType: p.MIME,
 		ThumbMIME: thumbMIME, Width: p.Width, Height: p.Height, ByteSize: int64(len(p.Display)),
 		CreatedAt: row.CreatedAt}, nil
-}
-
-// write puts b at rel under the root, through os.Root (첨부와 같은 탈출 방지, NFR-201).
-func (m *MediaStore) write(dir, rel string, b []byte) error {
-	rt, err := os.OpenRoot(m.root)
-	if err != nil {
-		return err
-	}
-	defer rt.Close()
-	// 첨부와 같이 앱 계정만 읽는다 (StoreUpload, D60 3절).
-	if err := rt.MkdirAll(filepath.FromSlash(dir), 0o700); err != nil {
-		return err
-	}
-	f, err := rt.OpenFile(filepath.FromSlash(rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(b)
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		_ = rt.Remove(filepath.FromSlash(rel))
-	}
-	return werr
 }
 
 // ByID reads one picture's row, or ErrNotFound.
@@ -129,10 +101,10 @@ func (m *MediaStore) ByID(ctx context.Context, id string) (Media, error) {
 }
 
 // Open opens the display file, or the thumbnail.
-func (m *MediaStore) Open(md Media, thumb bool) (*os.File, error) {
+func (m *MediaStore) Open(ctx context.Context, md Media, thumb bool) (io.ReadSeekCloser, error) {
 	rel := md.StoredPath
 	if thumb {
 		rel += "-thumb"
 	}
-	return OpenUpload(m.root, rel)
+	return m.files.Open(ctx, rel)
 }

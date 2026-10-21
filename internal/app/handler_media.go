@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"io/fs"
 	"net/http"
 
 	"github.com/emirue/ondolith/internal/admin"
@@ -24,9 +25,13 @@ func (d *boardDeps) mediaServe(thumb bool) http.HandlerFunc {
 			d.serverError(w, r, err)
 			return
 		}
-		f, err := d.media.Open(md, thumb)
-		if err != nil {
+		f, err := d.media.Open(r.Context(), md, thumb)
+		if errors.Is(err, fs.ErrNotExist) {
 			d.notFound(w, r) // 행은 있고 파일이 없다 — 고장이 아니라 없는 것이다 (P-211)
+			return
+		}
+		if err != nil {
+			d.serverError(w, r, err) // 버킷 불통은 없는 것이 아니다 (P-211)
 			return
 		}
 		defer f.Close()

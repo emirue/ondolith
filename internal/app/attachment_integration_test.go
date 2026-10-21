@@ -19,7 +19,7 @@ var pngFixture = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + strings.Repeat("
 // attach uploads a file to a post through the store, returning the row id.
 func attach(t *testing.T, pool *pgxpool.Pool, root, postID, name string) string {
 	t.Helper()
-	got, err := content.NewStore(pool).AttachmentsIn(root).
+	got, err := content.NewStore(pool).AttachmentsIn(content.LocalFiles(root)).
 		Save(context.Background(), postID, name, bytes.NewReader(pngFixture))
 	if err != nil {
 		t.Fatal(err)

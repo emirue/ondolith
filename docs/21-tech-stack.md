@@ -64,6 +64,11 @@
 | `golang.org/x/oauth2` | `v0.27.0` | **시험만** — 소셜 로그인 통합 시험이 토큰 응답을 흉내 낸다 | goth 가 이미 끌어오는 모듈이다. 시험 파일이 직접 가져다 써서 `go mod tidy` 가 직접 의존성으로 적는다 |
 | `github.com/markbates/goth` | `v1.82.0` | 소셜 로그인 OAuth2 (FR-208) | 프로바이더별 인가 흐름은 자작 금지 대상이다 (NFR-201). **`gothic` 하위 패키지는 쓰지 않는다** — gorilla/sessions 를 쓰는데 우리 세션은 scs 라 (NFR-204) 두 스토어가 한 요청에 있으면 어느 쪽이 진짜 로그인 상태인지가 코드마다 달라진다. `goth.Provider`·`goth.Session` 만 쓴다. 2026-08-07 조회: OSV 취약점 없음 |
 
+| `github.com/aws/aws-sdk-go-v2` | `v1.47.3` | S3 호환 저장소의 공통부 — 설정·HTTP 전송·재시도 (FR-717) | 아래 `service/s3` 가 요구한다. 요청 서명(SigV4)은 인증이라 자작 금지 대상이다(NFR-201, 4절 3번). `config` 패키지(공유 설정 파일·환경변수·IMDS 를 읽는다)는 쓰지 않는다 — 자격증명은 A-210 의 값뿐이다 ([D60](60-security.md) 「설정값을 어디에 두는가」의 「두지 않는 곳: 환경변수」). 2026-10-21 조회: OSV 취약점 없음 |
+| `github.com/aws/aws-sdk-go-v2/service/s3` | `v1.114.3` | S3 호환 버킷에 올리기·읽기(Range)·지우기 (FR-717, `internal/s3store`) | AWS 공식 SDK. 엔드포인트·경로 방식 주소만 바꾸면 Lightsail 버킷·R2·MinIO 에 그대로 붙는다. 2026-10-21 조회: OSV 2건(`GHSA-xmrv-pmrh-hhx2`·`GO-2026-5764`, eventstream 해석기 panic)은 `v1.97.3`·eventstream `v1.7.8` 에서 수정됨 — 이 판과 딸린 eventstream `v1.7.22` 는 해당 없음 |
+| `github.com/aws/aws-sdk-go-v2/credentials` | `v1.20.9` | 고정 액세스 키·시크릿 키를 SDK 에 넘긴다 | A-210 에 넣은 키를 그대로 쓴다. 2026-10-21 조회: OSV 취약점 없음 |
+| `github.com/aws/smithy-go` | `v1.28.5` | 서비스 오류 코드 읽기 (`smithy.APIError`) | SDK 가 이미 끌어오는 모듈이다. A-210 이 거부 사유(`NoSuchBucket` 등)를 코드로 보여 준다. 2026-10-21 조회: OSV 취약점 없음 |
+
 **Phase 1에 추가 예정** — 착수 시 버전과 취약점을 다시 조회한다
 
 | 모듈 | 용도 | 근거 |

@@ -139,8 +139,9 @@ func messageID(from string) string {
 	return "<" + rand.Text() + "@" + domain + ">"
 }
 
-// ErrMailHostBlocked is what an SMTP host inside 169.254.0.0/16 gets.
-var ErrMailHostBlocked = errors.New("app: SMTP 호스트로 링크 로컬 주소를 쓸 수 없습니다")
+// ErrMailHostBlocked is what a host inside 169.254.0.0/16 gets — SMTP 호스트(A-205)와
+// 파일 저장소 엔드포인트(A-210)가 같은 판정을 쓴다 (D60).
+var ErrMailHostBlocked = errors.New("app: 링크 로컬 주소(169.254.0.0/16)에는 접속하지 않습니다")
 
 // metadataNet is the link-local range cloud metadata services answer on
 // (169.254.169.254). Only this range is refused: private and loopback relays

@@ -152,6 +152,11 @@ func (d *Deps) ProductDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// 이미지 파일까지 지운다. 행은 CASCADE 로 가지만 파일은 따라가지 않는다.
 	err := d.Images.DeleteProduct(r.Context(), id)
+	if errors.Is(err, content.ErrFilesLeft) {
+		// 상품은 갔고 이미지 파일 일부가 남았다 — A-309 처럼 경고만 남기고 성공으로 넘긴다.
+		d.Logger.Warn("상품 이미지 파일 삭제", "product", id, "err", err)
+		err = nil
+	}
 	switch {
 	case errors.Is(err, commerce.ErrNotFound):
 		http.NotFound(w, r)

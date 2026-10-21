@@ -199,6 +199,7 @@
 | A-207 | 약관 관리 | `/admin/terms` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-619 |
 | A-208 | 사업자 정보 설정 | `/admin/settings/business` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-711 |
 | A-209 | 결제 설정 | `/admin/settings/payment` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-605, FR-607 |
+| A-210 | 파일 저장소 설정 | `/admin/settings/storage` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-717 |
 
 ### A-3xx 콘텐츠 관리
 
