@@ -246,10 +246,6 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 	d.renderSettings(w, r, "admin/settings.html", siteSettingKeys, http.StatusOK, "")
 }
 
-// assemblyKeys are read when the operating tree is built, not per request.
-// Changing one is what makes A-201 call Rebuild.
-var assemblyKeys = []string{"site.type", "admin.theme"}
-
 // ogImageURL is D19 A-201's 「스킴 허용목록 http/https 또는 내부 상대경로」. 빈 값은
 // 「없음」이다. `//호스트`·`/\호스트` 는 브라우저가 다른 호스트로 읽는 경로라 내부가 아니다.
 func ogImageURL(v string) bool {
