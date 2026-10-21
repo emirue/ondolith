@@ -135,18 +135,38 @@ func (q *Queries) UnlinkSocial(ctx context.Context, arg UnlinkSocialParams) (int
 	return result.RowsAffected(), nil
 }
 
-const userIDBySocial = `-- name: UserIDBySocial :one
-SELECT user_id FROM social_accounts WHERE provider = $1 AND provider_uid = $2
+const userBySocialLink = `-- name: UserBySocialLink :one
+SELECT u.id, u.email, u.display_name, u.is_active, u.sessions_valid_from, u.email_verified_at
+FROM social_accounts s JOIN users u ON u.id = s.user_id
+WHERE s.provider = $1 AND s.provider_uid = $2
 `
 
-type UserIDBySocialParams struct {
+type UserBySocialLinkParams struct {
 	Provider    string
 	ProviderUid string
 }
 
-func (q *Queries) UserIDBySocial(ctx context.Context, arg UserIDBySocialParams) (string, error) {
-	row := q.db.QueryRow(ctx, userIDBySocial, arg.Provider, arg.ProviderUid)
-	var user_id string
-	err := row.Scan(&user_id)
-	return user_id, err
+type UserBySocialLinkRow struct {
+	ID                string
+	Email             string
+	DisplayName       string
+	IsActive          bool
+	SessionsValidFrom time.Time
+	EmailVerifiedAt   *time.Time
+}
+
+// 연결과 사용자(기준 시각 포함)를 한 문장으로 읽는다 — 둘 사이에 A-402 회수가 커밋되면 연결은
+// 옛 것, 기준 시각은 새 것을 읽어 회수 뒤에도 사는 세션이 나온다 (User.Cutoff).
+func (q *Queries) UserBySocialLink(ctx context.Context, arg UserBySocialLinkParams) (UserBySocialLinkRow, error) {
+	row := q.db.QueryRow(ctx, userBySocialLink, arg.Provider, arg.ProviderUid)
+	var i UserBySocialLinkRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.DisplayName,
+		&i.IsActive,
+		&i.SessionsValidFrom,
+		&i.EmailVerifiedAt,
+	)
+	return i, err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/alexedwards/scs/v2"
 
@@ -92,18 +93,6 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The session's auth_at is taken BEFORE the password hash is read. A revoke
-	// (A-402·비밀번호 변경) that lands after the read then moves the cutoff past
-	// this stamp and the new session dies on its next request; stamping after
-	// the slow bcrypt compare let a login that read the old hash outlive the
-	// revoke (2026-10-21 3차 점검). Stamped from the database clock — see
-	// auth.Store.Now.
-	authAt, err := d.store.Now(ctx)
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-		return
-	}
-
 	// The password length floor is NOT applied here: it governs setting a
 	// password, and applying it at login would lock out every account created
 	// before the rule.
@@ -146,7 +135,10 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.sm.Put(ctx, sessUserID, u.ID)
-	stampAuthAt(d.sm, ctx, authAt)
+	// auth_at 은 해시와 같은 문장에서 읽은 기준 시각이다 (auth.User.Cutoff) — 그 뒤의 회수가
+	// 커밋되면 이 세션이 끊긴다. 재인증 창(15분)은 로그인한 지금부터 잰다.
+	stampAuthAt(d.sm, ctx, u.Cutoff())
+	putTime(d.sm, ctx, sessReauth, time.Now())
 
 	// Successful login clears the ACCOUNT counter: someone who mistyped four
 	// times must not stay throttled afterwards. **IP 버킷은 지우지 않는다** — 지우면

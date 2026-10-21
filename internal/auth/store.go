@@ -42,6 +42,17 @@ type User struct {
 	EmailVerifiedAt   *time.Time
 }
 
+// Cutoff is the sessions_valid_from this read saw, as the value a new session's
+// auth_at must carry (D15 5.4).
+//
+// A login stamps THIS, not the time of the login. A revoke is a transaction
+// whose cutoff is its start time and whose changes other connections see only
+// at commit — a login in between reads the old hash, and stamped "now" it would
+// sit after the new cutoff and outlive the revoke (2026-10-21 5차 점검). Stamped
+// with the cutoff it read alongside the credential, any later move of the
+// cutoff — a revoke, a password change elsewhere, a deactivation — ends it.
+func (u *User) Cutoff() DBTime { return DBTime{u.SessionsValidFrom} }
+
 // LoadPermissions returns the caller's whole permission set in ONE query.
 //
 // One query is the reason D15 4.3 can say "judging every menu entry costs no

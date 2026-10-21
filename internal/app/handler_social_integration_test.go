@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -708,5 +710,57 @@ func TestSocialCallbackWithProviderTurnedOffDoesNotRender(t *testing.T) {
 	rec := socialRun(t, sm, store, d.socialCallback, req, cookies)
 	if _, failed := socialFailure(t, sm, store, rec, cookies); !failed {
 		t.Errorf("프로바이더가 꺼진 콜백 = HTTP %d Location %q — 콜백 주소에서 그렸다", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+// 소셜 로그인도 같다 — 회수가 커밋되기 전에 연결을 읽어 들어온 세션은 회수 뒤에 죽는다 (D15 5.4).
+func TestSocialLoginDuringAnUncommittedRevokeDoesNotSurviveIt(t *testing.T) {
+	d, store, sm := socialFixture(t, fakeProvider{name: "google", uid: "u1"}, true)
+	ctx := context.Background()
+	hash, _ := auth.HashPassword("correct horse battery")
+	uid, err := store.CreateUser(ctx, "race@example.com", hash, "경합")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkSocial(ctx, uid, "google", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.New(ctx, os.Getenv(dsnEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = '', sessions_valid_from = now() WHERE id = $1`, uid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM social_accounts WHERE user_id = $1`, uid); err != nil {
+		t.Fatal(err)
+	}
+
+	cookies, state := beginAndGetState(t, d, sm, store, "google", nil)
+	req := httptest.NewRequest(http.MethodGet, "/auth/google/callback?code=x&state="+url.QueryEscape(state), nil)
+	req.SetPathValue("provider", "google")
+	rec := socialRun(t, sm, store, d.socialCallback, req, cookies)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+		t.Fatalf("회수가 커밋되기 전의 소셜 로그인 = HTTP %d %q — 전제가 깨졌다", rec.Code, rec.Header().Get("Location"))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	next := rec.Result().Cookies()
+	if len(next) == 0 {
+		next = cookies
+	}
+	var authed bool
+	socialRun(t, sm, store, func(_ http.ResponseWriter, r *http.Request) {
+		authed = ActorFrom(r.Context()).IsAuthenticated()
+	}, httptest.NewRequest(http.MethodGet, "/me", nil), next)
+	if authed {
+		t.Error("회수가 커밋된 뒤에도 그 전에 소셜로 들어온 세션이 살아 있다")
 	}
 }

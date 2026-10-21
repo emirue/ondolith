@@ -48,17 +48,15 @@ func (s *Store) SocialAccounts(ctx context.Context, userID string) ([]SocialAcco
 // 이메일의 로컬 계정에 자동으로 붙이면, 프로바이더 계정 하나를 뚫는 것이 곧
 // 우리 계정을 뚫는 것이 된다 (D18 닫은 결정, D12 P-107).
 func (s *Store) UserBySocial(ctx context.Context, provider, uid string) (*User, error) {
-	id, err := s.q.UserIDBySocial(ctx, authq.UserIDBySocialParams{Provider: provider, ProviderUid: uid})
+	r, err := s.q.UserBySocialLink(ctx, authq.UserBySocialLinkParams{Provider: provider, ProviderUid: uid})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNoUser
 	}
 	if err != nil {
 		return nil, err
 	}
-	u, err := s.FindUserByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
+	u := &User{ID: r.ID, Email: r.Email, DisplayName: r.DisplayName, IsActive: r.IsActive,
+		SessionsValidFrom: r.SessionsValidFrom, EmailVerifiedAt: r.EmailVerifiedAt}
 	// **비활성 계정은 소셜로도 들어올 수 없다.** 로컬 로그인만 막고 여기를
 	// 열어 두면 정지된 계정이 다른 문으로 들어온다.
 	if !u.IsActive {
