@@ -565,7 +565,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 	}))
 
-	// 결제대기 만료 (D14: 결제대기 → 결제실패, 시스템). NFR-103 대로 고루틴이다.
+	// 결제대기·입금대기 만료 (D14: → 결제실패, 시스템). NFR-103 대로 고루틴이다.
 	// AuthWindow 가 지난 주문은 P-408 이 승인을 거부하므로 결제될 길이 없는데,
 	// 그 주문이 차감한 재고는 잡혀 있었다 — 결제 없이 떠난 장바구니마다 재고가
 	// 하나씩 사라졌다. 1분마다 최대 100건.
@@ -581,6 +581,16 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 					log.Warn("결제대기 만료", "err", err)
 				} else if n > 0 {
 					log.Info("결제대기 만료", "orders", n)
+				}
+				// 입금 기한이 지난 가상계좌 주문 (D14: 입금대기 → 결제실패). PG 에 묻는다 —
+				// 결제사가 설정되지 않았으면 입금대기 주문도 생기지 않는다.
+				if _, gw := pgAdapter(); gw != nil {
+					n, err := commerceStore.ExpireDepositOrders(settingCtx, gw, time.Now(), 20)
+					if err != nil {
+						log.Warn("입금 기한 만료", "err", err)
+					} else if n > 0 {
+						log.Info("입금 기한 만료", "orders", n)
+					}
 				}
 				select {
 				case <-stopExpire:

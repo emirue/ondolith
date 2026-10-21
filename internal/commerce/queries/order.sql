@@ -123,6 +123,13 @@ WHERE o.status = sqlc.arg('status') AND o.created_at < sqlc.arg('before')
                   WHERE p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기')
 ORDER BY o.created_at LIMIT sqlc.arg('limit')::int;
 
+-- name: DepositPendingOrders :many
+-- 입금대기 주문과 그 살아 있는 결제. 입금 기한은 발급 응답 원문(virtualAccount.dueDate)에 있다.
+SELECT o.id AS order_id, o.order_no, p.id AS payment_id, p.payment_key, p.raw_response
+FROM orders o JOIN payments p ON p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기'
+WHERE o.status = sqlc.arg('status')
+ORDER BY o.created_at LIMIT sqlc.arg('limit')::int;
+
 -- name: LockOrderStatus :one
 SELECT status FROM orders WHERE id = $1 FOR UPDATE;
 

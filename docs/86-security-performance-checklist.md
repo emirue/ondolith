@@ -122,6 +122,8 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 5.17 | 반품·교환 기간(A-512)을 서버가 배송완료 시각부터 잰다 | `commerce/returns.go` `OpenReturn` | `TestReturnWindowIsEnforced` | ✓ 2026-10-21 에 고침(저장만 되고 읽는 곳이 없었다) |
 | 5.18 | 수량 상한은 `요청 > 주문-소진` — 덧셈이 넘치지 않게 | `discount.go`·`returns.go`·`scan.go` | `TestRefundableAmountRefusesOverRefund`·`TestReturnRefusesAnOverflowingQuantity`·`TestCheckPickRefusesAnOverflowingCount` | ✓ 2026-10-21 에 고침(DB CHECK 가 우연히 막고 있었다) |
 | 5.19 | 웹훅 입금 확인이 조회한 결제의 주문번호를 대조 | `commerce/webhook.go` | `TestDepositWebhookChecksTheLookedUpOrder` | ✓ 2026-10-21 (다층 방어) |
+| 5.20 | 입금 기한이 지난 가상계좌 주문은 결제실패·재고 복원(D14 입금대기 → 결제실패), A-508 실패 반영도 같은 정리 | `commerce/order.go` `ExpireDepositOrders`·`webhook.go` `ResolvePendingPayment` | `TestDepositOrderExpiresAfterItsDueDate`·`TestDepositOrderPaidAtTheGatewayIsNotExpired`·`TestResolvingAFailedDepositReleasesTheOrder` | ✓ 2026-10-21 에 고침(화살표가 표에만 있어 재고를 영원히 잡았다) |
+| 5.21 | 피킹 목록은 환불·반품으로 소진된 수량을 뺀다 | `commerce/queries/scan.sql` `PickList` | `TestPickListLeavesOutWhatWasRefunded` | ✓ 2026-10-21 에 고침(환불한 물건까지 출고됐다) |
 | 5.15 | 웹훅 서명 실패 응답 400 | `handler_webhook.go`·[D19](19-screen-io.md) P-905 | 토스 웹훅 가이드(200 만 성공, 최대 7회 재전송) | ✓ 2026-09-14 확정 |
 | 5.16 | 접수된 환불 건(P-507 구매자 요청·PG 거절로 돌아온 건·결과 불명 건)의 실행·거부 | A-507 `action=execute\|reject` · `commerce/refund.go` `RetryRefund` | `TestAdminExecutesOrRejectsAPendingRefund`·`TestAdminPendingRefundActionsAreReauthedAndScoped`·`TestAdminResendsAnUnknownRefundOnlyWhileTheKeyLives`·`TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives` | ✓ 2026-10-07. 결과 불명(`승인`)은 같은 멱등키로 접수 14일 안에서만 다시 보낸다(토스 키 15일) |
 

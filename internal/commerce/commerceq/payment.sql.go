@@ -25,6 +25,24 @@ func (q *Queries) DeclinePayment(ctx context.Context, arg DeclinePaymentParams) 
 	return err
 }
 
+const declinePendingPayment = `-- name: DeclinePendingPayment :execrows
+UPDATE payments SET status = '실패', raw_response = $2, updated_at = now()
+WHERE id = $1 AND status = '대기'
+`
+
+type DeclinePendingPaymentParams struct {
+	ID          string
+	RawResponse []byte
+}
+
+func (q *Queries) DeclinePendingPayment(ctx context.Context, arg DeclinePendingPaymentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, declinePendingPayment, arg.ID, arg.RawResponse)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const failPaymentByID = `-- name: FailPaymentByID :exec
 UPDATE payments SET status = '실패', updated_at = now() WHERE id = $1
 `

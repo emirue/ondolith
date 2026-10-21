@@ -412,6 +412,17 @@ func (s *Store) ResolvePendingPayment(ctx context.Context, gw Gateway, paymentID
 			ID: paymentID, RawResponse: MaskCardFields(got.Raw)}); err != nil {
 			return "", err
 		}
+		// 입금대기 주문은 여기서 놓는다. 결제대기는 10분 만료가 집지만, 입금대기는 어느
+		// 만료도 '실패' 결제를 집지 않아 재고를 잡은 채 남는다 (ExpireDepositOrders).
+		st, err := q.LockOrderStatus(ctx, p.OrderID)
+		if err != nil {
+			return "", err
+		}
+		if Status(st) == StatusDepositPending {
+			if err := s.releaseUnpaid(ctx, tx, p.OrderID, StatusDepositPending); err != nil {
+				return "", err
+			}
+		}
 		return "", tx.Commit(ctx)
 	}
 	if err := VerifyAmount(int(p.TotalAmount), got.Amount); err != nil {

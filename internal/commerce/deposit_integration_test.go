@@ -3,6 +3,7 @@ package commerce
 import (
 	"context"
 	"errors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"testing"
 	"time"
 )
@@ -302,5 +303,112 @@ func TestOnlyOurPaymentsAreRecorded(t *testing.T) {
 	}
 	if n != 3 {
 		t.Errorf("webhook_events %d행, want 3 — 맞지 않는 알림이 기록됐다", n)
+	}
+}
+
+// vaGateway 는 입금 기한이 due 인 가상계좌를 발급한다. 기한은 토스 문서의 모양
+// (`yyyy-MM-dd'T'HH:mm:ss`, 오프셋 없음 — 한국 시각)으로 싣는다.
+func vaGateway(secret string, due time.Time) *fakeGateway {
+	gw := pendingGateway(secret)
+	gw.response.Raw = []byte(`{"paymentKey":"pk-va","status":"WAITING_FOR_DEPOSIT","virtualAccount":{"dueDate":"` +
+		due.In(time.FixedZone("KST", 9*3600)).Format("2006-01-02T15:04:05") + `"}}`)
+	return gw
+}
+
+func stockOfOrder(t *testing.T, pool *pgxpool.Pool, orderNo string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT v.stock FROM product_variants v
+		JOIN order_items oi ON oi.variant_id = v.id JOIN orders o ON o.id = oi.order_id
+		WHERE o.order_no = $1`, orderNo).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// **입금 기한이 지난 가상계좌 주문은 결제실패가 되고 재고를 놓는다** (D14: 입금대기 →
+// 결제실패, 시스템 「입금 기한 초과」). 표에만 있고 실행하는 코드가 없어, 입금하지 않는
+// 가상계좌 주문이 재고를 영원히 잡았다 — 돈 없이 재고를 잠그는 길이었다 (2026-10-21 재점검).
+func TestDepositOrderExpiresAfterItsDueDate(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "va-exp", 1)
+	held := stockOfOrder(t, pool, orderNo)
+	due := time.Now().Add(time.Hour).Truncate(time.Second)
+	if _, err := s.ConfirmPayment(ctx, vaGateway("s3cret", due), "toss", orderNo, "pk-va", total, time.Now()); !errors.Is(err, ErrDepositPending) {
+		t.Fatalf("가상계좌 발급 = %v", err)
+	}
+	gw := &fakeGateway{getResponse: &Payment{PaymentKey: "pk-va", OrderNo: orderNo, Status: PaymentPending, Amount: total}}
+
+	// 기한 전에는 PG 에 묻지도 않는다.
+	if n, err := s.ExpireDepositOrders(ctx, gw, due.Add(-time.Minute), 10); err != nil || n != 0 {
+		t.Fatalf("기한 전 만료 = %d, %v", n, err)
+	}
+	if gw.getCalls != 0 {
+		t.Errorf("기한 전에 PG 를 %d번 불렀다", gw.getCalls)
+	}
+	if got := statusOf(t, s, orderNo); got != StatusDepositPending {
+		t.Fatalf("기한 전 주문 %s", got)
+	}
+
+	// 기한 + 유예가 지나고 PG 도 입금 전이라고 하면 놓는다.
+	if n, err := s.ExpireDepositOrders(ctx, gw, due.Add(DepositGrace+time.Minute), 10); err != nil || n != 1 {
+		t.Fatalf("기한 뒤 만료 = %d, %v", n, err)
+	}
+	if got := statusOf(t, s, orderNo); got != StatusPaymentFailed {
+		t.Errorf("기한 뒤 주문 %s, want %s", got, StatusPaymentFailed)
+	}
+	if got := stockOfOrder(t, pool, orderNo); got != held+1 {
+		t.Errorf("재고 %d, want %d — 놓지 않았다", got, held+1)
+	}
+	var pay string
+	if err := pool.QueryRow(ctx, `SELECT status FROM payments WHERE kind = '주문결제'`).Scan(&pay); err != nil {
+		t.Fatal(err)
+	}
+	if pay != string(PaymentFailed) {
+		t.Errorf("결제 %s, want %s", pay, PaymentFailed)
+	}
+}
+
+// 기한이 지났어도 PG 가 입금됐다(DONE)고 하면 놓지 않는다 — 결제완료는 웹훅·A-508 이 옮긴다.
+func TestDepositOrderPaidAtTheGatewayIsNotExpired(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "va-paid", 1)
+	due := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if _, err := s.ConfirmPayment(ctx, vaGateway("s3cret", due), "toss", orderNo, "pk-va", total, time.Now()); !errors.Is(err, ErrDepositPending) {
+		t.Fatalf("가상계좌 발급 = %v", err)
+	}
+	gw := &fakeGateway{getResponse: &Payment{PaymentKey: "pk-va", OrderNo: orderNo, Status: PaymentApproved, Amount: total}}
+	if n, err := s.ExpireDepositOrders(ctx, gw, time.Now(), 10); err != nil || n != 0 {
+		t.Fatalf("입금된 주문 만료 = %d, %v", n, err)
+	}
+	if got := statusOf(t, s, orderNo); got != StatusDepositPending {
+		t.Errorf("입금된 주문이 %s 가 됐다", got)
+	}
+}
+
+// A-508 이 입금대기 주문의 결제를 PG 의 실패로 닫으면 주문과 재고도 놓는다. 결제 행만
+// '실패' 로 내리면 그 주문은 어느 만료에도 걸리지 않고 재고를 잡은 채 남았다.
+func TestResolvingAFailedDepositReleasesTheOrder(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "va-fail", 1)
+	held := stockOfOrder(t, pool, orderNo)
+	depositOrder(t, s, pool, orderNo, total, "s3cret")
+	var paymentID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM payments WHERE kind = '주문결제'`).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	gw := &fakeGateway{getResponse: &Payment{PaymentKey: "pk-va", OrderNo: orderNo, Status: PaymentFailed,
+		Raw: []byte(`{"status":"EXPIRED"}`)}}
+	if _, err := s.ResolvePendingPayment(ctx, gw, paymentID); err != nil {
+		t.Fatalf("대사 반영 = %v", err)
+	}
+	if got := statusOf(t, s, orderNo); got != StatusPaymentFailed {
+		t.Errorf("주문 %s, want %s", got, StatusPaymentFailed)
+	}
+	if got := stockOfOrder(t, pool, orderNo); got != held+1 {
+		t.Errorf("재고 %d, want %d", got, held+1)
 	}
 }

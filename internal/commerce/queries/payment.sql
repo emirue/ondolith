@@ -15,6 +15,10 @@ UPDATE payments SET status = '실패', updated_at = now() WHERE id = $1;
 UPDATE payments SET status = '실패', raw_response = $2, updated_at = now()
 WHERE id = $1;
 
+-- name: DeclinePendingPayment :execrows
+UPDATE payments SET status = '실패', raw_response = $2, updated_at = now()
+WHERE id = $1 AND status = '대기';
+
 -- name: RecordPaymentResult :exec
 UPDATE payments SET status = sqlc.arg('status'),
        approved_at = CASE WHEN sqlc.arg('status') = '승인' THEN now() ELSE approved_at END,

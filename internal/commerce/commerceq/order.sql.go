@@ -85,6 +85,53 @@ func (q *Queries) ClearCart(ctx context.Context, arg ClearCartParams) error {
 	return err
 }
 
+const depositPendingOrders = `-- name: DepositPendingOrders :many
+SELECT o.id AS order_id, o.order_no, p.id AS payment_id, p.payment_key, p.raw_response
+FROM orders o JOIN payments p ON p.order_id = o.id AND p.kind = '주문결제' AND p.status = '대기'
+WHERE o.status = $1
+ORDER BY o.created_at LIMIT $2::int
+`
+
+type DepositPendingOrdersParams struct {
+	Status string
+	Limit  int32
+}
+
+type DepositPendingOrdersRow struct {
+	OrderID     string
+	OrderNo     string
+	PaymentID   string
+	PaymentKey  string
+	RawResponse []byte
+}
+
+// 입금대기 주문과 그 살아 있는 결제. 입금 기한은 발급 응답 원문(virtualAccount.dueDate)에 있다.
+func (q *Queries) DepositPendingOrders(ctx context.Context, arg DepositPendingOrdersParams) ([]DepositPendingOrdersRow, error) {
+	rows, err := q.db.Query(ctx, depositPendingOrders, arg.Status, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DepositPendingOrdersRow{}
+	for rows.Next() {
+		var i DepositPendingOrdersRow
+		if err := rows.Scan(
+			&i.OrderID,
+			&i.OrderNo,
+			&i.PaymentID,
+			&i.PaymentKey,
+			&i.RawResponse,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const expirablePendingOrders = `-- name: ExpirablePendingOrders :many
 SELECT o.id FROM orders o
 WHERE o.status = $1 AND o.created_at < $2
