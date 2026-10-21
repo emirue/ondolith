@@ -479,7 +479,11 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `mail.smtp_host` · `smtp_port` · `smtp_user` · `smtp_password` · `tls_mode` · `from_address` · `from_name` | text / int / text / **자격증명** / `none`\|`starttls`\|`tls` / text / text | A-205 | 1 |
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
 | `business.*` | text | A-208 | 3 |
-| `commerce.return_window_days` · `auto_confirm_days` · `return_shipping_payer` · `return_shipping_fee` | int(7) / int(8) / `차감`\|`별도청구` / int(0) | A-512 | 3 |
+| `pg.provider` · `pg.client_key` · `pg.secret_key` | `toss` / text — 공개값 / **자격증명** | A-209 | 3 |
+| `order.return_days` · `order.confirm_days` · `order.return_fee_policy` · `order.return_fee_amount` · `shipping.flat_fee` · `shipping.free_threshold` | int(7) / int(8) / `차감`\|`별도청구` / int(0) / int(0) / int(0) | A-512 | 3 |
+
+**자격증명** 표시는 이 표의 설명이고, 무엇이 봉인되는지의 단일 출처는 `content.IsSecretSetting` 이다
+([D60](60-security.md) 「설정값을 어디에 두는가」 ②).
 
 **PK가 `uuid`가 아니라 `key`다 — 3절 규칙의 의도적 예외다.** 이 행은 어떤 FK의 대상도 아니고
 모든 접근이 `WHERE key = $1`이다. uuid를 얹으면 식별자가 둘이 되고 upsert의 `ON CONFLICT`

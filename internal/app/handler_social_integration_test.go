@@ -149,8 +149,9 @@ func socialRun(t *testing.T, sm *scs.SessionManager, store *auth.Store, h http.H
 func socialFailure(t *testing.T, sm *scs.SessionManager, store *auth.Store,
 	rec *httptest.ResponseRecorder, cookies []*http.Cookie) (string, bool) {
 	t.Helper()
-	loc := rec.Header().Get("Location")
-	if rec.Code != http.StatusSeeOther || (loc != loginPath && loc != "/me/connections") {
+	// 빈 조각(#)이 붙어야 한다 — 없으면 브라우저가 콜백 주소의 조각을 다음 화면에 옮긴다.
+	loc, reset := strings.CutSuffix(rec.Header().Get("Location"), "#")
+	if rec.Code != http.StatusSeeOther || !reset || (loc != loginPath && loc != "/me/connections") {
 		return "", false
 	}
 	if next := rec.Result().Cookies(); len(next) > 0 {
@@ -694,5 +695,18 @@ func TestPasswordlessAccountLinksOnlyRightAfterLogin(t *testing.T) {
 	d.now = func() time.Time { return time.Now().Add(20 * time.Minute) }
 	if code := start(); code != http.StatusBadRequest {
 		t.Errorf("로그인 20분 뒤 = HTTP %d, want 400 — 다시 로그인해야 한다", code)
+	}
+}
+
+// 시작한 뒤 프로바이더가 꺼져도 콜백 주소(아직 교환 전 code)에서 화면을 그리지 않는다.
+func TestSocialCallbackWithProviderTurnedOffDoesNotRender(t *testing.T) {
+	d, store, sm := socialFixture(t, fakeProvider{name: "google", uid: "u1"}, true)
+	cookies, state := beginAndGetState(t, d, sm, store, "google", nil)
+	d.provider = func(*http.Request, string) (goth.Provider, error) { return nil, errors.New("꺼짐") }
+	req := httptest.NewRequest(http.MethodGet, "/auth/google/callback?code=x&state="+url.QueryEscape(state), nil)
+	req.SetPathValue("provider", "google")
+	rec := socialRun(t, sm, store, d.socialCallback, req, cookies)
+	if _, failed := socialFailure(t, sm, store, rec, cookies); !failed {
+		t.Errorf("프로바이더가 꺼진 콜백 = HTTP %d Location %q — 콜백 주소에서 그렸다", rec.Code, rec.Header().Get("Location"))
 	}
 }

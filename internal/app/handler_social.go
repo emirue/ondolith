@@ -144,7 +144,9 @@ func (d *socialDeps) socialCallback(w http.ResponseWriter, r *http.Request) {
 
 	p, err := d.provider(r, name)
 	if err != nil {
-		d.notFound(w, r)
+		// 시작한 뒤 A-206 에서 꺼졌다. 404 화면을 여기서 그리면 아직 교환하지 않은
+		// code 가 든 주소에서 그리게 된다 (sessSocialError).
+		d.socialFail(w, r, "로그인을 완료하지 못했습니다. 다시 시도해 주세요.")
 		return
 	}
 	sess, err := p.UnmarshalSession(marshalled)
@@ -354,7 +356,10 @@ func (d *socialDeps) socialFail(w http.ResponseWriter, r *http.Request, msg stri
 	if ActorFrom(r.Context()).IsAuthenticated() {
 		target = "/me/connections"
 	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	// **빈 조각(#)을 붙인다.** Location 에 조각이 없으면 브라우저가 요청 주소의 조각을
+	// 이어 붙인다(RFC 9110 10.2.2) — 하이브리드 응답이 code 를 # 뒤에 실어 오면 그것이
+	// 다음 화면의 주소로 옮겨 간다.
+	http.Redirect(w, r, target+"#", http.StatusSeeOther)
 }
 
 func (d *socialDeps) clearOAuth(ctx context.Context) {

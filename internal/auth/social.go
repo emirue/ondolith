@@ -85,13 +85,6 @@ func (s *Store) LinkSocial(ctx context.Context, userID, provider, uid string) er
 	return err
 }
 
-// UnlinkSocial removes one link (P-111).
-//
-// **마지막 로그인 수단은 해제할 수 없다** (FR-213). 비밀번호가 없는 계정에서
-// 마지막 소셜을 떼면 그 계정으로 들어올 방법이 사라진다.
-//
-// 판단과 삭제가 한 트랜잭션이다: 따로 하면 두 요청이 각자 "아직 하나 더
-// 있다" 를 읽고 둘 다 지운다.
 // UnlinkAllSocial removes every provider identity on the account and reports
 // how many there were. A-402's forced reset uses it: undoing a takeover means
 // closing every way back in, and a social identity the taker attached is one
@@ -100,6 +93,13 @@ func (s *Store) UnlinkAllSocial(ctx context.Context, userID string) (int64, erro
 	return s.q.UnlinkAllSocial(ctx, userID)
 }
 
+// UnlinkSocial removes one link (P-111).
+//
+// **마지막 로그인 수단은 해제할 수 없다** (FR-213). 비밀번호가 없는 계정에서
+// 마지막 소셜을 떼면 그 계정으로 들어올 방법이 사라진다.
+//
+// 판단과 삭제가 한 트랜잭션이다: 따로 하면 두 요청이 각자 "아직 하나 더
+// 있다" 를 읽고 둘 다 지운다.
 func (s *Store) UnlinkSocial(ctx context.Context, userID, provider string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

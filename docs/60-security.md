@@ -258,6 +258,8 @@ siteverify 에 보내, 각각 통과·거부·거부·우리 쪽 오류로 읽�
 | `/password/reset/{token}` (P-105) | 토큰을 `reset_token` 쿠키(HttpOnly, `Path=/password/new`)에 옮기고 `303 /password/new`. 세션이 아니라 쿠키인 이유: 세션은 DB 에 있고, 토큰 원문은 DB 에 두지 않는다 |
 | `/auth/{provider}/callback?code=…` (P-107) | 성공도 실패도 리다이렉트로 끝낸다. 실패 문구는 세션에 담아 `/login` 이 그린다 |
 | `/verify/{token}` (P-112) | 그린다 — 그리기 전에 토큰을 소모하므로 밖으로 나가도 쓸 수 없다 |
+| `/checkout/success?paymentKey=…&orderId=…&amount=…` (P-408) | 그린다 — `paymentKey` 는 그것만으로 쓸 수 있는 비밀이 아니다. 토스 API 는 시크릿 키의 Basic 인증 없이 승인·조회·취소를 받지 않고(`commerce/toss.go`), 우리 쪽 재사용은 세션의 주문·`orderId` 대조·`payments_pg_key_idx` 가 막는다 |
+| 콜백·실패 리다이렉트의 조각(`#`) | 실패 리다이렉트는 `Location` 끝에 빈 `#` 를 붙인다 — 없으면 브라우저가 콜백 주소의 조각을 다음 화면에 옮긴다(RFC 9110 10.2.2) |
 
 새 메일 링크·콜백을 만들면 이 표에 행을 더한다.
 
