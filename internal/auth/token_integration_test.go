@@ -156,7 +156,7 @@ func TestSetPasswordInvalidatesOtherSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, _ := HashPassword("brand-new-password")
-	if _, err := s.SetPassword(ctx, u, h); err != nil {
+	if _, err := s.SetPassword(ctx, u, h, before.SessionsValidFrom); err != nil {
 		t.Fatal(err)
 	}
 	after, err := s.FindUserByID(ctx, u)
@@ -259,5 +259,29 @@ func TestIssuingATokenLeavesOtherUsersAlone(t *testing.T) {
 	}
 	if _, err := s.ConsumeToken(ctx, KindPasswordReset, victim); err != nil {
 		t.Errorf("남의 발급이 이 토큰을 태웠다: %v", err)
+	}
+}
+
+// **회수된 세션은 비밀번호를 다시 쓸 수 없다** (D15 5.4). P-109 는 현재 비밀번호를 확인한
+// 뒤 새 해시를 쓰는데, 그 사이 A-402 가 자격증명을 회수하면 비워진 해시를 덮어쓰고 세션까지
+// 살렸다 — 열린 세션과 비밀번호를 가진 탈취자가 P-109 를 돌리면 회수를 이겼다 (2026-10-21
+// 3차 점검). 쓰는 문장 안에서 그 세션이 아직 유효한지 본다.
+func TestSetPasswordRefusesARevokedSession(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "r@example.com")
+	authAt, err := s.Now(ctx) // 이 시각에 로그인한 세션
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeCredentials(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := HashPassword("taker-sets-this")
+	if _, err := s.SetPassword(ctx, u, h, authAt.Time()); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("회수된 세션의 비밀번호 변경 = %v, want ErrSessionRevoked", err)
+	}
+	if _, err := s.Authenticate(ctx, "r@example.com", "taker-sets-this"); err == nil {
+		t.Error("회수 뒤에 탈취자가 정한 비밀번호가 들어갔다")
 	}
 }

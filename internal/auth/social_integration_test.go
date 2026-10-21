@@ -178,3 +178,32 @@ func TestSocialCallbackURLIsDerived(t *testing.T) {
 		}
 	}
 }
+
+// **회수된 세션은 소셜 계정을 붙일 수 없다** (D15 5.4). P-111 연결은 프로바이더와 왕복한
+// 뒤에 붙이는데, 그 사이 A-402 가 연결을 다 끊어도 뒤늦은 INSERT 가 남았다 (2026-10-21 3차 점검).
+func TestLinkSocialInSessionRefusesARevokedSession(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "l@example.com")
+	authAt, err := s.Now(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeCredentials(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.LinkSocialInSession(ctx, u, "google", "taker", authAt.Time()); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("회수된 세션의 연결 = %v, want ErrSessionRevoked", err)
+	}
+	if links, _ := s.SocialAccounts(ctx, u); len(links) != 0 {
+		t.Fatalf("회수 뒤에 연결이 남았다: %+v", links)
+	}
+	// 회수 뒤에 새로 로그인한 세션은 잇는다 — 거부가 「늘 거부」가 아니다.
+	later, err := s.Now(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.LinkSocialInSession(ctx, u, "google", "owner", later.Time()); err != nil {
+		t.Errorf("새 세션의 연결 = %v", err)
+	}
+}

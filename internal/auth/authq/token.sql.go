@@ -101,16 +101,18 @@ func (q *Queries) MarkEmailVerified(ctx context.Context, id string) error {
 
 const setPassword = `-- name: SetPassword :one
 UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
-WHERE id = $1 RETURNING sessions_valid_from
+WHERE id = $1 AND sessions_valid_from <= $3 RETURNING sessions_valid_from
 `
 
 type SetPasswordParams struct {
 	ID           string
 	PasswordHash string
+	AuthAt       time.Time
 }
 
+// 바꾸는 세션이 아직 유효할 때만 쓴다 — 확인과 쓰기 사이에 A-402 가 회수했으면 0행이다.
 func (q *Queries) SetPassword(ctx context.Context, arg SetPasswordParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, setPassword, arg.ID, arg.PasswordHash)
+	row := q.db.QueryRow(ctx, setPassword, arg.ID, arg.PasswordHash, arg.AuthAt)
 	var sessions_valid_from time.Time
 	err := row.Scan(&sessions_valid_from)
 	return sessions_valid_from, err

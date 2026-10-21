@@ -223,8 +223,11 @@ func (d *socialDeps) finishLink(w http.ResponseWriter, r *http.Request, provider
 		d.socialFail(w, r, "로그인이 만료되었습니다. 다시 로그인한 뒤 연결하세요.")
 		return
 	}
-	err := d.store.LinkSocial(r.Context(), a.User.ID, provider, uid)
+	// 이 세션이 아직 유효할 때만 잇는다 — 프로바이더와 왕복하는 사이 A-402 가 회수했을 수 있다.
+	err := d.store.LinkSocialInSession(r.Context(), a.User.ID, provider, uid, a.AuthAt)
 	switch {
+	case errors.Is(err, auth.ErrSessionRevoked):
+		d.socialFail(w, r, "로그인이 만료되었습니다. 다시 로그인한 뒤 연결하세요.")
 	case errors.Is(err, auth.ErrSocialTaken):
 		d.socialFail(w, r, "이미 다른 계정에 연결된 소셜 계정입니다.")
 	case errors.Is(err, auth.ErrSocialLinked):

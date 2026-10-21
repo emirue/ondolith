@@ -522,7 +522,13 @@ func (d *accountDeps) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// SetPassword also moves sessions_valid_from, ending every OTHER session,
 	// and hands back the cutoff it wrote.
-	cutoff, err := d.store.SetPassword(ctx, a.User.ID, hash)
+	cutoff, err := d.store.SetPassword(ctx, a.User.ID, hash, a.AuthAt)
+	if errors.Is(err, auth.ErrSessionRevoked) {
+		// 확인한 뒤 이 세션이 회수됐다(A-402·다른 기기의 변경). 바꾸지 않았고, 이 세션도 끝이다.
+		_ = d.sm.Destroy(ctx)
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
+		return
+	}
 	if err != nil {
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/emirue/ondolith/internal/auth/authq"
 	"github.com/jackc/pgx/v5"
@@ -71,7 +72,11 @@ func (s *Store) UserBySocial(ctx context.Context, provider, uid string) (*User, 
 // **연결은 로그인한 계정 주인만 만든다.** 콜백이 스스로 만들지 않는다 —
 // 그것이 곧 자동 연결이다.
 func (s *Store) LinkSocial(ctx context.Context, userID, provider, uid string) error {
-	err := s.q.LinkSocial(ctx, authq.LinkSocialParams{UserID: userID, Provider: provider, ProviderUid: uid})
+	return linkSocial(ctx, s.q, userID, provider, uid)
+}
+
+func linkSocial(ctx context.Context, q *authq.Queries, userID, provider, uid string) error {
+	err := q.LinkSocial(ctx, authq.LinkSocialParams{UserID: userID, Provider: provider, ProviderUid: uid})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		// 어느 유니크에 걸렸는지 구분한다. 접으면 "이미 연결됨" 과 "남의
@@ -83,6 +88,34 @@ func (s *Store) LinkSocial(ctx context.Context, userID, provider, uid string) er
 		return ErrSocialTaken
 	}
 	return err
+}
+
+// ErrSessionRevoked is a credential write from a session that has since been
+// cut off (A-402, 비밀번호 변경, 비활성화). 요청이 미들웨어를 지난 뒤 회수됐다.
+var ErrSessionRevoked = errors.New("auth: 세션이 회수됐다")
+
+// LinkSocialInSession is P-111's link: it attaches the identity only while the
+// session that logged in at authAt is still valid, holding the user row so an
+// A-402 revoke either lands before (and this refuses) or after (and its unlink
+// removes the row). 프로바이더와 왕복하는 동안 회수돼도 뒤늦은 INSERT 가 남지 않는다.
+func (s *Store) LinkSocialInSession(ctx context.Context, userID, provider, uid string, authAt time.Time) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	valid, err := s.q.WithTx(tx).LockSessionValid(ctx, authq.LockSessionValidParams{ID: userID, AuthAt: authAt})
+	// valid 는 NULL 일 수 있다(is_active·비교 어느 쪽이든) — NULL 도 무효다.
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (valid == nil || !*valid)) {
+		return ErrSessionRevoked
+	}
+	if err != nil {
+		return err
+	}
+	if err := linkSocial(ctx, s.q.WithTx(tx), userID, provider, uid); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // UnlinkAllSocial removes every provider identity on the account and reports

@@ -7,6 +7,7 @@ package authq
 
 import (
 	"context"
+	"time"
 )
 
 const countSocialAccounts = `-- name: CountSocialAccounts :one
@@ -44,6 +45,24 @@ type LinkSocialParams struct {
 func (q *Queries) LinkSocial(ctx context.Context, arg LinkSocialParams) error {
 	_, err := q.db.Exec(ctx, linkSocial, arg.UserID, arg.Provider, arg.ProviderUid)
 	return err
+}
+
+const lockSessionValid = `-- name: LockSessionValid :one
+SELECT is_active AND sessions_valid_from <= $1 AS valid
+FROM users WHERE id = $2 FOR UPDATE
+`
+
+type LockSessionValidParams struct {
+	AuthAt time.Time
+	ID     string
+}
+
+// 사용자 행을 잠그고, auth_at 에 로그인한 세션이 아직 유효한지 답한다 (A-402 회수와 직렬화).
+func (q *Queries) LockSessionValid(ctx context.Context, arg LockSessionValidParams) (*bool, error) {
+	row := q.db.QueryRow(ctx, lockSessionValid, arg.AuthAt, arg.ID)
+	var valid *bool
+	err := row.Scan(&valid)
+	return valid, err
 }
 
 const lockUserHasPassword = `-- name: LockUserHasPassword :one

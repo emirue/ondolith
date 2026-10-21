@@ -45,7 +45,8 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 1.14 | FR-214: 켜져 있으면 미인증 계정은 글·댓글·주문 불가 | `handler_board.go`·`handler_comment.go`·`handler_checkout.go` | `TestUnverifiedAccountCannotWriteWhenRequired` | ✓ 2026-09-13 에 고침 |
 | 1.16 | **비밀이 든 주소에서 화면을 그리지 않는다** — 재설정 링크는 토큰을 HttpOnly 쿠키로 옮기고 303, 소셜 콜백 실패도 303 ([D60](60-security.md) 「비밀이 든 주소」) | `handler_reset.go`·`handler_social.go` `socialFail` | `TestResetLinkLeavesTheTokenURLBeforeRendering`·`TestSocialCallbackRefusesBadState` | ✓ 2026-10-21 에 고침 — GA4 의 `page_location` 이 재설정 토큰·인가 code 를 밖으로 보냈다 |
 | 1.17 | P-111 연결·해제, P-109·P-110 은 **매번** 비밀번호(비밀번호 없는 계정은 15분 안 로그인), 관리자 재인증과 같은 계정당 5회/분 | `handler_social.go` `ownerConfirmed`·`reauth.go` `confirmPassword` | `TestSocialLinkAsksForThePassword`·`TestSocialUnlinkAsksForThePassword`·`TestOwnPasswordChecksShareTheReauthLimit` | ✓ 2026-10-21 에 고침 — 연결은 재확인이, P-109·P-110 은 제한이 없었다 |
-| 1.18 | A-402 재설정 강제가 소셜 연결까지 끊는다 | `admin/handlers.go` `UserResetPassword` | `TestForcedResetAlsoCutsSocialLinks` | ✓ 2026-10-21 에 고침 |
+| 1.18 | A-402 재설정 강제가 옛 비밀번호를 비우고 소셜 연결까지 끊는다 | `admin/handlers.go` `UserResetPassword`·`auth.RevokeCredentials` | `TestForcedResetEndsSessionsAndNeverSetsAPassword`·`TestForcedResetAlsoCutsSocialLinks` | ✓ 2026-10-21 에 고침 |
+| 1.19 | 자격증명 쓰기는 그 세션이 아직 유효할 때만(같은 문장), 로그인은 해시를 읽기 전의 시각을 찍는다 | `auth.SetPassword`·`auth.LinkSocialInSession`·`handler_login.go` | `TestSetPasswordRefusesARevokedSession`·`TestLinkSocialInSessionRefusesARevokedSession` | ✓ 2026-10-21 에 고침(회수와의 경합) |
 | 1.15 | OAuth 외부 요청 시한 | `auth/social_provider.go` | `TestSocialProvidersBoundOutboundRequests` | ✓ 2026-09-30: 세 프로바이더의 코드 교환·프로필 조회에 요청당 15초 |
 
 ## 2. 권한(RBAC)

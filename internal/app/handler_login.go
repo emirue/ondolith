@@ -92,6 +92,18 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The session's auth_at is taken BEFORE the password hash is read. A revoke
+	// (A-402·비밀번호 변경) that lands after the read then moves the cutoff past
+	// this stamp and the new session dies on its next request; stamping after
+	// the slow bcrypt compare let a login that read the old hash outlive the
+	// revoke (2026-10-21 3차 점검). Stamped from the database clock — see
+	// auth.Store.Now.
+	authAt, err := d.store.Now(ctx)
+	if err != nil {
+		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		return
+	}
+
 	// The password length floor is NOT applied here: it governs setting a
 	// password, and applying it at login would lock out every account created
 	// before the rule.
@@ -134,12 +146,6 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.sm.Put(ctx, sessUserID, u.ID)
-	// Stamped from the database clock, never time.Now() — see auth.Store.Now.
-	authAt, err := d.store.Now(ctx)
-	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
-		return
-	}
 	stampAuthAt(d.sm, ctx, authAt)
 
 	// Successful login clears the ACCOUNT counter: someone who mistyped four

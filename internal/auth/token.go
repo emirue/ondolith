@@ -170,7 +170,16 @@ func (s *Store) MarkEmailVerified(ctx context.Context, userID string) error {
 // few milliseconds of skew logs the user out of the session they just proved
 // they own. One clock, handed back, removes the question. It comes back as a
 // [DBTime] so the caller cannot substitute its own clock and still compile.
-func (s *Store) SetPassword(ctx context.Context, userID, hash string) (DBTime, error) {
-	cutoff, err := s.q.SetPassword(ctx, authq.SetPasswordParams{ID: userID, PasswordHash: hash})
+//
+// authAt is when the session doing the change logged in. The write happens only
+// while that session is still valid, in the same statement: between P-109's
+// password check and this write, A-402 may have revoked the credentials, and an
+// unconditional write would put a known password back and keep the taker's
+// session alive (ErrSessionRevoked).
+func (s *Store) SetPassword(ctx context.Context, userID, hash string, authAt time.Time) (DBTime, error) {
+	cutoff, err := s.q.SetPassword(ctx, authq.SetPasswordParams{ID: userID, PasswordHash: hash, AuthAt: authAt})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DBTime{}, ErrSessionRevoked
+	}
 	return DBTime{cutoff}, err
 }
