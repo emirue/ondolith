@@ -34,6 +34,10 @@ const (
 	// sessOAuthLink 는 「로그인」이 아니라 「연결」로 시작했다는 표시다
 	// (P-111). 같은 콜백을 쓰되 끝이 다르다.
 	sessOAuthLink = "oauth_link"
+	// sessSocialError 는 콜백이 실패했을 때 다음 화면이 한 번 그릴 안내다. 콜백
+	// 주소에서는 그리지 않는다 — 아직 교환하지 않은 인가 code 가 주소에 있고, 화면에
+	// 붙은 스크립트(GA4 의 page_location)가 주소째 밖으로 보낸다 (D60 「비밀이 든 주소」).
+	sessSocialError = "social_error"
 )
 
 // socialDeps serves P-106, P-107 and P-111.
@@ -222,7 +226,7 @@ func (d *socialDeps) finishLink(w http.ResponseWriter, r *http.Request, provider
 
 // connectionsPage is P-111 GET /me/connections.
 func (d *socialDeps) connectionsPage(w http.ResponseWriter, r *http.Request) {
-	d.renderConnections(w, r, http.StatusOK, "")
+	d.renderConnections(w, r, http.StatusOK, d.sm.PopString(r.Context(), sessSocialError))
 }
 
 // connectionsAction is P-111 POST — 연결 해제.
@@ -297,9 +301,16 @@ func (d *socialDeps) renderConnections(w http.ResponseWriter, r *http.Request, c
 }
 
 // socialFail draws the login screen with a reason.
+// socialFail ends the callback without rendering at its URL (sessSocialError):
+// the message rides the session to the login page, or to P-111 when the
+// person was linking while logged in.
 func (d *socialDeps) socialFail(w http.ResponseWriter, r *http.Request, msg string) {
-	d.renderPage(w, r, "auth/login.html", http.StatusUnprocessableEntity,
-		d.socialView(r, "로그인", map[string]any{"Error": msg}))
+	d.sm.Put(r.Context(), sessSocialError, msg)
+	target := loginPath
+	if ActorFrom(r.Context()).IsAuthenticated() {
+		target = "/me/connections"
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (d *socialDeps) clearOAuth(ctx context.Context) {

@@ -44,9 +44,14 @@ func (d *loginDeps) loginForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, auth.SafeNext(r.URL.Query().Get("next")), http.StatusSeeOther)
 		return
 	}
-	d.render(w, r, "auth/login.html", http.StatusOK, map[string]any{
+	data := map[string]any{
 		"Next": auth.SafeNext(r.URL.Query().Get("next")), "Social": d.socialButtons(),
-	})
+	}
+	// 소셜 콜백이 실패하면 안내를 세션에 담아 여기로 보낸다 (socialFail).
+	if msg := d.sm.PopString(r.Context(), sessSocialError); msg != "" {
+		data["Error"] = msg
+	}
+	d.render(w, r, "auth/login.html", http.StatusOK, data)
 }
 
 // P-102 POST: end the session.
