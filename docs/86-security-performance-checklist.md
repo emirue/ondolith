@@ -74,7 +74,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 3.3 | 테마 렌더링은 `html/template` 만, `text/template` 없음 | 전체 | `grep '"text/template"'` | ✓ 0건 |
 | 3.4 | `template.HTML` 생성 지점이 **넷**이고 각각 출처가 신뢰됨 | `admin_render.go`(내장 로고·CSS)·`handlers_scan.go`(정수 좌표만 찍는 QR SVG)·`theme/funcs.go`(`nl2br`, 이스케이프 뒤)·`content/richtext.go` `renderRich`(그릴 때마다 다시 정화) | `grep 'template.HTML('` | ✓ 2026-10-21 (넷째는 FR-513) |
 | 3.5 | FuncMap 에 `raw`·`safeHTML`·`js`·`html` 없음 | `theme/funcs.go` | 테스트 `ForbiddenFuncNames` | ✓ |
-| 3.6 | 리치텍스트 본문(FR-513): bluemonday UGC + 값까지 검사하는 스타일·유튜브 embed iframe·지도 블록, 저장·렌더 두 번 정화, 허용 밖 iframe 은 요소째 뺀다 | `content/richtext.go` | `richtext_test.go`(`TestDisallowedIframeLeavesNothing` 등) | ✓ 2026-10-21 — 「파이프라인 없음」은 FR-513 이전의 기록이었다 |
+| 3.6 | 리치텍스트 본문(FR-513): bluemonday UGC + 값까지 검사하는 스타일·유튜브 embed iframe·지도 블록, 저장·렌더 두 번 정화, 허용 밖 iframe 은 요소째 빼고, **열린 태그는 본문 안에서 닫는다**(짝 맞춘 뒤 다시 정화) | `content/richtext.go` | `richtext_test.go`(`TestDisallowedIframeLeavesNothing`·`TestRichTextClosesWhatItOpens` 등) | ✓ 2026-10-21 — 「파이프라인 없음」은 FR-513 이전의 기록이었다 |
 | 3.7 | 보안 헤더: `X-Frame-Options: DENY`·`nosniff`·`Referrer-Policy`·CSP | `internal/httpsec/headers.go` | 단위 테스트 | ✓ 정적 자산·첨부에도 (트리 밖으로 옮기며 유지) |
 | 3.8 | CSP 에 `script-src`/`default-src` 없음 (인라인 스크립트 허용) | `headers.go` | — | — 의도적. XSS 방어는 3.3~3.5 에 있다. 테마가 인라인을 쓴다 |
 | 3.9 | `Host`·`X-Forwarded-Host` 신뢰 | `handler_seo.go`(사이트맵 origin)·`app.go`(OAuth `redirect_uri`) | `grep X-Forwarded-Host` | ✓ `X-Forwarded-Host` 0건. 메일 링크와 사이트맵·robots 는 요청이 아니라 `site_url`(4.6, 사이트맵은 2026-10-07 부터) |

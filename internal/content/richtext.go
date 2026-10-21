@@ -7,6 +7,7 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // richPolicy is the allow-list every rich-text body passes through (FR-513, D60).
@@ -68,8 +69,32 @@ func SanitizeRichText(raw string) string {
 	// bluemonday 의 RequireSandboxOnIFrame 은 **있는** sandbox 의 값을 거를 뿐, 없으면 전부 금지인
 	// `sandbox=""` 를 붙인다(v1.0.27 sanitize.go). 그대로 두면 모든 유튜브가 「자바스크립트를 실행할
 	// 수 없습니다」다. 정화 뒤의 `sandbox=""` 는 iframe 에만 있다 — 글자·다른 속성 값의 따옴표는 &#34; 로 나간다.
-	return strings.TrimSpace(dropSrclessIframes(
-		strings.ReplaceAll(richPolicy.Sanitize(raw), `sandbox=""`, iframeSandbox)))
+	//
+	// 정화한 뒤 짝을 맞추고(balance) 한 번 더 정화한다 — 짝을 맞춘 모양도 정책 안에 있어야 하고,
+	// 마지막 출력은 늘 정화기를 지난 값이다.
+	clean := richPolicy.Sanitize(balance(richPolicy.Sanitize(raw)))
+	return strings.TrimSpace(dropSrclessIframes(strings.ReplaceAll(clean, `sandbox=""`, iframeSandbox)))
+}
+
+// balance closes what the HTML opened and drops closing tags with no opener, by
+// parsing it as a browser parses the inside of a <div> and rendering it back.
+//
+// bluemonday 는 짝을 맞추지 않는다(README: mismatched elements "will remain"). 닫지 않은
+// `<b style="font-size:0px">` 는 브라우저가 본문 뒤의 댓글·바닥글 글자마다 다시 만들어 남의
+// 화면에서 지웠고, 닫지 않은 iframe 은 그 뒤 화면 전체를 삼켰다 (2026-10-21 3차 점검).
+func balance(s string) string {
+	nodes, err := html.ParseFragment(strings.NewReader(s),
+		&html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div})
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, n := range nodes {
+		if err := html.Render(&b, n); err != nil {
+			return ""
+		}
+	}
+	return b.String()
 }
 
 // iframeElem matches one iframe in SANITISED html — 닫는 태그가 없으면 여는 태그만. 정화
