@@ -83,7 +83,7 @@
 | P-102 | 로그아웃 | `/logout` | POST | 로그인 | 있음 | SC-2 | FR-203 |
 | P-103 | 회원가입 | `/signup` | GET, POST | 공개 | 있음 | SC-2 | FR-210, FR-216, FR-217 |
 | P-104 | 비밀번호 재설정 요청 | `/password/reset` | GET, POST | 공개 | 있음 | SC-2 | FR-207, FR-216 |
-| P-105 | 비밀번호 재설정 수행 | `/password/reset/{token}` | GET, POST | 공개 | 있음 | SC-2 | FR-207 |
+| P-105 | 비밀번호 재설정 수행 | `/password/new` | GET, POST | 공개 | 있음 | SC-2 | FR-207 |
 | P-106 | 소셜 로그인 시작 | `/auth/{provider}` | POST | 공개 | 있음 | SC-2 | FR-208 |
 | P-107 | 소셜 로그인 콜백 | `/auth/{provider}/callback` | GET | 공개 | 있음 | SC-2 | FR-208, FR-204 |
 | P-108 | 내 정보 | `/me` | GET, POST | 본인 | 있음 | SC-3 | FR-211 |

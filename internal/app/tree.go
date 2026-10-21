@@ -47,12 +47,15 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Handler: acc.resetRequestForm})
 	r.Add(Route{Screen: "P-104", Method: "POST", Pattern: "/password/reset", Class: SC2,
 		Handler: acc.resetRequest})
-	// The token is in the path, so it lands in the access log and in Referer.
-	// That is the trade D11 already made for P-112, and it is bounded by the
-	// same two properties: 30 minutes, one use.
+	// The token is in the mailed path, so it lands in the access log. That is
+	// the trade D11 already made for P-112, and it is bounded by the same two
+	// properties: 30 minutes, one use. Nothing is RENDERED at that path — the
+	// token moves into the session first (D60 「비밀이 든 주소」).
 	r.Add(Route{Screen: "P-105", Method: "GET", Pattern: "/password/reset/{token}", Class: SC2,
+		Handler: acc.resetLink})
+	r.Add(Route{Screen: "P-105", Method: "GET", Pattern: "/password/new", Class: SC2,
 		Handler: acc.resetForm})
-	r.Add(Route{Screen: "P-105", Method: "POST", Pattern: "/password/reset/{token}", Class: SC2,
+	r.Add(Route{Screen: "P-105", Method: "POST", Pattern: "/password/new", Class: SC2,
 		Handler: acc.resetPassword})
 
 	// ---- 내 계정 (SC-3: 소유자는 세션이 정한다) --------------------------------
