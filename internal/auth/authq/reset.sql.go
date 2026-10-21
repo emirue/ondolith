@@ -21,7 +21,7 @@ func (q *Queries) InvalidateResetTokens(ctx context.Context, userID string) erro
 }
 
 const resetActiveUserPassword = `-- name: ResetActiveUserPassword :one
-UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
+UPDATE users SET password_hash = $2, sessions_valid_from = GREATEST(now(), sessions_valid_from + interval '1 microsecond'), updated_at = now()
 WHERE id = $1 AND is_active RETURNING sessions_valid_from
 `
 

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"github.com/emirue/ondolith/internal/auth/authq"
 	"strings"
 	"sync"
 	"testing"
@@ -283,5 +284,49 @@ func TestSetPasswordRefusesARevokedSession(t *testing.T) {
 	}
 	if _, err := s.Authenticate(ctx, "r@example.com", "taker-sets-this"); err == nil {
 		t.Error("회수 뒤에 탈취자가 정한 비밀번호가 들어갔다")
+	}
+}
+
+// **기준 시각은 뒤로 가지 않는다** (D15 5.4). 옮기는 쓰기가 `now()`(트랜잭션 시작 시각)를 쓰면,
+// 먼저 BEGIN 한 회수가 그 사이 커밋된 P-109 의 기준 시각보다 앞선 값을 써서 — 기준 시각이 과거로
+// 돌아가 — P-109 로 다시 찍힌 탈취자의 세션이 회수 뒤에도 살았다 (2026-10-21 6차 점검).
+func TestCutoffNeverMovesBackwards(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "mono@example.com")
+	before, err := s.FindUserByID(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 회수가 먼저 BEGIN 한다(now() 가 여기서 정해진다).
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1`); err != nil {
+		t.Fatal(err)
+	}
+	// 그 사이 다른 세션의 P-109 가 커밋된다.
+	h, _ := HashPassword("taker-sets-this")
+	cutoff, err := s.SetPassword(ctx, u, h, before.SessionsValidFrom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 이제 회수의 UPDATE 가 돌고 커밋된다.
+	if err := authq.New(tx).RevokeCredentials(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.FindUserByID(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.SessionsValidFrom.After(cutoff.Time()) {
+		t.Errorf("회수 뒤 기준 시각 %v 가 P-109 가 찍은 %v 보다 앞서거나 같다 — 그 세션이 산다",
+			after.SessionsValidFrom, cutoff.Time())
 	}
 }

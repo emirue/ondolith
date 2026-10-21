@@ -31,5 +31,5 @@ WHERE id = $1 AND email_verified_at IS NULL;
 
 -- name: SetPassword :one
 -- 바꾸는 세션이 아직 유효할 때만 쓴다 — 확인과 쓰기 사이에 A-402 가 회수했으면 0행이다.
-UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
+UPDATE users SET password_hash = $2, sessions_valid_from = GREATEST(now(), sessions_valid_from + interval '1 microsecond'), updated_at = now()
 WHERE id = $1 AND sessions_valid_from <= sqlc.arg('auth_at') RETURNING sessions_valid_from;

@@ -100,7 +100,7 @@ func (q *Queries) MarkEmailVerified(ctx context.Context, id string) error {
 }
 
 const setPassword = `-- name: SetPassword :one
-UPDATE users SET password_hash = $2, sessions_valid_from = now(), updated_at = now()
+UPDATE users SET password_hash = $2, sessions_valid_from = GREATEST(now(), sessions_valid_from + interval '1 microsecond'), updated_at = now()
 WHERE id = $1 AND sessions_valid_from <= $3 RETURNING sessions_valid_from
 `
 
