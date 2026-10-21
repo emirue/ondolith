@@ -42,6 +42,12 @@ func (s *Store) Authenticate(ctx context.Context, email, password string) (*User
 	if err != nil {
 		return nil, err
 	}
+	if hash == "" {
+		// 비밀번호가 없는 계정(소셜 전용, A-402 재설정 강제 뒤). bcrypt 는 빈 해시를 곧바로
+		// 거부해서, 그대로 두면 응답 시간이 「이 계정은 비밀번호가 없다」를 알려 준다.
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+		return nil, ErrBadCredentials
+	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
 		return nil, ErrBadCredentials
 	}

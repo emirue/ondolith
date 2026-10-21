@@ -380,6 +380,15 @@ func (q *Queries) PermissionIsScoped(ctx context.Context, key string) (bool, err
 	return is_scoped, err
 }
 
+const revokeCredentials = `-- name: RevokeCredentials :exec
+UPDATE users SET password_hash = '', sessions_valid_from = now(), updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) RevokeCredentials(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, revokeCredentials, id)
+	return err
+}
+
 const roleByKey = `-- name: RoleByKey :one
 SELECT r.key, r.is_superuser,
        coalesce(array_agg(DISTINCT p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions

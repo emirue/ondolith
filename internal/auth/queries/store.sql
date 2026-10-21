@@ -68,6 +68,9 @@ SELECT now()::timestamptz AS now;
 -- name: InvalidateSessions :exec
 UPDATE users SET sessions_valid_from = now(), updated_at = now() WHERE id = $1;
 
+-- name: RevokeCredentials :exec
+UPDATE users SET password_hash = '', sessions_valid_from = now(), updated_at = now() WHERE id = $1;
+
 -- name: LockSuperuserHolders :many
 SELECT u.id
 FROM users u

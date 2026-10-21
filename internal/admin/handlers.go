@@ -1093,9 +1093,10 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
-	// Sessions end first. Issuing the token first would leave a window where
-	// the takeover being undone is still logged in (D15 5.4).
-	if err := d.Auth.InvalidateSessions(ctx, target); err != nil {
+	// Sessions and the password end first, together. Issuing the token first
+	// would leave a window where the takeover being undone is still logged in,
+	// and a password left valid lets the taker log straight back in (D15 5.4).
+	if err := d.Auth.RevokeCredentials(ctx, target); err != nil {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
@@ -1117,7 +1118,7 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	// 토큰·링크는 넣지 않는다 (D15 7절 「절대 기록하지 않음」). 「비밀번호」가 든 요약은
 	// 작업 로그가 자격증명으로 보고 가리므로(content.Redacted) 낱말을 피한다.
 	d.log(r, c, "user.reset_password", "user", target,
-		"재설정 강제 (세션 종료·소셜 연결 "+strconv.FormatInt(unlinked, 10)+"개 해제·재설정 메일 발송)")
+		"재설정 강제 (세션 종료·로그인 수단 회수·소셜 연결 "+strconv.FormatInt(unlinked, 10)+"개 해제·재설정 메일 발송)")
 	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 

@@ -228,6 +228,15 @@ func (s *Store) InvalidateSessions(ctx context.Context, userID string) error {
 	return s.q.InvalidateSessions(ctx, userID)
 }
 
+// RevokeCredentials ends every session AND clears the password, in one UPDATE —
+// A-402's forced reset (D15 5.4). Undoing a takeover with the old password still
+// valid lets whoever knows it log straight back in. Clearing is not setting: the
+// administrator learns nothing, and the owner chooses the next password through
+// the reset mail (D19 「타인의 비밀번호를 설정하지 않는다」).
+func (s *Store) RevokeCredentials(ctx context.Context, userID string) error {
+	return s.q.RevokeCredentials(ctx, userID)
+}
+
 // withLastSuperuserGuard runs apply in a transaction that has every active
 // superuser holder locked FOR UPDATE, refusing when userID is the last one.
 //

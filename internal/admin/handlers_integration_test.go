@@ -947,11 +947,19 @@ func TestLastSuperuserCannotBeDeleted(t *testing.T) {
 
 // D19: 타인의 비밀번호를 설정하지 않는다 — 재설정 강제만 있다. The administrator
 // never learns a credential they could then use as that user.
+//
+// **옛 비밀번호는 비운다** (D15 5.4). 탈취를 되돌리는 동작인데 해시를 그대로 두면,
+// 비밀번호를 아는 탈취자가 세션이 끊긴 그 자리에서 다시 로그인하고 소셜 계정까지 다시
+// 붙인다 (2026-10-21 재점검). 비우는 것은 설정하는 것이 아니다 — 관리자는 아무것도 모른다.
 func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	d, pool := fixture(t, nil)
 	ctx := context.Background()
 	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
-	target, err := d.Auth.CreateUser(ctx, "t@example.com", "원래해시", "대상")
+	oldHash, err := auth.HashPassword("taker-knows-this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := d.Auth.CreateUser(ctx, "t@example.com", oldHash, "대상")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -969,13 +977,16 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
 
-	// The hash is untouched: forcing a reset is not setting a password.
+	// The hash is cleared, not replaced: nothing the administrator could know.
 	var hash string
 	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, target).Scan(&hash); err != nil {
 		t.Fatal(err)
 	}
-	if hash != "원래해시" {
-		t.Errorf("관리자가 타인의 비밀번호를 바꿨다: %q", hash)
+	if hash != "" {
+		t.Errorf("재설정 강제 뒤 해시 %q — 비우지 않았거나 관리자가 새 값을 넣었다", hash)
+	}
+	if _, err := d.Auth.Authenticate(ctx, "t@example.com", "taker-knows-this"); err == nil {
+		t.Error("재설정 강제 뒤에도 옛 비밀번호로 로그인된다 — 탈취자가 그대로 돌아온다")
 	}
 	// ...and every existing session is over (D15 5.4).
 	after, err := d.Auth.FindUserByID(ctx, target)
@@ -2157,7 +2168,7 @@ func TestAccountOperationsAreLogged(t *testing.T) {
 		}
 		got = append(got, s)
 	}
-	want := []string{"사용자 생성: new@example.com", "사용자 비활성화", "사용자 활성화", "재설정 강제 (세션 종료·소셜 연결 0개 해제·재설정 메일 발송)", "사용자 삭제"}
+	want := []string{"사용자 생성: new@example.com", "사용자 비활성화", "사용자 활성화", "재설정 강제 (세션 종료·로그인 수단 회수·소셜 연결 0개 해제·재설정 메일 발송)", "사용자 삭제"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("작업 로그 = %v, want %v", got, want)
 	}
