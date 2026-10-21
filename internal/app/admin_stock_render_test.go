@@ -594,3 +594,15 @@ func TestOrderDetailSuggestsRestockOnlyAfterShipping(t *testing.T) {
 		t.Error("발송된 주문에 입고 안내가 없다 — 환불된 몫이 창고에 남는다")
 	}
 }
+
+// 보낼 품목이 없는 주문의 피킹 화면은 열리고, 그렇다고 말한다 — 스캔 폼은 없다.
+func TestPickScreenSaysWhenNothingIsLeftToShip(t *testing.T) {
+	out := renderAdmin(t, "admin/pick.html", map[string]any{
+		"OrderNo": "N1", "Lines": []commerce.PickLine(nil), "Scanned": map[string]int{}})
+	if !strings.Contains(out, "보낼 품목이 없습니다") {
+		t.Errorf("빈 피킹 화면이 이유를 말하지 않는다: %.300s", out)
+	}
+	if strings.Contains(out, `name="scanned"`) {
+		t.Error("보낼 것이 없는데 스캔 폼이 있다")
+	}
+}

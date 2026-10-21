@@ -256,7 +256,13 @@ func (s *Store) PickList(ctx context.Context, orderNo string) ([]PickLine, error
 			OptionLabel: r.OptionLabel, Ordered: int(r.Quantity)})
 	}
 	if len(out) == 0 {
-		return nil, ErrNotFound
+		// 줄이 없는 것은 둘 중 하나다 — 주문이 없거나, 다 환불·반품돼 보낼 것이 없다.
+		// 뒤의 것은 404 가 아니라 빈 목록이다(A-516 이 「보낼 품목이 없다」고 말한다).
+		if _, err := s.q.OrderIDByNo(ctx, orderNo); errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		} else if err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

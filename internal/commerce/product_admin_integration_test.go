@@ -330,6 +330,17 @@ func TestPickListLeavesOutWhatWasRefunded(t *testing.T) {
 	if len(lines) != 1 || lines[0].Ordered != 1 {
 		t.Fatalf("부분 환불 뒤 피킹 목록 %+v, want 남은 1개", lines)
 	}
+	// 다 소진되면 보낼 것이 없다 — 「주문이 없다」(404)가 아니다. 없는 주문만 ErrNotFound 다.
+	if _, err := pool.Exec(ctx, `UPDATE order_items SET settled_quantity = quantity
+		WHERE order_id = (SELECT id FROM orders WHERE order_no = $1)`, orderNo); err != nil {
+		t.Fatal(err)
+	}
+	if lines, err := s.PickList(ctx, orderNo); err != nil || len(lines) != 0 {
+		t.Errorf("다 소진된 주문의 피킹 목록 = %+v, %v — 빈 목록이어야 한다", lines, err)
+	}
+	if _, err := s.PickList(ctx, "NO-SUCH-ORDER"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("없는 주문 = %v, want ErrNotFound", err)
+	}
 }
 
 func TestPickListTouchesNothing(t *testing.T) {
