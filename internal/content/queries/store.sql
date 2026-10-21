@@ -53,10 +53,10 @@ SELECT key, value FROM settings WHERE key = ANY(sqlc.arg('keys')::text[]);
 INSERT INTO settings (key, value) VALUES ($1, $2)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
--- name: LegacySecretSettings :many
-SELECT key, value FROM settings
-WHERE (key IN ('pg.secret_key', 'mail.smtp_password') OR key LIKE 'social.%.client_secret')
-  AND value <> '' AND value NOT LIKE 'enc:v1:%';
+-- name: UnsealedSettings :many
+-- 어느 키가 시크릿인지는 고르지 않는다 — content.IsSecretSetting 한 곳이 정한다.
+-- SQL 에 목록을 옮겨 적으면 낡는다(Turnstile 비밀 키가 그렇게 빠졌었다).
+SELECT key, value FROM settings WHERE value <> '' AND value NOT LIKE 'enc:v1:%';
 
 -- name: MenuItems :many
 SELECT id, coalesce(parent_id::text, '')::text AS parent_id, title, url, sort_order

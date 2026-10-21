@@ -315,16 +315,18 @@ func (s *Store) SealLegacySecrets(ctx context.Context) (int, error) {
 	if s.sealer == nil {
 		return 0, nil
 	}
-	rows, err := s.q.LegacySecretSettings(ctx)
+	rows, err := s.q.UnsealedSettings(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	legacy := make(map[string]string, len(rows))
+	legacy := map[string]string{}
 	for _, r := range rows {
-		legacy[r.Key] = r.Value
+		if IsSecretSetting(r.Key) {
+			legacy[r.Key] = r.Value
+		}
+	}
+	if len(legacy) == 0 {
+		return 0, nil
 	}
 	return len(legacy), s.PutSettings(ctx, legacy)
 }

@@ -127,3 +127,32 @@ func TestSealLegacySecretsUpgradesPlaintextRows(t *testing.T) {
 		t.Errorf("두 번째 승격이 %d행을 다시 썼다", n)
 	}
 }
+
+// **옛 평문을 봉인하는 길도 IsSecretSetting 한 곳을 본다** (D60 「설정값을 어디에 두는가」).
+// LegacySecretSettings 질의가 시크릿 목록을 SQL 에 옮겨 적으면서 Turnstile 비밀 키를
+// 빠뜨렸다 — 옮겨 적은 목록은 낡는다 (2026-10-21 점검).
+func TestSealLegacySecretsUsesTheOneList(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES
+		('turnstile.secret_key', 'ts-plain'), ('site.name', '온돌')`); err != nil {
+		t.Fatal(err)
+	}
+	s.UseSealer(sealer(t))
+	n, err := s.SealLegacySecrets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ts, name string
+	if err := pool.QueryRow(ctx, `SELECT
+		(SELECT value FROM settings WHERE key = 'turnstile.secret_key'),
+		(SELECT value FROM settings WHERE key = 'site.name')`).Scan(&ts, &name); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || !secretbox.IsSealed(ts) {
+		t.Errorf("봉인 %d건, Turnstile 비밀 키 %q — 평문이 남았다", n, ts)
+	}
+	if name != "온돌" {
+		t.Errorf("시크릿이 아닌 값까지 건드렸다: %q", name)
+	}
+}
