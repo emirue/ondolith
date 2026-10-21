@@ -973,6 +973,7 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mailReady(t, d)
 	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -1013,6 +1014,40 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	}
 }
 
+// mailReady 는 A-205 에 SMTP 호스트를 넣는다 — 재설정 강제는 메일이 나갈 때만 한다.
+func mailReady(t *testing.T, d *Deps) {
+	t.Helper()
+	if err := d.Content.PutSettings(context.Background(), map[string]string{"mail.smtp_host": "smtp.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// **메일을 보낼 수 없는 사이트에서는 재설정 강제를 하지 않는다.** 강제는 비밀번호를 비우고
+// 소셜 연결을 끊은 뒤 재설정 메일로 주인을 돌려보내는데, 메일이 안 나가면 그 계정은 들어갈
+// 길이 하나도 없다 (2026-10-21 3차 점검).
+func TestForcedResetNeedsMail(t *testing.T) {
+	d, pool := fixture(t, nil)
+	ctx := context.Background()
+	me, _ := d.Auth.CreateUser(ctx, "me@example.com", "h", "나")
+	target, err := d.Auth.CreateUser(ctx, "t@example.com", "원래해시", "대상")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Caller = func(*http.Request) Caller {
+		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
+	}
+	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("메일 없는 재설정 강제 = HTTP %d, want 409", rec.Code)
+	}
+	var hash string
+	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, target).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	if hash != "원래해시" {
+		t.Errorf("거부했는데 해시가 %q 가 됐다 — 계정이 잠겼다", hash)
+	}
+}
+
 // **재설정 강제는 소셜 연결도 끊는다** (D15 5.4). 탈취를 되돌리는 동작인데, 연결이
 // 남으면 탈취한 사람이 붙여 둔 소셜 계정으로 다시 들어온다 — 세션만 끊고 「되돌렸다」고
 // 말하던 것이 2026-10-21 점검에서 확인됐다. 주인은 재설정 뒤 P-111 에서 다시 잇는다.
@@ -1032,6 +1067,7 @@ func TestForcedResetAlsoCutsSocialLinks(t *testing.T) {
 	d.Caller = func(*http.Request) Caller {
 		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
 	}
+	mailReady(t, d)
 	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -1061,6 +1097,7 @@ func TestForcedResetWorksOnAnInactiveAccount(t *testing.T) {
 	}
 	d.SendReset = func(string, string) {}
 
+	mailReady(t, d)
 	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
 		t.Errorf("비활성 계정 재설정이 HTTP %d 로 거부됐다", rec.Code)
 	}
@@ -2150,6 +2187,7 @@ func TestAccountOperationsAreLogged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mailReady(t, d)
 	for _, h := range []http.HandlerFunc{d.UserDeactivate, d.UserActivate, d.UserResetPassword, d.UserDelete} {
 		if rec := postID(h, u.ID, url.Values{"password": {"pw"}}); rec.Code != http.StatusSeeOther {
 			t.Fatalf("계정 조작 = HTTP %d (%s)", rec.Code, rec.Body.String())

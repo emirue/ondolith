@@ -1093,6 +1093,18 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 		return
 	}
+	// 메일이 나가지 않으면 하지 않는다. 비밀번호를 비우고 연결을 끊은 뒤 주인이 돌아올
+	// 길은 재설정 메일 하나뿐이다 — 그것이 없으면 계정이 잠긴다.
+	kv, err := d.Content.Settings(ctx, "mail.smtp_host")
+	if err != nil {
+		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		return
+	}
+	if kv["mail.smtp_host"] == "" {
+		d.refuse(w, r, http.StatusConflict,
+			"메일을 보낼 수 없어 재설정을 강제하면 이 계정에 들어갈 방법이 없어집니다. 메일 설정(A-205)을 먼저 하세요.")
+		return
+	}
 	// Sessions and the password end first, together. Issuing the token first
 	// would leave a window where the takeover being undone is still logged in,
 	// and a password left valid lets the taker log straight back in (D15 5.4).
