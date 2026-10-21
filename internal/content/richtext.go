@@ -72,9 +72,10 @@ func SanitizeRichText(raw string) string {
 		strings.ReplaceAll(richPolicy.Sanitize(raw), `sandbox=""`, iframeSandbox)))
 }
 
-// iframeElem matches one iframe in SANITISED html. 정화 뒤의 값이라 속성 값의 `>`·`"` 는
-// 엔티티로 나가므로 태그 경계를 정규식으로 읽어도 된다. 정화되지 않은 입력에는 쓰지 않는다.
-var iframeElem = regexp.MustCompile(`(?s)<iframe\b([^>]*)>.*?</iframe>`)
+// iframeElem matches one iframe in SANITISED html — 닫는 태그가 없으면 여는 태그만. 정화
+// 뒤의 값이라 속성 값의 `>`·`"` 는 엔티티로 나가므로 태그 경계를 정규식으로 읽어도 된다.
+// 정화되지 않은 입력에는 쓰지 않는다.
+var iframeElem = regexp.MustCompile(`(?s)<iframe\b([^>]*)>(?:.*?</iframe>)?`)
 
 // dropSrclessIframes removes the iframes whose src the allow-list took away.
 func dropSrclessIframes(s string) string {

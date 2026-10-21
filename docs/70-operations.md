@@ -20,7 +20,8 @@
 ## 업그레이드 절차
 
 ```bash
-# 1. 백업 (아래 백업 절 참조)
+# 1. 백업 (아래 백업 절 참조). /backup 은 0700 — 덤프에 회원 비밀번호 해시가 있다
+install -d -m 700 /backup
 pg_dump -Fc ondolith > /backup/ondolith-$(date +%F).dump
 cp /opt/ondolith/ondolith.json /backup/
 
@@ -270,6 +271,10 @@ createdb ondolith_restored
 pg_restore --no-owner --exit-on-error -d ondolith_restored ondolith.dump
 unzip -o ondolith-backup-*.zip 'uploads/*' -d /opt/ondolith   # 업로드 폴더
 ```
+
+zip 은 파일 권한을 담지 않아 풀린 파일은 `0644` 다. 앱 계정 소유로 돌리고 다른 계정이 읽지 못하게 한다 —
+앱이 만드는 업로드는 `0600`·`0700` 이다 (D60 3절). [D72](72-deploy-lightsail.md) 배포라면
+`sudo chown -R ondolith:ondolith /opt/ondolith/uploads && sudo chmod -R go-rwx /opt/ondolith/uploads`.
 
 그다음 `ondolith.json` 의 `database_url` 을 새 DB 로 바꾸고 재시작한다. 복원한 사이트에서는 모두 다시 로그인한다.
 

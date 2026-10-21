@@ -226,7 +226,7 @@ const maxImageUploadBytes = 64 << 20
 // ProductImageUpload is A-502 POST /admin/products/{id}/images (FR-601, NFR-206).
 //
 // **검증을 여기 쓰지 않는다.** 확장자 허용목록·매직바이트·웹루트 밖 저장과
-// 파일명 재생성·0644 는 전부 content.StoreUpload 안에 있고 (D60), 상품 이미지는
+// 파일명 재생성·0600 은 전부 content.StoreUpload 안에 있고 (D60), 상품 이미지는
 // 그 허용목록을 이미지로 좁혀서 지난다 (commerce.Images.Save).
 func (d *Deps) ProductImageUpload(w http.ResponseWriter, r *http.Request) {
 	c, ok := d.require(w, r, "product.manage")

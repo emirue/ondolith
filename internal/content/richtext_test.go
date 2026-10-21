@@ -123,6 +123,7 @@ func TestDisallowedIframeLeavesNothing(t *testing.T) {
 		`<iframe id="x" src="https://evil.example/x"></iframe>`,
 		`<iframe title="t" src="https://evil.example/x">대체 글</iframe>`,
 		`<p>앞</p><iframe id="y"></iframe><p>뒤</p>`,
+		`<p>앞</p><iframe id="z">`, // 닫는 태그 없이 끝나도
 	} {
 		if got := SanitizeRichText(in); strings.Contains(got, "<iframe") {
 			t.Errorf("%q → %q — 빈 iframe 이 남았다", in, got)

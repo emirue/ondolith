@@ -206,7 +206,7 @@ Response timeout.)
 업그레이드 전마다, 그리고 정기적으로:
 
 ```bash
-sudo mkdir -p /backup
+sudo install -d -m 700 /backup
 sudo -u postgres pg_dump -Fc ondolith | sudo tee /backup/ondolith-$(date +%F).dump >/dev/null
 sudo cp /opt/ondolith/ondolith.json /backup/
 sudo tar czf /backup/uploads-$(date +%F).tgz -C /opt/ondolith uploads
@@ -217,6 +217,10 @@ sudo tar czf /backup/uploads-$(date +%F).tgz -C /opt/ondolith uploads
 PostgreSQL 롤이 아니라서 peer 인증에서 막힌다. 앞선 판의 세 줄은 Lightsail 에서 **셋 다
 실패했다** — `/backup` 이 없고, `Permission denied`, 그리고 롤 없음 (W4-13). 백업이
 안 뜨는 것은 업그레이드 직전에 알게 된다.
+
+**`/backup` 은 `0700` 이다** (`install -d -m 700` — 이미 있으면 권한만 고친다). 덤프에는 모든 회원의
+비밀번호 해시가, 업로드 묶음에는 비공개 게시판의 첨부가 있다. `mkdir` 로 만들면 `0755` 라 서버의 다른
+계정이 읽는다 — 자동 백업 폴더가 `0700` 인 것과 같은 이유다 ([D60](60-security.md) 「백업 내려받기」).
 
 **세 가지를 함께 뜬다.** DB만 뜨면 첨부 파일이 없는 글이 되살아나고, 설정 파일이 없으면
 복원한 DB에 붙을 방법이 없다 — 그리고 `secret_key` 가 거기 있어, 파일 없이는 DB 에 봉인된

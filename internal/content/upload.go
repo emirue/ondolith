@@ -20,7 +20,7 @@ import (
 //	1. extension allow-list  — a deny-list cannot enumerate .php5, .phtml, .svg…
 //	2. magic bytes           — the client's Content-Type is a claim, not a fact
 //	3. regenerated filename  — kills path traversal and executable placement
-//	4. no execute bit (0644) — belt to the braces of storing outside the web root
+//	4. no execute bit (0600) — belt to the braces of storing outside the web root
 //
 // Dropping any one of them re-opens the hole the other three were closing from
 // a different side: an allow-list without magic bytes accepts a .php renamed to

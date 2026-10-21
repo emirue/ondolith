@@ -345,7 +345,6 @@ func (d *socialDeps) renderConnections(w http.ResponseWriter, r *http.Request, c
 		}))
 }
 
-// socialFail draws the login screen with a reason.
 // socialFail ends the callback without rendering at its URL (sessSocialError):
 // the message rides the session to the login page, or to P-111 when the
 // person was linking while logged in.
