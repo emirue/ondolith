@@ -684,7 +684,7 @@
 | `body` | textarea | ✔ | 공백만 불가, **글자 50,000자 · 서식 포함 200,000자 이하** (`posts.body`·`body_html` CHECK 와 같다 — 앱이 먼저 422 로 막고 폼을 되돌린다) | 출력은 기본 이스케이프. `template.HTML`은 코어만 쓴다 (NFR-203) |
 | `custom_fields[<key>]` | 스키마별 | 스키마별 | **`board_fields`에 정의된 key만.** 타입·필수·선택지를 스키마대로 검증 | 폼 자체를 스키마에서 생성한다 ([D14](14-screen-flows.md) 3절) |
 | `is_secret` | checkbox | | 게시판이 비밀글을 허용할 때만 | 열람은 `post.read_secret` 또는 작성자 본인 (FR-512) |
-| `attachments[]` | file | | **4중 검증 전부** (확장자 허용목록 / MIME+매직바이트 / 웹루트 밖 저장 + 파일명 재생성 / `0644`) | 게시판 `allow_attachments`가 false면 첨부 자체를 거부 (NFR-206) |
+| `attachments[]` | file | | **4중 검증 전부** (확장자 허용목록 / MIME+매직바이트 / 웹루트 밖 저장 + 파일명 재생성 / `0600`) | 게시판 `allow_attachments`가 false면 첨부 자체를 거부 (NFR-206) |
 
 **받지 않는 필드**
 
@@ -2634,7 +2634,7 @@ P-214 와 같은 입력·응답이다(같은 함수). 다른 것은 권한뿐이
 
 > **이 화면에는 업로드 입력이 없다** — D11 메서드가 GET, DELETE다. 업로드 경로는 P-205이며
 > 거기서 D60 **4중 검증 전부**(확장자 허용목록 / MIME+매직바이트 / 웹루트 밖 저장 + 파일명 재생성 /
-> 실행권한 제거 0644)를 지킨다. **이 화면이 지켜야 할 것은 4중 검증 3항의 후반부**다 —
+> 실행권한 제거 `0600`)를 지킨다. **이 화면이 지켜야 할 것은 4중 검증 3항의 후반부**다 —
 > 디스크 접근은 DB에 기록된 저장 경로로만 하고, 경로를 요청에서 받지 않는다.
 
 **받지 않는 필드**
@@ -2987,7 +2987,7 @@ P-214 와 같은 입력·응답이다(같은 함수). 다른 것은 권한뿐이
 | 이름 | text | ✔ | 공백만 거부, **200자 이하** | `products.이름` |
 | 설명 | text | | **20,000자 이하**. `template.HTML`을 쓴다면 저장 시점 정화 (NFR-203) | |
 | 기본가 | integer | ✔ | **정수 minor unit(원)**, 음수 거부. 부동소수점 금지 | D30, D50 |
-| 이미지 | multipart 파일 (`image`, 여러 장) | | **D60 4중 검증 전부**: ① 확장자 허용목록 ② MIME + 매직바이트(`http.DetectContentType`, 클라이언트 `Content-Type` 불신) ③ 웹루트 밖 저장 + 파일명 UUID 재생성 ④ 0644. 허용 형식은 **jpg·jpeg·png·gif·webp** — 첨부의 허용목록을 이미지로 좁힌 것이다. 파일당 크기는 A-309의 `upload.max_bytes`, 상품당 10장 | NFR-206, D15 SC-7 1항. `product_images` (D30). **상품 폼과 다른 폼이다**: `POST /admin/products/{id}/images`. 삭제는 `POST /admin/product-images/{id}/delete` (id는 이미지의 것) |
+| 이미지 | multipart 파일 (`image`, 여러 장) | | **D60 4중 검증 전부**: ① 확장자 허용목록 ② MIME + 매직바이트(`http.DetectContentType`, 클라이언트 `Content-Type` 불신) ③ 웹루트 밖 저장 + 파일명 UUID 재생성 ④ 0600. 허용 형식은 **jpg·jpeg·png·gif·webp** — 첨부의 허용목록을 이미지로 좁힌 것이다. 파일당 크기는 A-309의 `upload.max_bytes`, 상품당 10장 | NFR-206, D15 SC-7 1항. `product_images` (D30). **상품 폼과 다른 폼이다**: `POST /admin/products/{id}/images`. 삭제는 `POST /admin/product-images/{id}/delete` (id는 이미지의 것) |
 | 노출 여부 | boolean | ✔ | — | P-301·P-303 노출 |
 | 카테고리 | uuid[] | | 존재하는 `categories`. A-509가 정의한다. 폼 필드는 `category_id`(반복). **보낸 집합이 저장되는 집합이다** — 상품과 한 트랜잭션에서 지우고 넣는다 | `product_categories` (D30) |
 

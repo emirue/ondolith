@@ -187,7 +187,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	//
 	// 여기서 하는 이유: 경로는 설정값이고(NFR-304) 운영자가 옮길 수 있으므로,
 	// 설치 한 번이 아니라 **뜰 때마다** 확인해야 한다.
-	if err := os.MkdirAll(cfg.Uploads(), 0o755); err != nil {
+	if err := os.MkdirAll(cfg.Uploads(), 0o700); err != nil {
 		return fail(fmt.Errorf("업로드 디렉터리를 만들 수 없다 (%s): %w", cfg.Uploads(), err))
 	}
 	// 업로드 폴더는 백업에 통째로 들어간다 — 그 안에 백업 폴더가 있으면 다음 백업이 이전

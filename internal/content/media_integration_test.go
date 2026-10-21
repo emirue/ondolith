@@ -28,6 +28,10 @@ func TestMediaSaveStoresDisplayAndThumbnail(t *testing.T) {
 	if md.Width != 1920 || md.Height != 1280 || md.MIMEType != "image/jpeg" {
 		t.Errorf("저장된 사진 %dx%d %s, want 1920x1280 image/jpeg", md.Width, md.Height, md.MIMEType)
 	}
+	// 본문 사진도 첨부와 같은 권한이다 — 앱 계정만 읽는다 (D60 3절).
+	if fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(md.StoredPath))); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("본문 사진 권한 %v (%v), want 0600", fi.Mode().Perm(), err)
+	}
 	got, err := m.ByID(ctx, md.ID)
 	if err != nil || got.StoredPath != md.StoredPath {
 		t.Fatalf("ByID = %+v (%v)", got, err)

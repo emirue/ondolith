@@ -213,14 +213,14 @@ func StoreUpload(root, name string, r io.Reader, now time.Time, limits UploadLim
 	}
 	defer rt.Close()
 
-	// 0755 on the directory: readable and traversable, and the execute bit on a
-	// directory is what "traversable" means — it is not the executable bit D60
-	// §4 is about, which is the file's.
-	if err := rt.MkdirAll(dir, 0o755); err != nil {
+	// **앱 계정만** — 폴더 0700·파일 0600, 자동 백업과 같은 기준이다 (D60 3절).
+	// 비공개 게시판의 첨부도 여기 있고, 읽는 길은 권한을 확인하는 핸들러 하나뿐이다.
+	// 폴더의 x 비트는 「들어갈 수 있다」는 뜻이지 D60 4절이 말하는 실행 비트가 아니다.
+	if err := rt.MkdirAll(dir, 0o700); err != nil {
 		return StoredUpload{}, err
 	}
 
-	f, err := rt.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := rt.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return StoredUpload{}, err
 	}
