@@ -336,6 +336,38 @@ func TestSiteSettingsSaveIsLogged(t *testing.T) {
 	}
 }
 
+// **A-201 은 D19 가 적은 검사를 한다** — 사이트 이름 1~100자(공백만은 거부), 메타 설명
+// 300자, OG 이미지 http·https 또는 내부 경로. 명세에만 있고 구현이 없었다 (2026-10-21
+// 점검). OG 이미지는 `<meta content>` 에 이스케이프돼 들어가 XSS 는 아니지만,
+// `javascript:`·`//남의호스트` 같은 값이 링크 미리보기에 그대로 실렸다.
+func TestSiteSettingsValidateTheD19Fields(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	for _, bad := range []url.Values{
+		{"site.name": {"   "}},
+		{"site.name": {strings.Repeat("가", 101)}},
+		{"site.meta_description": {strings.Repeat("a", 301)}},
+		{"site.og_image": {"javascript:alert(1)"}},
+		{"site.og_image": {"//evil.example/x.png"}},
+		{"site.og_image": {"ftp://example.com/x.png"}},
+		{"site.og_image": {`/\evil.example/x.png`}},
+	} {
+		if rec := post(d.SettingsSave, "/admin/settings", bad); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%v = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
+	for _, ok := range []url.Values{
+		{"site.name": {strings.Repeat("가", 100)}},
+		{"site.meta_description": {strings.Repeat("가", 300)}},
+		{"site.og_image": {"https://cdn.example.com/og.png"}},
+		{"site.og_image": {"/media/0e7f0c3a-0000-4000-8000-000000000000"}},
+		{"site.og_image": {""}},
+	} {
+		if rec := post(d.SettingsSave, "/admin/settings", ok); rec.Code != http.StatusSeeOther {
+			t.Errorf("%v = HTTP %d, want 303 (%s)", ok, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // **지도 키는 A-201 에서 넣는다** (FR-716). 네이버 ncpKeyId·카카오 JavaScript 키·구글 API
 // 키·Map ID 는 페이지에 실려 나가는 공개값이라 봉인하지 않지만, `<script>` 의 속성이 되므로
 // 영문·숫자·`-`·`_` 만 받는다. 붙여넣은 앞뒤 공백은 떼고, 빈 값은 그 지도를 끈다.

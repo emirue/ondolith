@@ -114,3 +114,22 @@ func TestCoverOfPicksTheFirstUploadedPhoto(t *testing.T) {
 		}
 	}
 }
+
+// **허용 밖 주소의 iframe 은 요소째 빠진다.** 다른 허용 속성(id·title)이 있으면 src 만
+// 빠진 빈 iframe 이 sandbox 를 달고 남았다 — 실을 것은 없지만 주석이 말한 동작이 아니었다
+// (2026-10-21 점검에서 실행으로 확인).
+func TestDisallowedIframeLeavesNothing(t *testing.T) {
+	for _, in := range []string{
+		`<iframe id="x" src="https://evil.example/x"></iframe>`,
+		`<iframe title="t" src="https://evil.example/x">대체 글</iframe>`,
+		`<p>앞</p><iframe id="y"></iframe><p>뒤</p>`,
+	} {
+		if got := SanitizeRichText(in); strings.Contains(got, "<iframe") {
+			t.Errorf("%q → %q — 빈 iframe 이 남았다", in, got)
+		}
+	}
+	yt := `<iframe id="v" src="https://www.youtube.com/embed/abc123"></iframe>`
+	if got := SanitizeRichText(yt); !strings.Contains(got, `src="https://www.youtube.com/embed/abc123"`) {
+		t.Errorf("유튜브가 빠졌다: %q", got)
+	}
+}

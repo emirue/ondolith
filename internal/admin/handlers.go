@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
@@ -248,6 +250,19 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 // Changing one is what makes A-201 call Rebuild.
 var assemblyKeys = []string{"site.type", "admin.theme"}
 
+// ogImageURL is D19 A-201's 「스킴 허용목록 http/https 또는 내부 상대경로」. 빈 값은
+// 「없음」이다. `//호스트`·`/\호스트` 는 브라우저가 다른 호스트로 읽는 경로라 내부가 아니다.
+func ogImageURL(v string) bool {
+	if v == "" {
+		return true
+	}
+	if strings.HasPrefix(v, "/") {
+		return !strings.HasPrefix(v, "//") && !strings.Contains(v, `\`)
+	}
+	u, err := url.Parse(v)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
 func orNone(v string) string {
 	if v == "" {
 		return "(없음)"
@@ -278,6 +293,22 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 비밀키 빈 칸은 「그대로 두라」다 (MailSettingsSave 와 같은 이유). 끄려면 사이트 키를 비운다.
 	if kv["turnstile.secret_key"] == "" {
 		delete(kv, "turnstile.secret_key")
+	}
+	// D19 A-201 의 길이·형식. 사이트 이름은 P-001 의 site_name 과 같은 상한이다.
+	if v, ok := kv["site.name"]; ok && (strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > 100) {
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "사이트 이름은 1~100자입니다.")
+		return
+	}
+	if utf8.RuneCountInString(kv["site.meta_description"]) > 300 {
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "기본 메타 설명은 300자 이내입니다.")
+		return
+	}
+	if !ogImageURL(kv["site.og_image"]) {
+		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			http.StatusUnprocessableEntity, "OG 이미지는 http·https 주소이거나 /로 시작하는 이 사이트의 경로여야 합니다.")
+		return
 	}
 	// 붙여넣은 공백·소문자는 고쳐 받는다. 빈 값은 끄기다.
 	if v, ok := kv["analytics.ga4_id"]; ok {
