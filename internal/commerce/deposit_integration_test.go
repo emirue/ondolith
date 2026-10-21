@@ -93,7 +93,7 @@ func TestDepositWebhookCompletesOnlyOnGatewayDone(t *testing.T) {
 		t.Errorf("조회 API %d번, want 1 — 웹훅 본문만 믿었다", gw.getCalls)
 	}
 
-	gw.getResponse = &Payment{PaymentKey: "pk-va", Status: PaymentApproved, Amount: total,
+	gw.getResponse = &Payment{PaymentKey: "pk-va", OrderNo: orderNo, Status: PaymentApproved, Amount: total,
 		Raw: []byte(`{"status":"DONE"}`)}
 	if err := s.ProcessWebhook(ctx, gw, webhook(t, s, orderNo, "s3cret", total), &WebhookEvent{
 		OrderNo: orderNo, PaymentKey: "pk-va", Secret: "s3cret", Amount: total}); err != nil {
@@ -110,6 +110,27 @@ func TestDepositWebhookCompletesOnlyOnGatewayDone(t *testing.T) {
 	}
 	if payStatus != string(PaymentApproved) || approvedAt == nil {
 		t.Errorf("payments = (%s, %v), want (승인, 시각)", payStatus, approvedAt)
+	}
+}
+
+// **조회 응답이 다른 주문의 것이면 옮기지 않는다.** 승인·결과 불명 분기는 조회한
+// orderId 를 대조했는데 웹훅 분기만 빠져 있었다 (2026-10-21 점검). 지금 저장된 키가
+// 그 주문에 묶여 있어 악용 길은 없지만, 진실의 출처를 대조 없이 믿지 않는다.
+func TestDepositWebhookChecksTheLookedUpOrder(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "va", 1)
+	depositOrder(t, s, pool, orderNo, total, "s3cret")
+
+	gw := pendingGateway("s3cret")
+	gw.getResponse = &Payment{PaymentKey: "pk-va", OrderNo: "SOMEONE-ELSE", Status: PaymentApproved,
+		Amount: total, Raw: []byte(`{"status":"DONE"}`)}
+	if err := s.ProcessWebhook(ctx, gw, webhook(t, s, orderNo, "s3cret", total), &WebhookEvent{
+		OrderNo: orderNo, PaymentKey: "pk-va", Secret: "s3cret", Amount: total}); err == nil {
+		t.Error("다른 주문의 조회 응답으로 처리가 성공했다")
+	}
+	if got := statusOf(t, s, orderNo); got != StatusDepositPending {
+		t.Errorf("다른 주문의 DONE 으로 주문이 %s 가 됐다", got)
 	}
 }
 

@@ -159,6 +159,10 @@ func (s *Store) processWebhook(ctx context.Context, gw Gateway, ev *WebhookEvent
 	if got == nil || got.Status != PaymentApproved {
 		return nil // 아직 입금 전이다. 다음 알림이 다시 묻는다.
 	}
+	// 조회한 결제가 이 주문의 것인지도 본다 — 승인·결과 불명 분기와 같은 대조다.
+	if got.OrderNo != ev.OrderNo {
+		return fmt.Errorf("commerce: 조회한 결제의 주문 %q 가 알림의 주문 %q 와 다릅니다", got.OrderNo, ev.OrderNo)
+	}
 	if err := VerifyAmount(total, got.Amount); err != nil {
 		return err
 	}
