@@ -395,18 +395,19 @@ func (q *Queries) LockCartForOrder(ctx context.Context, arg LockCartForOrderPara
 }
 
 const lockOrderByNo = `-- name: LockOrderByNo :one
-SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE
+SELECT id, status, delivered_at FROM orders WHERE order_no = $1 FOR UPDATE
 `
 
 type LockOrderByNoRow struct {
-	ID     string
-	Status string
+	ID          string
+	Status      string
+	DeliveredAt *time.Time
 }
 
 func (q *Queries) LockOrderByNo(ctx context.Context, orderNo string) (LockOrderByNoRow, error) {
 	row := q.db.QueryRow(ctx, lockOrderByNo, orderNo)
 	var i LockOrderByNoRow
-	err := row.Scan(&i.ID, &i.Status)
+	err := row.Scan(&i.ID, &i.Status, &i.DeliveredAt)
 	return i, err
 }
 

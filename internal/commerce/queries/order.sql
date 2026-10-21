@@ -98,7 +98,7 @@ WHERE (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
 ORDER BY created_at DESC, id LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
 
 -- name: LockOrderByNo :one
-SELECT id, status FROM orders WHERE order_no = $1 FOR UPDATE;
+SELECT id, status, delivered_at FROM orders WHERE order_no = $1 FOR UPDATE;
 
 -- name: SetOrderStatus :exec
 UPDATE orders SET status = $2, updated_at = now() WHERE id = $1;

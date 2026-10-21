@@ -37,6 +37,35 @@ func deliveredOrder(t *testing.T, s *Store, pool *pgxpool.Pool, slug string, qty
 	return orderNo, goods
 }
 
+// **반품·교환은 배송완료 뒤 A-512 기간 안에만 받는다** (FR-617·FR-618, D19 P-511).
+//
+// 기간(order.return_days)은 저장만 되고 읽는 곳이 없었다 — 몇 달 뒤의 교환 요청이
+// 새 조합의 재고를 관리자가 거부할 때까지 묶었다 (2026-10-21 점검).
+func TestReturnWindowIsEnforced(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+	req := ReturnRequest{Kind: KindReturn, Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}}
+	var delivered time.Time
+	if err := pool.QueryRow(ctx, `SELECT delivered_at FROM orders WHERE order_no = $1`, orderNo).Scan(&delivered); err != nil {
+		t.Fatal(err)
+	}
+
+	// 기본 7일 — 8일째는 받지 않는다.
+	if _, err := s.OpenReturn(ctx, orderNo, req, "P-511", delivered.AddDate(0, 0, 8)); !errors.Is(err, ErrReturnWindow) {
+		t.Fatalf("배송완료 8일 뒤 = %v, want ErrReturnWindow", err)
+	}
+	// A-512 에서 10일로 늘리면 같은 날 받는다 — 상수가 아니라 설정을 읽는다.
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES ($1, '10')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, SettingReturnDays); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenReturn(ctx, orderNo, req, "P-511", delivered.AddDate(0, 0, 8)); err != nil {
+		t.Errorf("기간 10일의 8일째 = %v, want 접수", err)
+	}
+}
+
 // **수거 확인 없이 환불이 나가지 않는다** (D14 「수거 우선」).
 //
 // 물건을 못 받고 돈만 나가는 것을 상태로 막는다 — 상태머신에 `반품접수 → 환불`
