@@ -17,7 +17,7 @@ import (
 func TestMediaSaveStoresDisplayAndThumbnail(t *testing.T) {
 	s, _ := testStore(t)
 	root := t.TempDir()
-	m := s.MediaIn(root)
+	m := s.MediaIn(LocalFiles(root))
 	ctx := context.Background()
 
 	md, err := m.Save(ctx, "", "거실.jpg", bytes.NewReader(encodeJPEG(t, halves(3000, 2000))),
@@ -37,7 +37,7 @@ func TestMediaSaveStoresDisplayAndThumbnail(t *testing.T) {
 		t.Fatalf("ByID = %+v (%v)", got, err)
 	}
 	for _, thumb := range []bool{false, true} {
-		f, err := m.Open(got, thumb)
+		f, err := m.Open(ctx, got, thumb)
 		if err != nil {
 			t.Fatalf("파일 열기(썸네일 %v): %v", thumb, err)
 		}
@@ -59,7 +59,7 @@ func TestMediaSaveStoresDisplayAndThumbnail(t *testing.T) {
 func TestMediaSaveRefusesAndLeavesNothing(t *testing.T) {
 	s, pool := testStore(t)
 	root := t.TempDir()
-	m := s.MediaIn(root)
+	m := s.MediaIn(LocalFiles(root))
 	ctx := context.Background()
 
 	cases := []struct {

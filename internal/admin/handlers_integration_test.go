@@ -104,9 +104,9 @@ func fixture(t *testing.T, c Caller) (*Deps, *pgxpool.Pool) {
 		Commerce: shop,
 		// 운영과 같이 채운다. 비워 두면 첨부를 지우는 경로가 nil 로 터지는데,
 		// 그 사실이 테스트에서는 보이지 않는다.
-		Attachments: store.AttachmentsIn(uploads),
-		Images:      shop.ImagesIn(uploads),
-		Media:       store.MediaIn(uploads),
+		Attachments: store.AttachmentsIn(content.LocalFiles(uploads)),
+		Images:      shop.ImagesIn(content.LocalFiles(uploads)),
+		Media:       store.MediaIn(content.LocalFiles(uploads)),
 		// **작업 로그도 운영과 같이 붙인다.** 비워 두면 d.log 가 조용히
 		// 아무것도 안 하고, "로그에 남는다" 를 확인하는 검사가 전부 무의미해진다
 		// (D15 7절이 요구하는 것이 바로 그 기록이다).
@@ -1246,7 +1246,7 @@ func TestAdminPostDeleteRemovesTheAttachmentFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Attachments.Open(&at); err != nil {
+	if _, err := d.Attachments.Open(context.Background(), &at); err != nil {
 		t.Fatalf("업로드 직후 파일이 없다: %v", err)
 	}
 
@@ -1256,7 +1256,7 @@ func TestAdminPostDeleteRemovesTheAttachmentFile(t *testing.T) {
 		t.Fatalf("삭제 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
 
-	if _, err := d.Attachments.Open(&at); !os.IsNotExist(err) {
+	if _, err := d.Attachments.Open(context.Background(), &at); !os.IsNotExist(err) {
 		t.Errorf("첨부 파일이 남았다 (err=%v) — 글이 없어 아무도 찾지 못한다", err)
 	}
 }

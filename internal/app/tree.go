@@ -178,6 +178,12 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "settings.update", Handler: ad.SocialSettingsForm})
 	r.Add(Route{Screen: "A-206", Method: "POST", Pattern: "/admin/settings/social", Class: SC5,
 		Permission: "settings.update", Handler: ad.SocialSettingsSave})
+	// A-210 파일 저장소 (FR-717). 코어다 — 첨부·본문 사진은 cms 사이트에도 있다. 저장·연결
+	// 확인·옮기기가 한 POST 의 `action` 이다 (A-209 와 같다). 셋 다 superuser + 재인증 (D15 R8).
+	r.Add(Route{Screen: "A-210", Method: "GET", Pattern: "/admin/settings/storage", Class: SC4,
+		Permission: "settings.update", Handler: ad.StorageSettingsForm})
+	r.Add(Route{Screen: "A-210", Method: "POST", Pattern: "/admin/settings/storage", Class: SC5,
+		Permission: "settings.update", Handler: ad.StorageSettingsSave})
 
 	r.Add(Route{Screen: "A-202", Method: "GET", Pattern: "/admin/themes", Class: SC4,
 		Permission: "theme.view", Handler: ad.ThemeList})

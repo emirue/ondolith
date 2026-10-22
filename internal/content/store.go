@@ -71,7 +71,7 @@ func (s *Store) UseSealer(box Sealer) { s.sealer = box }
 // docs/60-security.md 「설정값을 어디에 두는가」의 ②다.
 func IsSecretSetting(key string) bool {
 	switch key {
-	case "pg.secret_key", "mail.smtp_password", "turnstile.secret_key":
+	case "pg.secret_key", "mail.smtp_password", "turnstile.secret_key", SettingStorageSecretKey:
 		return true
 	}
 	return strings.HasPrefix(key, "social.") && strings.HasSuffix(key, ".client_secret")

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -47,11 +46,11 @@ func attachmentsOf(rows []contentq.Attachment) []Attachment {
 // files stayed put.
 type Attachments struct {
 	store *Store
-	root  string
+	files *Files
 }
 
-func (s *Store) AttachmentsIn(root string) *Attachments {
-	return &Attachments{store: s, root: root}
+func (s *Store) AttachmentsIn(files *Files) *Attachments {
+	return &Attachments{store: s, files: files}
 }
 
 // Save validates, writes the file and records the row.
@@ -75,7 +74,7 @@ func (a *Attachments) Save(ctx context.Context, postID, name string, r io.Reader
 		return Attachment{}, LimitError{Err: ErrUploadTooMany, Limit: int64(limits.MaxPerPost)}
 	}
 
-	stored, err := StoreUpload(a.root, name, r, time.Now(), limits)
+	stored, err := a.files.Store(ctx, name, r, time.Now(), limits)
 	if err != nil {
 		return Attachment{}, err
 	}
@@ -86,7 +85,7 @@ func (a *Attachments) Save(ctx context.Context, postID, name string, r io.Reader
 	if err != nil {
 		// The row did not land, so the bytes must not stay: nothing will ever
 		// point at them and nobody could tell them from a live attachment.
-		_ = a.removeFile(stored.StoredPath)
+		_ = a.files.Remove(ctx, stored.StoredPath)
 		return Attachment{}, err
 	}
 	return Attachment{ID: row.ID, CreatedAt: row.CreatedAt, PostID: postID,
@@ -114,9 +113,10 @@ func (a *Attachments) ByID(ctx context.Context, id string) (*Attachment, error) 
 	return &at, nil
 }
 
-// Open returns the file for download. 경로 탈출 검사는 OpenUpload 가 한다.
-func (a *Attachments) Open(at *Attachment) (*os.File, error) {
-	return OpenUpload(a.root, at.StoredPath)
+// Open returns the file for download — 로컬이든 버킷이든 (Files). 경로 탈출 검사는
+// OpenUpload 가 한다.
+func (a *Attachments) Open(ctx context.Context, at *Attachment) (io.ReadSeekCloser, error) {
+	return a.files.Open(ctx, at.StoredPath)
 }
 
 // Delete removes the row and then the file.
@@ -135,7 +135,7 @@ func (a *Attachments) Delete(ctx context.Context, id string) error {
 	}
 	// Reported, not returned: the row is already gone and the caller cannot
 	// undo it. The file is now orphaned, which A-309 accepts.
-	return a.removeFile(at.StoredPath)
+	return a.files.Remove(ctx, at.StoredPath)
 }
 
 // DeletePost removes the post and then the files its attachments left behind.
@@ -159,11 +159,14 @@ func (a *Attachments) DeletePost(ctx context.Context, postID string) error {
 	}
 	var firstErr error
 	for _, p := range paths {
-		if err := a.removeFile(p); err != nil && firstErr == nil {
+		if err := a.files.Remove(ctx, p); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	return firstErr
+	if firstErr != nil {
+		return fmt.Errorf("%w: %w", ErrFilesLeft, firstErr)
+	}
+	return nil
 }
 
 // Limits reads A-309's upload bounds (OPEN-41 결정). 설정이 없으면 기본값이다.
@@ -207,8 +210,6 @@ func (a *Attachments) Limits(ctx context.Context) (UploadLimits, error) {
 	}
 	return l, nil
 }
-
-func (a *Attachments) removeFile(rel string) error { return RemoveUpload(a.root, rel) }
 
 // BoardAttachments is A-309's list: every attachment on one board, newest
 // first. The board scopes it because post.moderate does (D15 2.4) — "every

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -44,10 +43,10 @@ func imageOf(r commerceq.ProductImage) ProductImage {
 // 첨부(content.Attachments)와 같은 루트를 쓴다 — 웹루트·테마 트리 밖이다 (D60 3항).
 type Images struct {
 	store *Store
-	root  string
+	files *content.Files
 }
 
-func (s *Store) ImagesIn(root string) *Images { return &Images{store: s, root: root} }
+func (s *Store) ImagesIn(files *content.Files) *Images { return &Images{store: s, files: files} }
 
 // Save validates, writes the file and records the row (A-502, FR-601).
 //
@@ -70,7 +69,7 @@ func (im *Images) Save(ctx context.Context, productID, name string, r io.Reader,
 		return ProductImage{}, fmt.Errorf("%w: 상품당 %d개", content.ErrUploadTooMany, MaxProductImages)
 	}
 
-	stored, err := content.StoreUpload(im.root, name, r, time.Now(), limits.ImageOnly())
+	stored, err := im.files.Store(ctx, name, r, time.Now(), limits.ImageOnly())
 	if err != nil {
 		return ProductImage{}, err
 	}
@@ -80,7 +79,7 @@ func (im *Images) Save(ctx context.Context, productID, name string, r io.Reader,
 	if err != nil {
 		// 행이 안 들어갔으면 바이트도 남기지 않는다. 아무것도 가리키지 않는
 		// 파일은 나중에 살아 있는 이미지와 구분할 수 없다.
-		_ = content.RemoveUpload(im.root, stored.StoredPath)
+		_ = im.files.Remove(ctx, stored.StoredPath)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 			return ProductImage{}, ErrNotFound // 없는 상품
@@ -122,9 +121,9 @@ func (im *Images) ByID(ctx context.Context, id string) (img *ProductImage, produ
 		CreatedAt: r.CreatedAt}, r.ProductVisible, nil
 }
 
-// Open returns the file for serving.
-func (im *Images) Open(img *ProductImage) (*os.File, error) {
-	return content.OpenUpload(im.root, img.StoredPath)
+// Open returns the file for serving — 로컬이든 버킷이든 (content.Files).
+func (im *Images) Open(ctx context.Context, img *ProductImage) (io.ReadSeekCloser, error) {
+	return im.files.Open(ctx, img.StoredPath)
 }
 
 // Delete removes the row and then the file, and reports whose image it was.
@@ -139,7 +138,7 @@ func (im *Images) Delete(ctx context.Context, id string) (productID string, err 
 	if err != nil {
 		return "", err
 	}
-	return r.ProductID, content.RemoveUpload(im.root, r.StoredPath)
+	return r.ProductID, im.files.Remove(ctx, r.StoredPath)
 }
 
 // DeleteProduct removes the product and then the files its images left behind.
@@ -158,9 +157,12 @@ func (im *Images) DeleteProduct(ctx context.Context, productID string) error {
 	}
 	var firstErr error
 	for _, p := range paths {
-		if err := content.RemoveUpload(im.root, p); err != nil && firstErr == nil {
+		if err := im.files.Remove(ctx, p); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	return firstErr
+	if firstErr != nil {
+		return fmt.Errorf("%w: %w", content.ErrFilesLeft, firstErr)
+	}
+	return nil
 }

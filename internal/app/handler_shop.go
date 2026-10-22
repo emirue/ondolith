@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -204,10 +205,14 @@ func (d *shopDeps) productImage(w http.ResponseWriter, r *http.Request) {
 		// 헤더가 없으면 공유 캐시가 Last-Modified 로 추정 캐시할 수 있었다.
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 	}
-	f, err := d.images.Open(img)
-	if err != nil {
+	f, err := d.images.Open(ctx, img)
+	if errors.Is(err, fs.ErrNotExist) {
 		// 행은 있고 파일이 없다. 고장이 아니라 없는 것이다 (P-211 과 같다).
 		d.notFound(w, r)
+		return
+	}
+	if err != nil {
+		d.serverError(w, r, err) // 버킷 불통은 없는 것이 아니다 (P-211)
 		return
 	}
 	defer f.Close()

@@ -339,7 +339,10 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 	case "delete":
 		// 첨부 실물까지 지운다 (OPEN-40). 행만 지우면 파일이 남는데,
 		// 글이 사라졌으니 A-309 목록에도 안 나와 아무도 찾지 못한다.
-		if err := d.Attachments.DeletePost(ctx, postID); err != nil {
+		if err := d.Attachments.DeletePost(ctx, postID); errors.Is(err, content.ErrFilesLeft) {
+			// 글은 갔고 파일 일부가 남았다 — A-309 처럼 경고만 남기고 성공으로 넘긴다.
+			d.Logger.Warn("글 첨부 파일 삭제", "post", postID, "err", err)
+		} else if err != nil {
 			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
 			return
 		}

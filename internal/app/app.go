@@ -385,6 +385,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		return scheme + "://" + r.Host
 	}
 
+	// 업로드가 사는 곳 (FR-717). 기본은 upload_dir 이고, A-210 이 S3 를 고르면 버킷이다.
+	// 첨부·본문 사진·상품 이미지·A-210 옮기기가 이 하나를 쓴다.
+	files := content.NewFiles(cfg.Uploads(), (&storageRemote{settings: contentStore.SettingsForForm}).resolve)
+
 	ad := &admin.Deps{
 		Content: contentStore,
 		Auth:    authStore,
@@ -393,19 +397,21 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 				ctx: r.Context(), auth: authStore, sm: sessions,
 				limiter: limiter, limit: limits.ReauthAccount}
 		},
-		Render:      adminUI.Render,
-		Commerce:    commerceStore,
-		Attachments: contentStore.AttachmentsIn(cfg.Uploads()),
-		Media:       contentStore.MediaIn(cfg.Uploads()),
-		Images:      commerceStore.ImagesIn(cfg.Uploads()),
-		DumpDB:      backup.Dump(cfg.DatabaseURL),
-		UploadDir:   cfg.Uploads(),
-		BackupDir:   cfg.Backups(),
-		OpLog:       contentStore.OpLog(),
-		Logger:      log,
-		BaseURL:     baseURL,
-		Version:     version,
-		Migrations:  func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
+		Render:       adminUI.Render,
+		Commerce:     commerceStore,
+		Attachments:  contentStore.AttachmentsIn(files),
+		Media:        contentStore.MediaIn(files),
+		Images:       commerceStore.ImagesIn(files),
+		Files:        files,
+		CheckStorage: checkStorage,
+		DumpDB:       backup.Dump(cfg.DatabaseURL),
+		UploadDir:    cfg.Uploads(),
+		BackupDir:    cfg.Backups(),
+		OpLog:        contentStore.OpLog(),
+		Logger:       log,
+		BaseURL:      baseURL,
+		Version:      version,
+		Migrations:   func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
 		ValidateTheme: func(name string) (string, error) {
 			// 이름을 테마 루트 아래 디렉터리로 푼다 — 로더가 쓰는 것과 같은
 			// 방식이어야, 검증에 통과한 것과 실제로 그려지는 것이 같아진다.
@@ -434,8 +440,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
-		attachments: contentStore.AttachmentsIn(cfg.Uploads()), authStore: authStore, siteURL: cfg.SiteURL,
-		media: contentStore.MediaIn(cfg.Uploads()), spam: spam}
+		attachments: contentStore.AttachmentsIn(files), authStore: authStore, siteURL: cfg.SiteURL,
+		media: contentStore.MediaIn(files), spam: spam}
 
 	// **이름과 어댑터를 한 곳에서 낸다.** 둘을 따로 읽으면 갈라진다 — 실제로
 	// 「사용 안 함」을 처음 넣었을 때 이름 쪽만 고쳐서, 웹훅 경로와
@@ -475,7 +481,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		enabled: enabledSocial}
 
 	sh := &shopDeps{publicDeps: pub, sm: sessions, store: commerceStore, log: log,
-		images:  commerceStore.ImagesIn(cfg.Uploads()),
+		images:  commerceStore.ImagesIn(files),
 		limiter: limiter, limits: limits,
 		// 요청마다 읽는다. A-512 가 바꾸면 다음 요청부터 반영돼야 하고,
 		// 부팅 때 붙잡아 두면 재시작 전까지 옛 값으로 계산한다.

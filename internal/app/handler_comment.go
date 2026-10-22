@@ -25,7 +25,10 @@ func (d *boardDeps) postDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	// 첨부 실물까지 지운다. content.DeletePost 만 부르면 행은 CASCADE 로
 	// 사라지고 파일은 영원히 남는다 — 정리 잡이 없다 (NFR-103, OPEN-40).
-	if err := d.attachments.DeletePost(r.Context(), p.ID); err != nil {
+	if err := d.attachments.DeletePost(r.Context(), p.ID); errors.Is(err, content.ErrFilesLeft) {
+		// 글은 갔고 파일 일부가 남았다 — 경고만 남기고 성공으로 넘긴다 (A-309 와 같다).
+		d.log.Warn("글 첨부 파일 삭제", "post", p.ID, "err", err)
+	} else if err != nil {
 		d.serverError(w, r, err)
 		return
 	}

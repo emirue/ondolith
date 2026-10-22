@@ -482,6 +482,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
 | `business.*` | text | A-208 | 3 |
 | `pg.provider` · `pg.client_key` · `pg.secret_key` | `toss` \| 빈 값(사용 안 함) / text — 공개값 / **자격증명** | A-209 | 3 |
+| `storage.backend` · `storage.s3.endpoint` · `storage.s3.region` · `storage.s3.bucket` · `storage.s3.access_key` · `storage.s3.secret_key` · `storage.s3.path_style` | 빈 값(로컬) \| `s3` / text(빈 값 = AWS S3) / text / text / text / **자격증명** / bool (FR-717) | A-210 | 6 |
 | `upload.max_bytes` · `upload.max_per_post` · `upload.deny_ext` | int / int / text | **쓰는 화면이 없다** — 코드 기본값 ([GAP-31](85-gaps.md)) | 2 |
 | `order.return_days` · `order.confirm_days` · `order.return_fee_policy` · `order.return_fee_amount` · `shipping.flat_fee` · `shipping.free_threshold` | int(7) / int(8) / `차감`\|`별도청구` / int(0) / int(0) / int(0) | A-512 | 3 |
 
@@ -493,7 +494,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 대상과 PK가 갈라진다.
 
 **`type`·`is_secret` 컬럼을 두지 않는다.** 어느 키가 어떤 타입이고 어느 것이 자격증명인지는
-**코드가 안다** — 범용 설정 편집 화면이 없고 A-201/202/205/206/208/209/512/604 가 각자 자기 키만 쓴다.
+**코드가 안다** — 범용 설정 편집 화면이 없고 A-201/202/205/206/208/209/210/512/604 가 각자 자기 키만 쓴다.
 컬럼으로 두면 코드 상수와 DB 데이터라는 두 출처가 생기고, `is_secret`이 UI로 뒤집히면
 D15 7절의 "자격증명 값은 로그에 남기지 않는다"가 데이터에 의존하게 된다.
 
@@ -774,6 +775,7 @@ CREATE INDEX comments_author_id_idx ON comments (author_id);
 3항의 "파일명 재생성"을 끝까지 미는 것이다 — 웹루트 밖이 어쩌다 서빙되더라도 **실행 가능한
 이름이 디스크에 없다.** 표시용 확장자는 `original_name`, Content-Type은 `mime_type`이 갖는다.
 `CHECK` 정규식이 `../` 형태를 DB에서 거부하는 것을 확인했다.
+S3 호환 저장소(FR-717)를 쓰면 **같은 값이 객체 키다** — 행에 저장소를 적지 않는다. 읽을 때는 로컬을 먼저 보고 없으면 버킷을 본다(A-210).
 
 `stored_path` UNIQUE: 두 행이 같은 파일을 가리키면 한쪽을 지울 때 다른 쪽 실물이 조용히
 사라진다. A-309가 "디스크 삭제 실패를 롤백하지 않는다"고 정한 이상 반대 방향은 DB가 막아야 한다.

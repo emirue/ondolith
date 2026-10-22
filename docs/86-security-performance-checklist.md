@@ -107,6 +107,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 | 4.14 | 첨부·본문 사진·상품 이미지는 앱 계정만 읽는다(파일 0600·폴더 0700) | `content/upload.go`·`content/media.go`·`app.go` | `TestStoredFileHasNoExecuteBit`·`TestMediaSaveStoresDisplayAndThumbnail` | ✓ 2026-10-21 에 고침(0644·0755 였다) |
 | 4.15 | A-201 저장이 작업 로그에 남고(GA4 ID 는 값까지) 이름·설명·OG 이미지를 D19 대로 검사 | `admin/handlers.go` `SettingsSave` | `TestSiteSettingsSaveIsLogged`·`TestSiteSettingsValidateTheD19Fields` | ✓ 2026-10-21 에 고침 |
 | 4.16 | 옛 평문 봉인도 `IsSecretSetting` 한 곳을 본다 | `content/store.go` `SealLegacySecrets` | `TestSealLegacySecretsUsesTheOneList` | ✓ 2026-10-21 (SQL 의 목록이 Turnstile 을 빠뜨렸다) |
+| 4.17 | S3 호환 저장소(A-210): 업로드는 로컬 검증을 다 지난 뒤 버킷에 가고, 내려줄 때는 같은 핸들러가 권한을 재확인한다(공개·서명 주소 없음). 엔드포인트는 `169.254.0.0/16` 으로 해석되면 접속하지 않고, 저장·연결 확인·옮기기는 superuser + 재인증(D15 R8), 시크릿은 봉인, 연결 확인은 오류 코드만 그린다 | `content/files.go`·`s3store`·`admin/handlers_storage.go`·`app/storage.go` | `TestS3StorageKeepsAndServesEveryUpload`·`TestCheckStorageRefusesTheMetadataRange`·`TestStorageSettingsAreSuperuserOnly`·`TestMigrateMovesUploadsOnly`·`TestCheckNeedsMissingKeysToBeNotFound`·`TestCloseDuringReadIsSafe` | ✓ 2026-10-22 (FR-717) — 검토에서 찾은 「없는 키 403」·Close 경쟁을 고쳤다 |
 | 4.11 | 글 삭제가 첨부 **파일**까지 지운다(디스크 고아 없음) | `content/attachment.go` `DeletePost` — P-207·A-307 둘 다 이 경로 | 코드 읽기 | ✓ 행은 CASCADE, 파일은 `os.Root.Remove` |
 
 ## 5. 결제·커머스

@@ -125,6 +125,13 @@ type Deps struct {
 	UploadDir string
 	// BackupDir holds the automatic backups A-604 lists and hands out (FR-715).
 	BackupDir string
+	// Files is where uploads live (FR-717) — A-210 「옮기기」가 쓴다.
+	Files *content.Files
+	// CheckStorage is A-210's 연결 확인 against the given settings: a probe
+	// object written, read and deleted. code is the service's error code when it
+	// answered with a refusal, "" when it never answered. Injected so admin does
+	// not import the SDK.
+	CheckStorage func(ctx context.Context, settings map[string]string) (code string, err error)
 }
 
 // actionLabels names operation-log actions for A-603. 코드(<자원>.<동사>)를 그대로

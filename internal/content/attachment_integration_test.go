@@ -17,7 +17,7 @@ func attachFixture(t *testing.T) (*Attachments, *Store, string, string) {
 	root := t.TempDir()
 	boardID := seedBoard(t, s)
 	postID := mkPost(t, s, boardID, "글")
-	return s.AttachmentsIn(root), s, root, postID
+	return s.AttachmentsIn(LocalFiles(root)), s, root, postID
 }
 
 func TestAttachmentRoundTrips(t *testing.T) {
@@ -43,7 +43,7 @@ func TestAttachmentRoundTrips(t *testing.T) {
 		t.Errorf("원본 이름이 저장 경로에 들어갔다: %q", got.StoredPath)
 	}
 
-	f, err := a.Open(&got)
+	f, err := a.Open(ctx, &got)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestDeleteRemovesRowThenFile(t *testing.T) {
 	}
 	// 이미 없는 파일을 지우는 것은 오류가 아니다 — 앞선 실패로 고아 행이 남았을
 	// 때 그 행을 정리할 수 없게 된다.
-	if err := a.removeFile(got.StoredPath); err != nil {
+	if err := a.files.Remove(ctx, got.StoredPath); err != nil {
 		t.Errorf("없는 파일 삭제가 오류를 냈다: %v", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestOpenRefusesAPathOutsideTheRoot(t *testing.T) {
 	// 성공해도 없는 경로라 열리지 않아, os.Root 를 빼는 변이가 안 잡힌다.
 	deep := strings.Repeat("../", 24) + "etc/passwd"
 	for _, p := range []string{deep, "../../etc/passwd", "/etc/passwd", "2026/08/../../../x"} {
-		if f, err := a.Open(&Attachment{StoredPath: p}); err == nil {
+		if f, err := a.Open(context.Background(), &Attachment{StoredPath: p}); err == nil {
 			f.Close()
 			t.Errorf("루트 밖 경로가 열렸다: %q", p)
 		}
@@ -331,5 +331,26 @@ func TestDenyExtSubtractsButCannotAdd(t *testing.T) {
 	// 빼지 않은 것은 여전히 된다.
 	if _, err := a.Save(ctx, postID, "ok.png", bytes.NewReader(pngBytes)); err != nil {
 		t.Errorf("거부 목록을 비웠는데 png 가 막혔다: %v", err)
+	}
+}
+
+// 글은 지워졌는데 버킷이 파일 지우기를 거부하면 ErrFilesLeft 다 — 호출자가 「행은 갔다」를
+// 알아야 500 대신 성공으로 넘기고 경고를 남긴다 (A-309 와 같은 규칙).
+func TestDeletingAPostSaysWhenFilesWereLeft(t *testing.T) {
+	_, s, root, postID := attachFixture(t)
+	ctx := context.Background()
+	rem := newMemRemote()
+	a := s.AttachmentsIn(NewFiles(root, remoteOf(rem, true)))
+	if _, err := a.Save(ctx, postID, "a.pdf", bytes.NewReader(pdfBytes)); err != nil {
+		t.Fatal(err)
+	}
+	rem.failRemove = errors.New("bucket refuses")
+	err := a.DeletePost(ctx, postID)
+	if !errors.Is(err, ErrFilesLeft) {
+		t.Fatalf("DeletePost = %v, want ErrFilesLeft", err)
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM posts WHERE id = $1`, postID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("글 행 %d (%v) — 지워졌어야 한다", n, err)
 	}
 }
