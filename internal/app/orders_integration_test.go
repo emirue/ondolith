@@ -281,3 +281,53 @@ func TestRefusedRefundStillOffersCancel(t *testing.T) {
 		t.Error("환불 거절 화면에서 「주문 취소」가 사라졌다")
 	}
 }
+
+// **부분 환불 요청(P-507)을 두 번 누르면 지금은 요청이 두 건 생긴다** (지금 동작 — G6).
+// 키를 POST 마다 새로 만들어 refunds_request_key_uniq 가 막을 것이 없다. A-507 은 폼이 키를
+// 들고 와 재전송을 알아본다(TestAdminRefundResubmitIsRecognisedNotRepeated). 고치면 이 단언을 바꾼다.
+func TestMemberPartialRefundDoubleSubmit(t *testing.T) {
+	srv, pool, variant := shopSite(t)
+	c := client()
+	for range 2 {
+		post(t, c, srv.URL+"/cart/items", url.Values{"variant_id": {variant}}).Body.Close()
+	}
+	post(t, c, srv.URL+"/checkout", url.Values{
+		"receiver_name": {"받는이"}, "receiver_phone": {"010-0000-0000"},
+		"postcode": {"12345"}, "address1": {"서울"},
+		"orderer_email": {"a@example.com"}, "orderer_phone": {"010-1111-1111"},
+	}).Body.Close()
+	ctx := context.Background()
+	var orderID, no, itemID string
+	var total, qty int
+	if err := pool.QueryRow(ctx, `SELECT o.id, o.order_no, o.total_amount, i.id, i.quantity
+		FROM orders o JOIN order_items i ON i.order_id = o.id`).Scan(&orderID, &no, &total, &itemID, &qty); err != nil {
+		t.Fatal(err)
+	}
+	if qty != 2 {
+		t.Fatalf("수량 %d — 전제(한 품목 2개)가 틀렸다", qty)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE orders SET status = '결제완료' WHERE id = $1`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO payments (order_id, kind, status, pg, payment_key, approved_amount)
+		VALUES ($1,'주문결제','승인','toss','pk-double',$2)`, orderID, total); err != nil {
+		t.Fatal(err)
+	}
+	g := client()
+	post(t, g, srv.URL+"/orders/guest", url.Values{"order_no": {no}, "phone": {"010-1111-1111"}}).Body.Close()
+	form := url.Values{"item_id": {itemID}, "qty_" + itemID: {"1"}, "reason": {"변심"}}
+	for i := range 2 {
+		resp := post(t, g, srv.URL+"/orders/"+no+"/refund", form)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("%d 번째 제출 = HTTP %d", i+1, resp.StatusCode)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refunds WHERE order_id = $1`, orderID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("요청 %d 건 — 지금 동작은 2 건이다", n)
+	}
+}

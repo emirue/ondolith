@@ -130,18 +130,3 @@ func Total(lines []Line, ship Shipping) (goods, fee, total int, err error) {
 	}
 	return goods, fee, total, nil
 }
-
-// CancelRefund is what a cancellation gives back.
-//
-// D50: 부분 취소로 배송비를 환불하지 않는다. 배송이 나갔으면 그 비용은 발생했고,
-// 부분 취소마다 비례 배분하면 남은 주문이 무료배송 기준을 밑도는 순간 배송비를
-// 다시 청구해야 하는데 그 청구 화면은 없다.
-func CancelRefund(itemsRefunded, fee int, whole bool) (int, error) {
-	if itemsRefunded < 0 || fee < 0 {
-		return 0, fmt.Errorf("%w: 품목 %d / 배송비 %d", ErrPriceNegative, itemsRefunded, fee)
-	}
-	if whole {
-		return itemsRefunded + fee, nil
-	}
-	return itemsRefunded, nil
-}

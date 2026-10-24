@@ -192,10 +192,7 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 		// — 관리자 화면에서 끝나야 운영이다. 결과만 말한다: 키 값도, PG 의 응답
 		// 본문도 화면에 싣지 않는다. 분기가 여기 있는 것은 D19 의 오류 식별자
 		// 대조(checkdocs 30-2)가 라우트 핸들러 본문을 보기 때문이다.
-		var gw commerce.Gateway
-		if d.Gateway != nil {
-			gw = d.Gateway()
-		}
+		gw := d.pgGateway()
 		if gw == nil {
 			d.renderPayment(w, r, http.StatusUnprocessableEntity, "결제사와 시크릿 키를 먼저 저장하세요.")
 			return

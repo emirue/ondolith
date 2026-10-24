@@ -105,7 +105,7 @@ func TestRefundNeedsPickupConfirmation(t *testing.T) {
 	}
 
 	// 수거 전이다. 환불이 거부된다.
-	if _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1"); !errors.Is(err, ErrPickupRequired) {
+	if _, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1"); !errors.Is(err, ErrPickupRequired) {
 		t.Fatalf("수거 전 환불 = %v, want ErrPickupRequired", err)
 	}
 	// 돈도 수량도 움직이지 않았다.
@@ -125,12 +125,22 @@ func TestRefundNeedsPickupConfirmation(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k2")
+	amount, refundID, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k2")
 	if err != nil {
 		t.Fatalf("수거 확인 뒤 환불이 막혔다: %v", err)
 	}
 	if amount <= 0 {
 		t.Errorf("환불액 %d", amount)
+	}
+	// 돌려준 환불 건이 바로 이 정산의 것이다 — 호출자는 그것을 PG 로 보낸다.
+	var gotAmount int
+	var gotReturn string
+	if err := pool.QueryRow(ctx, `SELECT rf.amount, rt.return_no FROM refunds rf JOIN returns rt ON rt.id = rf.return_id
+		WHERE rf.id = $1`, refundID).Scan(&gotAmount, &gotReturn); err != nil {
+		t.Fatalf("환불 건 %q: %v", refundID, err)
+	}
+	if gotAmount != amount || gotReturn != ret.ReturnNo {
+		t.Errorf("환불 건 %d원 · 반품 %s, want %d원 · %s", gotAmount, gotReturn, amount, ret.ReturnNo)
 	}
 }
 
@@ -155,7 +165,7 @@ func TestReturnRefundIsComputedFromSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
+	amount, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +210,7 @@ func TestSellerFaultMeansNoShippingFee(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "판매자", "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
+	amount, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +432,7 @@ func TestReturnAndPartialRefundShareTheSameCeiling(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "판매자", "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k2"); err != nil {
+	if _, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -496,7 +506,7 @@ func TestReturnRefundUsesTheDiscountSnapshot(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, order.OrderNo, ret.ReturnNo, "판매자", "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, order.OrderNo, ret.ReturnNo, "A-511", "k1")
+	amount, _, err := s.SettleReturn(ctx, order.OrderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +604,7 @@ func TestOversizedShippingFeeIsRefusedAtPickup(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, orderNo, ret2.ReturnNo, "구매자", "A-511"); err != nil {
 		t.Fatalf("몫보다 작은 배송비가 막혔다: %v", err)
 	}
-	amount, err := s.SettleReturn(ctx, orderNo, ret2.ReturnNo, "A-511", "k1")
+	amount, _, err := s.SettleReturn(ctx, orderNo, ret2.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatalf("정산이 막혔다: %v", err)
 	}
@@ -681,7 +691,7 @@ func TestNegativeShippingFeeIsRefused(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
+	amount, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +725,7 @@ func TestReturnActionsAreScopedToTheirOrder(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, mineNo, victim.ReturnNo, "구매자", "A-511"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("남의 반품 수거 확인 = %v, want ErrNotFound", err)
 	}
-	if _, err := s.SettleReturn(ctx, mineNo, victim.ReturnNo, "A-511", "k1"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.SettleReturn(ctx, mineNo, victim.ReturnNo, "A-511", "k1"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("남의 반품 정산 = %v, want ErrNotFound", err)
 	}
 	if err := s.RejectReturn(ctx, mineNo, victim.ReturnNo, "x", "A-511"); !errors.Is(err, ErrNotFound) {
@@ -852,7 +862,7 @@ func TestSeparateBillingFeeIsNotDeductedFromRefund(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	amount, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
+	amount, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -904,7 +914,7 @@ func TestPartialRefundCannotStrandAPickedUpReturn(t *testing.T) {
 	}
 
 	// 정산이 정상적으로 끝난다 — 이것이 막은 이유다.
-	if _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k-settle"); err != nil {
+	if _, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "k-settle"); err != nil {
 		t.Fatalf("정산이 막혔다: %v — 반품이 멈췄다", err)
 	}
 }
@@ -1271,7 +1281,7 @@ func TestReturnFlowsRefuseAnOrderOutOfStep(t *testing.T) {
 	}
 
 	var te *TransitionError
-	if _, err := s.SettleReturn(ctx, orderNo, returnNo, "A-511", "out-of-step"); !errors.As(err, &te) {
+	if _, _, err := s.SettleReturn(ctx, orderNo, returnNo, "A-511", "out-of-step"); !errors.As(err, &te) {
 		t.Fatalf("어긋난 주문의 정산 = %v, want 상태머신의 거부(TransitionError)", err)
 	}
 	assertOrderStatus(t, pool, orderNo, StatusDelivered)
@@ -1297,7 +1307,7 @@ func TestReturnSettleLetsForeignKeyChecksThrough(t *testing.T) {
 	orderNo, returnNo, itemID := pickedUpReturn(t, s, pool)
 	probe := `SELECT 1 FROM orders WHERE order_no = '` + orderNo + `' FOR KEY SHARE NOWAIT`
 	whileWaitingOn(t, pool, itemID, probe, func() error {
-		_, err := s.SettleReturn(context.Background(), orderNo, returnNo, "A-511", "fk-probe")
+		_, _, err := s.SettleReturn(context.Background(), orderNo, returnNo, "A-511", "fk-probe")
 		return err
 	})
 }

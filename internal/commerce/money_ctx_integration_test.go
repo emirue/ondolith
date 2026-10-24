@@ -44,7 +44,7 @@ func TestRefundIsRecordedEvenIfTheBrowserLeavesMidCall(t *testing.T) {
 	gw := okGateway()
 	gw.onCancel = leave
 
-	if err := s.ExecuteRefund(ctx, gw, id); err != nil {
+	if _, err := s.ExecuteRefund(ctx, gw, id, "A-507"); err != nil {
 		t.Fatalf("PG 가 취소했는데 기록이 실패했다: %v", err)
 	}
 	if got := refundStatus(t, s, id); got != "완료" {

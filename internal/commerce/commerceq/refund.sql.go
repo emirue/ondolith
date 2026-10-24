@@ -208,9 +208,9 @@ func (q *Queries) LockOrderItems(ctx context.Context, orderID string) ([]string,
 }
 
 const lockRefundForExecute = `-- name: LockRefundForExecute :one
-SELECT r.status, r.reason, r.request_key, r.amount, r.created_at, p.payment_key
-FROM refunds r JOIN payments p ON p.id = r.payment_id
-WHERE r.id = $1 FOR UPDATE
+SELECT r.status, r.reason, r.request_key, r.amount, r.created_at, p.payment_key, o.order_no
+FROM refunds r JOIN payments p ON p.id = r.payment_id JOIN orders o ON o.id = r.order_id
+WHERE r.id = $1 FOR UPDATE OF r, p
 `
 
 type LockRefundForExecuteRow struct {
@@ -220,6 +220,7 @@ type LockRefundForExecuteRow struct {
 	Amount     int32
 	CreatedAt  time.Time
 	PaymentKey string
+	OrderNo    string
 }
 
 func (q *Queries) LockRefundForExecute(ctx context.Context, id string) (LockRefundForExecuteRow, error) {
@@ -232,6 +233,7 @@ func (q *Queries) LockRefundForExecute(ctx context.Context, id string) (LockRefu
 		&i.Amount,
 		&i.CreatedAt,
 		&i.PaymentKey,
+		&i.OrderNo,
 	)
 	return i, err
 }
@@ -285,26 +287,6 @@ func (q *Queries) OrderItemStock(ctx context.Context, orderID string) ([]OrderIt
 		return nil, err
 	}
 	return items, nil
-}
-
-const refundForReturn = `-- name: RefundForReturn :one
-SELECT rf.id FROM refunds rf
-JOIN returns rt ON rt.id = rf.return_id
-JOIN orders o ON o.id = rf.order_id
-WHERE o.order_no = $1 AND rt.return_no = $2
-ORDER BY rf.created_at DESC, rf.id DESC LIMIT 1
-`
-
-type RefundForReturnParams struct {
-	OrderNo  string
-	ReturnNo string
-}
-
-func (q *Queries) RefundForReturn(ctx context.Context, arg RefundForReturnParams) (string, error) {
-	row := q.db.QueryRow(ctx, refundForReturn, arg.OrderNo, arg.ReturnNo)
-	var id string
-	err := row.Scan(&id)
-	return id, err
 }
 
 const refundedTotal = `-- name: RefundedTotal :one
