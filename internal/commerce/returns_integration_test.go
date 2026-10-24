@@ -1353,3 +1353,19 @@ func TestOtherReturnFlowsRefuseAnOrderOutOfStep(t *testing.T) {
 		})
 	}
 }
+
+// 교환 차액(P-514)은 승인 키를 멱등키로 보낸다 — 주문 결제는 결제 건 ID 다
+// (TestIdempotencyKeyIsStableForTheSamePayment). 둘 다 시도와 1:1 이라 이중 청구는 없지만
+// D50 「요청마다 UUID」 와 다른 쪽은 이것이다. BUG-01 설계 때 맞추면 여기서 알게 된다.
+func TestExchangeDiffSendsThePaymentKeyAsIdempotencyKey(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, returnNo, amount := exchangeAwaitingDiff(t, s, pool, "tee")
+	gw := okGateway()
+	if err := s.ConfirmExchangeDiff(context.Background(), gw, "toss", orderNo, returnNo, "",
+		"pk-diff", amount, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if gw.lastReq.IdempotencyKey != "pk-diff" {
+		t.Errorf("멱등키 %q, want 승인 키 %q", gw.lastReq.IdempotencyKey, "pk-diff")
+	}
+}

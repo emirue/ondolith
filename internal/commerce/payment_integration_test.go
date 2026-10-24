@@ -535,3 +535,23 @@ func TestOrderChangedDuringApprovalIsNotOverwritten(t *testing.T) {
 	}
 	assertOrderStatus(t, pool, orderNo, StatusCancelled)
 }
+
+// **승인 뒤 새로고침은 「이미 결제됨」이다** — P-408 은 그것을 완료로 보낸다. 같은 주문·
+// 같은 승인 키는 두 유니크(주문당 결제 한 건, 승인 키)를 함께 어기는데, 승인 키 쪽으로
+// 읽히면 결제한 손님이 「결제가 완료되지 않았습니다」를 본다. PG 는 다시 부르지 않는다.
+func TestRefreshAfterApprovalSaysAlreadyPaid(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total := seedOrder(t, s, pool, "tee", 1)
+	gw := okGateway()
+	if _, err := s.ConfirmPayment(ctx, gw, "toss", orderNo, "pk-refresh", total, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.ConfirmPayment(ctx, gw, "toss", orderNo, "pk-refresh", total, time.Now())
+	if !errors.Is(err, ErrAlreadyPaid) || errors.Is(err, ErrPaymentKeyReused) {
+		t.Errorf("새로고침 = %v, want ErrAlreadyPaid", err)
+	}
+	if gw.count() != 1 {
+		t.Errorf("승인 API %d 번 — 새로고침이 PG 를 다시 불렀다", gw.count())
+	}
+}
