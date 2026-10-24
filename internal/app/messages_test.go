@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -104,5 +105,40 @@ func TestLoginServerErrorLogsTheCause(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "pgx: conn reset") || !strings.Contains(buf.String(), "/login") {
 		t.Errorf("원인이 로그에 없다: %s", buf.String())
+	}
+}
+
+// **경로가 자격증명인 라우트는 로그에 토큰이 남지 않는다** (D15 7절). 재설정·인증
+// 링크(P-105·P-112)를 DB 가 흔들린 순간에 열면, 쓰지 않은 토큰이 로그를 읽는
+// 누구에게나 간다. 라우트 표에서 `{token}` 을 가진 것을 전부 본다 — 새 토큰 경로가
+// 생겨도 여기서 걸린다.
+func TestFailureLogHidesTokens(t *testing.T) {
+	const tok = "s3cr3t-T0KEN-value"
+	n := 0
+	for _, rt := range buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler).Routes() {
+		if !strings.Contains(rt.Pattern, "{token}") {
+			continue
+		}
+		n++
+		var buf bytes.Buffer
+		req := httptest.NewRequest(rt.Method, strings.Replace(rt.Pattern, "{token}", tok, 1), nil)
+		logFailure(slog.New(slog.NewTextHandler(&buf, nil)), req, errors.New("pgx: closed pool"))
+		if strings.Contains(buf.String(), tok) || !strings.Contains(buf.String(), "pgx: closed pool") {
+			t.Errorf("%s: 로그 %q", rt.Pattern, buf.String())
+		}
+	}
+	if n < 2 {
+		t.Fatalf("토큰 경로 %d 개 — 라우트 표를 읽지 못했다", n)
+	}
+}
+
+// 손님이 연결을 끊어 취소된 요청은 장애가 아니다 — 남기면 연결을 끊는 것만으로
+// 누구나 Error 로그를 찍을 수 있다.
+func TestFailureLogSkipsACanceledRequest(t *testing.T) {
+	var buf bytes.Buffer
+	logFailure(slog.New(slog.NewTextHandler(&buf, nil)), httptest.NewRequest(http.MethodGet, "/", nil),
+		fmt.Errorf("권한 읽기: %w", context.Canceled))
+	if buf.Len() != 0 {
+		t.Errorf("로그 %q", buf.String())
 	}
 }
