@@ -57,8 +57,9 @@ func (s *Store) AttachmentsIn(files *Files) *Attachments {
 //
 // The row is written LAST. A row pointing at a file that is not there renders
 // a broken download on a page that otherwise works; a file with no row is
-// invisible litter that a later sweep can find. Of the two failure modes only
-// one is silent to the visitor, so the write order picks the other.
+// invisible litter — 정리 잡이 없어(NFR-103) 아무도 찾지 않지만 아무것도 깨뜨리지
+// 않는다. Of the two failure modes only one is silent to the visitor, so the
+// write order picks the other.
 func (a *Attachments) Save(ctx context.Context, postID, name string, r io.Reader) (Attachment, error) {
 	limits, err := a.Limits(ctx)
 	if err != nil {
