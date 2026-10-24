@@ -3,6 +3,7 @@ package commerce
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -254,4 +255,69 @@ func TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives(t *testing.T) {
 	if len(late.cancelReqs) != 0 || refundStatus(t, s, old) != "승인" {
 		t.Errorf("키가 죽은 뒤 취소 %d번·상태 %s, want 0번·승인", len(late.cancelReqs), refundStatus(t, s, old))
 	}
+}
+
+// **같은 환불 건을 두 요청이 동시에 실행해도 PG 취소는 한 번이다** (지금 동작). 환불 행
+// 잠금이 둘을 줄 세우고, 뒤의 것은 「호출 중(승인)」 을 보고 상태 오류로 돌아선다 — 이중 환불은
+// 결국 취소 API 호출 수다.
+func TestConcurrentExecuteSendsOnce(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, _, _ := paidOrder(t, s, pool, "tee", 2)
+	id, _ := refundAll(t, s, orderNo, "rk-race")
+	gw := okGateway()
+	gw.onCancel = func() { time.Sleep(200 * time.Millisecond) } // 앞 호출이 PG 에 머무는 동안
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = s.ExecuteRefund(context.Background(), gw, id)
+		}()
+	}
+	wg.Wait()
+	if len(gw.cancelReqs) != 1 {
+		t.Errorf("취소 API %d 번 — 이중 환불", len(gw.cancelReqs))
+	}
+	ok, busy := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrRefundState):
+			busy++
+		default:
+			t.Errorf("예상 밖 오류: %v", err)
+		}
+	}
+	if ok != 1 || busy != 1 {
+		t.Errorf("성공 %d · 상태 오류 %d — 하나씩이어야 한다", ok, busy)
+	}
+	if got := refundStatus(t, s, id); got != "완료" {
+		t.Errorf("환불 상태 %s, want 완료", got)
+	}
+}
+
+// **배송비가 있는 주문의 품목을 A-507 로 전부 환불해도 주문은 열린 채다** (지금 동작).
+// 품목 단위 환불은 배송비를 돌려주지 않으므로(D50) 환불액이 결제액에 못 미쳐 「전액」이
+// 아니다 — 배송 전 주문이면 발송 대기 줄에 그대로 남는다. 정책을 정하면 이 시험을 바꾼다.
+func TestFullItemRefundWithShippingFeeLeavesTheOrderOpen(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total, goods := paidOrder(t, s, pool, "tee", 1)
+	if total == goods {
+		t.Fatalf("배송비가 없는 주문이다 (결제 %d) — 전제가 틀렸다", total)
+	}
+	id, _ := refundAll(t, s, orderNo, "rk-all-items")
+	if err := s.ExecuteRefund(ctx, okGateway(), id); err != nil {
+		t.Fatal(err)
+	}
+	to, err := s.SettleFullRefund(ctx, orderNo, "A-507")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if to != "" {
+		t.Errorf("주문이 %s 로 닫혔다", to)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusPaid)
 }

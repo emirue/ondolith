@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -2152,5 +2153,46 @@ func TestOverlongPageBodyIsRefusedWithAReason(t *testing.T) {
 		"slug": {"long"}, "title": {"긴 페이지"}, "body_html": {"<p>" + strings.Repeat("가", 200001) + "</p>"}})
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "200,000자") {
 		t.Errorf("긴 페이지 본문 = HTTP %d, want 422 + 이유", rec.Code)
+	}
+}
+
+// **반품 정산(A-511)의 PG 실패는 502 이고, 환불 건은 A-507 「실행」 으로 다시 보낸다**
+// (지금 동작). 정산은 이미 커밋됐다 — 주문은 환불(최종), 선점은 유지, 환불 건은 '요청' 이다.
+func TestReturnSettleReportsAGatewayFailure(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	gw := &cancelCounter{err: errors.New("결제사 503")}
+	d.Gateway = func() commerce.Gateway { return gw }
+	ctx := context.Background()
+	order, returnNo := deliveredAdminOrder(t, d, pool)
+	pv := map[string]string{"no": order.OrderNo}
+	returns := "/admin/orders/" + order.OrderNo + "/returns"
+	if rec := postAdmin(t, d.ReturnAction, returns, pv, url.Values{"return_no": {returnNo},
+		"action": {"pickup"}, "fault": {"판매자"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if rec := postAdmin(t, d.ReturnAction, returns, pv, url.Values{"return_no": {returnNo},
+		"action": {"settle"}}); rec.Code != http.StatusBadGateway {
+		t.Fatalf("PG 실패 = HTTP %d, want 502", rec.Code)
+	}
+	var id, orderStatus string
+	if err := pool.QueryRow(ctx, `SELECT id FROM refunds`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM orders WHERE order_no = $1`, order.OrderNo).Scan(&orderStatus); err != nil {
+		t.Fatal(err)
+	}
+	if got := refundRowStatus(t, pool, id); got != "요청" || orderStatus != string(commerce.StatusRefunded) {
+		t.Errorf("환불 건 %s · 주문 %s, want 요청·환불", got, orderStatus)
+	}
+
+	gw.err = nil
+	if rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund", pv,
+		url.Values{"action": {"execute"}, "refund_id": {id}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("A-507 실행 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if got := refundRowStatus(t, pool, id); got != "완료" || gw.cancels != 2 {
+		t.Errorf("다시 실행 뒤 %s · PG 취소 %d 회, want 완료·2", got, gw.cancels)
 	}
 }
