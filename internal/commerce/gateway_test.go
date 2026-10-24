@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // D81 W3-11: 메서드는 승인·취소·조회·웹훅 검증 4개뿐이다. 추측으로 넓히지
@@ -137,6 +139,25 @@ func TestNoCardFieldsAnywhereInTheContract(t *testing.T) {
 					t.Errorf("%s.%s — 카드 정보는 보관하지 않는다", typ.Name(), typ.Field(i).Name)
 				}
 			}
+		}
+	}
+}
+
+// 승인 선점의 유니크 위반을 가른다 (FR-608). 승인 키가 겹친 것은 「이미 결제됨」이
+// 아니다 — 한 오류로 접으면 사람이 엉뚱한 주문을 들여다본다.
+func TestPaymentConflict(t *testing.T) {
+	keyTaken := &pgconn.PgError{Code: "23505", ConstraintName: "payments_pg_key_idx"}
+	if err := paymentConflict(keyTaken, "toss", "pk-1"); !errors.Is(err, ErrPaymentKeyReused) || !strings.Contains(err.Error(), "toss/pk-1") {
+		t.Errorf("승인 키 = %v, want ErrPaymentKeyReused (toss/pk-1)", err)
+	}
+	for _, c := range []string{"payments_order_approved_idx", "payments_exchange_idx"} {
+		if err := paymentConflict(&pgconn.PgError{Code: "23505", ConstraintName: c}, "toss", "pk-1"); !errors.Is(err, ErrAlreadyPaid) {
+			t.Errorf("%s = %v, want ErrAlreadyPaid", c, err)
+		}
+	}
+	for _, err := range []error{nil, errors.New("conn reset"), &pgconn.PgError{Code: "23514"}} {
+		if got := paymentConflict(err, "toss", "pk-1"); got != nil {
+			t.Errorf("%v = %v, want nil — 유니크 위반이 아니다", err, got)
 		}
 	}
 }
