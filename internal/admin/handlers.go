@@ -363,7 +363,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	prev, err := d.Content.Settings(r.Context(), plain...)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	typeChanged := changed(kv, prev, "site.type")
@@ -375,7 +375,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		if kv["site.type"] == "cms" && d.Commerce != nil {
 			n, err := d.Commerce.OpenOrders(r.Context())
 			if err != nil {
-				d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+				d.serverError(w, r, err)
 				return
 			}
 			if n > 0 {
@@ -394,7 +394,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	if typeChanged {
@@ -490,7 +490,7 @@ func (d *Deps) renderSettingsNotice(w http.ResponseWriter, r *http.Request,
 ) {
 	kv, unreadable, err := d.Content.SettingsForForm(r.Context(), keys...)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	shown := map[string]string{}
@@ -563,7 +563,7 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// 값은 남기지 않는다 — 비밀번호가 섞여 있고 로그는 지워지지 않는다 (D15 7절).
@@ -679,7 +679,7 @@ func (d *Deps) PageList(w http.ResponseWriter, r *http.Request) {
 	}
 	pages, err := d.Content.Pages(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/pages.html", http.StatusOK, map[string]any{"Pages": pages})
@@ -709,7 +709,7 @@ func (d *Deps) PageForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.renderPageEdit(w, r, http.StatusOK, map[string]any{"Page": p})
@@ -904,7 +904,7 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	users, err := d.Auth.SearchUsers(r.Context(), q, userPageSize+1, page*userPageSize)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// **자르는 조건은 길이로 판단한다.** `if hasNext` 로 자르면 그 판정이
@@ -923,7 +923,7 @@ func (d *Deps) UserList(w http.ResponseWriter, r *http.Request) {
 	// 없는 동안 그 체크박스는 아무 일도 하지 않는 스위치였다.
 	fields, err := d.Content.UserFields(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	var columns []content.FieldSchema
@@ -953,14 +953,14 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// The hash is not in User, and nothing here puts it back: D19 lists it
 	// under "받지 않는 필드" in both directions.
 	roles, err := d.Auth.Roles(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u, "Roles": roles})
@@ -985,7 +985,7 @@ func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, 
 	}
 	holds, err := d.Auth.HoldsSuperuser(r.Context(), target)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return false
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: auth.NewPermissions(c.IsSuperuser(), nil)}
@@ -1013,7 +1013,7 @@ func (d *Deps) UserDeactivate(w http.ResponseWriter, r *http.Request) {
 			d.refuse(w, r, http.StatusConflict, "마지막 관리자는 비활성화할 수 없습니다.")
 			return
 		}
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// D15 7절·D19 A-402: 사용자 생성·비활성·삭제·재설정은 작업 로그에 남긴다.
@@ -1036,7 +1036,7 @@ func (d *Deps) UserActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.Auth.SetActive(r.Context(), target, true); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "user.update", "user", target, "사용자 활성화")
@@ -1065,7 +1065,7 @@ func (d *Deps) UserDelete(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, auth.ErrNoUser):
 		d.refuse(w, r, http.StatusNotFound, "사용자를 찾을 수 없습니다.")
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 	default:
 		d.log(r, c, "user.delete", "user", target, "사용자 삭제")
 		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
@@ -1093,14 +1093,14 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// 메일이 나가지 않으면 하지 않는다. 비밀번호를 비우고 연결을 끊은 뒤 주인이 돌아올
 	// 길은 재설정 메일 하나뿐이다 — 그것이 없으면 계정이 잠긴다.
 	kv, err := d.Content.Settings(ctx, "mail.smtp_host")
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	if kv["mail.smtp_host"] == "" {
@@ -1115,12 +1115,12 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	// session cutoff closes — in the same transaction. The owner re-links at P-111.
 	unlinked, err := d.Auth.RevokeCredentials(ctx, target)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	raw, err := d.Auth.IssueToken(ctx, auth.KindPasswordReset, target)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	if d.SendReset != nil {
@@ -1164,7 +1164,7 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// No role is assigned here. Handing user.create the ability to pick a role
@@ -1176,13 +1176,13 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 				map[string]any{"Error": "이미 사용 중인 이메일입니다."})
 			return
 		}
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// 관리자가 만든 계정은 인증된 채로 둔다 (FR-214) — 관리자가 보증한 주소이고, 인증을
 	// 켠 사이트는 미인증 계정의 로그인을 막으므로 그대로 두면 만든 계정이 들어오지 못한다.
 	if err := d.Auth.MarkEmailVerified(r.Context(), id); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "user.create", "user", id, "사용자 생성: "+email)
@@ -1262,12 +1262,12 @@ func (d *Deps) OpLogList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	entries, err := d.OpLog.RecentBetween(ctx, p.Since, p.Until, oplogPageSize, page*oplogPageSize)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	total, err := d.OpLog.Count(ctx, p.Since, p.Until)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// `Total` 이 아니라 `Count` 다 — 이 화면의 숫자는 금액이 아니라 건수이고,
@@ -1308,7 +1308,7 @@ func (d *Deps) UserFieldList(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := d.Content.UserFields(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	data := map[string]any{"Fields": fields, "Types": content.FieldTypes()}
@@ -1330,7 +1330,7 @@ func (d *Deps) UserFieldSave(w http.ResponseWriter, r *http.Request) {
 
 	if key := r.PostFormValue("delete"); key != "" {
 		if err := d.Content.DeleteUserField(ctx, key); err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		// 값은 남는다 (D14 3절 규칙 4) — 운영자가 곧 궁금해할 것이므로 적어 둔다.

@@ -58,7 +58,7 @@ func (d *Deps) SocialSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 열 수 없는 시크릿은 없는 것으로 친다 — 새 시크릿 없이 켜면 아래에서 거부된다.
 	stored, _, err := d.Content.SettingsForForm(r.Context(), idKey, secretKey)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 
@@ -93,7 +93,7 @@ func (d *Deps) SocialSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// D15 7절: 프로바이더 키 변경은 작업 로그 대상이다. **secret 값은 넣지 않는다.**
@@ -112,7 +112,7 @@ func (d *Deps) renderSocial(w http.ResponseWriter, r *http.Request, code int, ms
 	}
 	stored, unreadable, err := d.Content.SettingsForForm(r.Context(), keys...)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 

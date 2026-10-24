@@ -75,7 +75,7 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) renderTerms(w http.ResponseWriter, r *http.Request, code int, msg string) {
 	list, err := d.Commerce.ListTerms(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	data := map[string]any{"Terms": list, "Error": msg}
@@ -120,7 +120,7 @@ func (d *Deps) BusinessSave(w http.ResponseWriter, r *http.Request) {
 		kv[k] = strings.TrimSpace(r.PostFormValue(k))
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "settings.update", "settings", "business", "사업자 정보 수정")
@@ -134,7 +134,7 @@ func (d *Deps) renderBusiness(w http.ResponseWriter, r *http.Request, code int,
 	if kv == nil {
 		stored, err := d.Content.Settings(r.Context(), commerce.BusinessKeys...)
 		if err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		kv = stored
@@ -260,7 +260,7 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// D15 7절: 자격증명 변경은 분쟁의 근거가 된다. **값은 남기지 않는다.**
@@ -275,7 +275,7 @@ func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, m
 func (d *Deps) renderPaymentWith(w http.ResponseWriter, r *http.Request, code int, msg, notice string) {
 	kv, unreadable, err := d.Content.SettingsForForm(r.Context(), paymentSettingKeys...)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	shown := map[string]string{}
