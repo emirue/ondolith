@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
 	"github.com/emirue/ondolith/internal/theme"
@@ -121,6 +122,52 @@ func TestUnknownAdminFailureIsLoggedNotShown(t *testing.T) {
 	if got := d.refusal(httptest.NewRequest(http.MethodPost, "/admin/terms", nil),
 		termsMessage(commerce.ErrTermsIncomplete), commerce.ErrTermsIncomplete); got != "종류, 버전, 본문을 모두 입력해 주세요." || buf.Len() != 0 {
 		t.Errorf("알려진 거부 = %q, 로그 %q", got, buf.String())
+	}
+}
+
+// 500 은 원인을 로그에만 싣는다 — 화면에는 한 문장 (D22 3절).
+func TestServerErrorLogsTheCauseOnly(t *testing.T) {
+	var buf bytes.Buffer
+	d := &Deps{Logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	rec := httptest.NewRecorder()
+	d.serverError(rec, httptest.NewRequest(http.MethodPost, "/admin/orders/1", nil), errors.New("pgx: conn reset db=shop"))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("상태 = %d", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "일시적인 오류입니다.") || strings.Contains(body, "pgx") {
+		t.Errorf("화면 = %q", body)
+	}
+	if !strings.Contains(buf.String(), "pgx: conn reset") || !strings.Contains(buf.String(), "/admin/orders/1") {
+		t.Errorf("원인이 로그에 없다: %s", buf.String())
+	}
+}
+
+// 없는 것을 물은 것은 장애가 아니다 — 404 이고 로그에 남지 않는다.
+func TestFailSendsMissingTo404WithoutLogging(t *testing.T) {
+	for _, err := range []error{commerce.ErrNotFound, content.ErrNotFound, auth.ErrNoUser} {
+		var buf bytes.Buffer
+		d := &Deps{Logger: slog.New(slog.NewTextHandler(&buf, nil))}
+		rec := httptest.NewRecorder()
+		if !d.fail(rec, httptest.NewRequest(http.MethodGet, "/admin/x", nil), fmt.Errorf("찾기: %w", err)) {
+			t.Fatalf("%v: fail 이 멈추라고 하지 않았다", err)
+		}
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "찾을 수 없습니다.") {
+			t.Errorf("%v: 상태 %d, 화면 %q", err, rec.Code, rec.Body.String())
+		}
+		if buf.Len() != 0 {
+			t.Errorf("%v: 로그 %q", err, buf.String())
+		}
+	}
+}
+
+func TestFailOnNilDoesNothing(t *testing.T) {
+	d := &Deps{}
+	rec := httptest.NewRecorder()
+	if d.fail(rec, httptest.NewRequest(http.MethodGet, "/admin/x", nil), nil) {
+		t.Error("nil 인데 멈추라고 했다")
+	}
+	if rec.Body.Len() != 0 || rec.Code != http.StatusOK {
+		t.Errorf("응답을 썼다: %d %q", rec.Code, rec.Body.String())
 	}
 }
 

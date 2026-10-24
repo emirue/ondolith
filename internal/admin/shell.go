@@ -162,3 +162,13 @@ func (d *Deps) refuse(w http.ResponseWriter, r *http.Request, code int, msg stri
 	}
 	d.Render(w, r, "admin/refusal.html", code, map[string]any{"Error": msg})
 }
+
+// serverError answers a failure the operator cannot fix from the form: the
+// cause goes to the log and the page says one sentence (D22 3절, NFR-210).
+// 원인이 없는 500 — 조립에서 빠진 의존성 — 만 refuse 를 직접 부른다. 남길 원인이 없다.
+func (d *Deps) serverError(w http.ResponseWriter, r *http.Request, err error) {
+	if d.Logger != nil {
+		d.Logger.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
+	}
+	d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+}

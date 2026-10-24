@@ -165,6 +165,13 @@ func (d *Deps) require(w http.ResponseWriter, r *http.Request, perm string) (Cal
 	return c, true
 }
 
+// isCreate reports whether this request is the "make a new one" form.
+//
+// **만들기 화면은 자기 주소를 갖는다** (`/admin/pages/new`), 그래서 `{id}` 는
+// 비어 있다. 옛 주소(`/admin/pages/{id}` 에 `new`)로 오는 요청도 같은 뜻으로
+// 받는다 — 판정이 흩어져 있으면 다섯째 화면이 그것을 잊는다.
+func isCreate(id string) bool { return id == "" || id == "new" }
+
 // fail writes the response a store error deserves and reports whether the
 // handler must stop. A nil error writes nothing and returns false, so the
 // call reads as the `if err != nil` it replaces:
@@ -183,13 +190,6 @@ func (d *Deps) require(w http.ResponseWriter, r *http.Request, perm string) (Cal
 //
 // 도메인 오류(ErrOutOfStock 같은 것)는 화면마다 문구와 코드가 다르므로 여기서
 // 다루지 않는다. 호출자가 먼저 걸러내고, 남은 것만 넘긴다.
-// isCreate reports whether this request is the "make a new one" form.
-//
-// **만들기 화면은 자기 주소를 갖는다** (`/admin/pages/new`), 그래서 `{id}` 는
-// 비어 있다. 옛 주소(`/admin/pages/{id}` 에 `new`)로 오는 요청도 같은 뜻으로
-// 받는다 — 판정이 흩어져 있으면 다섯째 화면이 그것을 잊는다.
-func isCreate(id string) bool { return id == "" || id == "new" }
-
 func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 	switch {
 	case err == nil:
@@ -197,9 +197,9 @@ func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 	case errors.Is(err, commerce.ErrNotFound),
 		errors.Is(err, content.ErrNotFound),
 		errors.Is(err, auth.ErrNoUser):
-		http.NotFound(w, r)
+		d.refuse(w, r, http.StatusNotFound, "찾을 수 없습니다.")
 	default:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 	}
 	return true
 }
