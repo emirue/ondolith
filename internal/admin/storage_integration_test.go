@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -434,5 +435,155 @@ func TestStorageBucketChangeIsLogged(t *testing.T) {
 	}
 	if got := lastLog(t, pool); !strings.Contains(got, "ondolith-site") || !strings.Contains(got, "(없음)") {
 		t.Fatalf("작업 로그 %q — 버킷 이전 값이 없다", got)
+	}
+}
+
+// **첨부 하나 지우기(A-309)는 파일이 남은 것과 지우지 못한 것을 가른다** (G8).
+// 버킷이 파일 삭제를 거부하면 행은 이미 갔다 — 경고를 남기고 성공, 작업 로그에 「삭제」.
+// 행 삭제 자체가 실패하면 아무것도 지워지지 않았다 — 500 이고 「삭제」 로그는 남지 않는다.
+// 지금까지는 둘 다 성공으로 넘어갔다.
+func TestAttachmentDeleteTellsALeftoverFileFromAFailure(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{superuser: true, email: "root@example.com"})
+	ctx := context.Background()
+	bucket := fakes3.New("site")
+	defer bucket.Close()
+	remote := s3store.New(s3store.Config{Endpoint: bucket.URL, Region: "us-east-1", Bucket: "site",
+		AccessKey: "AK", SecretKey: "SK", PathStyle: true}, nil)
+	files := content.NewFiles(t.TempDir(), func(context.Context) (content.Remote, bool, error) { return remote, true, nil })
+	d.Attachments = d.Content.AttachmentsIn(files)
+	boardID, err := d.Content.CreateBoard(ctx, content.Board{Slug: "free", Name: "자유", PerPage: 20}, content.PresetPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	postID, err := d.Content.CreatePost(ctx, content.Post{BoardID: boardID, Title: "첨부 글", Body: "본문"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	png := "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + strings.Repeat("\x00", 40)
+	left, err := d.Attachments.Save(ctx, postID, "left.png", strings.NewReader(png))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := d.Attachments.Save(ctx, postID, "kept.png", strings.NewReader(png))
+	if err != nil {
+		t.Fatal(err)
+	}
+	del := func(id string) int {
+		return postAdmin(t, d.AttachmentDelete, "/admin/attachments/delete", nil,
+			url.Values{"attachment_id": {id}}).Code
+	}
+	rows := func(id string) int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachments WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	bucket.RejectCode = "AccessDenied"
+	if code := del(left.ID); code != http.StatusSeeOther || rows(left.ID) != 0 {
+		t.Errorf("버킷 거부 = HTTP %d, 남은 행 %d — want 303·0", code, rows(left.ID))
+	}
+	if got := lastLog(t, pool); !strings.Contains(got, "left.png") {
+		t.Errorf("작업 로그 %q", got)
+	}
+
+	bucket.RejectCode = ""
+	if _, err := pool.Exec(ctx, `
+		CREATE FUNCTION refuse_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'disk full'; END $$;
+		CREATE TRIGGER refuse_delete BEFORE DELETE ON attachments FOR EACH ROW EXECUTE FUNCTION refuse_delete()`); err != nil {
+		t.Fatal(err)
+	}
+	if code := del(kept.ID); code != http.StatusInternalServerError || rows(kept.ID) != 1 {
+		t.Errorf("행 삭제 실패 = HTTP %d, 남은 행 %d — want 500·1", code, rows(kept.ID))
+	}
+	if got := lastLog(t, pool); strings.Contains(got, "kept.png") {
+		t.Errorf("지우지 못한 첨부에 「삭제」 로그: %q", got)
+	}
+}
+
+// **게시판을 강제로 지우면 그 게시판 첨부의 실물도 지운다** (G7). 행은 CASCADE 로 가지만
+// 파일은 따라가지 않아, 경로 기록까지 사라진 영구 고아가 됐다 — 글 삭제(P-207·A-307)는
+// 이미 같은 요청에서 지운다. 버킷이 거부해도 게시판은 지워지고 화면은 성공이다(A-309 와 같은
+// 결정). 다른 게시판의 파일은 그대로다.
+func TestBoardDeleteRemovesAttachmentFiles(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{superuser: true, email: "root@example.com"})
+	ctx := context.Background()
+	bucket := fakes3.New("site")
+	defer bucket.Close()
+	remote := s3store.New(s3store.Config{Endpoint: bucket.URL, Region: "us-east-1", Bucket: "site",
+		AccessKey: "AK", SecretKey: "SK", PathStyle: true}, nil)
+	files := content.NewFiles(t.TempDir(), func(context.Context) (content.Remote, bool, error) { return remote, true, nil })
+	d.Attachments = d.Content.AttachmentsIn(files)
+	png := "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + strings.Repeat("\x00", 40)
+	board := func(slug string, posts int) string {
+		id, err := d.Content.CreateBoard(ctx, content.Board{Slug: slug, Name: slug, PerPage: 20}, content.PresetPublic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range posts {
+			postID, err := d.Content.CreatePost(ctx, content.Post{BoardID: id, Title: "글", Body: "본문"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"a.png", "b.png"} {
+				if _, err := d.Attachments.Save(ctx, postID, name, strings.NewReader(png)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		return id
+	}
+	gone, stuck, kept := board("gone", 3), board("stuck", 1), board("kept", 1)
+	del := func(id string) int {
+		return postAdmin(t, d.BoardDelete, "/admin/boards/"+id+"/delete", map[string]string{"id": id},
+			url.Values{"confirm": {"1"}}).Code
+	}
+	boards := func(id string) int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM boards WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	if code := del(gone); code != http.StatusSeeOther || boards(gone) != 0 {
+		t.Fatalf("강제 삭제 = HTTP %d, 남은 게시판 %d", code, boards(gone))
+	}
+	if n := len(bucket.Keys()); n != 4 {
+		t.Errorf("버킷 객체 %d 개, want 4 — 지운 게시판의 첨부 6개가 지워지고 나머지 둘의 4개가 남아야 한다", n)
+	}
+
+	bucket.RejectCode = "AccessDenied"
+	if code := del(stuck); code != http.StatusSeeOther || boards(stuck) != 0 {
+		t.Errorf("버킷 거부 = HTTP %d, 남은 게시판 %d — want 303·0", code, boards(stuck))
+	}
+	var logged int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs WHERE target_id = $1`, stuck).Scan(&logged); err != nil {
+		t.Fatal(err)
+	}
+	if logged != 1 {
+		t.Errorf("버킷이 거부한 게시판 삭제의 작업 로그 %d 건, want 1", logged)
+	}
+	if boards(kept) != 1 {
+		t.Error("다른 게시판이 지워졌다")
+	}
+}
+
+// **요청이 끊겨도 작업 로그는 남는다** (D15 7절) — 일은 이미 했다. 첨부가 많은 게시판 삭제처럼
+// 오래 걸리는 요청에서 브라우저나 프록시가 먼저 끊으면 「누가 무엇을 지웠나」 가 사라졌다.
+func TestOpLogSurvivesACanceledRequest(t *testing.T) {
+	caller := &fakeCaller{superuser: true, email: "root@example.com"}
+	d, pool := fixture(t, caller)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := httptest.NewRequest(http.MethodPost, "/admin/boards/b1/delete", nil).WithContext(ctx)
+	d.log(r, caller, "board.manage", "board", "b1", "게시판 삭제")
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM operation_logs WHERE target_id = 'b1'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("작업 로그 %d 건, want 1", n)
 	}
 }

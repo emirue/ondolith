@@ -63,7 +63,7 @@ MySQL 동시 지원은 배제됐다 ([DEC-0](../.ai/DECISIONS.md)). JSONB 없이
 | `comments.post_id` → `posts` | CASCADE | 글이 사라지면 댓글은 갈 곳이 없다 |
 | `comments.parent_id` → `comments` | **NO ACTION** | 아래 참조 |
 | `comments.author_id` → `users` | SET NULL | 〃 |
-| `attachments.post_id` → `posts` | CASCADE | 고아 행을 만들지 않는다. 고아 **파일**은 허용된다 (D13 A-309) |
+| `attachments.post_id` → `posts` | CASCADE | 고아 행을 만들지 않는다. **파일은 따라가지 않으므로** 글 삭제(P-207·A-307)와 게시판 삭제(A-305)가 같은 요청에서 지운다. 디스크·버킷 삭제가 실패해 남는 고아 **파일**은 허용된다 (D13 A-309) |
 | `board_fields.board_id` → `boards` | CASCADE | 스키마는 게시판에 종속 |
 | `user_roles.user_id` → `users` | CASCADE | 계정이 가면 부여도 간다 |
 | `user_roles.role_id` → `roles` | **RESTRICT** | 부여된 사용자가 있는 역할은 삭제 거부 (D15 1.3, D19 A-403의 409) |

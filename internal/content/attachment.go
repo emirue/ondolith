@@ -57,8 +57,9 @@ func (s *Store) AttachmentsIn(files *Files) *Attachments {
 //
 // The row is written LAST. A row pointing at a file that is not there renders
 // a broken download on a page that otherwise works; a file with no row is
-// invisible litter that a later sweep can find. Of the two failure modes only
-// one is silent to the visitor, so the write order picks the other.
+// invisible litter — 정리 잡이 없어(NFR-103) 아무도 찾지 않지만 아무것도 깨뜨리지
+// 않는다. Of the two failure modes only one is silent to the visitor, so the
+// write order picks the other.
 func (a *Attachments) Save(ctx context.Context, postID, name string, r io.Reader) (Attachment, error) {
 	limits, err := a.Limits(ctx)
 	if err != nil {
@@ -125,6 +126,9 @@ func (a *Attachments) Open(ctx context.Context, at *Attachment) (io.ReadSeekClos
 // survives its row is litter, while a row that survives its file is a download
 // that 500s. The row goes first so the failure the visitor can see is the one
 // that cannot happen.
+//
+// 파일만 남았으면 ErrFilesLeft 다 — 행은 이미 갔고 호출자는 그것을 경고로 다룬다.
+// 그 밖의 오류는 행이 지워지지 않았다는 뜻이다.
 func (a *Attachments) Delete(ctx context.Context, id string) error {
 	at, err := a.ByID(ctx, id)
 	if err != nil {
@@ -133,9 +137,7 @@ func (a *Attachments) Delete(ctx context.Context, id string) error {
 	if err := affected(a.store.q.DeleteAttachment(ctx, id)); err != nil {
 		return err
 	}
-	// Reported, not returned: the row is already gone and the caller cannot
-	// undo it. The file is now orphaned, which A-309 accepts.
-	return a.files.Remove(ctx, at.StoredPath)
+	return a.files.RemoveAll(ctx, []string{at.StoredPath})
 }
 
 // DeletePost removes the post and then the files its attachments left behind.
@@ -157,16 +159,21 @@ func (a *Attachments) DeletePost(ctx context.Context, postID string) error {
 	if err := a.store.DeletePost(ctx, postID); err != nil {
 		return err
 	}
-	var firstErr error
-	for _, p := range paths {
-		if err := a.files.Remove(ctx, p); err != nil && firstErr == nil {
-			firstErr = err
-		}
+	return a.files.RemoveAll(ctx, paths)
+}
+
+// DeleteBoard removes the board (Store.DeleteBoard) and then every file its
+// posts' attachments left behind — DeletePost 와 같은 이유와 순서다. 경로를 먼저
+// 읽고, 파일 삭제 실패는 ErrFilesLeft 로 보고만 한다.
+func (a *Attachments) DeleteBoard(ctx context.Context, boardID string, force bool) error {
+	paths, err := a.store.q.BoardAttachmentPaths(ctx, boardID)
+	if err != nil {
+		return err
 	}
-	if firstErr != nil {
-		return fmt.Errorf("%w: %w", ErrFilesLeft, firstErr)
+	if err := a.store.DeleteBoard(ctx, boardID, force); err != nil {
+		return err
 	}
-	return nil
+	return a.files.RemoveAll(ctx, paths)
 }
 
 // Limits reads A-309's upload bounds (OPEN-41 결정). 설정이 없으면 기본값이다.

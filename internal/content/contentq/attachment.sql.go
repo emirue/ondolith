@@ -87,6 +87,30 @@ func (q *Queries) Attachments(ctx context.Context, postID string) ([]Attachment,
 	return items, nil
 }
 
+const boardAttachmentPaths = `-- name: BoardAttachmentPaths :many
+SELECT a.stored_path FROM attachments a JOIN posts p ON p.id = a.post_id WHERE p.board_id = $1
+`
+
+func (q *Queries) BoardAttachmentPaths(ctx context.Context, boardID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, boardAttachmentPaths, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var stored_path string
+		if err := rows.Scan(&stored_path); err != nil {
+			return nil, err
+		}
+		items = append(items, stored_path)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const boardAttachments = `-- name: BoardAttachments :many
 SELECT a.id, a.post_id, a.stored_path, a.original_name, a.mime_type, a.byte_size, a.created_at
 FROM attachments a
