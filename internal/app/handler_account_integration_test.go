@@ -109,7 +109,7 @@ func accountFixture(t *testing.T, verifyRequired bool) (*accountDeps, http.Handl
 	mux := http.NewServeMux()
 	buildTree(nil, &d.loginDeps, d, nil, nil, nil, nil, false,
 		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }).Mount(mux)
-	return d, sm.LoadAndSave(withActor(sm, store)(mux)), store, sender
+	return d, sm.LoadAndSave(withActor(sm, store, nil)(mux)), store, sender
 }
 
 // FR-210: the response must not reveal that an address already has an account.

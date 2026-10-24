@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -20,6 +21,8 @@ type loginDeps struct {
 	limiter *auth.Limiter
 	limits  auth.Limits
 	render  func(w http.ResponseWriter, r *http.Request, name string, code int, data any)
+	// log 는 500 의 원인을 받는다 (plainServerError). nil 이면 남기지 않는다.
+	log *slog.Logger
 	// social 은 A-206 에서 **켠** 프로바이더다. 화면이 버튼을 그리는 데 쓴다 —
 	// 활성 프로바이더가 0이면 버튼도 없다 (FR-709). nil 이면 소셜이 없는
 	// 배포다.
@@ -62,7 +65,7 @@ func (d *loginDeps) loginForm(w http.ResponseWriter, r *http.Request) {
 // stolen cookie can still ride.
 func (d *loginDeps) logout(w http.ResponseWriter, r *http.Request) {
 	if err := d.sm.Destroy(r.Context()); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -108,7 +111,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	// FR-214: 인증을 켠 사이트에서 미인증 계정에는 세션을 주지 않는다. 비밀번호가 맞을
@@ -131,7 +134,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 	// a cookie before login (a shared machine, an XSS on a sibling host) holds
 	// a session that becomes authenticated when the victim signs in.
 	if err := d.sm.RenewToken(ctx); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	d.sm.Put(ctx, sessUserID, u.ID)

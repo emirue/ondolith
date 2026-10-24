@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -124,7 +125,7 @@ func ActorFrom(ctx context.Context) *Actor {
 //     is what makes "log out everywhere" and "password changed" actually end
 //     the other sessions (D15 5.4), and it is checked on every request because
 //     that is the only moment we can.
-func withActor(sm *scs.SessionManager, store *auth.Store) func(http.Handler) http.Handler {
+func withActor(sm *scs.SessionManager, store *auth.Store, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -137,7 +138,7 @@ func withActor(sm *scs.SessionManager, store *auth.Store) func(http.Handler) htt
 				case errors.Is(err, auth.ErrNoUser):
 					sm.Destroy(ctx) //nolint:errcheck // destroying a stale session cannot fail usefully
 				case err != nil:
-					http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+					plainServerError(log, w, r, err)
 					return
 				case !u.IsActive:
 					sm.Destroy(ctx) //nolint:errcheck
@@ -162,11 +163,22 @@ func withActor(sm *scs.SessionManager, store *auth.Store) func(http.Handler) htt
 				a.Perms, err = store.LoadAnonymousPermissions(ctx)
 			}
 			if err != nil {
-				http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+				plainServerError(log, w, r, err)
 				return
 			}
 
 			next.ServeHTTP(w, r.WithContext(withActorValue(ctx, a)))
 		})
 	}
+}
+
+// plainServerError answers a failure the visitor cannot fix with the plain line
+// the login screens have always used, and puts the cause in the log (D22 3절,
+// NFR-210). 저장소가 죽으면 모든 요청이 여기(withActor)서 500 이 된다 — 운영자가
+// 장애를 알 곳은 로그뿐이다. 로그인·계정 화면도 같은 줄을 쓴다.
+func plainServerError(log *slog.Logger, w http.ResponseWriter, r *http.Request, err error) {
+	if log != nil {
+		log.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
+	}
+	http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 }

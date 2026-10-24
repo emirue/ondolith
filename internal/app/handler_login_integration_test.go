@@ -35,7 +35,7 @@ func loginFixture(t *testing.T) (*loginDeps, http.Handler, *auth.Store) {
 		Add(Route{Screen: "P-101", Method: "POST", Pattern: "/login", Class: SC2, Handler: d.login}).
 		Add(Route{Screen: "P-102", Method: "POST", Pattern: "/logout", Class: SC2, Handler: d.logout}).
 		Mount(mux)
-	return d, sm.LoadAndSave(withActor(sm, store)(mux)), store
+	return d, sm.LoadAndSave(withActor(sm, store, nil)(mux)), store
 }
 
 func mkAccount(t *testing.T, store *auth.Store, email, password string) string {

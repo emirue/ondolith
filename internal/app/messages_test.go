@@ -1,8 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -85,3 +89,20 @@ func refusalShown(t *testing.T, page, want string) {
 }
 
 var leakedPrefix = regexp.MustCompile(`content: \p{Hangul}`)
+
+// 로그인·계정 화면의 500 은 원인을 로그에만 싣는다 — 화면에는 한 문장 (D22 3절).
+func TestLoginServerErrorLogsTheCause(t *testing.T) {
+	var buf bytes.Buffer
+	rec := httptest.NewRecorder()
+	plainServerError(slog.New(slog.NewTextHandler(&buf, nil)), rec,
+		httptest.NewRequest(http.MethodPost, "/login", nil), errors.New("pgx: conn reset db=shop"))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("상태 = %d", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "일시적인 오류입니다.") || strings.Contains(body, "pgx") {
+		t.Errorf("화면 = %q", body)
+	}
+	if !strings.Contains(buf.String(), "pgx: conn reset") || !strings.Contains(buf.String(), "/login") {
+		t.Errorf("원인이 로그에 없다: %s", buf.String())
+	}
+}

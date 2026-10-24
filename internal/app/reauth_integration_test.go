@@ -37,7 +37,7 @@ func TestAdminReauthWindowCanBeReopenedWithThePassword(t *testing.T) {
 	late := func() time.Time { return time.Now().Add(2 * reauthWindow) }
 
 	var needBefore, wrongAccepted, rightAccepted bool
-	probe := sm.LoadAndSave(withActor(sm, store)(http.HandlerFunc(
+	probe := sm.LoadAndSave(withActor(sm, store, nil)(http.HandlerFunc(
 		func(_ http.ResponseWriter, r *http.Request) {
 			c := adminCaller{a: ActorFrom(r.Context()), now: late,
 				ctx: r.Context(), auth: store, sm: sm,
@@ -75,7 +75,7 @@ func TestAdminReauthWindowCanBeReopenedWithThePassword(t *testing.T) {
 	// **도장이 세션에 남는다.** 남지 않으면 다음 요청에서 또 물어보고,
 	// 한 화면에서 두 번 연속 처리하려면 매번 비밀번호를 친다.
 	var needAfter bool
-	after := sm.LoadAndSave(withActor(sm, store)(http.HandlerFunc(
+	after := sm.LoadAndSave(withActor(sm, store, nil)(http.HandlerFunc(
 		func(_ http.ResponseWriter, r *http.Request) {
 			needAfter = adminCaller{a: ActorFrom(r.Context()), now: late}.NeedsReauth()
 		})))
@@ -125,7 +125,7 @@ func TestReauthIsRateLimitedPerAccount(t *testing.T) {
 
 	var wrongAccepted int
 	var rightAfterBlock bool
-	probe := sm.LoadAndSave(withActor(sm, store)(http.HandlerFunc(
+	probe := sm.LoadAndSave(withActor(sm, store, nil)(http.HandlerFunc(
 		func(_ http.ResponseWriter, r *http.Request) {
 			c := adminCaller{a: ActorFrom(r.Context()), now: late, ctx: r.Context(),
 				auth: store, sm: sm, limiter: limiter, limit: limit}
@@ -199,7 +199,7 @@ func TestReauthLimitIsScopedPerAccount(t *testing.T) {
 		for _, c := range rec.Result().Cookies() {
 			req.AddCookie(c)
 		}
-		sm.LoadAndSave(withActor(sm, store)(http.HandlerFunc(
+		sm.LoadAndSave(withActor(sm, store, nil)(http.HandlerFunc(
 			func(_ http.ResponseWriter, r *http.Request) {
 				fn(adminCaller{a: ActorFrom(r.Context()), now: late, ctx: r.Context(),
 					auth: store, sm: sm, limiter: limiter, limit: limit})
