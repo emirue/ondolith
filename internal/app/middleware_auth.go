@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -124,7 +126,7 @@ func ActorFrom(ctx context.Context) *Actor {
 //     is what makes "log out everywhere" and "password changed" actually end
 //     the other sessions (D15 5.4), and it is checked on every request because
 //     that is the only moment we can.
-func withActor(sm *scs.SessionManager, store *auth.Store) func(http.Handler) http.Handler {
+func withActor(sm *scs.SessionManager, store *auth.Store, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -137,7 +139,7 @@ func withActor(sm *scs.SessionManager, store *auth.Store) func(http.Handler) htt
 				case errors.Is(err, auth.ErrNoUser):
 					sm.Destroy(ctx) //nolint:errcheck // destroying a stale session cannot fail usefully
 				case err != nil:
-					http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+					plainServerError(log, w, r, err)
 					return
 				case !u.IsActive:
 					sm.Destroy(ctx) //nolint:errcheck
@@ -162,11 +164,51 @@ func withActor(sm *scs.SessionManager, store *auth.Store) func(http.Handler) htt
 				a.Perms, err = store.LoadAnonymousPermissions(ctx)
 			}
 			if err != nil {
-				http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+				plainServerError(log, w, r, err)
 				return
 			}
 
 			next.ServeHTTP(w, r.WithContext(withActorValue(ctx, a)))
 		})
 	}
+}
+
+// plainServerError answers a failure the visitor cannot fix with the plain line
+// the login screens have always used, and puts the cause in the log (NFR-210).
+// 저장소가 죽으면 모든 요청이 여기(withActor)서 500 이 된다 — 운영자가 장애를 알
+// 곳은 로그뿐이다. 로그인·계정 화면도 같은 줄을 쓴다.
+func plainServerError(log *slog.Logger, w http.ResponseWriter, r *http.Request, err error) {
+	logFailure(log, r, err)
+	http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+}
+
+// logFailure is the one log line a 500 leaves: the cause, not the screen's
+// sentence (D22 3절). 공개 화면(P-904)·로그인 화면·세션 확인이 같은 줄을 쓴다.
+//
+// 손님이 연결을 끊어 취소된 요청은 남기지 않는다 — 장애가 아니고, 남기면 연결을
+// 끊는 것만으로 누구나 Error 를 찍을 수 있다.
+func logFailure(log *slog.Logger, r *http.Request, err error) {
+	if log == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	log.Error("요청 처리 실패", "path", logPath(r), "err", err)
+}
+
+// tokenPaths are the GET links whose last segment is a credential — the reset
+// and verification mails (P-105·P-112). TestFailureLogHidesTokens 가 라우트 표의
+// `{token}` 과 대조한다.
+var tokenPaths = []string{"/password/reset/", "/verify/"}
+
+// logPath is the request path with a credential segment replaced by `{token}`
+// (D15 7절). 쓰지 않은 재설정 토큰은 그 자체가 로그인이다 — 로그를 읽을 수 있는
+// 누구에게나 계정이 간다.
+func logPath(r *http.Request) string {
+	if r.Method == http.MethodGet {
+		for _, p := range tokenPaths {
+			if rest, ok := strings.CutPrefix(r.URL.Path, p); ok && rest != "" && !strings.Contains(rest, "/") {
+				return p + "{token}"
+			}
+		}
+	}
+	return r.URL.Path
 }

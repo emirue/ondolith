@@ -268,7 +268,7 @@ func (d *publicDeps) refuseUnverified(w http.ResponseWriter, r *http.Request, wh
 // the log, where the operator can read them and an attacker cannot. In dev the
 // cause is shown, because the only audience is the person who caused it.
 func (d *publicDeps) serverError(w http.ResponseWriter, r *http.Request, err error) {
-	d.log.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
+	logFailure(d.log, r, err)
 	v := d.view(r, "일시적인 오류", "")
 	if d.dev {
 		v.Data = map[string]string{"Detail": err.Error()}

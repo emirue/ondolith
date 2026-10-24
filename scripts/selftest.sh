@@ -385,8 +385,10 @@ inject "Phase 표시가 실제보다 뒤처짐" docs/80-roadmap.md \
 # **✅ 인 Phase 에 미완료 작업을 하나 더한다**: 표시는 그대로 ✅ 인데 현실이
 # 🔄 가 되므로, 어느 Phase 가 어느 상태이든 「표시가 앞선다」가 성립한다.
 # **번호를 적어 두지 않는다.** 0~4 를 고정한 판은 Phase 5·6 을 대조하지 않았다 — 마지막 Phase 를 바꿔 본다.
+# 표시도 하나로 못 박지 않는다: ✅ 만 바꾸던 판은 Phase 6 에 작업 행이 더해져 🔄 가 되자
+# 아무것도 바꾸지 않았다. 지금 표시가 무엇이든 다른 표시로 돌린다.
 inject "Phase 6 표시도 대조한다" docs/80-roadmap.md \
-	'perl -pi -e "s/^(## Phase 6 — .*) ✅ 완료/\$1 ⏳ 대기/" docs/80-roadmap.md' \
+	'perl -pi -e "s/^(## Phase 6 — .*) (✅ 완료|🔄 진행 중|⏳ 대기)\$/\$1 . q( ) . (\$2 eq q(✅ 완료) ? q(⏳ 대기) : q(✅ 완료))/e" docs/80-roadmap.md' \
 	'Phase 6 표시가 docs/81-work-breakdown.md 와 다르다'
 inject "Phase 표시가 실제보다 앞섬" docs/81-work-breakdown.md \
 	'printf "| W1-99 | 아직 안 한 작업 | — | — | 검증 가능한 기준 |\n" >> docs/81-work-breakdown.md' \

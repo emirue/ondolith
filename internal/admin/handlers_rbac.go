@@ -22,7 +22,7 @@ func (d *Deps) MenuList(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := d.Content.MenuItems(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/menus.html", http.StatusOK, map[string]any{"Items": items})
@@ -33,7 +33,7 @@ func (d *Deps) MenuList(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) menuError(w http.ResponseWriter, r *http.Request, msg string) {
 	items, err := d.Content.MenuItems(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/menus.html", http.StatusUnprocessableEntity, map[string]any{"Items": items, "Error": msg})
@@ -125,7 +125,7 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 
 	existing, err := d.Content.MenuItems(ctx)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	found := false
@@ -180,19 +180,19 @@ func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, cod
 	ctx := r.Context()
 	roles, err := d.Auth.Roles(ctx)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// 고르는 목록이다 — 역할 키·권한 키·게시판 id 를 직접 치게 하던 칸들이다.
 	// 무엇을 줄 수 있는지는 여전히 서버가 판정한다 (R1~R5).
 	perms, err := d.Auth.PermissionKeys(ctx)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	boards, err := d.Content.Boards(ctx)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/roles.html", code, map[string]any{
@@ -230,7 +230,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 
@@ -239,7 +239,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	// actually holds.
 	actorPerms, err := d.Auth.LoadPermissions(ctx, c.UserID())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: actorPerms}
@@ -263,7 +263,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := d.Auth.GrantPermission(ctx, role.Key, permKey, board); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "role.manage", "role", role.Key, "권한 부여: "+permKey)
@@ -300,7 +300,7 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		targetUser = u.ID
@@ -312,12 +312,12 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	actorPerms, err := d.Auth.LoadPermissions(ctx, c.UserID())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: actorPerms}
@@ -328,7 +328,7 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.Auth.AssignRole(ctx, targetUser, role.Key); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "role.assign", "user", targetUser, "역할 부여: "+role.Key)
@@ -354,7 +354,7 @@ func (d *Deps) ThemeList(w http.ResponseWriter, r *http.Request) {
 	}
 	kv, err := d.Content.Settings(r.Context(), "theme.active")
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.renderThemes(w, r, http.StatusOK, map[string]any{"Active": kv["theme.active"]})
@@ -366,7 +366,7 @@ func (d *Deps) renderThemes(w http.ResponseWriter, r *http.Request, code int, da
 	if d.InstalledThemes != nil {
 		installed, err := d.InstalledThemes()
 		if err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		data["Installed"] = installed
@@ -391,7 +391,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		// Empty means the built-in theme, which always renders.
 		if err := d.Content.PutSettings(r.Context(), map[string]string{"theme.active": ""}); err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		d.themeChanged("")
@@ -406,7 +406,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		kv, kerr := d.Content.Settings(r.Context(), "theme.active")
 		if kerr != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, kerr)
 			return
 		}
 		d.renderThemes(w, r, http.StatusUnprocessableEntity, map[string]any{"Active": kv["theme.active"],
@@ -414,7 +414,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.Content.PutSettings(r.Context(), map[string]string{"theme.active": name}); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// Only after the write: telling the renderer about a theme the database
@@ -479,7 +479,7 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	// 덮어쓴다 — 거부하면 이름을 바꿔 올리게 되고 목록에 쓰레기가 쌓인다.
 	kv, err := d.Content.Settings(r.Context(), "theme.active")
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	if name != "" && name == kv["theme.active"] {
@@ -500,7 +500,7 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	// only when the part was spooled to disk; buffer otherwise.
 	ra, size, err := readerAt(file, header.Size)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 

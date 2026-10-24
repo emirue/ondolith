@@ -323,7 +323,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 
 	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
-		render: pub.renderNamed, social: func() []auth.SocialConfig { return enabledSocial() }}
+		render: pub.renderNamed, log: log, social: func() []auth.SocialConfig { return enabledSocial() }}
 	siteName := func() string { return site().Name }
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log, site: siteName}, log)
 	// D13: 끝내 나가지 못한 메일은 작업 로그에 남긴다. 화면은 실패를 말할 수
@@ -538,7 +538,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// [4] tree gate + rate limit, [5] mux. The gate reads the Actor, so it has
 	// to sit INSIDE the loader — outside it, every request looks anonymous and
 	// the gate sends a logged-in administrator to the login form.
-	h := withActor(sessions, authStore)(
+	h := withActor(sessions, authStore, log)(
 		withAdminRateLimit(limiter, limits.AdminTreeIP)(withTreeGate(mux, pub.forbidden)))
 	h = withMiddleware(h, sessions)
 
