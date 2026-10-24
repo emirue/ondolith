@@ -262,10 +262,7 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
-	o, err := q.LockOrderForCancel(ctx, orderNo)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
+	o, err := lockOrder(ctx, q, orderNo)
 	if err != nil {
 		return "", err
 	}
@@ -278,8 +275,7 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 		return "", err
 	}
 
-	if _, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
-		ID: orderID, ToStatus: string(StatusCancelled), FromStatus: status}); err != nil {
+	if err := s.moveOrder(ctx, tx, orderID, Status(status), StatusCancelled, actor); err != nil {
 		return "", err
 	}
 
@@ -362,10 +358,7 @@ func (s *Store) SettleFullRefund(ctx context.Context, orderNo string, actor Acto
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
-	o, err := q.LockOrderByNo(ctx, orderNo)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
+	o, err := lockOrder(ctx, q, orderNo)
 	if err != nil {
 		return "", err
 	}
@@ -397,8 +390,7 @@ func (s *Store) SettleFullRefund(ctx context.Context, orderNo string, actor Acto
 	if err := q.SettleAllOrderItems(ctx, orderID); err != nil {
 		return "", err
 	}
-	if _, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
-		ID: orderID, ToStatus: string(to), FromStatus: status}); err != nil {
+	if err := s.moveOrder(ctx, tx, orderID, Status(status), to, actor); err != nil {
 		return "", err
 	}
 	return to, tx.Commit(ctx)

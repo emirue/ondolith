@@ -98,8 +98,8 @@ type StockDelta struct {
 	Delta     int
 }
 
-// Reserve returns the deltas for taking `qty` units — 주문 생성(P-406)과 교환
-// 접수(P-512)가 같은 것을 쓴다.
+// Reserve returns the deltas for taking `qty` units — 교환 접수(P-512)가 새 조합을
+// 잡아 둘 때 쓴다.
 //
 // 교환 접수에 예약이 필요한 이유는 D14 「교환 재고」다: 새 조합을 잡아 두지
 // 않으면 수거하는 동안 그 조합이 팔려 나가고, 재발송할 물건이 없어진다.
@@ -112,9 +112,10 @@ func Reserve(variantID string, qty int) ([]StockDelta, error) {
 
 // Release returns the deltas for giving `qty` units back.
 //
-// 결제 실패(P-409), 취소, 교환 거부·취소가 부른다. D14 는 "거부·취소 시 반드시
-// 푼다. 풀지 않으면 재고가 조용히 잠긴다" 고 적었다 — 잠긴 재고는 오류를 내지
-// 않고 판매만 멈추므로, 사람이 A-503 에서 숫자를 보고서야 알아챈다.
+// 교환 거부(A-511)가 잡아 둔 새 조합을 풀 때 부른다 — 결제 실패·취소는 주문
+// 품목에서 되돌릴 양을 센다(restockDeltas). D14 는 "거부·취소 시 반드시 푼다.
+// 풀지 않으면 재고가 조용히 잠긴다" 고 적었다 — 잠긴 재고는 오류를 내지 않고
+// 판매만 멈추므로, 사람이 A-503 에서 숫자를 보고서야 알아챈다.
 //
 // reserved 는 실제로 잡아 둔 수량이다. 그것을 넘겨 푸는 요청은 거부한다 —
 // 통과시키면 없던 재고가 생기고, 그것이 다음 주문을 받는다.

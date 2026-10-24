@@ -231,11 +231,17 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 // **전에** 읽은 값이라 그 사이 A-507 이 취소로 옮겼을 수 있고, 조건 없는
 // UPDATE 는 취소된 주문을 결제완료로 되돌린다 — 역전이 금지(D14)를 코드가
 // 스스로 어기는 경로다.
+//
+// **배송완료·구매확정은 진입 시각을 같은 tx 에서 찍는다.** A-512 의 반품 기간과
+// 자동 확정이 이 시각 기준이고, operation_logs 는 감사 흔적이지 운영 데이터가
+// 아니다 (D30). 처음 들어온 시각만 남는다(`IS NULL`) — 반품 거부로 배송완료에
+// 다시 들어와도 기간이 새로 시작하지 않는다.
 func (s *Store) moveOrder(ctx context.Context, tx pgx.Tx, orderID string, from, to Status, actor Actor) error {
 	if err := CanTransition(from, to, actor); err != nil {
 		return err
 	}
-	n, err := s.q.WithTx(tx).MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
+	q := s.q.WithTx(tx)
+	n, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
 		ID: orderID, ToStatus: string(to), FromStatus: string(from)})
 	if err != nil {
 		return err
@@ -243,6 +249,12 @@ func (s *Store) moveOrder(ctx context.Context, tx pgx.Tx, orderID string, from, 
 	if n == 0 {
 		return fmt.Errorf("%w: 처리하는 사이 주문 상태가 %s 에서 바뀌었습니다",
 			ErrTransitionNotAllowed, from)
+	}
+	switch to {
+	case StatusDelivered:
+		return q.MarkDelivered(ctx, orderID)
+	case StatusConfirmed:
+		return q.MarkConfirmed(ctx, orderID)
 	}
 	return nil
 }

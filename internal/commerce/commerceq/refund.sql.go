@@ -152,23 +152,6 @@ func (q *Queries) LockApprovedPayment(ctx context.Context, orderID string) (Lock
 	return i, err
 }
 
-const lockOrderForCancel = `-- name: LockOrderForCancel :one
-SELECT id, status, total_amount FROM orders WHERE order_no = $1 FOR UPDATE
-`
-
-type LockOrderForCancelRow struct {
-	ID          string
-	Status      string
-	TotalAmount int32
-}
-
-func (q *Queries) LockOrderForCancel(ctx context.Context, orderNo string) (LockOrderForCancelRow, error) {
-	row := q.db.QueryRow(ctx, lockOrderForCancel, orderNo)
-	var i LockOrderForCancelRow
-	err := row.Scan(&i.ID, &i.Status, &i.TotalAmount)
-	return i, err
-}
-
 const lockOrderItemForRefund = `-- name: LockOrderItemForRefund :one
 SELECT line_amount::int AS line_amount, discount_amount, quantity, settled_quantity
 FROM order_items WHERE id = $1 AND order_id = $2 FOR UPDATE
