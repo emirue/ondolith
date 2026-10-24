@@ -1230,3 +1230,65 @@ func TestExchangeDiffRefusesBeforeCompletion(t *testing.T) {
 		t.Errorf("차액결제대기인데 막혔다: %v", err)
 	}
 }
+
+// pickedUpReturn is an order whose return A-511 has picked up — the step before
+// 환불 확정. 귀책은 판매자라 배송비 정책을 타지 않는다.
+func pickedUpReturn(t *testing.T, s *Store, pool *pgxpool.Pool) (orderNo, returnNo, itemID string) {
+	t.Helper()
+	ctx := context.Background()
+	orderNo, _ = deliveredOrder(t, s, pool, "tee", 2)
+	items := itemsOf(t, s, orderNo)
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{Kind: KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "판매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	return orderNo, ret.ReturnNo, items[0].ID
+}
+
+// **반품 행만 보고 주문을 덮어쓰지 않는다** (D14 「동시성」). 반품은 수거됐는데 주문이
+// 다른 상태라면(손으로 고친 DB, 놓친 전이) 불변식이 깨진 것이다 — 덮어쓰면 그 흔적이
+// 사라지고 돈이 나간다.
+func TestReturnFlowsRefuseAnOrderOutOfStep(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, returnNo, _ := pickedUpReturn(t, s, pool)
+	if _, err := pool.Exec(ctx, `UPDATE orders SET status = $2 WHERE order_no = $1`,
+		orderNo, string(StatusDelivered)); err != nil {
+		t.Fatal(err)
+	}
+
+	var te *TransitionError
+	if _, err := s.SettleReturn(ctx, orderNo, returnNo, "A-511", "out-of-step"); !errors.As(err, &te) {
+		t.Fatalf("어긋난 주문의 정산 = %v, want 상태머신의 거부(TransitionError)", err)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusDelivered)
+	var refunds int
+	var retStatus string
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refunds r JOIN orders o ON o.id = r.order_id
+		WHERE o.order_no = $1`, orderNo).Scan(&refunds); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM returns WHERE return_no = $1`, returnNo).Scan(&retStatus); err != nil {
+		t.Fatal(err)
+	}
+	if refunds != 0 || retStatus != string(StatusReturnPickedUp) {
+		t.Errorf("환불 행 %d 개, 반품 상태 %q — 아무것도 바뀌지 않아야 한다", refunds, retStatus)
+	}
+}
+
+// 반품 흐름이 주문을 잠근 동안에도 그 주문을 가리키는 INSERT 의 외래키 검사
+// (FOR KEY SHARE)는 지나간다. 품목을 잡은 부분 환불(RequestRefund)이 환불 행을
+// 넣으며 주문을 기다리고, 주문을 잡은 정산이 그 품목을 기다리면 교착이다.
+func TestReturnSettleLetsForeignKeyChecksThrough(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, returnNo, itemID := pickedUpReturn(t, s, pool)
+	probe := `SELECT 1 FROM orders WHERE order_no = '` + orderNo + `' FOR KEY SHARE NOWAIT`
+	whileWaitingOn(t, pool, itemID, probe, func() error {
+		_, err := s.SettleReturn(context.Background(), orderNo, returnNo, "A-511", "fk-probe")
+		return err
+	})
+}

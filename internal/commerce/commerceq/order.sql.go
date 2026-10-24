@@ -462,7 +462,7 @@ func (q *Queries) LockCartForOrder(ctx context.Context, arg LockCartForOrderPara
 }
 
 const lockOrderByNo = `-- name: LockOrderByNo :one
-SELECT id, status, delivered_at FROM orders WHERE order_no = $1 FOR UPDATE
+SELECT id, status, delivered_at FROM orders WHERE order_no = $1 FOR NO KEY UPDATE
 `
 
 type LockOrderByNoRow struct {
@@ -471,6 +471,9 @@ type LockOrderByNoRow struct {
 	DeliveredAt *time.Time
 }
 
+// FOR NO KEY UPDATE: 주문 상태를 쓰는 흐름끼리는 그대로 줄을 서고, 그 주문을 가리키는
+// 행의 INSERT(외래키 검사, FOR KEY SHARE)는 지나간다. FOR UPDATE 면 품목을 잡고 환불 행을
+// 넣는 부분 환불과, 주문을 잡고 그 품목을 기다리는 반품 정산이 교착한다 (LockVariantStock 과 같은 이유).
 func (q *Queries) LockOrderByNo(ctx context.Context, orderNo string) (LockOrderByNoRow, error) {
 	row := q.db.QueryRow(ctx, lockOrderByNo, orderNo)
 	var i LockOrderByNoRow
@@ -769,20 +772,6 @@ func (q *Queries) RequiredTermIDs(ctx context.Context, now time.Time) ([]string,
 		return nil, err
 	}
 	return items, nil
-}
-
-const setOrderStatus = `-- name: SetOrderStatus :exec
-UPDATE orders SET status = $2, updated_at = now() WHERE id = $1
-`
-
-type SetOrderStatusParams struct {
-	ID     string
-	Status string
-}
-
-func (q *Queries) SetOrderStatus(ctx context.Context, arg SetOrderStatusParams) error {
-	_, err := q.db.Exec(ctx, setOrderStatus, arg.ID, arg.Status)
-	return err
 }
 
 const shipments = `-- name: Shipments :many

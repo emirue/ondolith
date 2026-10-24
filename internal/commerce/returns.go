@@ -411,6 +411,10 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault stri
 	}
 
 	q := s.q.WithTx(tx)
+	o, err := lockOrder(ctx, q, orderNo)
+	if err != nil {
+		return err
+	}
 	// **그 주문의 반품 건인지 SQL 술어로 대조한다.** 폼의 return_no 를 그대로
 	// 조회 키로 쓰면, 다른 주문 화면에서 보낸 번호로 엉뚱한 건을 조작하고
 	// 원래 주문으로 리다이렉트된다 — 무슨 일이 있었는지 아무도 모른다.
@@ -456,7 +460,7 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault stri
 		FromStatus: status}); err != nil {
 		return err
 	}
-	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(target)}); err != nil {
+	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), target, actor); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -484,6 +488,10 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	defer tx.Rollback(ctx)
 
 	q := s.q.WithTx(tx)
+	o, err := lockOrder(ctx, q, orderNo)
+	if err != nil {
+		return 0, err
+	}
 	r, err := q.LockReturnForSettle(ctx, commerceq.LockReturnForSettleParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotFound
@@ -579,7 +587,7 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	if err := q.SetReturnStatus(ctx, commerceq.SetReturnStatusParams{ID: id, Status: string(StatusRefunded)}); err != nil {
 		return 0, err
 	}
-	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(StatusRefunded)}); err != nil {
+	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), StatusRefunded, actor); err != nil {
 		return 0, err
 	}
 
@@ -600,6 +608,10 @@ func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason stri
 	}
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
+	o, err := lockOrder(ctx, q, orderNo)
+	if err != nil {
+		return err
+	}
 
 	r, err := q.LockReturnForReject(ctx, commerceq.LockReturnForRejectParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -638,7 +650,7 @@ func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason stri
 	if err := q.CloseReturnItems(ctx, id); err != nil {
 		return err
 	}
-	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(StatusDelivered)}); err != nil {
+	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), StatusDelivered, actor); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -773,6 +785,10 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 	}
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
+	o, err := lockOrder(ctx, q, orderNo)
+	if err != nil {
+		return "", err
+	}
 
 	r, err := q.LockReturnForExchange(ctx, commerceq.LockReturnForExchangeParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -805,7 +821,7 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 		ID: id, ToStatus: string(target), FromStatus: status}); err != nil {
 		return "", err
 	}
-	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: orderID, Status: string(target)}); err != nil {
+	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), target, actor); err != nil {
 		return "", err
 	}
 	return target, tx.Commit(ctx)
