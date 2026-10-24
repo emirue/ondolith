@@ -189,10 +189,7 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
-	o, err := q.LockOrderByNo(ctx, orderNo)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
+	o, err := lockOrder(ctx, q, orderNo)
 	if err != nil {
 		return nil, err
 	}
