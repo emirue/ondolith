@@ -758,20 +758,13 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		key, err = commerce.NewRequestKey()
 		if err == nil {
 			var amount int
-			amount, err = d.Commerce.SettleReturn(r.Context(), order.OrderNo, returnNo, "A-511", key)
+			var refundID string
+			amount, refundID, err = d.Commerce.SettleReturn(r.Context(), order.OrderNo, returnNo, "A-511", key)
 			if err == nil {
 				d.log(r, c, "return.settle", "return", returnNo,
 					"반품 환불 "+itoa(amount)+"원 확정")
 				// 정산이 만든 환불 건을 PG 로 보낸다 (A-507 과 같은 순서).
-				var gw commerce.Gateway
-				if d.Gateway != nil {
-					gw = d.Gateway()
-				}
-				var refundID string
-				if refundID, err = d.Commerce.RefundForReturn(r.Context(), order.OrderNo, returnNo); err == nil {
-					err = d.Commerce.ExecuteRefund(r.Context(), gw, refundID)
-				}
-				if err != nil {
+				if err = d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID); err != nil {
 					d.Logger.Error("반품 환불 실행", "return", returnNo, "err", err)
 					d.log(r, c, "return.settle", "return", returnNo,
 						"반품 환불 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)

@@ -90,10 +90,3 @@ UPDATE refunds SET status = '요청', updated_at = now() WHERE id = $1 AND statu
 -- name: CompleteRefund :execrows
 UPDATE refunds SET status = '완료', pg_response = sqlc.narg('pg_response'), updated_at = now()
 WHERE id = sqlc.arg('id') AND status = '승인';
-
--- name: RefundForReturn :one
-SELECT rf.id FROM refunds rf
-JOIN returns rt ON rt.id = rf.return_id
-JOIN orders o ON o.id = rf.order_id
-WHERE o.order_no = $1 AND rt.return_no = $2
-ORDER BY rf.created_at DESC, rf.id DESC LIMIT 1;

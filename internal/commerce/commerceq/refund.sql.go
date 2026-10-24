@@ -287,26 +287,6 @@ func (q *Queries) OrderItemStock(ctx context.Context, orderID string) ([]OrderIt
 	return items, nil
 }
 
-const refundForReturn = `-- name: RefundForReturn :one
-SELECT rf.id FROM refunds rf
-JOIN returns rt ON rt.id = rf.return_id
-JOIN orders o ON o.id = rf.order_id
-WHERE o.order_no = $1 AND rt.return_no = $2
-ORDER BY rf.created_at DESC, rf.id DESC LIMIT 1
-`
-
-type RefundForReturnParams struct {
-	OrderNo  string
-	ReturnNo string
-}
-
-func (q *Queries) RefundForReturn(ctx context.Context, arg RefundForReturnParams) (string, error) {
-	row := q.db.QueryRow(ctx, refundForReturn, arg.OrderNo, arg.ReturnNo)
-	var id string
-	err := row.Scan(&id)
-	return id, err
-}
-
 const refundedTotal = `-- name: RefundedTotal :one
 SELECT p.approved_amount, p.refunded_amount FROM payments p
 JOIN orders o ON o.id = p.order_id

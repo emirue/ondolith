@@ -558,13 +558,3 @@ func nullIfEmptyBytes(b []byte) []byte {
 	}
 	return b
 }
-
-// RefundForReturn finds the refund a return settlement produced, so the caller
-// can execute it.
-func (s *Store) RefundForReturn(ctx context.Context, orderNo, returnNo string) (string, error) {
-	id, err := s.q.RefundForReturn(ctx, commerceq.RefundForReturnParams{OrderNo: orderNo, ReturnNo: returnNo})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return id, err
-}

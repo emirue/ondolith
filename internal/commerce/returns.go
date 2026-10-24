@@ -474,59 +474,62 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault stri
 //
 // 환불액은 **스냅샷에서 서버가 계산**한다 (FR-617): 품목별 할인후 금액의 몫에서
 // 수거 시점에 찍은 배송비 스냅샷을 뺀다. 요청 금액은 받지 않는다.
+//
+// 돌려주는 refundID 는 이 정산이 만든 '요청' 환불 건이다 — 호출자가 그것을 PG 로
+// 보낸다(ExecuteRefund).
 func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, actor Actor,
-	requestKey string) (amount int, err error) {
+	requestKey string) (amount int, refundID string, err error) {
 
 	if requestKey == "" {
-		return 0, errors.New("commerce: 요청 키가 필요합니다")
+		return 0, "", errors.New("commerce: 요청 키가 필요합니다")
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer tx.Rollback(ctx)
 
 	q := s.q.WithTx(tx)
 	o, err := lockOrder(ctx, q, orderNo)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	r, err := q.LockReturnForSettle(ctx, commerceq.LockReturnForSettleParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrNotFound
+		return 0, "", ErrNotFound
 	}
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	id, kind, status, orderID, feePolicy, feeAmount := r.ID, r.Kind, r.Status, r.OrderID, r.FeePolicy, int(r.FeeAmount)
 	if ReturnKind(kind) != KindReturn {
-		return 0, fmt.Errorf("%w: 교환 건은 환불로 정산하지 않습니다", ErrReturnKind)
+		return 0, "", fmt.Errorf("%w: 교환 건은 환불로 정산하지 않습니다", ErrReturnKind)
 	}
 	// 수거 전이면 상태머신이 거부한다. 그 거부가 이 함수의 존재 이유다.
 	if err := CanTransition(Status(status), StatusRefunded, actor); err != nil {
 		if Status(status) == StatusReturnOpen {
-			return 0, ErrPickupRequired
+			return 0, "", ErrPickupRequired
 		}
-		return 0, err
+		return 0, "", err
 	}
 
 	paymentID, err := q.ApprovedPaymentID(ctx, orderID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrNoPayment
+		return 0, "", ErrNoPayment
 	}
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	// 품목별 몫을 스냅샷에서 계산한다 — 수거 확인이 배송비를 검증할 때 쓴
 	// 것과 **같은 함수**다.
 	gross, toSettle, err := returnGross(ctx, tx, id)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if len(toSettle) == 0 {
-		return 0, fmt.Errorf("%w: 정산할 품목이 없습니다", ErrNotFound)
+		return 0, "", fmt.Errorf("%w: 정산할 품목이 없습니다", ErrNotFound)
 	}
 	amount = gross
 
@@ -540,7 +543,7 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 		// 수거 확인이 이미 막았어야 하는 경우다. 여기 오면 스냅샷이 그 사이
 		// 바뀐 것이고(예: 같은 품목이 부분 환불로 소진됨), 그때도 500 이
 		// 아니라 설명이 있는 오류를 낸다.
-		return 0, fmt.Errorf("%w: 배송비 %d 가 환불 몫 %d 이상입니다",
+		return 0, "", fmt.Errorf("%w: 배송비 %d 가 환불 몫 %d 이상입니다",
 			ErrShippingFeeTooLarge, feeAmount, gross)
 	}
 
@@ -549,9 +552,9 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 			ID: st.itemID, Quantity: int32(st.qty)}); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23514" {
-				return 0, ErrRefundQuantity
+				return 0, "", ErrRefundQuantity
 			}
-			return 0, err
+			return 0, "", err
 		}
 	}
 
@@ -561,19 +564,19 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 		ID: paymentID, Amount: int32(amount)}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23514" {
-			return 0, ErrRefundExceeds
+			return 0, "", ErrRefundExceeds
 		}
-		return 0, err
+		return 0, "", err
 	}
 
-	_, err = q.InsertReturnRefund(ctx, commerceq.InsertReturnRefundParams{
+	refundID, err = q.InsertReturnRefund(ctx, commerceq.InsertReturnRefundParams{
 		OrderID: orderID, PaymentID: paymentID, ReturnID: &id, Amount: int32(amount), RequestKey: requestKey})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return 0, ErrRefundDuplicate
+		return 0, "", ErrRefundDuplicate
 	}
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	// return_id 가 있는 refunds 는 refund_items 를 만들지 않는다 — 품목·수량이
 	// 이미 return_items 에 있고, 양쪽에 넣으면 settled_quantity 가 이중
@@ -582,19 +585,19 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	// 처리 중 표시를 내린다. returns 가 종결로 가는 트랜잭션에서 함께 내려야
 	// 부분 인덱스가 다음 반품을 허용한다.
 	if err := q.CloseReturnItems(ctx, id); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if err := q.SetReturnStatus(ctx, commerceq.SetReturnStatusParams{ID: id, Status: string(StatusRefunded)}); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), StatusRefunded, actor); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return amount, nil
+	return amount, refundID, nil
 }
 
 // RejectReturn sends the order back to 배송완료 and releases what was held.
