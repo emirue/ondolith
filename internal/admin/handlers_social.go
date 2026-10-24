@@ -71,13 +71,8 @@ func (d *Deps) SocialSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kv := map[string]string{idKey: clientID}
-	if secret != "" {
-		// 빈 칸은 「그대로 두라」다. 화면이 현재 값을 보여줄 수 없으므로 빈
-		// 칸이 정상 상태이고, 지우면 다른 항목을 고치러 온 관리자가 로그인을
-		// 꺼뜨린다 (D19 A-206).
-		kv[secretKey] = secret
-	}
+	kv := map[string]string{idKey: clientID, secretKey: secret}
+	dropBlankSecrets(kv) // 빈 시크릿을 지우면 다른 항목을 고치러 온 관리자가 로그인을 꺼뜨린다 (D19 A-206)
 
 	// **자격증명 없이 활성화할 수 없다** (D19 A-206 거부 조건). 켜면 P-106
 	// 버튼이 즉시 깨지고, 사용자는 로그인이 고장 난 것으로 읽는다.
