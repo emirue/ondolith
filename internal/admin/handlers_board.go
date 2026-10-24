@@ -598,13 +598,16 @@ func (d *Deps) AttachmentDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := d.Attachments.Delete(ctx, id); err != nil {
+	if err := d.Attachments.Delete(ctx, id); errors.Is(err, content.ErrFilesLeft) {
 		// A-309: 디스크 삭제 실패는 행 삭제를 되돌리지 않는다. 행은 이미
 		// 갔으므로 실패를 보고하되 화면은 성공으로 넘긴다 — 다시 누르면
 		// "찾을 수 없습니다"가 되어 운영자가 더 헷갈린다.
 		if d.Logger != nil {
 			d.Logger.Warn("첨부 파일 삭제", "attachment", id, "err", err)
 		}
+	} else if d.fail(w, r, err) {
+		// 행이 지워지지 않았다 — 「삭제」 로그도 남기지 않는다.
+		return
 	}
 	// D15 7절: 남의 첨부 삭제도 분쟁의 근거다.
 	d.log(r, c, "post.moderate", "attachment", id,

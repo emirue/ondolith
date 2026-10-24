@@ -436,3 +436,67 @@ func TestStorageBucketChangeIsLogged(t *testing.T) {
 		t.Fatalf("작업 로그 %q — 버킷 이전 값이 없다", got)
 	}
 }
+
+// **첨부 하나 지우기(A-309)는 파일이 남은 것과 지우지 못한 것을 가른다** (G8).
+// 버킷이 파일 삭제를 거부하면 행은 이미 갔다 — 경고를 남기고 성공, 작업 로그에 「삭제」.
+// 행 삭제 자체가 실패하면 아무것도 지워지지 않았다 — 500 이고 「삭제」 로그는 남지 않는다.
+// 지금까지는 둘 다 성공으로 넘어갔다.
+func TestAttachmentDeleteTellsALeftoverFileFromAFailure(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{superuser: true, email: "root@example.com"})
+	ctx := context.Background()
+	bucket := fakes3.New("site")
+	defer bucket.Close()
+	remote := s3store.New(s3store.Config{Endpoint: bucket.URL, Region: "us-east-1", Bucket: "site",
+		AccessKey: "AK", SecretKey: "SK", PathStyle: true}, nil)
+	files := content.NewFiles(t.TempDir(), func(context.Context) (content.Remote, bool, error) { return remote, true, nil })
+	d.Attachments = d.Content.AttachmentsIn(files)
+	boardID, err := d.Content.CreateBoard(ctx, content.Board{Slug: "free", Name: "자유", PerPage: 20}, content.PresetPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	postID, err := d.Content.CreatePost(ctx, content.Post{BoardID: boardID, Title: "첨부 글", Body: "본문"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	png := "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + strings.Repeat("\x00", 40)
+	left, err := d.Attachments.Save(ctx, postID, "left.png", strings.NewReader(png))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := d.Attachments.Save(ctx, postID, "kept.png", strings.NewReader(png))
+	if err != nil {
+		t.Fatal(err)
+	}
+	del := func(id string) int {
+		return postAdmin(t, d.AttachmentDelete, "/admin/attachments/delete", nil,
+			url.Values{"attachment_id": {id}}).Code
+	}
+	rows := func(id string) int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachments WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	bucket.RejectCode = "AccessDenied"
+	if code := del(left.ID); code != http.StatusSeeOther || rows(left.ID) != 0 {
+		t.Errorf("버킷 거부 = HTTP %d, 남은 행 %d — want 303·0", code, rows(left.ID))
+	}
+	if got := lastLog(t, pool); !strings.Contains(got, "left.png") {
+		t.Errorf("작업 로그 %q", got)
+	}
+
+	bucket.RejectCode = ""
+	if _, err := pool.Exec(ctx, `
+		CREATE FUNCTION refuse_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'disk full'; END $$;
+		CREATE TRIGGER refuse_delete BEFORE DELETE ON attachments FOR EACH ROW EXECUTE FUNCTION refuse_delete()`); err != nil {
+		t.Fatal(err)
+	}
+	if code := del(kept.ID); code != http.StatusInternalServerError || rows(kept.ID) != 1 {
+		t.Errorf("행 삭제 실패 = HTTP %d, 남은 행 %d — want 500·1", code, rows(kept.ID))
+	}
+	if got := lastLog(t, pool); strings.Contains(got, "kept.png") {
+		t.Errorf("지우지 못한 첨부에 「삭제」 로그: %q", got)
+	}
+}

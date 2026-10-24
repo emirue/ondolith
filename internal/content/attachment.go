@@ -125,6 +125,9 @@ func (a *Attachments) Open(ctx context.Context, at *Attachment) (io.ReadSeekClos
 // survives its row is litter, while a row that survives its file is a download
 // that 500s. The row goes first so the failure the visitor can see is the one
 // that cannot happen.
+//
+// 파일만 남았으면 ErrFilesLeft 다 — 행은 이미 갔고 호출자는 그것을 경고로 다룬다.
+// 그 밖의 오류는 행이 지워지지 않았다는 뜻이다.
 func (a *Attachments) Delete(ctx context.Context, id string) error {
 	at, err := a.ByID(ctx, id)
 	if err != nil {
@@ -133,9 +136,7 @@ func (a *Attachments) Delete(ctx context.Context, id string) error {
 	if err := affected(a.store.q.DeleteAttachment(ctx, id)); err != nil {
 		return err
 	}
-	// Reported, not returned: the row is already gone and the caller cannot
-	// undo it. The file is now orphaned, which A-309 accepts.
-	return a.files.Remove(ctx, at.StoredPath)
+	return a.files.RemoveAll(ctx, []string{at.StoredPath})
 }
 
 // DeletePost removes the post and then the files its attachments left behind.
