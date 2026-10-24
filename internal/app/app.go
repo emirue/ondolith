@@ -84,19 +84,6 @@ func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
 	return httpsec.Headers(http.NewCrossOriginProtection().Handler(h))
 }
 
-// New brings up the operating tree: connection pool, session store, and the
-// route table. The returned func releases the pool and must be called on
-// shutdown.
-//
-// Pending migrations are applied here rather than only at install time, so that
-// upgrading is "replace the binary and restart".
-//
-// The boot self-check runs before a single route serves, and a failure returns
-// an error rather than starting anyway (FR-110): a server that comes up in the
-// wrong state has its wrong state discovered by a visitor.
-// rebuild reassembles this tree from the same config and swaps it in; A-201
-// calls it when an assembly-time setting changes (D20 모듈 게이팅).
-//
 // poolConfig is the operating tree's connection pool settings, apart from New so
 // that a test can open a pool the same way and ask the server what it got.
 func poolConfig(dsn string) (*pgxpool.Config, error) {
@@ -117,6 +104,18 @@ func poolConfig(dsn string) (*pgxpool.Config, error) {
 	return pcfg, nil
 }
 
+// New brings up the operating tree: connection pool, session store, and the
+// route table. The returned func releases the pool and must be called on
+// shutdown.
+//
+// Pending migrations are applied here rather than only at install time, so that
+// upgrading is "replace the binary and restart".
+//
+// The boot self-check runs before a single route serves, and a failure returns
+// an error rather than starting anyway (FR-110): a server that comes up in the
+// wrong state has its wrong state discovered by a visitor.
+// rebuild reassembles this tree from the same config and swaps it in; A-201
+// calls it when an assembly-time setting changes (D20 모듈 게이팅).
 func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
 	rebuild func() error,
 ) (http.Handler, func(), error) {
