@@ -335,13 +335,8 @@ func (s *Store) OpenReturn(ctx context.Context, orderNo string, req ReturnReques
 	}
 
 	// 주문 상태도 옮긴다. 비교-교환이라 그 사이 상태가 바뀌었으면 실패한다.
-	n, err := q.MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
-		ID: orderID, ToStatus: string(target), FromStatus: status})
-	if err != nil {
+	if err := s.moveOrder(ctx, tx, orderID, Status(status), target, actor); err != nil {
 		return nil, err
-	}
-	if n == 0 {
-		return nil, fmt.Errorf("%w: 접수하는 사이 주문 상태가 바뀌었습니다", ErrTransitionNotAllowed)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -574,24 +574,8 @@ func (s *Store) TransitionOrder(ctx context.Context, orderNo string, to Status, 
 	if err != nil {
 		return err
 	}
-	id, from := row.ID, row.Status
-	if err := CanTransition(Status(from), to, actor); err != nil {
+	if err := s.moveOrder(ctx, tx, row.ID, Status(row.Status), to, actor); err != nil {
 		return err
-	}
-	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: id, Status: string(to)}); err != nil {
-		return err
-	}
-	// 배송완료 전이는 시각을 남긴다. A-512 의 반품 기간·자동 확정이 전부 이
-	// 시각 기준이고, operation_logs 는 감사 흔적이지 운영 데이터가 아니다 (D30).
-	if to == StatusDelivered {
-		if err := q.MarkDelivered(ctx, id); err != nil {
-			return err
-		}
-	}
-	if to == StatusConfirmed {
-		if err := q.MarkConfirmed(ctx, id); err != nil {
-			return err
-		}
 	}
 	return tx.Commit(ctx)
 }
@@ -786,9 +770,7 @@ func (s *Store) releaseUnpaid(ctx context.Context, tx pgx.Tx, orderID string, fr
 	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
 		return err
 	}
-	_, err = s.q.WithTx(tx).MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
-		ID: orderID, ToStatus: string(StatusPaymentFailed), FromStatus: string(from)})
-	return err
+	return s.moveOrder(ctx, tx, orderID, from, StatusPaymentFailed, ActorSystem)
 }
 
 func (s *Store) expireOne(ctx context.Context, orderID string) error {
