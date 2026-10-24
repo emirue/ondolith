@@ -36,7 +36,7 @@ func (d *Deps) OrderList(w http.ResponseWriter, r *http.Request) {
 	}
 	orders, more, err := d.Commerce.AdminOrders(r.Context(), status, p.Since, p.Until, page)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	data["Orders"] = orders
@@ -62,7 +62,7 @@ func (d *Deps) orderDetail(w http.ResponseWriter, r *http.Request, code int, msg
 	}
 	shipments, err := d.Commerce.Shipments(r.Context(), order.ID)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/order.html", code, map[string]any{
@@ -113,7 +113,7 @@ func (d *Deps) OrderTransition(w http.ResponseWriter, r *http.Request) {
 		d.orderDetail(w, r, http.StatusUnprocessableEntity, transitionMessage(err))
 		return
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 
@@ -133,7 +133,7 @@ func (d *Deps) ShippingForm(w http.ResponseWriter, r *http.Request) {
 	}
 	shipments, err := d.Commerce.Shipments(r.Context(), order.ID)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/shipping.html", http.StatusOK,
@@ -173,7 +173,7 @@ func (d *Deps) ShippingSave(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"Error": "이미 최초 발송이 기록된 주문입니다."})
 		return
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 
@@ -197,7 +197,7 @@ func (d *Deps) ProductList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	data := map[string]any{"Products": products}
@@ -213,7 +213,7 @@ func (d *Deps) CategoryList(w http.ResponseWriter, r *http.Request) {
 	}
 	cats, err := d.Commerce.Categories(r.Context())
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/categories.html", http.StatusOK, map[string]any{"Categories": cats})
@@ -273,7 +273,7 @@ func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
 		d.categoryError(w, r, http.StatusUnprocessableEntity, categoryMessage(err))
 		return
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "category.create", "category", cat.Slug, "카테고리 생성")
@@ -313,7 +313,7 @@ func (d *Deps) CategoryUpdate(w http.ResponseWriter, r *http.Request) {
 		d.categoryError(w, r, http.StatusNotFound, "없는 카테고리입니다.")
 		return
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "category.update", "category", id, "카테고리 이름·순서 변경: "+name)
@@ -338,7 +338,7 @@ func (d *Deps) CategoryDelete(w http.ResponseWriter, r *http.Request) {
 		d.categoryError(w, r, http.StatusNotFound, "없는 카테고리입니다.")
 		return
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "category.delete", "category", id, "카테고리 삭제")
@@ -370,7 +370,7 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"Categories": cats, "Error": categoryMessage(err)})
 		return
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "category.reparent", "category", id, "상위 카테고리 변경")
@@ -442,19 +442,19 @@ func (d *Deps) renderRefund(w http.ResponseWriter, r *http.Request, c Caller,
 
 	refunds, err := d.Commerce.Refunds(r.Context(), order.ID)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	approved, refunded, perr := d.Commerce.RefundedTotal(r.Context(), order.OrderNo)
 	if perr != nil && !errors.Is(perr, commerce.ErrNoPayment) {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, perr)
 		return
 	}
 	// 요청 키는 화면을 그릴 때 발급하고 폼이 되돌려 준다 (D19 A-507). POST 마다
 	// 만들면 같은 폼의 재전송이 매번 새 키라 UNIQUE 가 아무것도 막지 못한다.
 	key, err := commerce.NewRequestKey()
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/refund.html", code, map[string]any{
@@ -507,7 +507,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		d.log(r, c, "order.refund", "order", order.OrderNo,
@@ -582,7 +582,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	case err != nil:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 
@@ -603,7 +603,7 @@ func (d *Deps) refundInOrder(w http.ResponseWriter, r *http.Request,
 
 	refunds, err := d.Commerce.Refunds(r.Context(), order.ID)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return nil, false
 	}
 	id := r.PostFormValue("refund_id")
@@ -683,7 +683,7 @@ func (d *Deps) renderReturns(w http.ResponseWriter, r *http.Request, c Caller,
 
 	returns, err := d.Commerce.Returns(r.Context(), order.ID)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	d.Render(w, r, "admin/returns.html", code, map[string]any{
@@ -814,6 +814,6 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		d.renderReturns(w, r, c, order, http.StatusUnprocessableEntity,
 			"금액이 올바르지 않습니다.")
 	default:
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 	}
 }

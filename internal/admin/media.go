@@ -103,7 +103,7 @@ func (d *Deps) PageMediaUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	limits, err := d.Attachments.Limits(r.Context())
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.serverError(w, r, err)
 		return
 	}
 	EditorUpload(w, r, d.Media, limits, c.UserID(), d.Logger)

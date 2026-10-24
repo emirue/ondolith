@@ -160,6 +160,23 @@ func TestFailSendsMissingTo404WithoutLogging(t *testing.T) {
 	}
 }
 
+// 재고 화면(A-514·A-515)은 자기 화면 안에 거부를 그린다 — 모르는 오류만 로그에 간다.
+func TestStockErrorLogsOnlyTheUnknown(t *testing.T) {
+	var buf bytes.Buffer
+	d := &Deps{Logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	req := httptest.NewRequest(http.MethodPost, "/admin/stock/receive", nil)
+	if code, msg := d.stockError(req, errors.New("pgx: conn reset")); code != http.StatusInternalServerError || msg != "일시적인 오류입니다." {
+		t.Errorf("모르는 오류 = %d %q", code, msg)
+	}
+	if !strings.Contains(buf.String(), "pgx: conn reset") || !strings.Contains(buf.String(), "/admin/stock/receive") {
+		t.Errorf("원인이 로그에 없다: %s", buf.String())
+	}
+	buf.Reset()
+	if code, _ := d.stockError(req, commerce.ErrOutOfStock); code != http.StatusUnprocessableEntity || buf.Len() != 0 {
+		t.Errorf("알려진 거부 = %d, 로그 %q", code, buf.String())
+	}
+}
+
 func TestFailOnNilDoesNothing(t *testing.T) {
 	d := &Deps{}
 	rec := httptest.NewRecorder()

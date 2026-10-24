@@ -28,7 +28,7 @@ func (d *Deps) BackupForm(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) renderBackup(w http.ResponseWriter, r *http.Request, code int, msg string) {
 	kv, err := d.Content.Settings(r.Context(), backupKeys...)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.serverError(w, r, err)
 		return
 	}
 	// 고른 적이 없으면 0시(사용이 가장 적은 자정)·7개다 — 화면이 빈 칸을 보이지 않게.
@@ -147,7 +147,7 @@ func (d *Deps) saveBackupSettings(w http.ResponseWriter, r *http.Request, c Call
 	if err := d.Content.PutSettings(r.Context(), map[string]string{
 		"backup.auto": auto, "backup.hour": strconv.Itoa(hour), "backup.keep": strconv.Itoa(keep),
 	}); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		d.serverError(w, r, err)
 		return
 	}
 	d.log(r, c, "backup.settings", "system", "backup",
