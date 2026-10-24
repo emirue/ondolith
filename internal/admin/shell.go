@@ -7,6 +7,8 @@
 package admin
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"sort"
 )
@@ -167,8 +169,16 @@ func (d *Deps) refuse(w http.ResponseWriter, r *http.Request, code int, msg stri
 // cause goes to the log and the page says one sentence (D22 3절, NFR-210).
 // 원인이 없는 500 — 조립에서 빠진 의존성 — 만 refuse 를 직접 부른다. 남길 원인이 없다.
 func (d *Deps) serverError(w http.ResponseWriter, r *http.Request, err error) {
-	if d.Logger != nil {
-		d.Logger.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
-	}
+	d.logFailure(r, err)
 	d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+}
+
+// logFailure is the one log line a failure nobody can fix from the form leaves
+// (D22 3절). serverError·refusal·stockError 가 같은 줄을 쓴다. 브라우저가 끊어
+// 취소된 요청은 장애가 아니라 남기지 않는다.
+func (d *Deps) logFailure(r *http.Request, err error) {
+	if d.Logger == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	d.Logger.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
 }

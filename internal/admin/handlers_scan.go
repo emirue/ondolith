@@ -30,9 +30,7 @@ func (d *Deps) stockError(r *http.Request, err error) (int, string) {
 	case errors.Is(err, commerce.ErrOutOfStock):
 		return http.StatusUnprocessableEntity, "재고가 0보다 작아집니다."
 	default:
-		if d.Logger != nil {
-			d.Logger.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
-		}
+		d.logFailure(r, err)
 		return http.StatusInternalServerError, "일시적인 오류입니다."
 	}
 }

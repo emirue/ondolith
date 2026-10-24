@@ -177,6 +177,37 @@ func TestStockErrorLogsOnlyTheUnknown(t *testing.T) {
 	}
 }
 
+// fail 의 나머지는 serverError 다 — 약 스무 곳이 이 분기를 함께 쓴다.
+func TestFailSendsTheRestTo500WithTheCause(t *testing.T) {
+	var buf bytes.Buffer
+	d := &Deps{Logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	rec := httptest.NewRecorder()
+	if !d.fail(rec, httptest.NewRequest(http.MethodGet, "/admin/orders/1", nil), errors.New("pgx: conn reset")) {
+		t.Fatal("fail 이 멈추라고 하지 않았다")
+	}
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "일시적인 오류입니다.") {
+		t.Errorf("상태 %d, 화면 %q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(buf.String(), "pgx: conn reset") {
+		t.Errorf("원인이 로그에 없다: %s", buf.String())
+	}
+}
+
+// 브라우저가 요청을 끊어 취소된 것은 장애가 아니다 — 응답은 같고 로그만 없다.
+func TestAdminFailureLogSkipsACanceledRequest(t *testing.T) {
+	var buf bytes.Buffer
+	d := &Deps{Logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	req := httptest.NewRequest(http.MethodGet, "/admin/orders", nil)
+	cause := fmt.Errorf("주문 목록: %w", context.Canceled)
+	rec := httptest.NewRecorder()
+	d.serverError(rec, req, cause)
+	d.refusal(req, "", cause)
+	d.stockError(req, cause)
+	if rec.Code != http.StatusInternalServerError || buf.Len() != 0 {
+		t.Errorf("상태 %d, 로그 %q", rec.Code, buf.String())
+	}
+}
+
 func TestFailOnNilDoesNothing(t *testing.T) {
 	d := &Deps{}
 	rec := httptest.NewRecorder()
