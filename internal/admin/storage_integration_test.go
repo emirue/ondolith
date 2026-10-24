@@ -500,3 +500,67 @@ func TestAttachmentDeleteTellsALeftoverFileFromAFailure(t *testing.T) {
 		t.Errorf("지우지 못한 첨부에 「삭제」 로그: %q", got)
 	}
 }
+
+// **게시판을 강제로 지우면 그 게시판 첨부의 실물도 지운다** (G7). 행은 CASCADE 로 가지만
+// 파일은 따라가지 않아, 경로 기록까지 사라진 영구 고아가 됐다 — 글 삭제(P-207·A-307)는
+// 이미 같은 요청에서 지운다. 버킷이 거부해도 게시판은 지워지고 화면은 성공이다(A-309 와 같은
+// 결정). 다른 게시판의 파일은 그대로다.
+func TestBoardDeleteRemovesAttachmentFiles(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{superuser: true, email: "root@example.com"})
+	ctx := context.Background()
+	bucket := fakes3.New("site")
+	defer bucket.Close()
+	remote := s3store.New(s3store.Config{Endpoint: bucket.URL, Region: "us-east-1", Bucket: "site",
+		AccessKey: "AK", SecretKey: "SK", PathStyle: true}, nil)
+	files := content.NewFiles(t.TempDir(), func(context.Context) (content.Remote, bool, error) { return remote, true, nil })
+	d.Attachments = d.Content.AttachmentsIn(files)
+	png := "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + strings.Repeat("\x00", 40)
+	board := func(slug string, posts int) string {
+		id, err := d.Content.CreateBoard(ctx, content.Board{Slug: slug, Name: slug, PerPage: 20}, content.PresetPublic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range posts {
+			postID, err := d.Content.CreatePost(ctx, content.Post{BoardID: id, Title: "글", Body: "본문"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"a.png", "b.png"} {
+				if _, err := d.Attachments.Save(ctx, postID, name, strings.NewReader(png)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		return id
+	}
+	gone, stuck, kept := board("gone", 3), board("stuck", 1), board("kept", 1)
+	del := func(id string) int {
+		return postAdmin(t, d.BoardDelete, "/admin/boards/"+id+"/delete", map[string]string{"id": id},
+			url.Values{"confirm": {"1"}}).Code
+	}
+	boards := func(id string) int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM boards WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	if code := del(gone); code != http.StatusSeeOther || boards(gone) != 0 {
+		t.Fatalf("강제 삭제 = HTTP %d, 남은 게시판 %d", code, boards(gone))
+	}
+	if n := len(bucket.Keys()); n != 4 {
+		t.Errorf("버킷 객체 %d 개, want 4 — 지운 게시판의 첨부 6개가 지워지고 나머지 둘의 4개가 남아야 한다", n)
+	}
+
+	bucket.RejectCode = "AccessDenied"
+	if code := del(stuck); code != http.StatusSeeOther || boards(stuck) != 0 {
+		t.Errorf("버킷 거부 = HTTP %d, 남은 게시판 %d — want 303·0", code, boards(stuck))
+	}
+	if got := lastLog(t, pool); !strings.Contains(got, "게시판 삭제") {
+		t.Errorf("작업 로그 %q", got)
+	}
+	if boards(kept) != 1 {
+		t.Error("다른 게시판이 지워졌다")
+	}
+}

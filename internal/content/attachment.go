@@ -161,6 +161,20 @@ func (a *Attachments) DeletePost(ctx context.Context, postID string) error {
 	return a.files.RemoveAll(ctx, paths)
 }
 
+// DeleteBoard removes the board (Store.DeleteBoard) and then every file its
+// posts' attachments left behind — DeletePost 와 같은 이유와 순서다. 경로를 먼저
+// 읽고, 파일 삭제 실패는 ErrFilesLeft 로 보고만 한다.
+func (a *Attachments) DeleteBoard(ctx context.Context, boardID string, force bool) error {
+	paths, err := a.store.q.BoardAttachmentPaths(ctx, boardID)
+	if err != nil {
+		return err
+	}
+	if err := a.store.DeleteBoard(ctx, boardID, force); err != nil {
+		return err
+	}
+	return a.files.RemoveAll(ctx, paths)
+}
+
 // Limits reads A-309's upload bounds (OPEN-41 결정). 설정이 없으면 기본값이다.
 //
 // 값이 이상하면 **기본값으로 물러서지 않고 오류를 낸다**: 상한을 0 으로 적어
