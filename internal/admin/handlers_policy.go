@@ -18,7 +18,7 @@ const (
 
 // policyDefaults are D19 A-512's defaults.
 var policyDefaults = map[string]string{
-	settingReturnDays:               "7",
+	settingReturnDays:               strconv.Itoa(commerce.DefaultReturnDays),
 	settingConfirmDays:              "8",
 	commerce.SettingReturnFeePolicy: commerce.FeePolicyDeduct,
 	commerce.SettingReturnFeeAmount: "0",

@@ -293,10 +293,8 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			kv[k] = v
 		}
 	}
-	// 비밀키 빈 칸은 「그대로 두라」다 (MailSettingsSave 와 같은 이유). 끄려면 사이트 키를 비운다.
-	if kv["turnstile.secret_key"] == "" {
-		delete(kv, "turnstile.secret_key")
-	}
+	// Turnstile 비밀키 빈 칸은 그대로 둔다. 끄려면 사이트 키를 비운다.
+	dropBlankSecrets(kv)
 	// D19 A-201 의 길이·형식. 사이트 이름은 P-001 의 site_name 과 같은 상한이다.
 	if v, ok := kv["site.name"]; ok && (strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > 100) {
 		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
@@ -451,6 +449,31 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 // 이름들을 봐야 한다.
 func isSecretKey(k string) bool { return content.IsSecretSetting(k) }
 
+// dropBlankSecrets removes the secret settings a form left blank. 빈 비밀칸은
+// 「그대로 두라」이지 「지우라」가 아니다 — 화면이 현재 값을 보여줄 수 없으므로 빈
+// 칸이 정상 상태이고, 지우면 다른 항목을 고치러 온 관리자가 자격증명을 날린다.
+func dropBlankSecrets(kv map[string]string) {
+	for k, v := range kv {
+		if isSecretKey(k) && v == "" {
+			delete(kv, k)
+		}
+	}
+}
+
+// formSettings splits stored settings for a form: 비밀값은 설정됐는지만(saved),
+// 나머지는 값(shown). 비밀값은 브라우저에 다시 가지 않는다.
+func formSettings(kv map[string]string) (shown map[string]string, saved map[string]bool) {
+	shown, saved = map[string]string{}, map[string]bool{}
+	for k, v := range kv {
+		if isSecretKey(k) {
+			saved[k] = v != ""
+			continue
+		}
+		shown[k] = v
+	}
+	return shown, saved
+}
+
 // unreadableWarning is what a settings screen says when a stored secret no
 // longer opens (content.SettingsForForm). 그 칸은 「미설정」으로 그려지고, 운영자가
 // 무엇을 해야 하는지는 이 줄이 말한다 (D60 「저장된 자격증명」).
@@ -493,15 +516,7 @@ func (d *Deps) renderSettingsNotice(w http.ResponseWriter, r *http.Request,
 		d.serverError(w, r, err)
 		return
 	}
-	shown := map[string]string{}
-	saved := map[string]bool{}
-	for k, v := range kv {
-		if isSecretKey(k) {
-			saved[k] = v != ""
-			continue
-		}
-		shown[k] = v
-	}
+	shown, saved := formSettings(kv)
 	d.Render(w, r, screen, code, map[string]any{"Settings": shown, "SecretSaved": saved,
 		"Error": msg, "Notice": notice, "Warning": unreadableWarning(unreadable)})
 }
@@ -541,15 +556,9 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	kv := map[string]string{}
 	for _, k := range mailSettingKeys {
-		v := r.PostFormValue(k)
-		if isSecretKey(k) && v == "" {
-			// An empty secret means "leave it alone", not "erase it": the form
-			// cannot show the current value, so an empty box is the normal
-			// state of a screen the operator opened to change something else.
-			continue
-		}
-		kv[k] = v
+		kv[k] = r.PostFormValue(k)
 	}
+	dropBlankSecrets(kv)
 	if m, ok := kv["mail.tls_mode"]; ok && m != "none" && m != "starttls" && m != "tls" {
 		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys,
 			http.StatusUnprocessableEntity, "TLS 모드 값이 올바르지 않습니다.")
