@@ -559,7 +559,8 @@ func TestMoveOrderRefusesAStaleFrom(t *testing.T) {
 }
 
 // 두 관리자가 같은 주문을 동시에 배송완료로 — 하나만 옮기고 시각은 한 번 찍힌다
-// (D14 「동시성」). 주문 행 잠금이 둘을 줄 세운다.
+// (D14 「동시성」). 결과만 본다: 잠금을 빼도 비교-교환이 같은 결과를 내므로, 잠금
+// 자체는 외래키 시험들(…LetsForeignKeyChecksThrough)이 본다.
 func TestConcurrentTransitionsMoveOnce(t *testing.T) {
 	s, pool := testStore(t)
 	orderNo := shippedOrder(t, s, pool)
