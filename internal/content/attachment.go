@@ -157,16 +157,7 @@ func (a *Attachments) DeletePost(ctx context.Context, postID string) error {
 	if err := a.store.DeletePost(ctx, postID); err != nil {
 		return err
 	}
-	var firstErr error
-	for _, p := range paths {
-		if err := a.files.Remove(ctx, p); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if firstErr != nil {
-		return fmt.Errorf("%w: %w", ErrFilesLeft, firstErr)
-	}
-	return nil
+	return a.files.RemoveAll(ctx, paths)
 }
 
 // Limits reads A-309's upload bounds (OPEN-41 결정). 설정이 없으면 기본값이다.

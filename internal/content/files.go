@@ -184,6 +184,22 @@ func (f *Files) Remove(ctx context.Context, rel string) error {
 	return nil
 }
 
+// RemoveAll deletes every path, carrying on past a failure: 앞에서 멈추면 뒤의
+// 파일은 행이 사라진 뒤라 아무도 찾지 못한다. 하나라도 남으면 ErrFilesLeft 다 —
+// 행을 먼저 지운 호출자는 그것을 경고로 다룬다(A-309 와 같은 결정).
+func (f *Files) RemoveAll(ctx context.Context, paths []string) error {
+	var errs []error
+	for _, p := range paths {
+		if err := f.Remove(ctx, p); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %w", ErrFilesLeft, errors.Join(errs...))
+	}
+	return nil
+}
+
 // uploadPathRe is what Migrate may send: the shapes the stores write
 // (첨부·상품 이미지 `YYYY/MM/<uuid>`, 본문 사진 `media/…` 와 `-thumb`).
 var uploadPathRe = regexp.MustCompile(`^(media/)?[0-9]{4}/[0-9]{2}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(-thumb)?$`)

@@ -500,3 +500,37 @@ func TestMigrateCountsFoldersItCouldNotRead(t *testing.T) {
 		t.Fatalf("Migrate = %+v, %v; want 1 moved, 1 unreadable folder, an error", res, err)
 	}
 }
+
+// pickyRemote refuses to delete one key — 버킷이 그 객체 하나만 거부하는 경우.
+type pickyRemote struct {
+	*memRemote
+	refuse string
+}
+
+func (p pickyRemote) Remove(ctx context.Context, key string) error {
+	if key == p.refuse {
+		return errors.New("AccessDenied")
+	}
+	return p.memRemote.Remove(ctx, key)
+}
+
+// 묶음 삭제는 하나가 실패해도 나머지를 지운다 — 앞에서 멈추면 뒤의 파일은 영영 남는다.
+// 실패는 ErrFilesLeft 이고, 어느 파일인지 오류에 있다.
+func TestRemoveAllTriesEveryPath(t *testing.T) {
+	mem := newMemRemote()
+	keys := []string{"2026/10/a", "2026/10/b", "2026/10/c"}
+	for _, k := range keys {
+		mem.objects[k] = []byte("x")
+	}
+	f := NewFiles(t.TempDir(), remoteOf(pickyRemote{mem, keys[1]}, true))
+	err := f.RemoveAll(context.Background(), keys)
+	if !errors.Is(err, ErrFilesLeft) || !strings.Contains(err.Error(), keys[1]) {
+		t.Errorf("= %v, want ErrFilesLeft naming %s", err, keys[1])
+	}
+	if got := mem.keys(); len(got) != 1 || got[0] != keys[1] {
+		t.Errorf("남은 객체 %v, want [%s]", got, keys[1])
+	}
+	if err := f.RemoveAll(context.Background(), []string{keys[0], keys[2]}); err != nil {
+		t.Errorf("다 지워지면 nil 이어야 한다: %v", err)
+	}
+}
