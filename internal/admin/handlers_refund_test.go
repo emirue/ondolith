@@ -2196,3 +2196,59 @@ func TestReturnSettleReportsAGatewayFailure(t *testing.T) {
 		t.Errorf("다시 실행 뒤 %s · PG 취소 %d 회, want 완료·2", got, gw.cancels)
 	}
 }
+
+// renamingGateway 는 PG 취소가 도는 동안 주문번호를 바꾼다 — 환불은 확정되는데 그 뒤의
+// 주문 종료가 주문을 찾지 못한다 (commerce.ErrRefundSentNotSettled).
+type renamingGateway struct {
+	adminFakeGateway
+	pool    *pgxpool.Pool
+	orderNo string
+}
+
+func (g renamingGateway) Cancel(ctx context.Context, _ commerce.CancelRequest) (*commerce.Payment, error) {
+	_, err := g.pool.Exec(ctx, `UPDATE orders SET order_no = order_no || '-x' WHERE order_no = $1`, g.orderNo)
+	return nil, err
+}
+
+// **PG 가 확정한 환불은 주문 종료 기록이 실패해도 성공으로 보인다** — 502 「결제사 처리에
+// 실패했습니다」나 작업 로그 「PG 처리 실패」 는 돈이 나간 환불을 다시 누르게 만든다.
+func TestRefundSentButNotSettledIsShownAsDone(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	ctx := context.Background()
+	summaries := func() string {
+		var all string
+		if err := pool.QueryRow(ctx, `SELECT coalesce(string_agg(summary, ' | '), '') FROM operation_logs`).Scan(&all); err != nil {
+			t.Fatal(err)
+		}
+		return all
+	}
+
+	// A-507 새 접수.
+	order, _ := paidAdminOrder(t, d, pool)
+	d.Gateway = func() commerce.Gateway { return renamingGateway{pool: pool, orderNo: order.OrderNo} }
+	item := order.Items[0]
+	if rec := postAdmin(t, d.RefundSave, "/admin/orders/"+order.OrderNo+"/refund", map[string]string{"no": order.OrderNo},
+		url.Values{"item_id": {item.ID}, "qty_" + item.ID: {"1"}, "request_key": {refundFormKey(t, d, order.OrderNo)}}); rec.Code != http.StatusSeeOther {
+		t.Errorf("A-507 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
+	}
+	if s := summaries(); !strings.Contains(s, "PG 확정") || strings.Contains(s, "PG 처리 실패") {
+		t.Errorf("작업 로그 %q", s)
+	}
+
+	// A-511 정산.
+	order2, returnNo := deliveredAdminOrderFor(t, d, pool, order2Slug)
+	d.Gateway = func() commerce.Gateway { return renamingGateway{pool: pool, orderNo: order2.OrderNo} }
+	returns := "/admin/orders/" + order2.OrderNo + "/returns"
+	pv := map[string]string{"no": order2.OrderNo}
+	if rec := postAdmin(t, d.ReturnAction, returns, pv, url.Values{"return_no": {returnNo},
+		"action": {"pickup"}, "fault": {"판매자"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인 = HTTP %d", rec.Code)
+	}
+	if rec := postAdmin(t, d.ReturnAction, returns, pv, url.Values{"return_no": {returnNo},
+		"action": {"settle"}}); rec.Code != http.StatusSeeOther {
+		t.Errorf("A-511 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
+	}
+}

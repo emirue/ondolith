@@ -471,8 +471,8 @@ func (s *Store) RetryRefund(ctx context.Context, gw Gateway, refundID string, no
 }
 
 // ErrRefundSentNotSettled 는 PG 가 환불을 확정했는데 주문 종료 기록이 실패했다는
-// 뜻이다. 돈은 이미 나갔다 — 호출자는 로그만 남기고 성공으로 다룬다. 같은 환불
-// 건을 다시 실행하면 PG 를 부르지 않고 종료만 다시 한다.
+// 뜻이다. 돈은 이미 나갔다 — 호출자는 로그만 남기고 성공으로 다룬다. 주문은 열린 채
+// 남고, 지금은 화면에서 다시 닫을 길이 없다(A-507 「실행」 은 완료된 건을 받지 않는다).
 var ErrRefundSentNotSettled = errors.New("commerce: 환불은 확정됐지만 주문 상태를 바꾸지 못했습니다")
 
 // executeAndSettle 은 PG 호출과 주문 종료를 한 트랜잭션에 묶지 않는다 — PG 왕복 동안
