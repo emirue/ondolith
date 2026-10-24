@@ -534,3 +534,49 @@ func TestRemoveAllTriesEveryPath(t *testing.T) {
 		t.Errorf("다 지워지면 nil 이어야 한다: %v", err)
 	}
 }
+
+// slowRemote takes a while per delete — 답이 느린 버킷.
+type slowRemote struct {
+	*memRemote
+	delay time.Duration
+}
+
+func (s slowRemote) Remove(ctx context.Context, key string) error {
+	time.Sleep(s.delay)
+	return s.memRemote.Remove(ctx, key)
+}
+
+// **묶음 삭제는 시한 안에서 끝난다** — 게시판 하나에 첨부가 수천 개여도 요청이 WriteTimeout 을
+// 넘기지 않는다. 다 못 지운 것은 몇 개인지와 함께 ErrFilesLeft 로 보고하고, 버킷 설정은 묶음에
+// 한 번만 읽는다.
+func TestRemoveAllStopsAtItsBudget(t *testing.T) {
+	defer func(b time.Duration) { removeAllBudget = b }(removeAllBudget)
+	removeAllBudget = 100 * time.Millisecond
+	mem := newMemRemote()
+	var keys []string
+	for i := range 40 {
+		k := fmt.Sprintf("2026/10/%02d", i)
+		keys = append(keys, k)
+		mem.objects[k] = []byte("x")
+	}
+	resolved := 0
+	f := NewFiles(t.TempDir(), func(context.Context) (Remote, bool, error) {
+		resolved++
+		return slowRemote{mem, 50 * time.Millisecond}, true, nil
+	})
+	start := time.Now()
+	err := f.RemoveAll(context.Background(), keys)
+	// 멈추지 않으면 40 × 50ms = 2초다.
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("%v 걸렸다 — 시한에서 멈추지 않았다", took)
+	}
+	if !errors.Is(err, ErrFilesLeft) || !strings.Contains(err.Error(), "40 개 중") {
+		t.Errorf("= %v, want ErrFilesLeft with the count", err)
+	}
+	if left := len(mem.keys()); left == 0 || left == 40 {
+		t.Errorf("남은 객체 %d — 일부만 지워졌어야 한다", left)
+	}
+	if resolved != 1 {
+		t.Errorf("버킷 설정을 %d 번 읽었다, want 1", resolved)
+	}
+}
