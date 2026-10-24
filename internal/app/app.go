@@ -300,17 +300,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// A-206 에서 켠 프로바이더. 로그인 화면과 연결 관리 화면이 함께 쓴다 —
 	// 두 곳이 각자 판단하면 "로그인 화면엔 버튼이 있는데 눌러도 404" 가 된다.
 	socialConfigOf := func(name string) auth.SocialConfig {
-		kv := setting(
+		return auth.SocialConfigFrom(name, setting(
 			auth.SocialSettingKey(name, "client_id"),
 			auth.SocialSettingKey(name, "client_secret"),
-			auth.SocialSettingKey(name, "enabled"))
-		return auth.SocialConfig{
-			Provider:  name,
-			Label:     auth.SocialProviders[name],
-			ClientID:  kv[auth.SocialSettingKey(name, "client_id")],
-			HasSecret: kv[auth.SocialSettingKey(name, "client_secret")] != "",
-			Enabled:   kv[auth.SocialSettingKey(name, "enabled")] != "",
-		}
+			auth.SocialSettingKey(name, "enabled")))
 	}
 	enabledSocial := func() []auth.SocialConfig {
 		var out []auth.SocialConfig

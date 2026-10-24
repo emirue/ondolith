@@ -122,15 +122,7 @@ func (d *Deps) renderSocial(w http.ResponseWriter, r *http.Request, code int, ms
 	}
 	configs := make([]auth.SocialConfig, 0, len(auth.SocialProviders))
 	for _, p := range auth.SocialProviderKeys() {
-		configs = append(configs, auth.SocialConfig{
-			Provider: p,
-			Label:    auth.SocialProviders[p],
-			ClientID: stored[auth.SocialSettingKey(p, "client_id")],
-			// **값이 아니라 있는지 여부만.** 시크릿은 저장 후 어떤 화면에도
-			// 다시 오지 않는다.
-			HasSecret: stored[auth.SocialSettingKey(p, "client_secret")] != "",
-			Enabled:   stored[auth.SocialSettingKey(p, "enabled")] != "",
-		})
+		configs = append(configs, auth.SocialConfigFrom(p, stored))
 	}
 	// 콜백 URL 은 **표시만** 한다. 관리자가 이 값을 프로바이더 콘솔에 붙여넣는
 	// 것이 연동의 전부다.
