@@ -1226,7 +1226,8 @@ func (d *Deps) log(r *http.Request, c Caller, action, targetType, targetID, summ
 	if d.OpLog == nil {
 		return
 	}
-	err := d.OpLog.Record(r.Context(), content.Entry{
+	// 요청이 끊겨도 남긴다 — 일은 이미 했다 (D15 7절).
+	err := d.OpLog.Record(context.WithoutCancel(r.Context()), content.Entry{
 		ActorID: c.UserID(), ActorEmail: c.Email(),
 		Action: action, TargetType: targetType, TargetID: targetID,
 		Summary: summary, IP: r.RemoteAddr,

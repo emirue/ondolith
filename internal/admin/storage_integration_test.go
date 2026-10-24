@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -557,10 +558,32 @@ func TestBoardDeleteRemovesAttachmentFiles(t *testing.T) {
 	if code := del(stuck); code != http.StatusSeeOther || boards(stuck) != 0 {
 		t.Errorf("버킷 거부 = HTTP %d, 남은 게시판 %d — want 303·0", code, boards(stuck))
 	}
-	if got := lastLog(t, pool); !strings.Contains(got, "게시판 삭제") {
-		t.Errorf("작업 로그 %q", got)
+	var logged int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs WHERE target_id = $1`, stuck).Scan(&logged); err != nil {
+		t.Fatal(err)
+	}
+	if logged != 1 {
+		t.Errorf("버킷이 거부한 게시판 삭제의 작업 로그 %d 건, want 1", logged)
 	}
 	if boards(kept) != 1 {
 		t.Error("다른 게시판이 지워졌다")
+	}
+}
+
+// **요청이 끊겨도 작업 로그는 남는다** (D15 7절) — 일은 이미 했다. 첨부가 많은 게시판 삭제처럼
+// 오래 걸리는 요청에서 브라우저나 프록시가 먼저 끊으면 「누가 무엇을 지웠나」 가 사라졌다.
+func TestOpLogSurvivesACanceledRequest(t *testing.T) {
+	caller := &fakeCaller{superuser: true, email: "root@example.com"}
+	d, pool := fixture(t, caller)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := httptest.NewRequest(http.MethodPost, "/admin/boards/b1/delete", nil).WithContext(ctx)
+	d.log(r, caller, "board.manage", "board", "b1", "게시판 삭제")
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM operation_logs WHERE target_id = 'b1'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("작업 로그 %d 건, want 1", n)
 	}
 }
