@@ -151,6 +151,13 @@ func prune(dir string, keep int) error {
 	return nil
 }
 
+// A-604 를 한 번도 저장하지 않은 사이트의 자동 백업 시각·보관 개수 — 사용이 가장 적은
+// 자정, 7개. 화면(admin)과 스케줄러(app)가 같은 값을 쓴다.
+const (
+	DefaultHour = 0
+	DefaultKeep = 7
+)
+
 // Schedule is A-604's automatic-backup setting (FR-715): every day at Hour
 // (server local time), keeping the newest Keep.
 type Schedule struct {

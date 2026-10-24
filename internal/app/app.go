@@ -688,11 +688,11 @@ func themePath(cfg *config.Config, name string) string {
 	return filepath.Join(cfg.Themes(), filepath.Base(name))
 }
 
-// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐·0시(사용이 가장 적은
-// 자정)·7개다 — A-604 화면이 보이는 기본값과 같아야 한다(admin.renderBackup).
+// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐과 backup 의 기본
+// 시각·보관 개수다 — A-604 화면이 보이는 값과 같다.
 func backupSchedule(kv map[string]string) backup.Schedule {
 	return backup.Schedule{Enabled: kv["backup.auto"] != "",
-		Hour: atoiOr(kv["backup.hour"], 0), Keep: atoiOr(kv["backup.keep"], 7)}
+		Hour: atoiOr(kv["backup.hour"], backup.DefaultHour), Keep: atoiOr(kv["backup.keep"], backup.DefaultKeep)}
 }
 
 // mailFailureEntry is the operation-log row for a mail that never went out, or

@@ -31,13 +31,12 @@ func (d *Deps) renderBackup(w http.ResponseWriter, r *http.Request, code int, ms
 		d.serverError(w, r, err)
 		return
 	}
-	// 고른 적이 없으면 0시(사용이 가장 적은 자정)·7개다 — 화면이 빈 칸을 보이지 않게.
-	// 스케줄러의 기본값(app.backupSchedule)과 같아야 한다.
+	// 고른 적이 없으면 스케줄러와 같은 기본값을 보인다 — 화면이 빈 칸을 보이지 않게.
 	if kv["backup.hour"] == "" {
-		kv["backup.hour"] = "0"
+		kv["backup.hour"] = strconv.Itoa(backup.DefaultHour)
 	}
 	if kv["backup.keep"] == "" {
-		kv["backup.keep"] = "7"
+		kv["backup.keep"] = strconv.Itoa(backup.DefaultKeep)
 	}
 	files, err := backup.List(d.BackupDir)
 	if err != nil && d.Logger != nil {
