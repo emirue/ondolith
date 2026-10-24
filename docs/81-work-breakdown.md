@@ -472,7 +472,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-15 | 결제 승인 충돌 구분을 한 곳에 **(완료 — `TestPaymentConflict`·`TestRefreshAfterApprovalSaysAlreadyPaid`·`TestExchangeDiffSendsThePaymentKeyAsIdempotencyKey`, `make test-integration` 2026-10-24)** | — | `commerce.paymentConflict` | 주문 결제와 교환 차액이 같은 함수로 23505 를 가르고(`TestPaymentConflict`), 승인 경로의 지금 동작이 시험으로 고정된다. 교환 차액의 재조회·멱등키는 BUG-01 과 함께 다룬다 (FR-608) |
 | W6-16 | 환불 확정 뒤 주문 종료를 도메인으로 **(완료 — `TestExecuteRefundClosesAFullyRefundedOrder`·`TestRefundSentButNotSettledIsShownAsDone`·`TestConcurrentExecuteSendsOnce`, `make test-integration` 2026-10-24)** | W6-13, W6-14 | `commerce.ExecuteRefund`·`RetryRefund` 반환값, `SettleReturn` 환불 ID | 전액 환불의 주문 종료를 commerce 가 하고(`TestExecuteRefundClosesAFullyRefundedOrder`) admin·app 에 `SettleFullRefund` 호출이 없다. 반품 정산이 만든 환불 건을 그대로 실행한다. 쓰이지 않는 `CancelRefund` 가 없다 (FR-611, FR-617) |
 | W6-17 | 설정 중복 정리 **(완료 — `TestSocialConfigFrom`·`TestDropBlankSecrets`·`TestFormSettingsHideSecrets`, `make test-integration` 2026-10-24)** | — | `auth.SocialConfigFrom`, `admin.dropBlankSecrets`·`secretsSaved`, 기본값 상수 | 소셜 설정 조립·빈 비밀칸 규칙·저장 표시·기본값이 한 곳에 있고 기존 「시크릿이 다시 표시되지 않는다」 시험이 그대로 통과한다 (FR-208, NFR-210) |
-| W6-18 | 첨부 파일 수명 정리 | W6-13 | `content.Files.RemoveAll`, `Attachments.DeleteBoard` | 게시판 강제 삭제가 첨부 실물도 지우고, 첨부 단건 삭제가 DB 오류를 성공으로 넘기지 않는다. 버킷이 삭제를 거부하면 행은 지워지고 화면은 경고와 함께 성공한다 (FR-506) |
+| W6-18 | 첨부 파일 수명 정리 **(완료 — `TestBoardDeleteRemovesAttachmentFiles`·`TestAttachmentDeleteTellsALeftoverFileFromAFailure`·`TestRemoveAllTriesEveryPath`, `make test-integration` 2026-10-24)** | W6-13 | `content.Files.RemoveAll`, `Attachments.DeleteBoard` | 게시판 강제 삭제가 첨부 실물도 지우고, 첨부 단건 삭제가 DB 오류를 성공으로 넘기지 않는다. 버킷이 삭제를 거부하면 행은 지워지고 화면은 경고와 함께 성공한다 (FR-506) |
 
 ## 작업 수 요약
 
