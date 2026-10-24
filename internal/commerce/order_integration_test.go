@@ -472,3 +472,123 @@ func TestHiddenAfterAddingCannotBeOrdered(t *testing.T) {
 		t.Errorf("복구 뒤 주문이 막혔다: %v", err)
 	}
 }
+
+// stamps reads an order's arrival times — A-512 의 반품 기간·자동 확정이 이 시각 기준이다.
+func stamps(t *testing.T, pool *pgxpool.Pool, orderNo string) (delivered, confirmed *time.Time) {
+	t.Helper()
+	if err := pool.QueryRow(context.Background(),
+		`SELECT delivered_at, confirmed_at FROM orders WHERE order_no = $1`, orderNo).Scan(&delivered, &confirmed); err != nil {
+		t.Fatal(err)
+	}
+	return delivered, confirmed
+}
+
+// moveInTx runs one moveOrder the way its callers do: under the order lock, in a
+// transaction of its own.
+func moveInTx(t *testing.T, s *Store, pool *pgxpool.Pool, orderNo string, from, to Status, actor Actor) error {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id FROM orders WHERE order_no = $1 FOR UPDATE`, orderNo).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.moveOrder(ctx, tx, id, from, to, actor); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func shippedOrder(t *testing.T, s *Store, pool *pgxpool.Pool) string {
+	t.Helper()
+	orderNo, _, _ := paidOrder(t, s, pool, "tee", 1)
+	for _, to := range []Status{StatusPreparing, StatusShipping} {
+		if err := s.TransitionOrder(context.Background(), orderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return orderNo
+}
+
+// **진입 시각은 상태와 같은 쓰기에서 찍힌다** (FR-604). 배송완료로 들어오는 길이
+// 여럿이어도(A-506 · 반품 거부 · 재배송 도착) 처음 도착한 시각 하나만 남는다 —
+// 다시 찍히면 반품 기간이 거부될 때마다 새로 시작한다.
+func TestMoveOrderStampsArrivalOnce(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo := shippedOrder(t, s, pool)
+	if err := moveInTx(t, s, pool, orderNo, StatusShipping, StatusDelivered, "A-506"); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := stamps(t, pool, orderNo)
+	if first == nil {
+		t.Fatal("배송완료로 옮겼는데 delivered_at 이 비었다")
+	}
+
+	// 반품 거부로 배송완료에 다시 들어온다. 접수 흐름 대신 상태만 반품접수로 둔다.
+	if _, err := pool.Exec(context.Background(), `UPDATE orders SET status = $2 WHERE order_no = $1`,
+		orderNo, string(StatusReturnOpen)); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveInTx(t, s, pool, orderNo, StatusReturnOpen, StatusDelivered, "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := stamps(t, pool, orderNo); again == nil || !again.Equal(*first) {
+		t.Errorf("delivered_at %v → %v — 처음 시각이어야 한다", first, again)
+	}
+
+	if err := moveInTx(t, s, pool, orderNo, StatusDelivered, StatusConfirmed, "P-510"); err != nil {
+		t.Fatal(err)
+	}
+	if _, confirmed := stamps(t, pool, orderNo); confirmed == nil {
+		t.Error("구매확정으로 옮겼는데 confirmed_at 이 비었다")
+	}
+}
+
+// 비교-교환: 잠근 뒤 읽은 것과 다른 from 은 아무것도 쓰지 않는다.
+func TestMoveOrderRefusesAStaleFrom(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo := shippedOrder(t, s, pool)
+	if err := moveInTx(t, s, pool, orderNo, StatusPreparing, StatusCancelled, "A-507"); !errors.Is(err, ErrTransitionNotAllowed) {
+		t.Fatalf("어긋난 from = %v, want ErrTransitionNotAllowed", err)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusShipping)
+}
+
+// 두 관리자가 같은 주문을 동시에 배송완료로 — 하나만 옮기고 시각은 한 번 찍힌다
+// (D14 「동시성」). 주문 행 잠금이 둘을 줄 세운다.
+func TestConcurrentTransitionsMoveOnce(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo := shippedOrder(t, s, pool)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = s.TransitionOrder(context.Background(), orderNo, StatusDelivered, "A-506")
+		}()
+	}
+	wg.Wait()
+	ok, refused := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrTransitionNotAllowed):
+			refused++
+		default:
+			t.Errorf("예상 밖 오류: %v", err)
+		}
+	}
+	if ok != 1 || refused != 1 {
+		t.Errorf("성공 %d · 거부 %d — 하나씩이어야 한다", ok, refused)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusDelivered)
+	if d, _ := stamps(t, pool, orderNo); d == nil {
+		t.Error("delivered_at 이 비었다")
+	}
+}
