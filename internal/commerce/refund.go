@@ -262,10 +262,7 @@ func (s *Store) CancelOrder(ctx context.Context, orderNo string, actor Actor,
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
-	o, err := q.LockOrderForCancel(ctx, orderNo)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
+	o, err := lockOrder(ctx, q, orderNo)
 	if err != nil {
 		return "", err
 	}

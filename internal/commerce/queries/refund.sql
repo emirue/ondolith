@@ -50,9 +50,6 @@ SELECT p.approved_amount, p.refunded_amount FROM payments p
 JOIN orders o ON o.id = p.order_id
 WHERE o.order_no = $1 AND p.kind = '주문결제' AND p.status = '승인';
 
--- name: LockOrderForCancel :one
-SELECT id, status, total_amount FROM orders WHERE order_no = $1 FOR UPDATE;
-
 -- 잠금 순서의 앞 절반이다: **order_items(id 오름차순) → payments.** 환불·취소·반품
 -- 경로가 전부 이 순서로 잡아야 서로를 기다리지 않는다.
 -- name: LockOrderItems :many
