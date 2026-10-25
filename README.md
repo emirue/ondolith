@@ -32,7 +32,7 @@ Go로 작성하는 오픈소스 CMS + 커머스 플랫폼. 단일 바이너리�
 
 | 영역 | 선택 |
 |---|---|
-| 언어 | Go 1.25+ |
+| 언어 | Go 최신 안정판 (`go.mod`, [DEC-2.4](.ai/DECISIONS.md)) |
 | 라우터 | `net/http.ServeMux` (표준 라이브러리) |
 | 테마 렌더링 | `html/template` (런타임 로딩) |
 | CSRF | `net/http.CrossOriginProtection` (표준 라이브러리) |

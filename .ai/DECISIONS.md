@@ -65,7 +65,7 @@ goose에는 `stdlib.OpenDBFromPool(pool)`로 `*sql.DB`를 만들어 넘긴다. �
 - `gorilla/csrf`는 **CVE-2025-47909 (GO-2025-3884)** 대상이며 최신 v1.7.3이
   `last_affected` — 즉 **수정 버전이 존재하지 않는다**.
 - 해당 어드바이저리의 공식 권고가 "Go 1.25에 도입된 `net/http.CrossOriginProtection`
-  으로 이전하라"이다. 우리 툴체인은 Go 1.25.5다.
+  으로 이전하라"이다. 당시 우리 툴체인은 Go 1.25.5 였다(지금은 [DEC-2.4](#dec-24-go-툴체인은-최신-안정판을-따른다) 의 최신 안정판).
 
 부수 효과로 설계가 단순해진다. double-submit 토큰 방식이 아니라 `Sec-Fetch-Site` /
 `Origin` 헤더 검사이므로 **테마 템플릿의 모든 `<form>`에 토큰 히든 필드를 심을
@@ -119,6 +119,23 @@ goose에는 `stdlib.OpenDBFromPool(pool)`로 `*sql.DB`를 만들어 넘긴다. �
 켜진다** — 넘기지 않으면 툴바가 비고 에디터가 만들어지지 않는다. 쓰는 것만 넘긴다(`editor.js`).
 
 갱신은 `SUNEDITOR.VERSION`·D21·이 절을 같은 커밋에서 고치고, `make ui` 의 에디터 시험을 돌린다.
+
+### DEC-2.4 Go 툴체인은 최신 안정판을 따른다
+
+**`go.mod` 의 `go` 지시자는 go.dev 가 안정판(stable)으로 내는 최신 판이다 — 패치 번호까지** (2026-10-26).
+
+- Go 는 최신 두 주 버전만 지원한다. 로컬 mise 의 Go 가 지원이 끝난 1.25.5 로 남아 있던 것을 2026-10-26 에 알아챘고,
+  그날 최신 안정판 `go1.27.3`(2026-10-19)으로 올렸다
+- 표준 라이브러리 취약점은 툴체인을 올려야만 고쳐진다([D21](../docs/21-tech-stack.md) 1절) — 「지원 중인 아무 판」이
+  아니라 최신 판이어야 그 수정이 들어온다
+- **확인**: `curl -s 'https://go.dev/VERSION?m=text'` 의 첫 줄(또는 `https://go.dev/dl/?mode=json` 의 첫 `stable`).
+  기억으로 정하지 않는다 ([M1](MISTAKES.md))
+- **올리기**: `mise install go@latest` → `go mod edit -go=<판>` → `make check`·`make test-integration` · 주 버전이 바뀌면
+  공식 릴리스 노트의 호환성 항목을 읽고 전체 검증(`make ui`·`screens`·`crawl`·`e2e`)까지
+- **버전은 `go.mod` 한 곳에만 적는다.** CI 는 `go-version-file: go.mod`, 로컬은 mise 의 전역 `go = "latest"`(`mise install go@latest`)
+  와 `GOTOOLCHAIN=auto`(로컬이 낮으면 `go.mod` 의 판을 받는다). 저장소에 `mise.toml` 을 두지 않는다 — 신뢰하지 않은 사본에서
+  mise 가 `go` 를 막는다([D21](../docs/21-tech-stack.md) 1절). 안내 문서(README·CONTRIBUTING 등)는 판 번호를 되풀이하지 않고
+  「`go.mod`」를 가리킨다 — 판 번호는 D21 1절(표·이력)과 CHANGELOG 의 기록에만 남는다
 
 ---
 
