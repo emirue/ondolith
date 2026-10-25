@@ -1,0 +1,16 @@
+{{/* 검색 노출 태그 (FR-718, FR-719, FR-511). 코어가 앞으로 <head> 에 더하는 검색용 태그도 여기 온다.
+     partials/head.html 을 덮어쓴 테마는 그 안에서 이 조각을 template 으로 부르는 한 줄만 두면 받는다 (D17).
+     noindex 는 테마가 그 줄을 빠뜨려도 X-Robots-Tag 헤더로 간다(renderPage). 소유 확인은 구글·네이버·빙이
+     홈 <head> 에서 찾는다. noindex 는 robots.txt 로 막지 않는다 — 막으면 크롤러가 이 태그를 읽지 못한다. */}}
+{{with .Site.SEO}}{{if .NoIndex}}<meta name="robots" content="noindex">
+{{end}}{{with .GoogleVerify}}<meta name="google-site-verification" content="{{.}}">
+{{end}}{{with .NaverVerify}}<meta name="naver-site-verification" content="{{.}}">
+{{end}}{{with .BingVerify}}<meta name="msvalidate.01" content="{{.}}">
+{{end}}{{end}}
+{{with .Meta.URL}}<link rel="canonical" href="{{.}}">
+<meta property="og:url" content="{{.}}">
+{{end}}
+{{/* 트위터(X)는 og:* 를 그대로 읽고 카드 모양만 따로 묻는다. */}}
+<meta name="twitter:card" content="{{if .Meta.OGImage}}summary_large_image{{else}}summary{{end}}">
+{{/* 구조화 데이터 (FR-719). html/template 이 이 스크립트 안의 값을 JSON 으로 이스케이프한다. */}}
+{{with .Meta.JSONLD}}<script type="application/ld+json">{{.}}</script>{{end}}

@@ -50,6 +50,10 @@ func TestThemeLogoAndFaviconReachAdminAndPublic(t *testing.T) {
 			t.Errorf("공개 화면에 %s 가 없다", want)
 		}
 	}
+	// 구조화 데이터의 logo 는 절대 주소여야 한다 — site_url 이 없으면 싣지 않는다 (FR-719).
+	if strings.Contains(home, `"logo":`) {
+		t.Error("site_url 이 없는데 JSON-LD 에 logo 를 실었다")
+	}
 	c, _ := adminSession(t, srv, pool)
 	code, admin := mustGet(t, c, srv.URL+"/admin/")
 	if code != http.StatusOK {
