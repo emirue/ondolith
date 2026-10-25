@@ -40,7 +40,7 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	effective, err := time.Parse("2006-01-02", strings.TrimSpace(r.PostFormValue("effective_at")))
+	effective, err := termsDay(r.PostFormValue("effective_at"), time.Local)
 	if err != nil {
 		d.renderTerms(w, r, http.StatusUnprocessableEntity,
 			"시행일을 YYYY-MM-DD 로 입력하세요.")
@@ -70,6 +70,13 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 		d.log(r, c, "settings.update", "terms", t.Kind+" "+t.Version, "약관 버전 추가")
 		http.Redirect(w, r, "/admin/terms", http.StatusSeeOther)
 	}
+}
+
+// termsDay reads A-207's 시행일 as midnight in loc — 하루의 경계는 서버 시간대다
+// (D19 0.6). UTC 로 읽으면 한국에서 오전 9시 전에 등록한 오늘 시행분이 9시까지
+// 시행 전으로 남는다.
+func termsDay(raw string, loc *time.Location) (time.Time, error) {
+	return time.ParseInLocation(dateLayout, strings.TrimSpace(raw), loc)
 }
 
 func (d *Deps) renderTerms(w http.ResponseWriter, r *http.Request, code int, msg string) {

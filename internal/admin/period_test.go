@@ -194,3 +194,23 @@ func TestQuickLinksKeepOtherConditionsAndDropThePage(t *testing.T) {
 		t.Errorf("1개월 링크 %s", links[1].URL)
 	}
 }
+
+// **약관 시행일은 서버 시간대의 그날 자정이다** (D19 0.6, FR-619).
+//
+// UTC 로 읽던 판은 한국에서 0~9시에 등록한 「오늘 시행」 약관을 9시까지 시행 전으로
+// 두었다 — P-411 이 404 를 내고 주문서가 그 버전을 고르지 않았다 (2026-10-25 00:16
+// KST `make screens` 실측). 같은 시각에 「어제」를 넣으면 UTC 로는 오늘이라 소급
+// 검사도 지나갔다.
+func TestTermsEffectiveDayIsServerLocal(t *testing.T) {
+	kst := time.FixedZone("KST", 9*60*60)
+	got, err := termsDay(" 2026-10-25 ", kst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := day(2026, time.October, 25, kst); !got.Equal(want) {
+		t.Errorf("시행일 = %v, want %v", got, want)
+	}
+	if _, err := termsDay("2026/10/25", kst); err == nil {
+		t.Error("형식이 틀린 날짜를 받았다")
+	}
+}
