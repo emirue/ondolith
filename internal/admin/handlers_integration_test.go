@@ -1521,14 +1521,14 @@ func TestSiteSettingsHoldBusinessInfo(t *testing.T) {
 	ctx := context.Background()
 
 	if rec := post(d.SettingsSave, "/admin/settings", url.Values{"site.name": {"온돌"},
-		"business.name": {" 온돌리스 "}, "business.reg_no": {""}}); rec.Code != http.StatusSeeOther {
+		"business.name": {" 온돌리스 "}, "business.reg_no": {""}, "business.hours": {"평일 08:30 – 17:30"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
-	kv, err := d.Content.Settings(ctx, "business.name", "business.reg_no")
+	kv, err := d.Content.Settings(ctx, "business.name", "business.reg_no", "business.hours")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kv["business.name"] != "온돌리스" || kv["business.reg_no"] != "" {
+	if kv["business.name"] != "온돌리스" || kv["business.reg_no"] != "" || kv["business.hours"] != "평일 08:30 – 17:30" {
 		t.Errorf("저장된 값 %q", kv)
 	}
 	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
@@ -1551,6 +1551,13 @@ func TestSiteSettingsHoldBusinessInfo(t *testing.T) {
 	get(d.SettingsForm, "/admin/settings")
 	if w, _ := data["Warning"].(string); !strings.Contains(w, "사업자등록번호") {
 		t.Errorf("쇼핑몰의 빈 항목을 알리지 않았다: %q", w)
+	}
+	if err := d.Content.PutSettings(ctx, map[string]string{"business.hours": ""}); err != nil {
+		t.Fatal(err)
+	}
+	get(d.SettingsForm, "/admin/settings")
+	if w, _ := data["Warning"].(string); strings.Contains(w, "업무시간") {
+		t.Errorf("표시 의무가 아닌 업무시간을 빈 항목으로 알렸다: %q", w)
 	}
 	if shown, _ := data["Settings"].(map[string]string); shown["business.name"] != "온돌리스" {
 		t.Errorf("폼에 상호가 없다: %v", data["Settings"])

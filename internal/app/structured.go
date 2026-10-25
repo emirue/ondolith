@@ -14,11 +14,15 @@ import (
 // 필수 속성이 없다(Organization 구조화 데이터 안내, 2026-10-25 확인). name 은 사이트 이름이고,
 // 상호가 다르면 legalName 이다. 사업자 정보는 입력한 항목만 싣는다. url 은 site_url 을
 // 알 때만이다 — canonical 과 같은 이유다.
-func siteJSONLD(site theme.Site, url string) map[string]any {
+func siteJSONLD(site theme.Site, url, logo string) map[string]any {
 	web := map[string]any{"@type": "WebSite", "name": site.Name}
 	org := map[string]any{"@type": "Organization", "name": site.Name}
 	if url != "" {
 		web["url"], org["url"] = url, url
+		// 활성 테마의 로고 (FR-310). 구조화 데이터의 주소는 절대 주소라 site_url 이 있을 때만이다.
+		if logo != "" {
+			org["logo"] = logo
+		}
 	}
 	business := func(key string) string { return site.Business[commerce.BusinessLabels[key]] }
 	if v := business("business.name"); v != "" && v != site.Name {

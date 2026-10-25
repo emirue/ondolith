@@ -2,13 +2,18 @@ package app
 
 import (
 	"context"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/content"
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 // FR-510: 발행된 페이지·글만 들어간다. 초안·비밀글·비공개 게시판 글이 없어야
@@ -303,6 +308,14 @@ func TestSearchSettingsReachTheHeadAndRobots(t *testing.T) {
 	if _, home := mustGet(t, c, srv.URL+"/"); strings.Contains(home, `name="robots"`) {
 		t.Error("검색 노출을 다시 켰는데 noindex 가 남았다")
 	}
+	resp, err := c.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("X-Robots-Tag"); got != "" {
+		t.Errorf("검색 노출을 다시 켰는데 X-Robots-Tag = %q", got)
+	}
 }
 
 // **site_url 이 있으면 canonical·og:url 이 그 주소이고, 글은 article·첫 사진이다** (FR-511).
@@ -334,6 +347,12 @@ func TestShareTagsUseTheSiteURL(t *testing.T) {
 	if !strings.Contains(home, `<meta property="og:type" content="website">`) ||
 		!strings.Contains(home, `<link rel="canonical" href="https://site.example/">`) {
 		t.Error("홈의 og:type·canonical 이 틀렸다")
+	}
+	// 검색 노출 태그는 partials/seo.html 한 곳에서만 나온다 — head.html 에 옛 줄이 남으면 두 번 나간다.
+	for _, tag := range []string{`rel="canonical"`, `property="og:url"`, `name="twitter:card"`, `application/ld+json`} {
+		if n := strings.Count(home, tag); n != 1 {
+			t.Errorf("내장 테마 홈에 %s 가 %d 번", tag, n)
+		}
 	}
 }
 
@@ -437,5 +456,83 @@ func TestStructuredDataOnHomeAndProduct(t *testing.T) {
 	}
 	if !strings.Contains(page, `\u003c/script\u003e`) {
 		t.Error("상품 이름의 < 가 JSON 으로 이스케이프되지 않았다")
+	}
+}
+
+// **head.html 을 덮어쓴 테마도 검색 노출 태그를 받는다** (FR-718, FR-719, FR-511). 태그를 내장
+// head.html 에만 두면 그것을 통째로 바꾼 테마(주원산림 테마가 그랬다)에는 코어가 새로 넣는 태그가
+// 하나도 가지 않았다 — 「검색 노출 끄기」를 켜도 noindex 가 붙지 않았다. 태그는 partials/seo.html
+// 에 있고 테마는 그 한 줄을 부른다. 테마가 부르지 않아도 noindex 는 X-Robots-Tag 헤더로 간다.
+// 홈 Organization 에는 활성 테마의 로고가 절대 주소로 실린다.
+func TestSEOPartialReachesAThemeThatOverridesHead(t *testing.T) {
+	_, pool := liveSite(t)
+	root := t.TempDir()
+	base, err := fs.ReadFile(theme.Builtin(), "base.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := `<meta charset="utf-8"><title>{{.Site.Name}}</title>`
+	for name, body := range map[string]string{
+		"own/base.html":           string(base),
+		"own/theme.json":          `{"name":"자체 머리","logo":"img/logo.svg"}`,
+		"own/static/img/logo.svg": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>`,
+		"own/partials/head.html":  head + `{{template "partials/seo.html" .}}`,
+		"bare/base.html":          string(base),
+		"bare/theme.json":         `{"name":"옛 머리"}`,
+		"bare/partials/head.html": head,
+	} {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(context.Background(), `INSERT INTO settings (key, value) VALUES
+		('theme.active','own'), ('seo.noindex','1'), ('seo.google_verification','g-token_1')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t, func(c *config.Config) { c.ThemeDir = root; c.SiteURL = "https://site.example/" })
+
+	resp, err := client().Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("head.html 을 덮어쓴 테마의 홈 HTTP %d", resp.StatusCode)
+	}
+	home := string(b)
+	for _, want := range []string{
+		`<meta name="robots" content="noindex">`,
+		`<meta name="google-site-verification" content="g-token_1">`,
+		`<link rel="canonical" href="https://site.example/">`,
+		`<meta name="twitter:card" content="summary">`,
+		`<script type="application/ld+json">`,
+		`"logo":"https://site.example/static/img/logo.svg`,
+	} {
+		if !strings.Contains(home, want) {
+			t.Errorf("head.html 을 덮어쓴 테마의 홈에 %s 가 없다", want)
+		}
+	}
+	if got := resp.Header.Get("X-Robots-Tag"); got != "noindex" {
+		t.Errorf("X-Robots-Tag = %q, want noindex", got)
+	}
+
+	// 조각을 부르지 않는 옛 테마도 noindex 는 헤더로 받는다.
+	if _, err := pool.Exec(context.Background(), `UPDATE settings SET value = 'bare' WHERE key = 'theme.active'`); err != nil {
+		t.Fatal(err)
+	}
+	srv = restartOnSameSchema(t, func(c *config.Config) { c.ThemeDir = root; c.SiteURL = "https://site.example/" })
+	resp, err = client().Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("X-Robots-Tag"); got != "noindex" {
+		t.Errorf("조각이 없는 테마의 X-Robots-Tag = %q, want noindex", got)
 	}
 }

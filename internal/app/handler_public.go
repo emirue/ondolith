@@ -66,7 +66,7 @@ func (d *publicDeps) home(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a := ActorFrom(ctx)
 	v := d.view(r, "홈", "")
-	v.Meta.JSONLD = siteJSONLD(v.Site, v.Meta.URL)
+	v.Meta.JSONLD = siteJSONLD(v.Site, v.Meta.URL, d.absURL(v.Site.Logo))
 
 	data := map[string]any{}
 	// **유형을 여기서 다시 보지 않는다.** `products` 는 커머스일 때만 채워지므로
@@ -222,6 +222,10 @@ func (d *publicDeps) view(r *http.Request, title, desc string) theme.View {
 
 func (d *publicDeps) renderPage(w http.ResponseWriter, r *http.Request, name string, code int, v theme.View) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// 「검색 노출 끄기」(FR-718)는 헤더로도 간다 — head.html 을 덮어쓴 테마가 partials/seo.html 을 부르지 않아도 걸린다.
+	if v.Site.SEO.NoIndex {
+		w.Header().Set("X-Robots-Tag", "noindex")
+	}
 	w.WriteHeader(code)
 	if err := d.loader().Render(w, name, v); err != nil {
 		// The status line is already sent, so this cannot become a 500 — log it

@@ -127,8 +127,12 @@ func TestMissingBusinessKeysNamesTheEmptyOnes(t *testing.T) {
 
 	partial := map[string]string{"business.name": "온돌리스"}
 	got := MissingBusinessKeys(partial)
-	if len(got) != len(BusinessKeys)-1 {
-		t.Errorf("빈 항목 %d개, want %d", len(got), len(BusinessKeys)-1)
+	if len(got) != 7 {
+		t.Errorf("빈 항목 %d개, want 7 (표시 의무 여덟 중 상호를 뺀 것)", len(got))
+	}
+	// 업무시간은 칸이 있지만 표시 의무가 아니다 — 비어 있어도 알리지 않는다.
+	if BusinessLabels["business.hours"] != "업무시간" || strings.Contains(strings.Join(got, ","), "업무시간") {
+		t.Errorf("업무시간 칸 %q · 빈 항목 %v", BusinessLabels["business.hours"], got)
 	}
 	for _, name := range got {
 		if name == "상호" {

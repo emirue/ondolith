@@ -77,7 +77,7 @@ themes/{이름}/
 **`logo`·`favicon`** (FR-310). 지정하면 그 테마가 활성인 동안 **관리자 화면** 머리글의 마크와 파비콘이 그것으로
 바뀌고, 뷰 모델의 `.Site.Logo`·`.Site.Favicon` 에 자산 주소(해시가 붙은 `/static/…`)로 온다 — 내장
 `partials/header.html` 은 로고를 이름 앞에, 내장 `partials/head.html` 은 파비콘을 싣는다. 머리글·`<head>` 를
-덮어쓴 테마는 그 값을 직접 쓴다. 지정이 없거나 틀리면(`static/` 밖·이미지가 아님·파일 없음) 빈 값이고 기본
+덮어쓴 테마는 그 값을 직접 쓴다. `site_url` 이 있으면 홈의 구조화 데이터 Organization 에도 `logo`(절대 주소)로 실린다(FR-719). 지정이 없거나 틀리면(`static/` 밖·이미지가 아님·파일 없음) 빈 값이고 기본
 마크·아이콘이 나오며, 활성화(A-202)가 경고한다(거부하지 않는다). **로고는 `<img>` 로만 그린다** — 남이 만든
 테마의 SVG 를 문서에 끼우면 그 안의 스크립트가 사이트 출처로 돈다.
 
@@ -138,6 +138,7 @@ themes/{이름}/
 |---|---|---|---|
 | `base.html` | (전체) | 필수 | 문서 뼈대. 다른 템플릿을 `{{block "content"}}`로 감싼다 |
 | `partials/head.html` | (전체) | 폴백 | `<head>` 내용. 메타·OG 태그 (FR-511) |
+| `partials/seo.html` | (전체) | 폴백 | **검색 노출 태그** — noindex·소유 확인(FR-718), canonical·`og:url`(FR-511), 트위터 카드, JSON-LD(FR-719). 내장 `partials/head.html` 이 부른다. **`partials/head.html` 을 덮어쓴 테마는 그 안에 `{{template "partials/seo.html" .}}` 한 줄을 둔다** — 코어가 앞으로 더하는 검색용 태그도 여기로 온다. 부르지 않아도 「검색 노출 끄기」의 noindex 는 `X-Robots-Tag` 헤더로 간다 |
 | `partials/header.html` | (전체) | 폴백 | 상단. 메뉴(FR-405)와 로그인 상태 |
 | `partials/footer.html` | (전체) | 폴백 | 하단. 사업자 정보(FR-711)가 여기 들어간다 |
 | `partials/pagination.html` | (목록) | 폴백 | 페이지 이동 (FR-508). 전체 건수를 세는 게시판(P-203)·통합 검색(P-212). 데이터 `{Total, Capped, CapTotal, LastPage, Pages[{No, URL, Current}], FirstURL, PrevURL, NextURL, LastURL}` — 번호는 열 개씩, 빈 주소는 링크 없음, 주소에 정렬·검색어가 실려 있다. 검색은 맞는 글을 `CapTotal`(10,000)까지만 센다 — 넘으면 `Capped` 가 참이고 `Total` 은 `CapTotal`+1 이다(「10,000건 이상」으로 그린다). 앞 판의 `{Base, Query, PageNo, PrevPage, NextPage, HasPrev, HasNext}` 도 함께 들어온다 |
@@ -333,7 +334,7 @@ themes/{이름}/
 
 | 이름 | 내용 |
 |---|---|
-| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 테마 로고·파비콘(`.Site.Logo`·`.Site.Favicon` — FR-310. `theme.json` 이 지정했을 때의 자산 주소, 없으면 빈 값), 검색 노출(`.Site.SEO` — FR-718. 소유 확인 `GoogleVerify`·`NaverVerify`·`BingVerify` 와 `NoIndex`. 내장 `partials/head.html` 이 메타 태그로 싣는다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 소유 확인이 된다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
+| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 테마 로고·파비콘(`.Site.Logo`·`.Site.Favicon` — FR-310. `theme.json` 이 지정했을 때의 자산 주소, 없으면 빈 값), 검색 노출(`.Site.SEO` — FR-718. 소유 확인 `GoogleVerify`·`NaverVerify`·`BingVerify` 와 `NoIndex`. 내장 `partials/seo.html` 이 메타 태그로 싣는다. `<head>` 를 덮어쓴 테마는 블록을 옮겨 적지 말고 `{{template "partials/seo.html" .}}` 한 줄을 부른다 — 옮겨 적고 그 줄까지 두면 canonical·JSON-LD 가 두 번 나온다. `NoIndex` 는 테마와 상관없이 `X-Robots-Tag` 헤더로도 간다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
 | `.Menu` | 메뉴 트리 (FR-405) |
 | `.User` | 로그인 사용자 (미로그인이면 nil). 이메일·표시이름만. **역할·권한 원본은 넘기지 않는다** |
 | `.Can` | 미리 계산된 권한 불리언 맵 ([D15](15-access-control.md) 4.3) |
