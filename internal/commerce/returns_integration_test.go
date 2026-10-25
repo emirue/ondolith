@@ -1306,7 +1306,7 @@ func TestReturnSettleLetsForeignKeyChecksThrough(t *testing.T) {
 	s, pool := testStore(t)
 	orderNo, returnNo, itemID := pickedUpReturn(t, s, pool)
 	probe := `SELECT 1 FROM orders WHERE order_no = '` + orderNo + `' FOR KEY SHARE NOWAIT`
-	whileWaitingOn(t, pool, itemID, probe, func() error {
+	whileWaitingOn(t, pool, itemLock(itemID), probe, func() error {
 		_, _, err := s.SettleReturn(context.Background(), orderNo, returnNo, "A-511", "fk-probe")
 		return err
 	})
@@ -1377,5 +1377,64 @@ func TestExchangeDiffSendsThePaymentKeyAsIdempotencyKey(t *testing.T) {
 	}
 	if gw.lastReq.IdempotencyKey != "pk-diff" {
 		t.Errorf("멱등키 %q, want 승인 키 %q", gw.lastReq.IdempotencyKey, "pk-diff")
+	}
+}
+
+// **거부된 반품·교환 건은 어느 처리도 받지 않고, 그 답은 「할 수 없는 처리」다** (FR-617).
+//
+// 반품 행의 `거부` 는 주문 상태 이름이 아니다. 그것을 상태머신에 그대로 넘기던 판은
+// ErrUnknownStatus — A-511 의 500 — 를 냈다. 거부를 두 번 누르기만 해도 났다.
+func TestRejectedReturnRefusesEveryAction(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	reject := func(kind ReturnKind, slug string) (string, string) {
+		orderNo, _ := deliveredOrder(t, s, pool, slug, 1)
+		req := ReturnRequest{Kind: kind, Lines: []RefundLine{{OrderItemID: itemsOf(t, s, orderNo)[0].ID, Quantity: 1}}}
+		actor := Actor("P-511")
+		if kind == KindExchange {
+			var variant string
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+				SELECT product_id,'{"크기":"M"}',0,5 FROM order_items WHERE id = $1 RETURNING id`,
+				req.Lines[0].OrderItemID).Scan(&variant); err != nil {
+				t.Fatal(err)
+			}
+			req.NewVariantID, actor = variant, "P-512"
+		}
+		ret, err := s.OpenReturn(ctx, orderNo, req, actor, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RejectReturn(ctx, orderNo, ret.ReturnNo, "상품 훼손", "A-511"); err != nil {
+			t.Fatal(err)
+		}
+		return orderNo, ret.ReturnNo
+	}
+	retOrder, retNo := reject(KindReturn, "rej-return")
+	exOrder, exNo := reject(KindExchange, "rej-exchange")
+
+	for _, tc := range []struct {
+		name string
+		act  func() error
+	}{
+		{"다시 거부", func() error { return s.RejectReturn(ctx, retOrder, retNo, "두 번째", "A-511") }},
+		{"수거 확인", func() error { return s.ConfirmPickup(ctx, retOrder, retNo, "판매자", "A-511") }},
+		{"환불 확정", func() error {
+			_, _, err := s.SettleReturn(ctx, retOrder, retNo, "A-511", "rej-settle")
+			return err
+		}},
+		{"교환 완료", func() error {
+			_, err := s.CompleteExchange(ctx, exOrder, exNo, "A-511")
+			return err
+		}},
+	} {
+		if err := tc.act(); !errors.Is(err, ErrTransitionNotAllowed) {
+			t.Errorf("%s = %v, want ErrTransitionNotAllowed", tc.name, err)
+		}
+	}
+	for _, orderNo := range []string{retOrder, exOrder} {
+		if got := statusOf(t, s, orderNo); got != StatusDelivered {
+			t.Errorf("주문 %s = %s, want %s", orderNo, got, StatusDelivered)
+		}
 	}
 }

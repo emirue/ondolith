@@ -342,15 +342,17 @@ func (s *Store) restockOrder(ctx context.Context, tx pgx.Tx, orderID string) err
 	return s.AdjustStock(ctx, tx, deltas)
 }
 
-// settleFullRefund closes an order whose 주문결제 has now been refunded in full
-// (D14 5절, D19 A-507 「목표 상태는 상태머신이 정한다」): 배송 전이면 취소 —
-// 재고도 되돌린다 — 배송 뒤면 환불. 부분 환불이거나 상태머신이 두 전이를
-// 모두 막는 상태면 아무것도 바꾸지 않고 "" 를 돌려준다.
+// CloseRefundedOrder closes an order whose refunds are done (D14 5절, D19 A-507
+// 「목표 상태는 상태머신이 정한다」) — 어디로 가는지는 refundCloseTarget 이 정한다. 배송
+// 전이면 취소라 재고도 되돌린다. 닫을 곳이 없으면 아무것도 바꾸지 않고 "" 를 돌려준다.
+//
+// 환불을 실행한 쪽(executeAndSettle)이 PG 확정 뒤에 부르고, 그 기록이 실패해 열린 채
+// 남은 주문은 A-507 「주문 종료」가 다시 부른다.
 //
 // A-507 이 품목 단위로 환불하므로 전액에 이르는 순간이 따로 없었다 — 돈은
 // 전부 돌아갔는데 주문은 결제완료로 남아 발송 대기 줄에 서 있었다
 // (2026-10-01 실측).
-func (s *Store) settleFullRefund(ctx context.Context, orderNo string, actor Actor) (Status, error) {
+func (s *Store) CloseRefundedOrder(ctx context.Context, orderNo string, actor Actor) (Status, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -362,38 +364,76 @@ func (s *Store) settleFullRefund(ctx context.Context, orderNo string, actor Acto
 	if err != nil {
 		return "", err
 	}
-	orderID, status := o.ID, o.Status
+	orderID, status := o.ID, Status(o.Status)
+	// **품목을 잡은 뒤에 판정한다.** 환불 접수·거부는 주문 행을 잡지 않고 품목 → 결제로
+	// 잡으므로, 잠그지 않고 읽으면 판정의 세 SELECT 사이에 거부가 커밋될 수 있다 —
+	// 「전액」을 읽은 뒤 한도가 풀려도 닫고, 아래에서 품목을 다시 전부 소진한다.
+	// id 오름차순이다 (RequestRefund 와 같은 순서) — 아니면 품목이 둘 이상인 주문에서
+	// 환불 요청과 교착한다.
+	if _, err := q.LockOrderItems(ctx, orderID); err != nil {
+		return "", err
+	}
+	to, err := refundCloseTarget(ctx, q, orderID, status, actor)
+	if err != nil || to == "" {
+		return "", err
+	}
+	if to == StatusCancelled {
+		if err := s.restockOrder(ctx, tx, orderID); err != nil {
+			return "", err
+		}
+	}
+	if err := q.SettleAllOrderItems(ctx, orderID); err != nil {
+		return "", err
+	}
+	if err := s.moveOrder(ctx, tx, orderID, status, to, actor); err != nil {
+		return "", err
+	}
+	return to, tx.Commit(ctx)
+}
+
+// RefundCloseTarget is where A-507 「주문 종료」 would send the order — "" 이면 단추가 없다.
+// 종료 기록이 실패한 주문과, 이 판정이 생기기 전에 배송비 때문에 열린 채 남은 배송 뒤
+// 주문이 여기에 걸린다.
+// 잠그지 않고 읽는다. 누르면 CloseRefundedOrder 가 잠근 채 다시 판정한다.
+func (s *Store) RefundCloseTarget(ctx context.Context, orderID string, status Status, actor Actor) (Status, error) {
+	return refundCloseTarget(ctx, s.q, orderID, status, actor)
+}
+
+// refundCloseTarget decides where an order whose refunds are done goes — "" 이면 열어 둔다.
+//
+// 끝났다는 것은 남은 환불(요청·승인)이 없고, 결제액이 전부 돌아갔거나 배송 뒤 품목이
+// 전부 환불된 것이다. 선점만 보면 아직 PG 로 가지 않은 건이 있어도 닫히고, 그 건이
+// 거절되어 한도가 돌아가도 주문은 끝나 있다. 배송 뒤의 배송비는 돌려주지 않으므로
+// (D50) 금액만 보면 그 주문은 영영 「전액」이 아니다. 배송 전이면 결제액 전부일 때만
+// 닫는다 — 남은 배송비를 돌려주며 닫는 것은 전체 취소(P-506)다.
+//
+// 목적지는 상태머신이 정한다: 취소할 수 있으면(배송 전) 취소, 아니면 환불.
+func refundCloseTarget(ctx context.Context, q *commerceq.Queries, orderID string, status Status, actor Actor) (Status, error) {
 	p, err := q.ApprovedPaymentAmounts(ctx, orderID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && p.RefundedAmount < p.ApprovedAmount) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	var to Status
+	open, err := q.OpenRefundExists(ctx, orderID)
+	if err != nil || open {
+		return "", err
+	}
+	full := p.RefundedAmount >= p.ApprovedAmount
 	switch {
-	case CanTransition(Status(status), StatusCancelled, actor) == nil:
-		to = StatusCancelled
-		if err := s.restockOrder(ctx, tx, orderID); err != nil {
-			return "", err
-		}
-	case CanTransition(Status(status), StatusRefunded, actor) == nil:
-		to = StatusRefunded
-	default:
+	case full && CanTransition(status, StatusCancelled, actor) == nil:
+		return StatusCancelled, nil
+	case CanTransition(status, StatusRefunded, actor) != nil:
 		return "", nil
+	case full:
+		return StatusRefunded, nil
 	}
-	// 품목은 id 오름차순으로 잡는다 (RequestRefund 와 같은 순서). 아래 UPDATE 가
-	// 제 순서대로 잡게 두면 품목이 둘 이상인 주문에서 환불 요청과 교착한다.
-	if _, err := q.LockOrderItems(ctx, orderID); err != nil {
+	left, err := q.UnsettledItemCount(ctx, orderID)
+	if err != nil || left > 0 {
 		return "", err
 	}
-	if err := q.SettleAllOrderItems(ctx, orderID); err != nil {
-		return "", err
-	}
-	if err := s.moveOrder(ctx, tx, orderID, Status(status), to, actor); err != nil {
-		return "", err
-	}
-	return to, tx.Commit(ctx)
+	return StatusRefunded, nil
 }
 
 // requesterOf maps a screen id to refunds.requester.
@@ -456,8 +496,8 @@ const RefundRetryWindow = 14 * 24 * time.Hour
 // (타임아웃·5xx·IDEMPOTENT_REQUEST_PROCESSING)은 '승인' 에 둔다 —
 // **미환불이 이중환불보다 낫다** (D13).
 //
-// PG 가 확정하면(이미 완료였어도) 결제액 전부가 돌아갔는지 보고 주문을 끝낸다 —
-// 옮긴 상태를 돌려주고, 부분이면 "" 다 (settleFullRefund). actor 는 그 전이를 일으키는
+// PG 가 확정하면(이미 완료였어도) 환불이 끝났는지 보고 주문을 끝낸다 — 옮긴 상태를
+// 돌려주고, 아직이면 "" 다 (CloseRefundedOrder). actor 는 그 전이를 일으키는
 // 화면이다. 그 기록이 실패하면 ErrRefundSentNotSettled 다.
 func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string, actor Actor) (Status, error) {
 	return s.executeAndSettle(ctx, gw, refundID, time.Time{}, actor)
@@ -472,7 +512,7 @@ func (s *Store) RetryRefund(ctx context.Context, gw Gateway, refundID string, no
 
 // ErrRefundSentNotSettled 는 PG 가 환불을 확정했는데 주문 종료 기록이 실패했다는
 // 뜻이다. 돈은 이미 나갔다 — 호출자는 로그만 남기고 성공으로 다룬다. 주문은 열린 채
-// 남고, 지금은 화면에서 다시 닫을 길이 없다(A-507 「실행」 은 완료된 건을 받지 않는다).
+// 남고, A-507 「주문 종료」(CloseRefundedOrder)가 다시 닫는다.
 var ErrRefundSentNotSettled = errors.New("commerce: 환불은 확정됐지만 주문 상태를 바꾸지 못했습니다")
 
 // executeAndSettle 은 PG 호출과 주문 종료를 한 트랜잭션에 묶지 않는다 — PG 왕복 동안
@@ -484,7 +524,7 @@ func (s *Store) executeAndSettle(ctx context.Context, gw Gateway, refundID strin
 	if err != nil {
 		return "", err
 	}
-	to, err := s.settleFullRefund(ctx, orderNo, actor)
+	to, err := s.CloseRefundedOrder(ctx, orderNo, actor)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrRefundSentNotSettled, err)
 	}

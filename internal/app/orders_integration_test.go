@@ -282,7 +282,7 @@ func TestRefusedRefundStillOffersCancel(t *testing.T) {
 	}
 }
 
-// **부분 환불 요청(P-507)을 두 번 누르면 지금은 요청이 두 건 생긴다** (지금 동작 — G6).
+// **부분 환불 요청(P-507)을 두 번 누르면 지금은 요청이 두 건 생긴다** (지금 동작 — BUG-03).
 // 키를 POST 마다 새로 만들어 refunds_request_key_uniq 가 막을 것이 없다. A-507 은 폼이 키를
 // 들고 와 재전송을 알아본다(TestAdminRefundResubmitIsRecognisedNotRepeated). 고치면 이 단언을 바꾼다.
 func TestMemberPartialRefundDoubleSubmit(t *testing.T) {

@@ -399,6 +399,11 @@ func (s *Store) ResolvePendingPayment(ctx context.Context, gw Gateway, paymentID
 	}
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
+	// 주문 → 결제 순서로 잠근다. 입금 만료·웹훅이 이 순서라, 결제를 먼저 쥐면 서로를
+	// 기다린다. 결제가 가리키는 주문은 바뀌지 않으므로 앞에서 읽은 id 로 잡는다.
+	if _, err := q.LockOrderStatus(ctx, p.OrderID); err != nil {
+		return "", err
+	}
 	// 조회하는 사이 웹훅이나 다른 관리자가 닫았을 수 있다 — 잠그고 다시 본다.
 	p, err = q.PaymentForResolve(ctx, paymentID)
 	if err != nil {
@@ -414,11 +419,7 @@ func (s *Store) ResolvePendingPayment(ctx context.Context, gw Gateway, paymentID
 		}
 		// 입금대기 주문은 여기서 놓는다. 결제대기는 10분 만료가 집지만, 입금대기는 어느
 		// 만료도 '실패' 결제를 집지 않아 재고를 잡은 채 남는다 (ExpireDepositOrders).
-		st, err := q.LockOrderStatus(ctx, p.OrderID)
-		if err != nil {
-			return "", err
-		}
-		if Status(st) == StatusDepositPending {
+		if Status(p.OrderStatus) == StatusDepositPending {
 			if err := s.releaseUnpaid(ctx, tx, p.OrderID, StatusDepositPending); err != nil {
 				return "", err
 			}

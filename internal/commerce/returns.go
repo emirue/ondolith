@@ -55,6 +55,16 @@ const (
 	DefaultReturnDays = 7
 )
 
+// returnStep checks a return row's own move. 반품 행의 상태는 거부를 빼면 주문 상태와
+// 이름이 같아 상태머신이 판정한다. 거부는 끝난 건이라 어디로도 가지 않는다 — 주문
+// 상태 이름이 아니어서 그대로 넘기면 「알 수 없는 상태」(A-511 의 500)가 된다.
+func returnStep(status string, to Status, actor Actor) error {
+	if status == "거부" {
+		return fmt.Errorf("%w: 거부된 건", ErrTransitionNotAllowed)
+	}
+	return CanTransition(Status(status), to, actor)
+}
+
 // ErrReturnWindow 는 배송완료 뒤 반품·교환 기간이 지났다는 뜻이다 (D19 P-511).
 var ErrReturnWindow = errors.New("commerce: 반품·교환 기간이 지났습니다")
 
@@ -433,7 +443,7 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault stri
 	if ReturnKind(kind) == KindExchange {
 		target = StatusExchangePicked
 	}
-	if err := CanTransition(Status(status), target, actor); err != nil {
+	if err := returnStep(status, target, actor); err != nil {
 		return err
 	}
 
@@ -509,7 +519,7 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 		return 0, "", fmt.Errorf("%w: 교환 건은 환불로 정산하지 않습니다", ErrReturnKind)
 	}
 	// 수거 전이면 상태머신이 거부한다. 그 거부가 이 함수의 존재 이유다.
-	if err := CanTransition(Status(status), StatusRefunded, actor); err != nil {
+	if err := returnStep(status, StatusRefunded, actor); err != nil {
 		if Status(status) == StatusReturnOpen {
 			return 0, "", ErrPickupRequired
 		}
@@ -592,6 +602,7 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	if err := q.SetReturnStatus(ctx, commerceq.SetReturnStatusParams{ID: id, Status: string(StatusRefunded)}); err != nil {
 		return 0, "", err
 	}
+	// BUG-04: 부분 반품이어도 주문 전체가 환불(최종)로 간다.
 	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), StatusRefunded, actor); err != nil {
 		return 0, "", err
 	}
@@ -626,7 +637,7 @@ func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason stri
 		return err
 	}
 	id, kind, status, orderID, newVariant := r.ID, r.Kind, r.Status, r.OrderID, r.NewVariantID
-	if err := CanTransition(Status(status), StatusDelivered, actor); err != nil {
+	if err := returnStep(status, StatusDelivered, actor); err != nil {
 		return err
 	}
 
@@ -782,7 +793,8 @@ func (s *Store) VariantsForExchange(ctx context.Context, orderItemID string) ([]
 //
 // 차액이 양수면 `차액결제대기` 로 간다 — 돈을 더 받아야 하고, 받는 것은
 // P-514 다. 0 이하면 곧바로 발송이다. **차액을 깎아 돌려주지는 않는다**:
-// 더 싼 조합으로 바꿔 생기는 차액 환불은 별도 결정이고 그 화면이 없다.
+// 더 싼 조합으로 바꿔 생기는 차액 환불은 별도 결정이고 그 화면이 없다 — D14 와
+// 다르다 (BUG-05).
 func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, actor Actor) (Status, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -811,7 +823,7 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 	if diff > 0 {
 		target = StatusExchangeDiffDue
 	}
-	if err := CanTransition(Status(status), target, actor); err != nil {
+	if err := returnStep(status, target, actor); err != nil {
 		return "", err
 	}
 

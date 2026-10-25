@@ -773,6 +773,14 @@ func TestAdminRejectReleasesExchangeStockThroughTheHandler(t *testing.T) {
 	if status != "거부" || reason != "재고 확인 불가" {
 		t.Errorf("반품 건 = %q / %q", status, reason)
 	}
+	// 거부를 두 번 눌러도 500 이 아니다 — 거부된 건은 끝난 건이다. 예약도 두 번 풀리지 않는다.
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {ret.ReturnNo}, "action": {"reject"}, "reason": {"재고 확인 불가"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("다시 거부 = HTTP %d, want 422 (%q)", rec.Code, rec.Body.String())
+	}
+	assertVariantStock(t, pool, newVariant, 5)
 	// 처리 중 표시가 내려가 같은 품목에 다시 걸 수 있다.
 	if _, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
 		Kind:  commerce.KindReturn,
@@ -2250,5 +2258,65 @@ func TestRefundSentButNotSettledIsShownAsDone(t *testing.T) {
 	if rec := postAdmin(t, d.ReturnAction, returns, pv, url.Values{"return_no": {returnNo},
 		"action": {"settle"}}); rec.Code != http.StatusSeeOther {
 		t.Errorf("A-511 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
+	}
+}
+
+// **환불은 끝났는데 열린 채 남은 주문을 A-507 「주문 종료」가 닫는다** (FR-611). PG 확정 뒤
+// 종료 기록이 실패하면(ErrRefundSentNotSettled) 「실행」은 완료된 건을 받지 않아 그 주문을
+// 닫을 길이 없었다. 단추는 닫을 곳이 있을 때만 보이고, 돈이 나가지 않아 재인증이 없다.
+func TestCloseActionClosesARefundedOrder(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	ctx := context.Background()
+	order, _ := paidAdminOrder(t, d, pool)
+	d.Gateway = func() commerce.Gateway { return renamingGateway{pool: pool, orderNo: order.OrderNo} }
+	item := order.Items[0]
+	path := "/admin/orders/" + order.OrderNo + "/refund"
+	pv := map[string]string{"no": order.OrderNo}
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"item_id": {item.ID},
+		"qty_" + item.ID: {strconv.Itoa(item.Quantity)}, "request_key": {refundFormKey(t, d, order.OrderNo)}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("전량 환불 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if _, err := pool.Exec(ctx, `UPDATE orders SET order_no = $1 WHERE order_no = $1 || '-x'`, order.OrderNo); err != nil {
+		t.Fatal(err)
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaid)
+
+	closeTo := func() any {
+		t.Helper()
+		var data map[string]any
+		d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, c int, v any) {
+			w.WriteHeader(c)
+			data = v.(map[string]any)
+		}
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.SetPathValue("no", order.OrderNo)
+		rec := httptest.NewRecorder()
+		d.RefundForm(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("A-507 GET = HTTP %d", rec.Code)
+		}
+		return data["CloseTo"]
+	}
+	if got := closeTo(); got != commerce.StatusCancelled {
+		t.Errorf("닫기 전 단추 = %v, want 취소", got)
+	}
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("주문 종료 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusCancelled)
+	var summary string
+	if err := pool.QueryRow(ctx, `SELECT summary FROM operation_logs ORDER BY created_at DESC LIMIT 1`).Scan(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "주문 종료") {
+		t.Errorf("작업 로그 %q", summary)
+	}
+	if got := closeTo(); got != commerce.Status("") {
+		t.Errorf("닫은 뒤 단추 = %v, want 없음", got)
+	}
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("다시 종료 = HTTP %d, want 422", rec.Code)
 	}
 }

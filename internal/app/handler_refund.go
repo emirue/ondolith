@@ -77,6 +77,7 @@ func (d *shopDeps) refundRequest(w http.ResponseWriter, r *http.Request) {
 		d.refundError(w, r, orderNo, "환불할 품목과 수량을 고르세요.")
 		return
 	}
+	// BUG-03: POST 마다 새 키라 두 번 누르면 요청이 두 건이다.
 	key, err := commerce.NewRequestKey()
 	if err != nil {
 		d.serverError(w, r, err)

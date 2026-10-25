@@ -257,6 +257,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 		return s
 	}
+	// BUG-06: 조립 때 한 번 읽는다 — A-201 저장만으로는 재시작 전에 반영되지 않는다.
 	dev := setting("site.dev_mode")["site.dev_mode"] != ""
 	// A theme name is a directory under the theme root, never a path: the
 	// setting comes from A-202 and an operator typing `../..` must not aim the

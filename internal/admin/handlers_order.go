@@ -450,6 +450,12 @@ func (d *Deps) renderRefund(w http.ResponseWriter, r *http.Request, c Caller,
 		d.serverError(w, r, perr)
 		return
 	}
+	// 환불은 끝났는데 열린 채 남은 주문이면 「주문 종료」 단추를 그린다.
+	closeTo, err := d.Commerce.RefundCloseTarget(r.Context(), order.ID, order.Status, "A-507")
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 	// 요청 키는 화면을 그릴 때 발급하고 폼이 되돌려 준다 (D19 A-507). POST 마다
 	// 만들면 같은 폼의 재전송이 매번 새 키라 UNIQUE 가 아무것도 막지 못한다.
 	key, err := commerce.NewRequestKey()
@@ -459,7 +465,7 @@ func (d *Deps) renderRefund(w http.ResponseWriter, r *http.Request, c Caller,
 	}
 	d.Render(w, r, "admin/refund.html", code, map[string]any{
 		"Order": order, "Refunds": refunds, "RequestKey": key,
-		"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
+		"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded, "CloseTo": closeTo,
 		// D15 5.3-1: 최근 15분 내 확인이 있으면 비밀번호 필드를 그리지 않는다.
 		// 매 클릭마다 물으면 관리자가 비밀번호를 브라우저에 저장하게 된다.
 		"NeedsReauth": c.NeedsReauth(),
@@ -489,6 +495,21 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 	// PG 가 거절해 '요청' 으로 돌아온 건, 결과를 모른 채 '승인' 에 멈춘 건이다 —
 	// 이것이 없으면 그 행들은 한도를 잡은 채 나갈 길이 없다. 동작이 없으면 새 접수다.
 	switch r.PostFormValue("action") {
+	case "close":
+		// 「주문 종료」 — PG 확정 뒤 종료 기록이 실패해 열린 채 남은 주문을 닫는다
+		// (commerce.ErrRefundSentNotSettled). 돈이 나가지 않으므로 재인증을 묻지 않는다.
+		to, err := d.Commerce.CloseRefundedOrder(r.Context(), order.OrderNo, "A-507")
+		if err != nil {
+			d.serverError(w, r, err)
+			return
+		}
+		if to == "" {
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "닫을 수 있는 주문이 아닙니다.")
+			return
+		}
+		d.log(r, c, "order.refund", "order", order.OrderNo, "환불이 끝난 주문 종료 — 주문 "+string(to))
+		http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+		return
 	case "reject":
 		target, ok := d.refundInOrder(w, r, order)
 		if !ok {
@@ -640,12 +661,12 @@ func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
 		return
 	}
 	d.log(r, c, "order.refund", "order", order.OrderNo, "환불 "+itoa(amount)+"원 PG 확정")
-	// 전액이면 commerce 가 주문을 끝냈다(to). 돈은 이미 움직였으므로 그 기록의
+	// 환불이 끝났으면 commerce 가 주문을 끝냈다(to). 돈은 이미 움직였으므로 그 기록의
 	// 실패는 로그만 남기고 화면은 정상으로 돌아간다.
 	if err != nil {
 		d.Logger.Error("전액 환불 뒤 주문 종료", "order", order.OrderNo, "err", err)
 	} else if to != "" {
-		d.log(r, c, "order.refund", "order", order.OrderNo, "전액 환불 — 주문 "+string(to))
+		d.log(r, c, "order.refund", "order", order.OrderNo, "환불이 끝나 주문 "+string(to))
 	}
 	http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
 }
