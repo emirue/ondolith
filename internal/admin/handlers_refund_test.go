@@ -773,6 +773,14 @@ func TestAdminRejectReleasesExchangeStockThroughTheHandler(t *testing.T) {
 	if status != "거부" || reason != "재고 확인 불가" {
 		t.Errorf("반품 건 = %q / %q", status, reason)
 	}
+	// 거부를 두 번 눌러도 500 이 아니다 — 거부된 건은 끝난 건이다. 예약도 두 번 풀리지 않는다.
+	rec = postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {ret.ReturnNo}, "action": {"reject"}, "reason": {"재고 확인 불가"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("다시 거부 = HTTP %d, want 422 (%q)", rec.Code, rec.Body.String())
+	}
+	assertVariantStock(t, pool, newVariant, 5)
 	// 처리 중 표시가 내려가 같은 품목에 다시 걸 수 있다.
 	if _, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
 		Kind:  commerce.KindReturn,
