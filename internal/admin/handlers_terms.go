@@ -242,13 +242,9 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 				"키가 너무 깁니다 (200자 이내).")
 			return
 		}
-		if isSecretKey(k) && v == "" {
-			// 빈 시크릿은 "그대로 두라" 이지 "지우라" 가 아니다. 화면이 현재
-			// 값을 보여줄 수 없으므로 빈 칸이 정상 상태다.
-			continue
-		}
 		kv[k] = v
 	}
+	dropBlankSecrets(kv)
 	if p, ok := kv["pg.provider"]; ok && p != "" {
 		if _, known := pgProviders[p]; !known {
 			d.renderPayment(w, r, http.StatusUnprocessableEntity,
@@ -275,16 +271,7 @@ func (d *Deps) renderPaymentWith(w http.ResponseWriter, r *http.Request, code in
 		d.serverError(w, r, err)
 		return
 	}
-	shown := map[string]string{}
-	saved := map[string]bool{}
-	for k, v := range kv {
-		if isSecretKey(k) {
-			// 설정 여부만. 값은 아니다.
-			saved[k] = v != ""
-			continue
-		}
-		shown[k] = v
-	}
+	shown, saved := formSettings(kv)
 	data := map[string]any{"Settings": shown, "SecretSaved": saved,
 		"Providers": pgProviders, "Error": msg, "Notice": notice}
 	// 클라이언트 키만 있고 시크릿이 없으면 결제창은 뜨는데 승인이 실패한다 —

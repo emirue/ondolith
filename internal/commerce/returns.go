@@ -51,6 +51,8 @@ const (
 	SettingReturnFeeAmount = "order.return_fee_amount"
 	// SettingReturnDays 는 반품·교환을 받는 기간(배송완료 뒤 일 수)이다 (A-512, FR-617).
 	SettingReturnDays = "order.return_days"
+	// DefaultReturnDays 는 그 기간을 정하지 않은 사이트의 값이다 (FR-617 기본 7일).
+	DefaultReturnDays = 7
 )
 
 // ErrReturnWindow 는 배송완료 뒤 반품·교환 기간이 지났다는 뜻이다 (D19 P-511).
@@ -92,13 +94,13 @@ func returnFeeSetting(ctx context.Context, tx pgx.Tx) (policy string, amount int
 }
 
 // returnDays reads A-512's 반품·교환 기간 inside the caller's transaction.
-// 기본값은 D19 A-512 의 7일이다. 설정을 읽는 질의는 배송비 정책과 같은 것을 쓴다.
+// 기본값은 DefaultReturnDays 다. 설정을 읽는 질의는 배송비 정책과 같은 것을 쓴다.
 func returnDays(ctx context.Context, tx pgx.Tx) (int, error) {
 	rows, err := commerceq.New(tx).ReturnFeeSettings(ctx, []string{SettingReturnDays})
 	if err != nil {
 		return 0, err
 	}
-	days := 7
+	days := DefaultReturnDays
 	for _, r := range rows {
 		n, cerr := strconv.Atoi(r.Value)
 		if cerr != nil || n < 1 {

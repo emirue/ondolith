@@ -53,6 +53,19 @@ type SocialConfig struct {
 	Enabled   bool
 }
 
+// SocialConfigFrom reads one provider's A-206 settings out of kv (the three
+// SocialSettingKey values). 로그인 화면과 A-206 이 같은 판단을 쓴다 — 두 곳이
+// 따로 읽으면 「로그인 화면엔 버튼이 있는데 눌러도 404」 가 된다.
+func SocialConfigFrom(name string, kv map[string]string) SocialConfig {
+	return SocialConfig{
+		Provider:  name,
+		Label:     SocialProviders[name],
+		ClientID:  kv[SocialSettingKey(name, "client_id")],
+		HasSecret: kv[SocialSettingKey(name, "client_secret")] != "",
+		Enabled:   kv[SocialSettingKey(name, "enabled")] != "",
+	}
+}
+
 // NewSocialProvider builds the goth provider for one configured entry.
 //
 // **`gothic` 을 쓰지 않는다.** 그 패키지는 gorilla/sessions 를 쓰는데 우리

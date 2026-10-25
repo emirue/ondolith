@@ -79,12 +79,9 @@ func (d *Deps) StorageSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	kv := map[string]string{}
 	for _, k := range content.StorageSettingKeys {
-		v := strings.TrimSpace(r.PostFormValue(k))
-		if isSecretKey(k) && v == "" {
-			continue // 빈 시크릿은 「그대로 두라」 — 화면이 현재 값을 보여줄 수 없다
-		}
-		kv[k] = v
+		kv[k] = strings.TrimSpace(r.PostFormValue(k))
 	}
+	dropBlankSecrets(kv)
 	if kv[content.SettingStoragePathStyle] != "" {
 		kv[content.SettingStoragePathStyle] = "1"
 	}

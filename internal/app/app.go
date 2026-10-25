@@ -84,19 +84,6 @@ func withMiddleware(h http.Handler, sessions *scs.SessionManager) http.Handler {
 	return httpsec.Headers(http.NewCrossOriginProtection().Handler(h))
 }
 
-// New brings up the operating tree: connection pool, session store, and the
-// route table. The returned func releases the pool and must be called on
-// shutdown.
-//
-// Pending migrations are applied here rather than only at install time, so that
-// upgrading is "replace the binary and restart".
-//
-// The boot self-check runs before a single route serves, and a failure returns
-// an error rather than starting anyway (FR-110): a server that comes up in the
-// wrong state has its wrong state discovered by a visitor.
-// rebuild reassembles this tree from the same config and swaps it in; A-201
-// calls it when an assembly-time setting changes (D20 모듈 게이팅).
-//
 // poolConfig is the operating tree's connection pool settings, apart from New so
 // that a test can open a pool the same way and ask the server what it got.
 func poolConfig(dsn string) (*pgxpool.Config, error) {
@@ -117,6 +104,18 @@ func poolConfig(dsn string) (*pgxpool.Config, error) {
 	return pcfg, nil
 }
 
+// New brings up the operating tree: connection pool, session store, and the
+// route table. The returned func releases the pool and must be called on
+// shutdown.
+//
+// Pending migrations are applied here rather than only at install time, so that
+// upgrading is "replace the binary and restart".
+//
+// The boot self-check runs before a single route serves, and a failure returns
+// an error rather than starting anyway (FR-110): a server that comes up in the
+// wrong state has its wrong state discovered by a visitor.
+// rebuild reassembles this tree from the same config and swaps it in; A-201
+// calls it when an assembly-time setting changes (D20 모듈 게이팅).
 func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
 	rebuild func() error,
 ) (http.Handler, func(), error) {
@@ -300,17 +299,10 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// A-206 에서 켠 프로바이더. 로그인 화면과 연결 관리 화면이 함께 쓴다 —
 	// 두 곳이 각자 판단하면 "로그인 화면엔 버튼이 있는데 눌러도 404" 가 된다.
 	socialConfigOf := func(name string) auth.SocialConfig {
-		kv := setting(
+		return auth.SocialConfigFrom(name, setting(
 			auth.SocialSettingKey(name, "client_id"),
 			auth.SocialSettingKey(name, "client_secret"),
-			auth.SocialSettingKey(name, "enabled"))
-		return auth.SocialConfig{
-			Provider:  name,
-			Label:     auth.SocialProviders[name],
-			ClientID:  kv[auth.SocialSettingKey(name, "client_id")],
-			HasSecret: kv[auth.SocialSettingKey(name, "client_secret")] != "",
-			Enabled:   kv[auth.SocialSettingKey(name, "enabled")] != "",
-		}
+			auth.SocialSettingKey(name, "enabled")))
 	}
 	enabledSocial := func() []auth.SocialConfig {
 		var out []auth.SocialConfig
@@ -695,11 +687,11 @@ func themePath(cfg *config.Config, name string) string {
 	return filepath.Join(cfg.Themes(), filepath.Base(name))
 }
 
-// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐·0시(사용이 가장 적은
-// 자정)·7개다 — A-604 화면이 보이는 기본값과 같아야 한다(admin.renderBackup).
+// backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐과 backup 의 기본
+// 시각·보관 개수다 — A-604 화면이 보이는 값과 같다.
 func backupSchedule(kv map[string]string) backup.Schedule {
 	return backup.Schedule{Enabled: kv["backup.auto"] != "",
-		Hour: atoiOr(kv["backup.hour"], 0), Keep: atoiOr(kv["backup.keep"], 7)}
+		Hour: atoiOr(kv["backup.hour"], backup.DefaultHour), Keep: atoiOr(kv["backup.keep"], backup.DefaultKeep)}
 }
 
 // mailFailureEntry is the operation-log row for a mail that never went out, or
