@@ -2,6 +2,7 @@ package content
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -170,8 +171,13 @@ const removeBudget = 30 * time.Second
 func (f *Files) Remove(ctx context.Context, rel string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), removeBudget)
 	defer cancel()
-	err := RemoveUpload(f.root, rel)
 	rem, _, rerr := f.resolve(ctx)
+	return f.removeFrom(ctx, rem, rerr, rel)
+}
+
+// removeFrom deletes rel locally and from the already-resolved bucket.
+func (f *Files) removeFrom(ctx context.Context, rem Remote, rerr error, rel string) error {
+	err := RemoveUpload(f.root, rel)
 	if rerr != nil {
 		err = errors.Join(err, rerr)
 	} else if rem != nil {
@@ -180,6 +186,37 @@ func (f *Files) Remove(ctx context.Context, rel string) error {
 	if err != nil {
 		// 어느 파일인지 남긴다 — 버킷의 오류에는 키가 없어 로그만으로는 찾지 못한다.
 		return fmt.Errorf("%s: %w", rel, err)
+	}
+	return nil
+}
+
+// removeAllBudget bounds one RemoveAll — 한 요청 안에서 끝나야 운영자가 빈 응답을 보지
+// 않는다(WriteTimeout 60초, admin 의 migrateBudget 과 같은 이유). 시험이 줄인다.
+var removeAllBudget = 40 * time.Second
+
+// RemoveAll deletes every path, carrying on past a failure: 앞에서 멈추면 뒤의
+// 파일은 행이 사라진 뒤라 아무도 찾지 못한다. 버킷 설정은 한 번 읽는다. 하나라도
+// 남으면 — 시한을 넘겨 손대지 못한 것까지 — 몇 개인지와 첫 오류를 실은 ErrFilesLeft
+// 다. 행을 먼저 지운 호출자는 그것을 경고로 다룬다(A-309 와 같은 결정).
+func (f *Files) RemoveAll(ctx context.Context, paths []string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), removeAllBudget)
+	defer cancel()
+	rem, _, rerr := f.resolve(ctx)
+	left := 0
+	var first error
+	for i, p := range paths {
+		if ctx.Err() != nil {
+			left += len(paths) - i
+			first = cmp.Or(first, ctx.Err())
+			break
+		}
+		if err := f.removeFrom(ctx, rem, rerr, p); err != nil {
+			left++
+			first = cmp.Or(first, err)
+		}
+	}
+	if left > 0 {
+		return fmt.Errorf("%w: %d 개 중 %d 개 (첫 오류: %w)", ErrFilesLeft, len(paths), left, first)
 	}
 	return nil
 }

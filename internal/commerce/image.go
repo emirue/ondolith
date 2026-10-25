@@ -155,14 +155,5 @@ func (im *Images) DeleteProduct(ctx context.Context, productID string) error {
 	if err := im.store.DeleteProduct(ctx, productID); err != nil {
 		return err
 	}
-	var firstErr error
-	for _, p := range paths {
-		if err := im.files.Remove(ctx, p); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if firstErr != nil {
-		return fmt.Errorf("%w: %w", content.ErrFilesLeft, firstErr)
-	}
-	return nil
+	return im.files.RemoveAll(ctx, paths)
 }

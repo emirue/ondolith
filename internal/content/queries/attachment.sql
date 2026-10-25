@@ -19,6 +19,9 @@ DELETE FROM attachments WHERE id = $1;
 -- name: AttachmentPaths :many
 SELECT stored_path FROM attachments WHERE post_id = $1;
 
+-- name: BoardAttachmentPaths :many
+SELECT a.stored_path FROM attachments a JOIN posts p ON p.id = a.post_id WHERE p.board_id = $1;
+
 -- name: BoardAttachments :many
 SELECT a.id, a.post_id, a.stored_path, a.original_name, a.mime_type, a.byte_size, a.created_at
 FROM attachments a
