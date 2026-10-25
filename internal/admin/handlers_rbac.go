@@ -451,6 +451,19 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// The body is capped before anything reads it. Without this the multipart
+	// parser buffers whatever arrives, which is a denial of service that never
+	// reaches the zip limits at all. 재인증보다 먼저다 — 재인증이 폼의 비밀번호를
+	// 읽는 순간 본문 전체가 상한 없이 파싱된다.
+	r.Body = http.MaxBytesReader(w, r.Body, maxThemeUploadBytes)
+	if err := r.ParseMultipartForm(maxThemeMemoryBytes); err != nil {
+		d.Render(w, r, "admin/theme-upload.html", http.StatusRequestEntityTooLarge,
+			map[string]any{"Error": "파일이 너무 크거나 형식이 올바르지 않습니다."})
+		return
+	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
+
 	// D15 5.3-1: uploading executable-ish content is the last step of a takeover.
 	if !reauthOK(c, r) {
 		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
@@ -460,17 +473,6 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 		d.refuse(w, r, http.StatusInternalServerError, "테마를 설치할 수 없습니다.")
 		return
 	}
-
-	// The body is capped before anything reads it. Without this the multipart
-	// parser buffers whatever arrives, which is a denial of service that never
-	// reaches the zip limits at all.
-	r.Body = http.MaxBytesReader(w, r.Body, maxThemeUploadBytes)
-	if err := r.ParseMultipartForm(maxThemeMemoryBytes); err != nil {
-		d.Render(w, r, "admin/theme-upload.html", http.StatusRequestEntityTooLarge,
-			map[string]any{"Error": "파일이 너무 크거나 형식이 올바르지 않습니다."})
-		return
-	}
-	defer func() { _ = r.MultipartForm.RemoveAll() }()
 
 	name := strings.TrimSpace(r.PostFormValue("name"))
 	// **활성 테마는 덮어쓰지 않는다** (OPEN-42 결정). 덮어쓰는 동안 사이트가
