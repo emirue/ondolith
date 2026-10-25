@@ -511,6 +511,10 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 			d.renderRefund(w, r, c, order, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 			return
 		}
+		if order.Status == commerce.StatusCancelled {
+			d.renderRefund(w, r, c, order, http.StatusUnprocessableEntity, "이미 취소된 주문입니다.")
+			return
+		}
 		key, err := commerce.NewRequestKey()
 		if err != nil {
 			d.serverError(w, r, err)
@@ -547,8 +551,12 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		// 「주문 종료」 — PG 확정 뒤 종료 기록이 실패해 열린 채 남은 주문을 닫는다
 		// (commerce.ErrRefundSentNotSettled). 돈이 나가지 않으므로 재인증을 묻지 않는다.
 		// 취소로 닫히면 order.cancel 을 본다 (D19 A-507 동작별 권한, GAP-11).
-		if target, err := d.Commerce.RefundCloseTarget(r.Context(), order.ID, order.Status, "A-507"); err == nil &&
-			target == commerce.StatusCancelled && !c.Can("order.cancel") {
+		target, err := d.Commerce.RefundCloseTarget(r.Context(), order.ID, order.Status, "A-507")
+		if err != nil {
+			d.serverError(w, r, err)
+			return
+		}
+		if target == commerce.StatusCancelled && !c.Can("order.cancel") {
 			d.renderRefund(w, r, c, order, http.StatusForbidden, "주문 취소 권한이 없습니다.")
 			return
 		}
@@ -808,7 +816,12 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		// 교환 완료 (재발송). 차액이 양수면 여기서 끝나지 않고 차액결제대기로 가고, 받는 것은
 		// P-514 다. **차액이 음수면 돈이 나간다** — 그 차액을 돌려주므로 환불 확정과 같은
 		// order.refund + 재인증이다 (D19 A-511 「동작별 권한」, D15 5.3-1). 아니면 order.return 만.
-		if ret, rerr := d.Commerce.ReturnByNo(r.Context(), returnNo); rerr == nil && ret.PriceDiff < 0 {
+		ret, rerr := d.Commerce.ReturnByNo(r.Context(), returnNo)
+		if rerr != nil && !errors.Is(rerr, commerce.ErrNotFound) {
+			d.serverError(w, r, rerr) // 차액을 모르면 권한을 정할 수 없다 — 열린 쪽으로 빠지지 않는다
+			return
+		}
+		if rerr == nil && ret.PriceDiff < 0 {
 			if !c.Can("order.refund") {
 				d.renderReturns(w, r, c, order, http.StatusForbidden, "환불 확정 권한이 없습니다.")
 				return
@@ -866,9 +879,11 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				d.log(r, c, "return.settle", "return", returnNo,
 					"반품 환불 "+itoa(amount)+"원 확정")
-				// 정산이 만든 환불 건을 PG 로 보낸다 (A-507 과 같은 순서).
-				// 주문은 같은 tx 에서 이미 환불(최종)이라 종료할 것이 없다.
-				if _, err = d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511"); errors.Is(err, commerce.ErrRefundSentNotSettled) {
+				// 정산이 만든 환불 건을 PG 로 보낸다 (A-507 과 같은 순서). 교환 차액으로 이미 다 돌려준
+				// 품목이면 환불 건이 없다(refundID ""). 주문은 같은 tx 에서 이미 옮겼다.
+				if refundID == "" {
+					err = nil
+				} else if _, err = d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511"); errors.Is(err, commerce.ErrRefundSentNotSettled) {
 					d.Logger.Error("반품 환불 뒤 주문 종료", "return", returnNo, "err", err)
 					err = nil
 				}

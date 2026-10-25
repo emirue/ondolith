@@ -80,7 +80,8 @@ func verifyValue(v string) string {
 // robotsRules normalises seo.robots_extra and reports the first line it refuses (1부터),
 // or 0. 줄 끝은 \n 으로 맞추고 줄마다 앞뒤 공백을 걷는다.
 func robotsRules(v string) (string, int) {
-	lines := strings.Split(strings.ReplaceAll(v, "\r\n", "\n"), "\n")
+	// CR 하나도 줄 끝이다 (RFC 9309) — 남겨 두면 한 줄로 보이는 값 안에 다른 줄이 숨는다.
+	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(v, "\r\n", "\n"), "\r", "\n"), "\n")
 	var out []string
 	for i, l := range lines {
 		l = strings.TrimSpace(l)

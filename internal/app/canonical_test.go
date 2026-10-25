@@ -14,6 +14,8 @@ func TestCanonicalURLKeepsOnlyThePage(t *testing.T) {
 		"/shop/p/tee?ref=ad":                             "https://site.example/shop/p/tee",
 		"/":                                              "https://site.example/",
 		"/%ED%95%9C%EA%B8%80":                            "https://site.example/%ED%95%9C%EA%B8%80",
+		"/board/free?page=abc":                           "https://site.example/board/free",
+		"/board/free?page=99999":                         "https://site.example/board/free?page=100",
 	} {
 		u, err := url.Parse(raw)
 		if err != nil {

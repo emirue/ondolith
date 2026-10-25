@@ -2357,6 +2357,12 @@ func TestAdminFullCancelReturnsTheRestAndCancels(t *testing.T) {
 	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaid)
 
 	caller.perms["order.cancel"] = true
+	caller.reauth = true // 돈이 나간다 — 재인증이 지나야 한다
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"cancel"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("재인증 없이 전체 취소 = HTTP %d, want 403", rec.Code)
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaid)
+	caller.reauth = false
 	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"cancel"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("전체 취소 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
@@ -2410,6 +2416,11 @@ func TestAdminCheaperExchangeRefundsTheDifference(t *testing.T) {
 		t.Errorf("order.refund 없이 차액 환불 교환 = HTTP %d, want 403", rec.Code)
 	}
 	caller.perms["order.refund"] = true
+	caller.reauth = true // 돈이 나간다 — 재인증이 지나야 한다
+	if rec := postAdmin(t, d.ReturnAction, path, pv, exchange); rec.Code != http.StatusForbidden {
+		t.Errorf("재인증 없이 차액 환불 교환 = HTTP %d, want 403", rec.Code)
+	}
+	caller.reauth = false
 	if rec := postAdmin(t, d.ReturnAction, path, pv, exchange); rec.Code != http.StatusSeeOther {
 		t.Fatalf("교환 완료 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}

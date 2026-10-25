@@ -367,7 +367,8 @@ type returnLine struct {
 // `반품수거` 에서 나가는 화살표는 `환불` 하나뿐이라(D14 5절) 그 주문은
 // 애플리케이션 안에서 영영 멈춘다.
 func returnGross(ctx context.Context, tx pgx.Tx, returnID string) (int, []returnLine, error) {
-	rows, err := commerceq.New(tx).LockReturnGross(ctx, returnID)
+	q := commerceq.New(tx)
+	rows, err := q.LockReturnGross(ctx, returnID)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -380,7 +381,13 @@ func returnGross(ctx context.Context, tx pgx.Tx, returnID string) (int, []return
 		if err != nil {
 			return 0, nil, err
 		}
-		gross += part
+		// 더 싼 조합 교환으로 이미 돌려준 차액은 뺀다 (capByExchangeCredit).
+		credit, err := q.ExchangeCreditForItem(ctx, r.OrderItemID)
+		if err != nil {
+			return 0, nil, err
+		}
+		gross += capByExchangeCredit(part, int(r.LineAmount), int(r.DiscountAmount),
+			int(r.Quantity), int(r.SettledQuantity), int(credit))
 		lines = append(lines, returnLine{r.OrderItemID, int(r.ReturnQuantity)})
 	}
 	return gross, lines, nil
@@ -460,7 +467,8 @@ func (s *Store) ConfirmPickup(ctx context.Context, orderNo, returnNo, fault stri
 		if err != nil {
 			return err
 		}
-		if feeAmount >= gross {
+		// 몫이 0 이면(교환 차액으로 이미 다 돌려줬다) 뺄 환불이 없다 — 정산은 환불 없이 끝난다.
+		if gross > 0 && feeAmount >= gross {
 			return fmt.Errorf("%w: 배송비 %d, 환불 몫 %d",
 				ErrShippingFeeTooLarge, feeAmount, gross)
 		}
@@ -551,7 +559,10 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	if feePolicy == FeePolicyDeduct {
 		amount -= feeAmount
 	}
-	if amount <= 0 {
+	if gross == 0 {
+		// 교환 차액으로 이미 다 돌려준 품목이다 — 돌려줄 것이 없어 환불 행 없이 정산한다.
+		amount = 0
+	} else if amount <= 0 {
 		// 수거 확인이 이미 막았어야 하는 경우다. 여기 오면 스냅샷이 그 사이
 		// 바뀐 것이고(예: 같은 품목이 부분 환불로 소진됨), 그때도 500 이
 		// 아니라 설명이 있는 오류를 낸다.
@@ -570,25 +581,27 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 		}
 	}
 
-	// 선점. 부분 환불과 **같은 한도**를 나눠 쓴다 — 각각 한도까지 쓰면
-	// 결제액을 넘는 사고가 난다 (D19 P-511).
-	if err := q.ReserveRefundAmount(ctx, commerceq.ReserveRefundAmountParams{
-		ID: paymentID, Amount: int32(amount)}); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23514" {
-			return 0, "", ErrRefundExceeds
+	if amount > 0 {
+		// 선점. 부분 환불과 **같은 한도**를 나눠 쓴다 — 각각 한도까지 쓰면
+		// 결제액을 넘는 사고가 난다 (D19 P-511).
+		if err := q.ReserveRefundAmount(ctx, commerceq.ReserveRefundAmountParams{
+			ID: paymentID, Amount: int32(amount)}); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23514" {
+				return 0, "", ErrRefundExceeds
+			}
+			return 0, "", err
 		}
-		return 0, "", err
-	}
 
-	refundID, err = q.InsertReturnRefund(ctx, commerceq.InsertReturnRefundParams{
-		OrderID: orderID, PaymentID: paymentID, ReturnID: &id, Amount: int32(amount), Reason: "반품 환불", RequestKey: requestKey})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return 0, "", ErrRefundDuplicate
-	}
-	if err != nil {
-		return 0, "", err
+		refundID, err = q.InsertReturnRefund(ctx, commerceq.InsertReturnRefundParams{
+			OrderID: orderID, PaymentID: paymentID, ReturnID: &id, Amount: int32(amount), Reason: "반품 환불", RequestKey: requestKey})
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return 0, "", ErrRefundDuplicate
+		}
+		if err != nil {
+			return 0, "", err
+		}
 	}
 	// return_id 가 있는 refunds 는 refund_items 를 만들지 않는다 — 품목·수량이
 	// 이미 return_items 에 있고, 양쪽에 넣으면 settled_quantity 가 이중
@@ -646,6 +659,11 @@ func (s *Store) RejectReturn(ctx context.Context, orderNo, returnNo, reason stri
 		return err
 	}
 	id, kind, status, orderID, newVariant := r.ID, r.Kind, r.Status, r.OrderID, r.NewVariantID
+	// 수거한 반품은 거부하지 않는다 — 물건을 받았으니 끝은 환불이다. 상태표의 `반품수거 → 배송완료` 는
+	// 부분 반품 정산(SettleReturn)의 화살표이지 거부의 것이 아니다.
+	if Status(status) == StatusReturnPickedUp {
+		return fmt.Errorf("%w: 수거한 반품은 거부할 수 없습니다", ErrTransitionNotAllowed)
+	}
 	if err := returnStep(status, StatusDelivered, actor); err != nil {
 		return err
 	}
@@ -862,7 +880,7 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 
 // reserveExchangeRefund records the refund of a cheaper exchange's difference under the caller's
 // order and return locks. 반품 정산과 **같은 한도**(payments.refunded_amount)를 나눠 쓴다 — 각각 한도까지
-// 쓰면 결제액을 넘는다. 잠금 순서는 주문 → 반품 → 결제다 (D30 「잠금 순서」).
+// 쓰면 결제액을 넘는다. 잠금 순서는 주문 → 반품 → 결제다 (D14 「동시성」, D30 「잠금 순서」의 결제는 끝).
 func (s *Store) reserveExchangeRefund(ctx context.Context, q *commerceq.Queries, orderID, returnID string,
 	amount int, requestKey string) (string, error) {
 	if requestKey == "" {

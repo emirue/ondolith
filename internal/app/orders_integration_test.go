@@ -322,7 +322,8 @@ func TestMemberPartialRefundDoubleSubmit(t *testing.T) {
 	if m == nil {
 		t.Fatal("P-508 폼에 request_key 가 없다")
 	}
-	form := url.Values{"item_id": {itemID}, "qty_" + itemID: {"1"}, "reason": {"변심"}, "request_key": {m[1]}}
+	// 남은 두 개를 다 고른다 — 두 번째 제출이 수량 검사보다 먼저 같은 요청으로 알아봐져야 한다.
+	form := url.Values{"item_id": {itemID}, "qty_" + itemID: {"2"}, "reason": {"변심"}, "request_key": {m[1]}}
 	for i := range 2 {
 		resp := post(t, g, srv.URL+"/orders/"+no+"/refund", form)
 		resp.Body.Close()

@@ -73,6 +73,13 @@ func (s *Store) RequestRefund(ctx context.Context, orderNo string, lines []Refun
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
+	// 같은 폼의 재전송이면 첫 결과다. 남은 수량을 다 고른 요청이면 수량 검사가 먼저 걸려, 접수된
+	// 요청이 「남은 수량을 넘습니다」로 보였다.
+	if taken, err := q.RefundKeyTaken(ctx, requestKey); err != nil {
+		return "", 0, err
+	} else if taken {
+		return "", 0, ErrRefundDuplicate
+	}
 	ids, err := q.ApprovedPaymentForOrderNo(ctx, orderNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", 0, ErrNoPayment
@@ -132,7 +139,12 @@ func (s *Store) RequestRefund(ctx context.Context, orderNo string, lines []Refun
 		if err != nil {
 			return "", 0, err
 		}
-		amount += part
+		credit, err := q.ExchangeCreditForItem(ctx, l.OrderItemID)
+		if err != nil {
+			return "", 0, err
+		}
+		amount += capByExchangeCredit(part, int(it.LineAmount), int(it.DiscountAmount),
+			int(it.Quantity), int(it.SettledQuantity), int(credit))
 
 		if err := q.SettleOrderItem(ctx, commerceq.SettleOrderItemParams{
 			ID: l.OrderItemID, Quantity: int32(l.Quantity)}); err != nil {

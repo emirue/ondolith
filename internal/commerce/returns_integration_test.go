@@ -1518,3 +1518,103 @@ func TestNegativeExchangeDifferenceIsRefunded(t *testing.T) {
 		t.Errorf("주문 %s, want %s — 차액 환불이 주문을 닫으면 안 된다", got, StatusExchangeShipped)
 	}
 }
+
+// **차액을 돌려준 교환 품목을 나중에 반품하면 그 차액을 빼고 돌려준다** (FR-618). 빼지 않던 판(리뷰가
+// 찾음)은 원래 값 전액을 또 돌려줘 품목 하나에 낸 것보다 많이 나갔다 — 결제액 한도는 다른 품목·배송비
+// 몫이 있으면 막지 못한다. 부분 환불(A-507)도 같은 계산이다.
+func TestExchangeCreditIsNotRefundedTwice(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, goods := deliveredOrder(t, s, pool, "tee-credit", 1)
+	items := itemsOf(t, s, orderNo)
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		SELECT product_id,'{"크기":"S"}',0,5 FROM order_items WHERE id = $1 RETURNING id`,
+		items[0].ID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ex, err := s.OpenReturn(ctx, orderNo, ReturnRequest{Kind: KindExchange, NewVariantID: newVariant,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	if err := s.ConfirmPickup(ctx, orderNo, ex.ReturnNo, "구매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	_, refundID, err := s.CompleteExchange(ctx, orderNo, ex.ReturnNo, "A-511", "ex-credit")
+	if err != nil || refundID == "" {
+		t.Fatalf("교환 완료 = %q, %v", refundID, err)
+	}
+	if _, err := s.ExecuteRefund(ctx, okGateway(), refundID, "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	// 재배송 도착 — 그 전이를 일으키는 코드가 아직 없다 (GAP-32).
+	if _, err := pool.Exec(ctx, `UPDATE orders SET status = '배송완료' WHERE order_no = $1`, orderNo); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{Kind: KindReturn,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}}, "P-511", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "판매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	amount, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", "rk-credit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if amount != goods-1000 {
+		t.Errorf("반품 환불 %d, want %d (원래 %d − 돌려준 차액 1000)", amount, goods-1000, goods)
+	}
+}
+
+// **수거한 반품은 거부할 수 없다** (D19 A-511). 부분 반품 정산을 위해 상태표에 `반품수거 → 배송완료` 를
+// 넣자 같은 표를 보는 거부가 그 화살표로 열렸다 — 물건을 받고 돈은 돌려주지 않는 길이다(리뷰가 찾음).
+func TestPickedUpReturnCannotBeRejected(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, returnNo, _ := pickedUpReturn(t, s, pool)
+	if err := s.RejectReturn(context.Background(), orderNo, returnNo, "이미 받았다", "A-511"); !errors.Is(err, ErrTransitionNotAllowed) {
+		t.Errorf("수거한 반품 거부 = %v, want ErrTransitionNotAllowed", err)
+	}
+	if got := statusOf(t, s, orderNo); got != StatusReturnPickedUp {
+		t.Errorf("주문 %s, want %s", got, StatusReturnPickedUp)
+	}
+}
+
+// 부분 환불(A-507·P-507)도 교환으로 돌려준 차액을 뺀다 — 반품 정산과 같은 계산이다 (위 시험의 짝).
+func TestExchangeCreditAlsoAppliesToPartialRefunds(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, goods := deliveredOrder(t, s, pool, "tee-credit-part", 1)
+	items := itemsOf(t, s, orderNo)
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		SELECT product_id,'{"크기":"S"}',0,5 FROM order_items WHERE id = $1 RETURNING id`,
+		items[0].ID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ex, err := s.OpenReturn(ctx, orderNo, ReturnRequest{Kind: KindExchange, NewVariantID: newVariant,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	if err := s.ConfirmPickup(ctx, orderNo, ex.ReturnNo, "구매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CompleteExchange(ctx, orderNo, ex.ReturnNo, "A-511", "ex-credit-part"); err != nil {
+		t.Fatal(err)
+	}
+	_, amount, err := s.RequestRefund(ctx, orderNo, []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
+		"관리자", "", "rk-credit-part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if amount != goods-1000 {
+		t.Errorf("부분 환불 %d, want %d (원래 %d − 선점한 차액 1000)", amount, goods-1000, goods)
+	}
+}

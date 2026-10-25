@@ -125,6 +125,18 @@ func RefundableAmount(lineAmount, discount, quantity, settled, qty int) (int, er
 	return share(net, settled+qty, quantity) - share(net, settled, quantity), nil
 }
 
+// capByExchangeCredit trims an item's refund part by what a cheaper exchange already returned on it
+// (FR-618). 그 품목이 지금까지 돌려준 것 — 앞선 환불(소진 수량 몫)과 교환 차액 — 이 할인후 금액을 넘지
+// 않게 한다. 빼지 않으면 차액을 돌려준 품목을 반품할 때 원래 값 전액이 또 나간다. 차액은 남은 몫의
+// 끝에서 깎인다 — 앞 단위는 제 몫을 받고 마지막 단위가 덜 받는다. 음수는 0 이다.
+func capByExchangeCredit(part, lineAmount, discount, quantity, settled, credit int) int {
+	if credit <= 0 {
+		return part
+	}
+	net := lineAmount - discount
+	return max(0, min(part, net-share(net, settled, quantity)-credit))
+}
+
 // share is floor(net * n / q).
 //
 // 곱이 넘치지 않는다: net 은 금액 상한(20억) 이하이고 n 은 수량 상한(999)
