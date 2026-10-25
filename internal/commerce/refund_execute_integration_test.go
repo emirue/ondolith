@@ -304,7 +304,7 @@ func TestConcurrentExecuteSendsOnce(t *testing.T) {
 // **배송 전 주문은 품목을 A-507 로 전부 환불해도 열린 채다** (지금 동작). 품목 단위
 // 환불은 배송비를 돌려주지 않으므로(D50) 환불액이 결제액에 못 미치고, 배송 전의 남은
 // 배송비를 돌려주며 닫는 길은 구매자의 전체 취소(P-506)뿐이다. 배송 뒤는
-// TestAllItemsRefundedAfterShippingClosesTheOrder 다. 정책을 정하면 이 시험을 바꾼다.
+// TestAllItemsRefundedAfterShippingClosesTheOrder 다. BUG-02 를 고치면 이 시험을 바꾼다.
 func TestFullItemRefundWithShippingFeeLeavesTheOrderOpen(t *testing.T) {
 	s, pool := testStore(t)
 	ctx := context.Background()

@@ -602,6 +602,7 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	if err := q.SetReturnStatus(ctx, commerceq.SetReturnStatusParams{ID: id, Status: string(StatusRefunded)}); err != nil {
 		return 0, "", err
 	}
+	// BUG-04: 부분 반품이어도 주문 전체가 환불(최종)로 간다.
 	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), StatusRefunded, actor); err != nil {
 		return 0, "", err
 	}
@@ -792,7 +793,8 @@ func (s *Store) VariantsForExchange(ctx context.Context, orderItemID string) ([]
 //
 // 차액이 양수면 `차액결제대기` 로 간다 — 돈을 더 받아야 하고, 받는 것은
 // P-514 다. 0 이하면 곧바로 발송이다. **차액을 깎아 돌려주지는 않는다**:
-// 더 싼 조합으로 바꿔 생기는 차액 환불은 별도 결정이고 그 화면이 없다.
+// 더 싼 조합으로 바꿔 생기는 차액 환불은 별도 결정이고 그 화면이 없다 — D14 와
+// 다르다 (BUG-05).
 func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, actor Actor) (Status, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
