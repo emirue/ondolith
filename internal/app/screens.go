@@ -82,6 +82,7 @@ var screenInventory = map[string]SecurityClass{
 	"A-101": SC4, // 대시보드
 	"A-102": SC4, // 관리자 셸 (레이아웃·메뉴)
 	"A-201": SC5, // 사이트 설정
+	"A-211": SC5, // 검색 노출
 	"A-202": SC5, // 테마 목록·활성화
 	"A-203": SC7, // 테마 업로드
 	"A-204": SC5, // 메뉴 관리

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/emirue/ondolith/internal/commerce/commerceq"
 	"github.com/jackc/pgx/v5"
@@ -392,6 +393,25 @@ func (s *Store) Categories(ctx context.Context) ([]Category, error) {
 	var out []Category
 	for _, r := range rows {
 		out = append(out, categoryFromRow(r))
+	}
+	return out, nil
+}
+
+// SitemapProduct is one visible product for sitemap.xml (FR-510).
+type SitemapProduct struct {
+	Slug      string
+	UpdatedAt time.Time
+}
+
+// SitemapProducts lists visible products, most recently changed first, at most limit.
+func (s *Store) SitemapProducts(ctx context.Context, limit int) ([]SitemapProduct, error) {
+	rows, err := s.q.SitemapProducts(ctx, int32(limit))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SitemapProduct, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, SitemapProduct{Slug: r.Slug, UpdatedAt: r.UpdatedAt})
 	}
 	return out, nil
 }

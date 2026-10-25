@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -210,7 +209,7 @@ func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 // from writing another screen's keys: there is no generic settings editor
 // (D30 settings).
 var siteSettingKeys = append([]string{
-	"site.name", "site.meta_description", "site.og_image", "site.dev_mode", "site.type",
+	"site.name", "site.dev_mode", "site.type",
 	"auth.email_verification_required",
 	// 회원가입을 닫는다 (FR-217). 빈 값이 「받음」이라 이 키가 없던 사이트는 지금처럼 열려 있다.
 	"auth.signup_closed",
@@ -219,8 +218,7 @@ var siteSettingKeys = append([]string{
 	"admin.theme",
 	// 공개 폼 스팸 방지 (FR-216). 둘 다 있어야 켜진다. 비밀키는 봉인되고 다시 보이지 않는다.
 	"turnstile.site_key", "turnstile.secret_key",
-	// 방문 통계 GA4 측정 ID (FR-714). 공개 화면의 <script> 에 들어간다 — 형식은 ga4ID 가 본다.
-	"analytics.ga4_id",
+	// 기본 설명·대표 이미지·GA4 는 「검색 노출」(A-211, seoSettingKeys)에 있다.
 	// 지도 키 (FR-716) — mapKeyNames 와 같은 목록이다.
 	"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id",
 	// 사업자 정보 여덟 칸이 뒤에 붙는다 (FR-711). 쇼핑몰에서만 열리던 화면에 있었는데,
@@ -234,10 +232,6 @@ var siteSettingKeys = append([]string{
 var mapKeyNames = []string{"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id"}
 
 var mapKey = regexp.MustCompile(`^[A-Za-z0-9_-]{0,100}$`)
-
-// ga4ID is a GA4 measurement ID: 「G- + 숫자·문자」 (Google 애널리틱스 도움말, 2026-10-08 확인).
-// 길이 상한은 문서에 없다 — 30자는 실제 ID(10자 안팎)보다 넉넉한 우리 상한이다.
-var ga4ID = regexp.MustCompile(`^G-[A-Z0-9]{1,30}$`)
 
 // adminThemes 는 admin.css 가 아는 배색이다 (`data-admin-theme="1a"` … `1e`).
 //
@@ -253,26 +247,6 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 	}
 	// renderSettings 를 거친다 — Turnstile 비밀키는 「저장됐는지」 만 나간다.
 	d.renderSite(w, r, http.StatusOK, "")
-}
-
-// ogImageURL is D19 A-201's 「스킴 허용목록 http/https 또는 내부 상대경로」. 빈 값은
-// 「없음」이다. `//호스트`·`/\호스트` 는 브라우저가 다른 호스트로 읽는 경로라 내부가 아니다.
-func ogImageURL(v string) bool {
-	if v == "" {
-		return true
-	}
-	if strings.HasPrefix(v, "/") {
-		return !strings.HasPrefix(v, "//") && !strings.Contains(v, `\`)
-	}
-	u, err := url.Parse(v)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
-}
-
-func orNone(v string) string {
-	if v == "" {
-		return "(없음)"
-	}
-	return v
 }
 
 func changed(kv, prev map[string]string, key string) bool {
@@ -303,16 +277,6 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "사이트 이름은 1~100자입니다.")
 		return
 	}
-	if utf8.RuneCountInString(kv["site.meta_description"]) > 300 {
-		d.renderSite(w, r,
-			http.StatusUnprocessableEntity, "기본 메타 설명은 300자 이내입니다.")
-		return
-	}
-	if !ogImageURL(kv["site.og_image"]) {
-		d.renderSite(w, r,
-			http.StatusUnprocessableEntity, "OG 이미지는 http·https 주소이거나 /로 시작하는 이 사이트의 경로여야 합니다.")
-		return
-	}
 	// 사업자 정보는 비워도 저장한다 — 필수가 아니다. 쇼핑몰의 빈 항목은 경고다 (FR-711).
 	for _, k := range commerce.BusinessKeys {
 		if v, ok := kv[k]; ok {
@@ -322,15 +286,6 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 					http.StatusUnprocessableEntity, "사업자 정보는 항목마다 200자 이내입니다.")
 				return
 			}
-		}
-	}
-	// 붙여넣은 공백·소문자는 고쳐 받는다. 빈 값은 끄기다.
-	if v, ok := kv["analytics.ga4_id"]; ok {
-		kv["analytics.ga4_id"] = strings.ToUpper(strings.TrimSpace(v))
-		if v := kv["analytics.ga4_id"]; v != "" && !ga4ID.MatchString(v) {
-			d.renderSite(w, r,
-				http.StatusUnprocessableEntity, "GA4 측정 ID 는 G- 로 시작하는 영문·숫자입니다 (예: G-PSW1MY7HB4).")
-			return
 		}
 	}
 	for _, k := range mapKeyNames {
@@ -416,15 +371,11 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	if changed(kv, prev, "turnstile.site_key") || kv["turnstile.secret_key"] != "" {
 		d.log(r, c, "settings.update", "settings", "turnstile", "스팸 방지(Turnstile) 키 변경")
 	}
-	// 나머지 저장도 남긴다 (D19 A-201). 바뀐 키 이름만 적되 GA4 ID 는 값까지 적는다 — 방문
-	// 기록이 어느 GA 속성으로 가는지를 정하는 공개값이다 (D60 「설정값을 어디에 두는가」 ①).
+	// 나머지 저장도 남긴다 (D19 A-201). 바뀐 키 이름만 적는다.
 	var names []string
 	for _, k := range plain {
 		if k == "site.type" || k == "turnstile.site_key" || !changed(kv, prev, k) {
 			continue
-		}
-		if k == "analytics.ga4_id" {
-			k += " " + orNone(prev[k]) + " → " + orNone(kv[k])
 		}
 		names = append(names, k)
 	}

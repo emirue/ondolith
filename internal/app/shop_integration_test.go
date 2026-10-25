@@ -149,9 +149,12 @@ func TestCommercePathsOpenInShopMode(t *testing.T) {
 // restartOnSameSchema starts a second app against the same database WITHOUT
 // wiping it — liveSite drops the schema, which would undo the setting we just
 // wrote.
-func restartOnSameSchema(t *testing.T) *httptest.Server {
+func restartOnSameSchema(t *testing.T, tweak ...func(*config.Config)) *httptest.Server {
 	t.Helper()
 	cfg := &config.Config{DatabaseURL: os.Getenv(dsnEnv), SiteName: "테스트 사이트", UploadDir: t.TempDir()}
+	for _, f := range tweak {
+		f(cfg)
+	}
 	h, cleanup, err := New(context.Background(), cfg, "1.0.0",
 		slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err != nil {

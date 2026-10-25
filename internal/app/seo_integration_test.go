@@ -183,9 +183,8 @@ func TestMetaDiffersPerScreen(t *testing.T) {
 	ctx := context.Background()
 	store := content.NewStore(pool)
 	c, post := adminSession(t, srv, pool)
-	post("/admin/settings", urlValues("site.name", "테스트 사이트",
-		"site.meta_description", "사이트 기본 설명", "site.og_image", "/기본.png",
-		"site.type", "cms"))
+	post("/admin/settings", urlValues("site.name", "테스트 사이트", "site.type", "cms"))
+	post("/admin/settings/seo", urlValues("site.meta_description", "사이트 기본 설명", "site.og_image", "/기본.png"))
 
 	pageID, err := store.CreatePage(ctx, content.Page{
 		Slug: "about", Title: "회사 소개", Body: "회사 소개 첫 줄입니다.\n둘째 줄"})
@@ -267,5 +266,176 @@ func TestSitemapUsesTheConfiguredSiteURL(t *testing.T) {
 	_, robots := mustGet(t, client(), srv.URL+"/robots.txt")
 	if !strings.Contains(robots, "Sitemap: https://shop.example.com/sitemap.xml\n") {
 		t.Errorf("robots 의 Sitemap 줄이 site_url 을 쓰지 않는다:\n%s", robots)
+	}
+}
+
+// **「검색 노출」(A-211)의 소유 확인·검색 노출 끄기가 공개 화면 <head> 에, 추가 규칙이
+// robots.txt 에 나간다** (FR-718). 소유 확인은 구글·네이버·빙이 홈의 <head> 에서 찾는다.
+// noindex 는 robots.txt 로 막지 않는다 — 막으면 크롤러가 그 태그를 읽지 못해 이미 색인된
+// 쪽이 빠지지 않는다(구글 안내).
+func TestSearchSettingsReachTheHeadAndRobots(t *testing.T) {
+	srv, pool := liveSite(t)
+	c, post := adminSession(t, srv, pool)
+	post("/admin/settings/seo", urlValues(
+		"seo.google_verification", "g-token_1", "seo.naver_verification", "n0token",
+		"seo.bing_verification", "B1NG", "seo.noindex", "1", "seo.robots_extra", "Disallow: /tmp"))
+
+	_, home := mustGet(t, c, srv.URL+"/")
+	for _, want := range []string{
+		`<meta name="google-site-verification" content="g-token_1">`,
+		`<meta name="naver-site-verification" content="n0token">`,
+		`<meta name="msvalidate.01" content="B1NG">`,
+		`<meta name="robots" content="noindex">`,
+	} {
+		if !strings.Contains(home, want) {
+			t.Errorf("홈 <head> 에 %s 가 없다", want)
+		}
+	}
+	_, robots := mustGet(t, client(), srv.URL+"/robots.txt")
+	if i, j := strings.Index(robots, "Disallow: /tmp\n"), strings.Index(robots, "Sitemap: "); i < 0 || i > j {
+		t.Errorf("추가 규칙이 Sitemap 줄 앞에 없다:\n%s", robots)
+	}
+	if strings.Contains(robots, "Disallow: /\n") {
+		t.Errorf("검색 노출 끄기가 robots.txt 로 사이트 전체를 막았다:\n%s", robots)
+	}
+
+	post("/admin/settings/seo", urlValues("seo.noindex", ""))
+	if _, home := mustGet(t, c, srv.URL+"/"); strings.Contains(home, `name="robots"`) {
+		t.Error("검색 노출을 다시 켰는데 noindex 가 남았다")
+	}
+}
+
+// **site_url 이 있으면 canonical·og:url 이 그 주소이고, 글은 article·첫 사진이다** (FR-511).
+// 링크 미리보기는 상대 주소를 읽지 못해 og:image 도 절대 주소다. site_url 이 없으면 canonical 을
+// 싣지 않는다 — 요청의 Host 로 짐작한 주소를 정본으로 알리면 잘못된 주소가 검색에 굳는다.
+func TestShareTagsUseTheSiteURL(t *testing.T) {
+	srv, pool := liveSiteWith(t, func(c *config.Config) { c.SiteURL = "https://site.example/" })
+	boardID := mkBoard(t, pool, "free", content.PresetPublic)
+	const photo = "0e7f0c3a-0000-4000-8000-000000000001"
+	postID, err := content.NewStore(pool).CreatePost(context.Background(), content.Post{
+		BoardID: boardID, Title: "사진 글", Body: "본문",
+		BodyHTML: `<p>본문</p><p><img src="/media/` + photo + `/thumb" alt=""></p>`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, page := mustGet(t, client(), srv.URL+"/board/free/"+postID+"?utm_source=kakao")
+	for _, want := range []string{
+		`<link rel="canonical" href="https://site.example/board/free/` + postID + `">`,
+		`<meta property="og:url" content="https://site.example/board/free/` + postID + `">`,
+		`<meta property="og:type" content="article">`,
+		`<meta property="og:image" content="https://site.example/media/` + photo + `">`,
+		`<meta name="twitter:card" content="summary_large_image">`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("글 화면에 %s 가 없다", want)
+		}
+	}
+	_, home := mustGet(t, client(), srv.URL+"/")
+	if !strings.Contains(home, `<meta property="og:type" content="website">`) ||
+		!strings.Contains(home, `<link rel="canonical" href="https://site.example/">`) {
+		t.Error("홈의 og:type·canonical 이 틀렸다")
+	}
+}
+
+// site_url 이 없으면 canonical·og:url 을 싣지 않는다 (위 시험의 짝).
+func TestCanonicalIsAbsentWithoutSiteURL(t *testing.T) {
+	srv, _ := liveSite(t)
+	if _, home := mustGet(t, client(), srv.URL+"/"); strings.Contains(home, `rel="canonical"`) || strings.Contains(home, "og:url") {
+		t.Error("site_url 이 없는데 canonical 을 실었다")
+	}
+}
+
+// **쇼핑몰의 사이트맵에는 노출 상품과 상품 카테고리가 있다** (FR-510). 상품 화면이 검색 결과에
+// 나오려면 크롤러가 그 주소를 알아야 하는데, 사이트맵에는 게시판 글만 있었다. 미노출 상품은
+// 404 이므로 넣지 않는다 — 넣으면 검색엔진이 깨진 주소를 쌓는다.
+func TestSitemapListsShopProductsAndCategories(t *testing.T) {
+	_, pool := liveSite(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settings (key, value) VALUES ('site.type','shop')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+		INSERT INTO products (slug,name,base_price,is_visible) VALUES
+			('on-sale','파는 상품',1000,true), ('hidden-one','숨긴 상품',1000,false);
+		INSERT INTO categories (name, slug) VALUES ('옷','clothes')`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t)
+	_, sitemap := mustGet(t, client(), srv.URL+"/sitemap.xml")
+	for _, want := range []string{"/shop</loc>", "/shop/p/on-sale</loc>", "/shop/c/clothes</loc>"} {
+		if !strings.Contains(sitemap, want) {
+			t.Errorf("사이트맵에 %s 가 없다:\n%s", want, sitemap)
+		}
+	}
+	if strings.Contains(sitemap, "hidden-one") {
+		t.Error("미노출 상품이 사이트맵에 있다")
+	}
+}
+
+// cms 사이트의 사이트맵에는 상품이 없다 — 커머스 라우트가 없으니 주소도 없다 (FR-710).
+func TestSitemapHasNoShopInCmsMode(t *testing.T) {
+	srv, pool := liveSite(t)
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO products (slug,name,base_price,is_visible) VALUES ('on-sale','파는 상품',1000,true)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, sitemap := mustGet(t, client(), srv.URL+"/sitemap.xml"); strings.Contains(sitemap, "/shop") {
+		t.Errorf("cms 사이트맵에 상품 주소가 있다:\n%s", sitemap)
+	}
+}
+
+// **홈에는 WebSite·Organization, 상품 화면에는 Product 가 JSON-LD 로 있다** (FR-719). 조직은
+// 사이트 이름이 name 이고 상호가 다르면 legalName 이다(구글 안내). 상품의 가격은 파는 조합 중
+// 가장 싼 값이고 재고가 하나라도 있으면 InStock 이다. 값은 html/template 이 JSON 으로 이스케이프
+// 한다 — 상품 이름의 `</script>` 가 스크립트를 끊지 못한다.
+func TestStructuredDataOnHomeAndProduct(t *testing.T) {
+	_, pool := liveSite(t)
+	ctx := context.Background()
+	var productID, imageID string
+	if err := pool.QueryRow(ctx, `INSERT INTO products (slug,name,description,base_price,is_visible)
+		VALUES ('tee', $1, E'부드러운 면\n둘째 줄', 12000, true) RETURNING id`,
+		`면 티 </script><script>alert(1)</script>`).Scan(&productID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		VALUES ($1,'{"크기":"L"}',1000,3), ($1,'{"크기":"S"}',0,0)`, productID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO product_images (product_id,stored_path,original_name,mime_type,byte_size)
+		VALUES ($1,'2026/10/0e7f0c3a-0000-4000-8000-000000000002','a.png','image/png',10) RETURNING id`,
+		productID).Scan(&imageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES
+		('site.type','shop'), ('business.name','온돌리스 주식회사'), ('business.reg_no','123-45-67890'),
+		('business.phone','02-000-0000')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t, func(c *config.Config) { c.SiteURL = "https://shop.example" })
+
+	_, home := mustGet(t, client(), srv.URL+"/")
+	for _, want := range []string{`<script type="application/ld+json">`, `"@type":"WebSite"`, `"@type":"Organization"`,
+		`"name":"테스트 사이트"`, `"legalName":"온돌리스 주식회사"`, `"taxID":"123-45-67890"`,
+		`"telephone":"02-000-0000"`, `"url":"https://shop.example/"`} {
+		if !strings.Contains(home, want) {
+			t.Errorf("홈 JSON-LD 에 %s 가 없다", want)
+		}
+	}
+	_, page := mustGet(t, client(), srv.URL+"/shop/p/tee")
+	image := "https://shop.example/shop/images/" + imageID
+	for _, want := range []string{`"@type":"Product"`, `"priceCurrency":"KRW"`, `"price":12000`,
+		`"availability":"https://schema.org/InStock"`, `"image":"` + image + `"`,
+		`"url":"https://shop.example/shop/p/tee"`, `"description":"부드러운 면"`,
+		`<meta property="og:image" content="` + image + `">`,
+		`<meta name="description" content="부드러운 면">`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("상품 화면에 %s 가 없다", want)
+		}
+	}
+	if strings.Contains(page, "</script><script>alert(1)") {
+		t.Error("상품 이름이 JSON-LD 스크립트를 끊었다")
+	}
+	if !strings.Contains(page, `\u003c/script\u003e`) {
+		t.Error("상품 이름의 < 가 JSON 으로 이스케이프되지 않았다")
 	}
 }

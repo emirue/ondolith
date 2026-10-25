@@ -170,7 +170,19 @@ func (d *shopDeps) productDetail(w http.ResponseWriter, r *http.Request) {
 	if len(groups) == 0 && len(variants) == 1 {
 		data["Variant"] = &variants[0]
 	}
-	d.renderPage(w, r, "shop/product.html", http.StatusOK, d.shopView(r, p.Name, data))
+	// 검색 결과·링크 미리보기는 상품 설명 첫 줄과 첫 이미지다 (FR-511).
+	desc := firstLine(p.Description)
+	v := d.view(r, p.Name, desc)
+	v.Data = data
+	image := ""
+	if len(images) > 0 {
+		image = d.absURL("/shop/images/" + images[0].ID)
+		v.Meta.OGImage = image
+	}
+	if ld := productJSONLD(p, variants, desc, image, v.Meta.URL); ld != nil {
+		v.Meta.JSONLD = ld
+	}
+	d.renderPage(w, r, "shop/product.html", http.StatusOK, v)
 }
 
 // P-306 GET /shop/images/{id} — one product image.

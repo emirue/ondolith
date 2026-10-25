@@ -219,6 +219,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 	site := func() theme.Site {
 		kv := setting("site.name", "site.meta_description", "site.og_image", "site.type", "analytics.ga4_id",
+			"seo.google_verification", "seo.naver_verification", "seo.bing_verification", "seo.noindex",
 			"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id", "auth.signup_closed")
 		s := theme.Site{
 			Name:            kv["site.name"],
@@ -229,6 +230,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			Maps: theme.MapKeys{Naver: kv["map.naver_key"], Kakao: kv["map.kakao_key"],
 				Google: kv["map.google_key"], GoogleMapID: kv["map.google_map_id"]},
 			SignupClosed: kv["auth.signup_closed"] != "",
+			SEO: theme.SEO{GoogleVerify: kv["seo.google_verification"], NaverVerify: kv["seo.naver_verification"],
+				BingVerify: kv["seo.bing_verification"], NoIndex: kv["seo.noindex"] != ""},
 		}
 		if s.Name == "" {
 			s.Name = cfg.SiteName
@@ -287,7 +290,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 관리자 폼 하나로 켜지고, 테마 작업(FR-306 재파싱)을 위해 켜 둔 채 잊으면
 	// 공개 500 페이지가 pgx 오류·파일 경로를 찍는다 — D60 이 원문을 허용한
 	// 화면은 설치 페이지 하나다. 재파싱은 dev_mode 가, 원문 노출은 빌드가 정한다.
-	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site,
+	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site, siteURL: cfg.SiteURL,
 		dev:            dev && theme.IsDevBuild(version),
 		verifyRequired: verifyRequired,
 		// P-907. 풀을 통째로 넘기지 않는다 — 헬스체크가 필요한 것은
@@ -354,6 +357,14 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 정한다. tree.go 가 라우트를 가르는 것과 같은 규칙이고, 그래야 검사를
 	// 빠뜨릴 자리가 생기지 않는다.
 	if shopMode {
+		pub.shopSitemap = func(c context.Context) ([]commerce.SitemapProduct, []commerce.Category, error) {
+			products, err := commerceStore.SitemapProducts(c, sitemapProductsMax)
+			if err != nil {
+				return nil, nil, err
+			}
+			cats, err := commerceStore.Categories(c)
+			return products, cats, err
+		}
 		pub.products = func(c context.Context, limit int) ([]commerce.Product, error) {
 			return commerceStore.ListProducts(c, commerce.ProductQuery{
 				VisibleOnly: true, Sort: "new", PerPage: limit, Page: 1,
@@ -431,7 +442,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 
 	bd := &boardDeps{publicDeps: pub, sm: sessions, log: log,
-		attachments: contentStore.AttachmentsIn(files), authStore: authStore, siteURL: cfg.SiteURL,
+		attachments: contentStore.AttachmentsIn(files), authStore: authStore,
 		media: contentStore.MediaIn(files), spam: spam}
 
 	// **이름과 어댑터를 한 곳에서 낸다.** 둘을 따로 읽으면 갈라진다 — 실제로

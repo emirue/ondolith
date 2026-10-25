@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
@@ -22,6 +24,8 @@ type publicDeps struct {
 	loader func() *theme.Loader
 	log    *slog.Logger
 	site   func() theme.Site
+	// siteURL is config.SiteURL — 운영자가 정한 출처. 사이트맵·robots·canonical 이 쓴다.
+	siteURL string
 	// verifyRequired mirrors auth.email_verification_required (FR-214). 켜져
 	// 있으면 인증 전 계정은 글쓰기·주문을 할 수 없다 — 가입 직후 로그인은
 	// 되므로(P-107) 그 문은 로그인이 아니라 **쓰기** 앞에 있다.
@@ -35,6 +39,9 @@ type publicDeps struct {
 	// 커머스가 꺼진 배포다 — 핸들러가 `if 커머스켜짐` 을 검사하는 대신 조립
 	// 시점에 정해진다 (FR-710, tree.go 와 같은 규칙).
 	products func(ctx context.Context, limit int) ([]commerce.Product, error)
+	// shopSitemap is the shop's part of sitemap.xml (FR-510): 노출 상품과 상품 카테고리.
+	// products 와 같은 규칙이다 — nil 이면 커머스가 꺼진 배포다.
+	shopSitemap func(ctx context.Context) ([]commerce.SitemapProduct, []commerce.Category, error)
 	// ping answers P-907. 함수인 이유는 이 타입이 풀을 알 필요가 없기 때문이다
 	// — 헬스체크가 필요한 것은 "지금 DB 에 닿는가" 하나다.
 	ping func(context.Context) error
@@ -58,6 +65,7 @@ func (d *publicDeps) home(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a := ActorFrom(ctx)
 	v := d.view(r, "홈", "")
+	v.Meta.JSONLD = siteJSONLD(v.Site, v.Meta.URL)
 
 	data := map[string]any{}
 	// **유형을 여기서 다시 보지 않는다.** `products` 는 커머스일 때만 채워지므로
@@ -147,6 +155,26 @@ func (d *publicDeps) page(w http.ResponseWriter, r *http.Request) {
 	d.renderPage(w, r, name, http.StatusOK, v)
 }
 
+// canonicalURL is the page's own address under base (site_url): 경로와 쪽 번호만 남긴다.
+// 정렬·검색어·추적 매개변수(utm_*)를 남기면 같은 글이 주소 여러 개로 나뉘어 색인된다. 둘째
+// 쪽 뒤는 다른 목록이라 쪽 번호는 남긴다(1쪽은 붙이지 않는다).
+func canonicalURL(base string, u *url.URL) string {
+	out := strings.TrimRight(base, "/") + u.EscapedPath()
+	if p := u.Query().Get("page"); p != "" && p != "1" {
+		out += "?page=" + url.QueryEscape(p)
+	}
+	return out
+}
+
+// absURL makes a site path (`/…`) absolute under site_url — 링크 미리보기는 상대 주소를
+// 읽지 못한다. site_url 이 없거나 이미 절대 주소면 그대로다.
+func (d *publicDeps) absURL(p string) string {
+	if d.siteURL == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") {
+		return p
+	}
+	return strings.TrimRight(d.siteURL, "/") + p
+}
+
 // view assembles the common model (D17).
 func (d *publicDeps) view(r *http.Request, title, desc string) theme.View {
 	a := ActorFrom(r.Context())
@@ -155,12 +183,13 @@ func (d *publicDeps) view(r *http.Request, title, desc string) theme.View {
 	// fallback is resolved HERE and not in the template — D17 규약 1 keeps
 	// branching out of themes, and a theme that forgets the `if` would ship a
 	// page with no description at all.
-	v.Meta = theme.Meta{Title: title, Description: desc}
+	v.Meta = theme.Meta{Title: title, Description: desc, Type: "website",
+		OGImage: d.absURL(v.Site.OGImage)}
 	if v.Meta.Description == "" {
 		v.Meta.Description = v.Site.MetaDescription
 	}
-	if v.Meta.OGImage == "" {
-		v.Meta.OGImage = v.Site.OGImage
+	if d.siteURL != "" {
+		v.Meta.URL = canonicalURL(d.siteURL, r.URL)
 	}
 	if a.IsAuthenticated() {
 		// Only what a template draws. Roles and permission rows stay out

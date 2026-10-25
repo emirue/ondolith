@@ -1,0 +1,63 @@
+{{define "content"}}
+<div class="adm-card">
+  <form method="post" action="/admin/settings/seo">
+    {{/* 검색 결과·링크 미리보기 (FR-511). 화면이 자기 설명·이미지를 정하지 않으면 이 값으로 채운다. */}}
+    <label class="adm-field">
+      <span>기본 메타 설명</span>
+      <input type="text" name="site.meta_description" value="{{index .Settings "site.meta_description"}}" maxlength="300">
+      <span class="adm-hint">검색 결과에 제목 아래로 나오는 문장입니다. 글·상품은 본문 첫 줄을 쓰고, 그것이 없는 화면에 이 문장이 들어갑니다. 300자 이내.</span>
+    </label>
+    <label class="adm-field">
+      <span>기본 대표 이미지(OG 이미지) 주소</span>
+      <input type="text" name="site.og_image" value="{{index .Settings "site.og_image"}}">
+      <span class="adm-hint">카카오톡·페이스북 등에 링크를 붙였을 때 보이는 그림입니다. https 주소나 이 사이트의 /로 시작하는 경로. 글은 본문 첫 사진, 상품은 첫 이미지가 먼저입니다.</span>
+    </label>
+
+    {{/* 검색엔진 소유 확인 (FR-718). 콘솔이 주는 태그를 통째로 붙여 넣어도 서버가 content 값만 뽑는다. */}}
+    <fieldset>
+      <legend>검색엔진 소유 확인</legend>
+      <span class="adm-hint">각 콘솔에서 「HTML 태그」 방식을 고르고 받은 태그를 붙여 넣으세요. 확인한 뒤에도 지우지 마세요 — 검색엔진이 가끔 다시 확인합니다.</span>
+      <label class="adm-field">
+        <span>구글 Search Console</span>
+        <input type="text" name="seo.google_verification" value="{{index .Settings "seo.google_verification"}}" autocomplete="off" placeholder="&lt;meta name=&quot;google-site-verification&quot; content=&quot;…&quot; /&gt;">
+      </label>
+      <label class="adm-field">
+        <span>네이버 서치어드바이저</span>
+        <input type="text" name="seo.naver_verification" value="{{index .Settings "seo.naver_verification"}}" autocomplete="off" placeholder="&lt;meta name=&quot;naver-site-verification&quot; content=&quot;…&quot; /&gt;">
+      </label>
+      <label class="adm-field">
+        <span>빙 웹마스터 도구</span>
+        <input type="text" name="seo.bing_verification" value="{{index .Settings "seo.bing_verification"}}" autocomplete="off" placeholder="&lt;meta name=&quot;msvalidate.01&quot; content=&quot;…&quot; /&gt;">
+      </label>
+    </fieldset>
+
+    {{/* 방문 통계 (FR-714). 공개 화면의 <head> 에 Google gtag.js 가 붙는다. */}}
+    <label class="adm-field">
+      <span>GA4 측정 ID</span>
+      <input type="text" name="analytics.ga4_id" value="{{index .Settings "analytics.ga4_id"}}" maxlength="32" placeholder="G-XXXXXXXXXX" autocomplete="off">
+      <span class="adm-hint">Google 애널리틱스 → 관리 → 데이터 스트림 → 웹 스트림의 첫 줄에 있습니다. 비우면 측정 스크립트가 붙지 않습니다.</span>
+    </label>
+
+    {{/* 검색 노출 끄기 (FR-718). robots.txt 로 막지 않고 noindex 를 붙인다 — 막으면 크롤러가
+         noindex 를 읽지 못해 이미 색인된 주소가 빠지지 않는다(구글 안내). */}}
+    <label class="adm-field">
+      <span>검색 노출</span>
+      <select name="seo.noindex">
+        <option value="">검색엔진에 노출</option>
+        <option value="1"{{if index .Settings "seo.noindex"}} selected{{end}}>노출하지 않음 (noindex)</option>
+      </select>
+      <span class="adm-hint">준비 중인 사이트나 시험 서버에 씁니다. 공개 화면 전부에 noindex 가 붙어 검색 결과에서 빠집니다.</span>
+    </label>
+
+    <label class="adm-field">
+      <span>robots.txt 추가 규칙</span>
+      <textarea name="seo.robots_extra" rows="5" spellcheck="false" placeholder="Disallow: /preview">{{index .Settings "seo.robots_extra"}}</textarea>
+      <span class="adm-hint">기본 규칙(관리자·내 정보·검색·첨부 막기) 뒤에 붙습니다. User-agent·Allow·Disallow·Crawl-delay·Sitemap 줄과 # 주석만 받습니다. <a href="/robots.txt" target="_blank" rel="noopener">지금 robots.txt 보기</a></span>
+    </label>
+
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+</div>
+{{end}}

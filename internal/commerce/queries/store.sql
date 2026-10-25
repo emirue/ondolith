@@ -82,6 +82,10 @@ WHERE id = sqlc.arg('id');
 -- name: SetCategoryParent :exec
 UPDATE categories SET parent_id = sqlc.narg('parent_id'), updated_at = now() WHERE id = sqlc.arg('id');
 
+-- name: SitemapProducts :many
+-- 사이트맵(P-901)의 상품 — 노출 상품만, 최근 바뀐 것부터 (FR-510). 미노출은 404 다.
+SELECT slug, updated_at FROM products WHERE is_visible ORDER BY updated_at DESC, id LIMIT $1;
+
 -- name: Categories :many
 SELECT id, COALESCE(parent_id::text, '')::text AS parent_id, name, slug, sort_order
 FROM categories ORDER BY sort_order, name, id;

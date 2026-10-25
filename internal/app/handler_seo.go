@@ -78,6 +78,23 @@ func (d *boardDeps) sitemap(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// 쇼핑몰이면 상품 목록·노출 상품·상품 카테고리 (FR-510). 미노출 상품은 질의가 뺀다.
+	if d.shopSitemap != nil {
+		products, cats, err := d.shopSitemap(ctx)
+		if err != nil {
+			d.serverError(w, r, err)
+			return
+		}
+		set.URLs = append(set.URLs, urlEntry{Loc: base + "/shop"})
+		for _, c := range cats {
+			set.URLs = append(set.URLs, urlEntry{Loc: base + "/shop/c/" + c.Slug})
+		}
+		for _, p := range products {
+			set.URLs = append(set.URLs, urlEntry{Loc: base + "/shop/p/" + p.Slug,
+				LastMod: p.UpdatedAt.UTC().Format(time.RFC3339)})
+		}
+	}
+
 	// 크롤러는 이 주소를 자주 찾고, 매번 만들면 그때마다 위의 질의가 돈다.
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
@@ -96,19 +113,34 @@ func (d *boardDeps) sitemap(w http.ResponseWriter, r *http.Request) {
 // scan of every board (NFR-101's tier does not have room for that).
 const sitemapPostsPerBoard = 500
 
+// sitemapProductsMax bounds the shop's contribution the same way. 사이트맵 한 파일의 상한은
+// 50,000 주소다(sitemaps.org) — 게시판 몫과 합쳐도 그 안에 들도록 작게 잡는다.
+const sitemapProductsMax = 5000
+
 // P-902 GET /robots.txt
 //
 // The admin tree is listed as Disallow. That is a request, not a control —
 // D15's gate is what actually refuses — but a crawler that indexes /admin/
 // login pages puts them in search results, and the operator finds out from a
 // stranger.
+//
+// A-211 의 추가 규칙(FR-718)이 기본 규칙 뒤, Sitemap 줄 앞에 붙는다. 모양은 A-211 이 저장할 때
+// 본다(지시어·주석 줄만). 못 읽으면 기본 규칙만 낸다 — robots.txt 가 5xx 면 크롤러는 사이트
+// 전체를 읽지 않는다(구글 안내).
 func (d *boardDeps) robots(w http.ResponseWriter, r *http.Request) {
+	extra := ""
+	if kv, err := d.content.Settings(r.Context(), "seo.robots_extra"); err != nil {
+		d.log.Error("robots.txt 추가 규칙 조회", "err", err)
+	} else if v := kv["seo.robots_extra"]; v != "" {
+		extra = v + "\n"
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte("User-agent: *\n" +
 		"Disallow: /admin/\n" +
 		"Disallow: /me\n" +
 		"Disallow: /search\n" +
 		"Disallow: /attachments/\n" +
+		extra +
 		"Sitemap: " + d.baseURL(r) + "/sitemap.xml\n"))
 }
 
@@ -119,7 +151,7 @@ func (d *boardDeps) robots(w http.ResponseWriter, r *http.Request) {
 // 없을 때만 요청에서 만든다 — Host 를 쓰고 전달 헤더는 쓰지 않는다:
 // X-Forwarded-Host is attacker-controlled on any deployment that does not strip
 // it, and a sitemap full of somebody else's origin is a gift to whoever sent it.
-func (d *boardDeps) baseURL(r *http.Request) string {
+func (d *publicDeps) baseURL(r *http.Request) string {
 	if d.siteURL != "" {
 		return strings.TrimRight(d.siteURL, "/")
 	}

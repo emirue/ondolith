@@ -57,8 +57,7 @@ code POST /login --data-urlencode "email=admin@example.com" \
 
 # 커머스를 켜고 재시작한다 — 커머스 라우트는 조립 시점에 정해진다 (FR-710).
 code POST /admin/settings --data-urlencode "site.name=크롤" \
-	--data-urlencode "site.type=shop" --data-urlencode "site.meta_description=" \
-	--data-urlencode "site.og_image=" --data-urlencode "site.dev_mode=" \
+	--data-urlencode "site.type=shop" --data-urlencode "site.dev_mode=" \
 	--data-urlencode "auth.email_verification_required=" >/dev/null
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 i=0; while [ "$i" -lt 100 ] && lsof -ti ":$PORT" >/dev/null 2>&1; do i=$((i + 1)); sleep 0.1; done
