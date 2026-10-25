@@ -12,7 +12,7 @@
 ## 요구 사항
 
 - Go 최신 안정판 — 판 번호는 `go.mod` 에 있다 ([DEC-2.4](.ai/DECISIONS.md)). mise 를 쓰면 `mise install go@latest`
-- PostgreSQL 14 이상
+- PostgreSQL 18 이상 — 근거는 [D70](docs/70-operations.md) 「서버 구성」(14 는 2026-11 에 지원이 끝난다)
 
 ## 개발
 
