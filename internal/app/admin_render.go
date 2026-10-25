@@ -137,6 +137,7 @@ var adminScreenTitles = map[string]string{
 	"admin/settings.html":         "사이트 설정",
 	"admin/seo.html":              "검색 노출",
 	"admin/mail.html":             "메일 설정",
+	"admin/storage.html":          "파일 저장소",
 	"admin/pages.html":            "페이지",
 	"admin/page-edit.html":        "페이지 편집",
 	"admin/menus.html":            "메뉴",
