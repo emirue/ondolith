@@ -46,7 +46,7 @@
 | 취약점 발견 시 | 툴체인부터 올린다. 애플리케이션 코드로 우회하지 않는다 |
 | Go 버전 | **최신 안정판을 쓴다** ([DEC-2.4](../.ai/DECISIONS.md)) — `curl -s 'https://go.dev/VERSION?m=text'` 의 첫 줄. 새 판(패치 포함)이 나오면 올린다 |
 | `go.mod`의 `go` 지시자 | 실제로 검증한 버전으로 유지한다. 올릴 때 `make check` + `make test-integration`을 다시 돌린다. 주 버전이 바뀌면 릴리스 노트의 호환성 항목을 읽고 전체 검증까지 |
-| 로컬 툴체인 | 저장소의 `mise.toml` 이 mise 에게 `go.mod` 의 버전을 쓰게 한다(`idiomatic_version_file_enable_tools`) — 버전은 `go.mod` 한 곳에만 적는다. 처음 한 번 `mise trust` 와 `mise install` |
+| 로컬 툴체인 | 버전은 `go.mod` 한 곳에만 적는다. mise 는 전역 `go = "latest"` 로 최신 안정판을 설치해 쓴다(`mise install go@latest`). 로컬 Go 가 `go.mod` 보다 낮으면 `GOTOOLCHAIN=auto` 가 `go.mod` 의 판을 받아 쓴다. **저장소에 mise 설정 파일(`mise.toml`)을 두지 않는다** — mise 는 신뢰(`mise trust`)하지 않은 경로의 설정 파일이 있으면 `go` 실행을 거부해, 새로 clone 한 폴더와 selftest 의 임시 사본에서 `go list` 가 비고 의존성 표 검사가 엉뚱하게 실패했다(2026-10-26) |
 
 ---
 

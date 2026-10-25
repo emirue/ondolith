@@ -130,11 +130,12 @@ goose에는 `stdlib.OpenDBFromPool(pool)`로 `*sql.DB`를 만들어 넘긴다. �
   아니라 최신 판이어야 그 수정이 들어온다
 - **확인**: `curl -s 'https://go.dev/VERSION?m=text'` 의 첫 줄(또는 `https://go.dev/dl/?mode=json` 의 첫 `stable`).
   기억으로 정하지 않는다 ([M1](MISTAKES.md))
-- **올리기**: `go mod edit -go=<판>` → `mise install` → `make check`·`make test-integration` · 주 버전이 바뀌면
+- **올리기**: `mise install go@latest` → `go mod edit -go=<판>` → `make check`·`make test-integration` · 주 버전이 바뀌면
   공식 릴리스 노트의 호환성 항목을 읽고 전체 검증(`make ui`·`screens`·`crawl`·`e2e`)까지
-- **버전은 `go.mod` 한 곳에만 적는다.** CI 는 `go-version-file: go.mod`, 로컬 mise 는 저장소 `mise.toml` 의
-  `idiomatic_version_file_enable_tools = ["go"]` 로 `go.mod` 를 읽는다. 안내 문서(README·CONTRIBUTING 등)는 판 번호를 되풀이하지 않고 「`go.mod`」를 가리킨다 — 판 번호는 D21 1절(표·이력)과
-  CHANGELOG 의 기록에만 남는다
+- **버전은 `go.mod` 한 곳에만 적는다.** CI 는 `go-version-file: go.mod`, 로컬은 mise 의 전역 `go = "latest"`(`mise install go@latest`)
+  와 `GOTOOLCHAIN=auto`(로컬이 낮으면 `go.mod` 의 판을 받는다). 저장소에 `mise.toml` 을 두지 않는다 — 신뢰하지 않은 사본에서
+  mise 가 `go` 를 막는다([D21](../docs/21-tech-stack.md) 1절). 안내 문서(README·CONTRIBUTING 등)는 판 번호를 되풀이하지 않고
+  「`go.mod`」를 가리킨다 — 판 번호는 D21 1절(표·이력)과 CHANGELOG 의 기록에만 남는다
 
 ---
 

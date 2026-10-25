@@ -11,7 +11,7 @@
 
 ## 요구 사항
 
-- Go 최신 안정판 — 판 번호는 `go.mod` 에 있다 ([DEC-2.4](.ai/DECISIONS.md)). mise 를 쓰면 처음 한 번 `mise trust` 와 `mise install`
+- Go 최신 안정판 — 판 번호는 `go.mod` 에 있다 ([DEC-2.4](.ai/DECISIONS.md)). mise 를 쓰면 `mise install go@latest`
 - PostgreSQL 14 이상
 
 ## 개발
