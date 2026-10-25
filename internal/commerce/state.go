@@ -101,6 +101,8 @@ var transitions = map[Status]map[Status][]Actor{
 		// 수거 확인 후에만. 반품접수에서 곧바로 환불로 가는 화살표는 없다 —
 		// 물건을 못 받고 돈만 나가는 것을 상태로 막는다.
 		StatusRefunded: {"A-511"},
+		// 부분 반품 정산 — 환불하지 않은 품목이 남아 있다 (SettleReturn).
+		StatusDelivered: {"A-511"},
 	},
 	StatusExchangeOpen: {
 		StatusExchangePicked: {"A-511"},

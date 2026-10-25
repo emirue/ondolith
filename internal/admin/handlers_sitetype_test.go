@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/emirue/ondolith/internal/commerce"
@@ -30,6 +31,29 @@ func TestSettingsSaveRebuildsTreeWhenAssemblyKeyChanges(t *testing.T) {
 	// 관리자 배색도 렌더러가 조립 때 읽는다.
 	if code := save(url.Values{"site.type": {"shop"}, "admin.theme": {"1d"}}); code != http.StatusSeeOther || calls != 2 {
 		t.Fatalf("배색 변경: HTTP %d, 재조립 %d회 (303, 2회여야)", code, calls)
+	}
+	// 개발 모드도 조립 때 한 번 읽는다(템플릿 로더). 저장만 하고 재조립하지 않던 판은 재시작 전에는
+	// 켜고 꺼도 아무 일이 없었다.
+	if code := save(url.Values{"site.type": {"shop"}, "site.dev_mode": {"1"}}); code != http.StatusSeeOther || calls != 3 {
+		t.Fatalf("개발 모드 변경: HTTP %d, 재조립 %d회 (303, 3회여야)", code, calls)
+	}
+}
+
+// **개발 모드가 켜져 있으면 A-201 이 경고한다** (D19 A-201 — 거부가 아니라 경고, NFR-104). 매 요청
+// 템플릿을 다시 읽어 느려지므로 운영에서 켜 둔 채로 두면 안 된다. 폼에 그 칸이 없어 켤 수도 끌 수도 없었다.
+func TestSiteSettingsWarnWhileDevModeIsOn(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	var data map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, c int, v any) {
+		w.WriteHeader(c)
+		data, _ = v.(map[string]any)
+	}
+	if err := d.Content.PutSettings(context.Background(), map[string]string{"site.dev_mode": "1"}); err != nil {
+		t.Fatal(err)
+	}
+	get(d.SettingsForm, "/admin/settings")
+	if w, _ := data["Warning"].(string); !strings.Contains(w, "개발 모드") {
+		t.Errorf("개발 모드가 켜져 있는데 경고하지 않았다: %q", w)
 	}
 }
 

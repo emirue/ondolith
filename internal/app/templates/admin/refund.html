@@ -10,6 +10,19 @@
 {{/* 환불은 끝났는데 열린 채 남은 주문 (D19 A-507 `close`) — 종료 기록이 실패했거나, 배송
      뒤 품목을 전부 환불하고도 배송비 때문에 닫히지 않던 판에 남은 주문이다. 돈이 나가지
      않아 재인증을 묻지 않는다. */}}
+{{/* 「전체 취소」 (D19 A-507). 배송 전 주문의 남은 금액을 배송비까지 돌려주고 취소한다 — 품목
+     환불은 배송비를 주지 않는다. 돈이 나가므로 재인증을 묻는다. */}}
+{{if .CanCancel}}
+<form method="post" class="adm-form">
+  <input type="hidden" name="action" value="cancel">
+  <p>배송 전 주문입니다. 전체 취소하면 남은 {{money .Remaining}}(배송비 포함)을 돌려주고 주문을 「취소」로 닫습니다.</p>
+  {{if .NeedsReauth}}
+  <input name="password" type="password" required autocomplete="current-password"
+         aria-label="비밀번호 확인" placeholder="비밀번호 확인">
+  {{end}}
+  <button type="submit" class="adm-btn adm-btn--danger">전체 취소</button>
+</form>
+{{end}}
 {{if .CloseTo}}
 <form method="post" class="adm-form">
   <input type="hidden" name="action" value="close">

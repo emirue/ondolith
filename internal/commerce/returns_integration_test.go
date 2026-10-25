@@ -990,7 +990,7 @@ func TestExchangeCanLeavePickedUp(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			got, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511")
+			got, _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511", "ex-key")
 			if err != nil {
 				t.Fatalf("교환 완료가 막혔다: %v — 교환수거에서 나갈 길이 없다", err)
 			}
@@ -1040,7 +1040,7 @@ func TestCompleteExchangeRefusesAReturn(t *testing.T) {
 	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511"); !errors.Is(err, ErrReturnKind) {
+	if _, _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511", "ex-key"); !errors.Is(err, ErrReturnKind) {
 		t.Fatalf("반품의 교환 완료 = %v, want ErrReturnKind", err)
 	}
 }
@@ -1050,7 +1050,7 @@ func exchangeAwaitingDiff(t *testing.T, s *Store, pool *pgxpool.Pool, slug strin
 	t.Helper()
 	ctx := context.Background()
 	orderNo, returnNo := exchangePickedUp(t, s, pool, slug)
-	if _, err := s.CompleteExchange(ctx, orderNo, returnNo, "A-511"); err != nil {
+	if _, _, err := s.CompleteExchange(ctx, orderNo, returnNo, "A-511", "ex-key"); err != nil {
 		t.Fatal(err)
 	}
 	diff, err := s.ExchangeDiffDue(ctx, orderNo, returnNo, "")
@@ -1242,7 +1242,7 @@ func TestExchangeDiffRefusesBeforeCompletion(t *testing.T) {
 	}
 
 	// 교환 완료를 거치면 열린다 — 위 단언이 "항상 막힌다" 를 본 것이 아니다.
-	if _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511"); err != nil {
+	if _, _, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511", "ex-key"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ExchangeDiffDue(ctx, orderNo, ret.ReturnNo, ""); err != nil {
@@ -1343,7 +1343,7 @@ func TestOtherReturnFlowsRefuseAnOrderOutOfStep(t *testing.T) {
 		{"거부", func() (string, string) { return openReturn("reject") },
 			func(o, r string) error { return s.RejectReturn(ctx, o, r, "상품 훼손", "A-511") }, StatusReturnOpen},
 		{"교환 완료", func() (string, string) { return exchangePickedUp(t, s, pool, "swap") },
-			func(o, r string) error { _, err := s.CompleteExchange(ctx, o, r, "A-511"); return err }, StatusExchangePicked},
+			func(o, r string) error { _, _, err := s.CompleteExchange(ctx, o, r, "A-511", "ex-key"); return err }, StatusExchangePicked},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			orderNo, returnNo := tc.prep()
@@ -1424,7 +1424,7 @@ func TestRejectedReturnRefusesEveryAction(t *testing.T) {
 			return err
 		}},
 		{"교환 완료", func() error {
-			_, err := s.CompleteExchange(ctx, exOrder, exNo, "A-511")
+			_, _, err := s.CompleteExchange(ctx, exOrder, exNo, "A-511", "ex-key")
 			return err
 		}},
 	} {
@@ -1436,5 +1436,89 @@ func TestRejectedReturnRefusesEveryAction(t *testing.T) {
 		if got := statusOf(t, s, orderNo); got != StatusDelivered {
 			t.Errorf("주문 %s = %s, want %s", orderNo, got, StatusDelivered)
 		}
+	}
+}
+
+// **부분 반품을 정산하면 주문은 배송완료로 돌아오고, 남은 품목까지 반품되면 환불로 끝난다** (FR-617).
+// 정산이 주문을 늘 최종 환불로 보내던 판은 반품하지 않은 품목의 반품·교환·구매확정을 닫았다 —
+// 끝난 주문이라 상태머신이 받지 않는다. 배송완료 진입 시각은 처음 것을 지켜 반품 기간이 다시
+// 시작하지 않는다(moveOrder).
+func TestPartialReturnSendsTheOrderBackToDelivered(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	item := itemsOf(t, s, orderNo)[0].ID
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	settleOne := func(key string) {
+		t.Helper()
+		ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{Kind: KindReturn,
+			Lines: []RefundLine{{OrderItemID: item, Quantity: 1}}}, "P-511", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "판매자", "A-511"); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.SettleReturn(ctx, orderNo, ret.ReturnNo, "A-511", key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settleOne("rk-part-1")
+	if got := statusOf(t, s, orderNo); got != StatusDelivered {
+		t.Fatalf("한 개 반품 뒤 주문 %s, want %s — 남은 한 개가 있다", got, StatusDelivered)
+	}
+	settleOne("rk-part-2")
+	if got := statusOf(t, s, orderNo); got != StatusRefunded {
+		t.Errorf("전부 반품 뒤 주문 %s, want %s", got, StatusRefunded)
+	}
+}
+
+// **더 싼 조합으로 바꾼 교환은 차액을 돌려준다** (D14 「교환 차액」 — 음수면 부분 환불로 정산하고 바로
+// 교환발송). 돌려주지 않던 판은 구매자가 싼 옵션으로 바꾸고도 차액을 받지 못했다. 환불은 반품 정산과
+// 같은 한도를 나눠 쓰고, PG 로 보내는 것은 A-511 이다(ExecuteRefund).
+func TestNegativeExchangeDifferenceIsRefunded(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee-less", 1)
+	items := itemsOf(t, s, orderNo)
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		SELECT product_id,'{"크기":"S"}',0,5 FROM order_items WHERE id = $1 RETURNING id`,
+		items[0].ID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := s.OpenReturn(ctx, orderNo, ReturnRequest{Kind: KindExchange, NewVariantID: newVariant,
+		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}}}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setReturnFee(t, pool, FeePolicyDeduct, 0)
+	if err := s.ConfirmPickup(ctx, orderNo, ret.ReturnNo, "구매자", "A-511"); err != nil {
+		t.Fatal(err)
+	}
+	to, refundID, err := s.CompleteExchange(ctx, orderNo, ret.ReturnNo, "A-511", "ex-less")
+	if err != nil || to != StatusExchangeShipped || refundID == "" {
+		t.Fatalf("= %s, %q, %v — want 교환발송·환불 건", to, refundID, err)
+	}
+	var amount int
+	var reason string
+	if err := pool.QueryRow(ctx, `SELECT amount, reason FROM refunds WHERE id = $1`, refundID).Scan(&amount, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if amount != 1000 || reason != "교환 차액 환불" {
+		t.Errorf("환불 %d원 %q, want 1000원 교환 차액 환불", amount, reason)
+	}
+	if _, refunded, _ := s.RefundedTotal(ctx, orderNo); refunded != 1000 {
+		t.Errorf("선점 %d, want 1000 — 반품 정산과 같은 한도를 써야 한다", refunded)
+	}
+	if _, err := s.ExecuteRefund(ctx, okGateway(), refundID, "A-511"); err != nil {
+		t.Fatalf("차액 환불 실행 = %v", err)
+	}
+	if got := refundStatus(t, s, refundID); got != "완료" {
+		t.Errorf("환불 상태 %s, want 완료", got)
+	}
+	if got := statusOf(t, s, orderNo); got != StatusExchangeShipped {
+		t.Errorf("주문 %s, want %s — 차액 환불이 주문을 닫으면 안 된다", got, StatusExchangeShipped)
 	}
 }

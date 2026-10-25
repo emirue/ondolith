@@ -383,7 +383,8 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		d.log(r, c, "settings.update", "settings", "site", "사이트 설정 변경: "+strings.Join(names, ", "))
 	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
-	if !typeChanged && !changed(kv, prev, "admin.theme") {
+	// 조립 때 읽는 키 — 사이트 유형(라우트), 관리자 배색(렌더러), 개발 모드(템플릿 로더).
+	if !typeChanged && !changed(kv, prev, "admin.theme") && !changed(kv, prev, "site.dev_mode") {
 		return
 	}
 	// 조립 시점 키가 바뀌었다 — 운영 트리를 다시 조립해 원자 교체한다 (D20).
@@ -505,6 +506,11 @@ func (d *Deps) renderSite(w http.ResponseWriter, r *http.Request, code int, msg 
 			data["BusinessKeys"], data["BusinessLabels"] = commerce.BusinessKeys, commerce.BusinessLabels
 			if bw := businessWarning(kv); bw != "" {
 				data["Warning"] = strings.TrimSpace(data["Warning"].(string) + " " + bw)
+			}
+			// 개발 모드는 거부하지 않고 경고한다 (D19 A-201, NFR-104).
+			if kv["site.dev_mode"] != "" {
+				data["Warning"] = strings.TrimSpace(data["Warning"].(string) +
+					" 개발 모드가 켜져 있습니다 — 요청마다 템플릿을 다시 읽어 느려집니다. 운영 중에는 끄세요.")
 			}
 		})
 }

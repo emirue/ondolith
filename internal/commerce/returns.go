@@ -582,7 +582,7 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	}
 
 	refundID, err = q.InsertReturnRefund(ctx, commerceq.InsertReturnRefundParams{
-		OrderID: orderID, PaymentID: paymentID, ReturnID: &id, Amount: int32(amount), RequestKey: requestKey})
+		OrderID: orderID, PaymentID: paymentID, ReturnID: &id, Amount: int32(amount), Reason: "반품 환불", RequestKey: requestKey})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return 0, "", ErrRefundDuplicate
@@ -602,8 +602,17 @@ func (s *Store) SettleReturn(ctx context.Context, orderNo, returnNo string, acto
 	if err := q.SetReturnStatus(ctx, commerceq.SetReturnStatusParams{ID: id, Status: string(StatusRefunded)}); err != nil {
 		return 0, "", err
 	}
-	// BUG-04: 부분 반품이어도 주문 전체가 환불(최종)로 간다.
-	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), StatusRefunded, actor); err != nil {
+	// 아직 환불하지 않은 품목이 남았으면 주문은 배송완료로 돌아간다 — 그 품목의 반품·교환·구매확정이
+	// 남아 있다. 전부 정산됐으면 환불로 끝난다 (FR-617). 늘 환불로 보내던 판은 남은 품목을 닫았다.
+	target := StatusRefunded
+	left, err := q.UnsettledItemCount(ctx, orderID)
+	if err != nil {
+		return 0, "", err
+	}
+	if left > 0 {
+		target = StatusDelivered
+	}
+	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), target, actor); err != nil {
 		return 0, "", err
 	}
 
@@ -792,31 +801,33 @@ func (s *Store) VariantsForExchange(ctx context.Context, orderItemID string) ([]
 // 도 내려가지 않아 그 품목은 다시 반품·교환할 수 없다.
 //
 // 차액이 양수면 `차액결제대기` 로 간다 — 돈을 더 받아야 하고, 받는 것은
-// P-514 다. 0 이하면 곧바로 발송이다. **차액을 깎아 돌려주지는 않는다**:
-// 더 싼 조합으로 바꿔 생기는 차액 환불은 별도 결정이고 그 화면이 없다 — D14 와
-// 다르다 (BUG-05).
-func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, actor Actor) (Status, error) {
+// P-514 다. 0 이하면 곧바로 발송이다. **음수면 그 차액을 돌려준다** (D14 「교환
+// 차액」): 반품 정산과 같은 한도를 선점하고 같은 반품 건에 묶은 환불 행을 만들어 그
+// id 를 돌려준다. PG 로 보내는 것은 호출자다(ExecuteRefund) — 반품 정산과 같은 순서다.
+// 차액이 음수가 아니면 refundID 는 "" 이고 requestKey 도 쓰지 않는다.
+func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, actor Actor,
+	requestKey string) (to Status, refundID string, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 	o, err := lockOrder(ctx, q, orderNo)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	r, err := q.LockReturnForExchange(ctx, commerceq.LockReturnForExchangeParams{ReturnNo: returnNo, OrderNo: orderNo})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
+		return "", "", ErrNotFound
 	}
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	id, kind, status, orderID, diff := r.ID, r.Kind, r.Status, r.OrderID, int(r.PriceDifference)
 	if ReturnKind(kind) != KindExchange {
-		return "", fmt.Errorf("%w: 반품 건은 교환 완료로 처리하지 않습니다", ErrReturnKind)
+		return "", "", fmt.Errorf("%w: 반품 건은 교환 완료로 처리하지 않습니다", ErrReturnKind)
 	}
 
 	target := StatusExchangeShipped
@@ -824,24 +835,60 @@ func (s *Store) CompleteExchange(ctx context.Context, orderNo, returnNo string, 
 		target = StatusExchangeDiffDue
 	}
 	if err := returnStep(status, target, actor); err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// 발송으로 바로 가는 경우에만 처리 중 표시를 내린다. 차액 대기는 아직
 	// 끝나지 않았고, 내리면 같은 품목에 새 반품이 걸려 예약 재고와 어긋난다.
 	if target == StatusExchangeShipped {
 		if err := q.CloseReturnItemsNoTouch(ctx, id); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	if _, err := q.MoveReturnStatus(ctx, commerceq.MoveReturnStatusParams{
 		ID: id, ToStatus: string(target), FromStatus: status}); err != nil {
-		return "", err
+		return "", "", err
+	}
+	if diff < 0 {
+		if refundID, err = s.reserveExchangeRefund(ctx, q, orderID, id, -diff, requestKey); err != nil {
+			return "", "", err
+		}
 	}
 	if err := s.moveOrder(ctx, tx, orderID, Status(o.Status), target, actor); err != nil {
+		return "", "", err
+	}
+	return target, refundID, tx.Commit(ctx)
+}
+
+// reserveExchangeRefund records the refund of a cheaper exchange's difference under the caller's
+// order and return locks. 반품 정산과 **같은 한도**(payments.refunded_amount)를 나눠 쓴다 — 각각 한도까지
+// 쓰면 결제액을 넘는다. 잠금 순서는 주문 → 반품 → 결제다 (D30 「잠금 순서」).
+func (s *Store) reserveExchangeRefund(ctx context.Context, q *commerceq.Queries, orderID, returnID string,
+	amount int, requestKey string) (string, error) {
+	if requestKey == "" {
+		return "", errors.New("commerce: 요청 키가 필요합니다")
+	}
+	paymentID, err := q.ApprovedPaymentID(ctx, orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNoPayment
+	}
+	if err != nil {
 		return "", err
 	}
-	return target, tx.Commit(ctx)
+	var pgErr *pgconn.PgError
+	if err := q.ReserveRefundAmount(ctx, commerceq.ReserveRefundAmountParams{
+		ID: paymentID, Amount: int32(amount)}); err != nil {
+		if errors.As(err, &pgErr) && pgErr.Code == "23514" {
+			return "", ErrRefundExceeds
+		}
+		return "", err
+	}
+	refundID, err := q.InsertReturnRefund(ctx, commerceq.InsertReturnRefundParams{OrderID: orderID,
+		PaymentID: paymentID, ReturnID: &returnID, Amount: int32(amount), Reason: "교환 차액 환불", RequestKey: requestKey})
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return "", ErrRefundDuplicate
+	}
+	return refundID, err
 }
 
 // ErrNoPriceDiff 는 결제할 차액이 없다는 뜻이다 (P-514 409).

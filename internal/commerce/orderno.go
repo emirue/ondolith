@@ -76,6 +76,10 @@ func ValidRequestKey(s string) bool {
 // collide with a resubmission of the same order's form.
 func AdminRefundKey(orderID, formKey string) string { return "A-507:" + orderID + ":" + formKey }
 
+// MemberRefundKey is P-507's key: P-508 이 발급한 폼 키를 그 주문에 묶는다 — AdminRefundKey 와 같은
+// 이유이고, 접두사가 달라 두 화면의 키는 겹치지 않는다.
+func MemberRefundKey(orderID, formKey string) string { return "P-507:" + orderID + ":" + formKey }
+
 // NewReturnNo is the same shape as an order number, with an R prefix.
 //
 // 순번이 아닌 이유도 같다 (SC-3 3항): A-511 목록과 P-513 이 이 번호를 쓰고,
