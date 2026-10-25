@@ -2197,8 +2197,10 @@ func TestReturnSettleReportsAGatewayFailure(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT status FROM orders WHERE order_no = $1`, order.OrderNo).Scan(&orderStatus); err != nil {
 		t.Fatal(err)
 	}
-	if got := refundRowStatus(t, pool, id); got != "요청" || orderStatus != string(commerce.StatusRefunded) {
-		t.Errorf("환불 건 %s · 주문 %s, want 요청·환불", got, orderStatus)
+	// 두 개 중 하나를 반품했으므로 주문은 배송완료로 돌아온다(부분 반품 정산). 정산은 커밋됐고
+	// PG 만 실패했다 — 환불 건은 요청으로 남아 A-507 이 다시 보낸다.
+	if got := refundRowStatus(t, pool, id); got != "요청" || orderStatus != string(commerce.StatusDelivered) {
+		t.Errorf("환불 건 %s · 주문 %s, want 요청·배송완료", got, orderStatus)
 	}
 
 	gw.err = nil
@@ -2271,7 +2273,7 @@ func TestRefundSentButNotSettledIsShownAsDone(t *testing.T) {
 // 종료 기록이 실패하면(ErrRefundSentNotSettled) 「실행」은 완료된 건을 받지 않아 그 주문을
 // 닫을 길이 없었다. 단추는 닫을 곳이 있을 때만 보이고, 돈이 나가지 않아 재인증이 없다.
 func TestCloseActionClosesARefundedOrder(t *testing.T) {
-	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, id: "", email: "op@example.com"}
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true, "order.cancel": true}, id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
 	d.OpLog = content.NewStore(pool).OpLog()
 	ctx := context.Background()
@@ -2308,6 +2310,12 @@ func TestCloseActionClosesARefundedOrder(t *testing.T) {
 	if got := closeTo(); got != commerce.StatusCancelled {
 		t.Errorf("닫기 전 단추 = %v, want 취소", got)
 	}
+	// 취소로 닫히므로 order.cancel 이 있어야 한다 (D19 A-507 동작별 권한).
+	caller.perms["order.cancel"] = false
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("order.cancel 없이 취소로 닫기 = HTTP %d, want 403", rec.Code)
+	}
+	caller.perms["order.cancel"] = true
 	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("주문 종료 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}

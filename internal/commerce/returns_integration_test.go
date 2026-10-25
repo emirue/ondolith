@@ -514,14 +514,10 @@ func TestReturnRefundUsesTheDiscountSnapshot(t *testing.T) {
 		t.Errorf("반품 환불액 %d, want %d (단가 계산이면 %d)", amount, want, naive)
 	}
 
-	// 주문은 이제 `환불` 이고 그것은 최종 상태다 (D14) — 두 번째 반품은 열리지
-	// 않는다. 남은 수량은 부분 환불(A-507)로 처리하고, **두 경로가 같은 한도와
-	// 같은 스냅샷을 쓴다.**
-	if _, err := s.OpenReturn(ctx, order.OrderNo, ReturnRequest{
-		Kind:  KindReturn,
-		Lines: []RefundLine{{OrderItemID: items[0].ID, Quantity: 1}},
-	}, "P-511", time.Now()); !errors.Is(err, ErrTransitionNotAllowed) {
-		t.Errorf("환불 상태에서 반품 재접수 = %v, want ErrTransitionNotAllowed", err)
+	// 세 개 중 하나만 반품했으므로 주문은 배송완료로 돌아온다 (부분 반품 정산). 남은 수량은 부분
+	// 환불(A-507)로 처리하고, **두 경로가 같은 한도와 같은 스냅샷을 쓴다.**
+	if got := statusOf(t, s, order.OrderNo); got != StatusDelivered {
+		t.Errorf("부분 반품 정산 뒤 주문 %s, want %s", got, StatusDelivered)
 	}
 
 	total := amount
