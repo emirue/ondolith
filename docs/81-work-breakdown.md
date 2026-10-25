@@ -484,6 +484,9 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-27 | 테마의 로고·파비콘 | — | `theme.Manifest` logo·favicon, `Loader.Brand`, 관리자 레이아웃·내장 머리글·head | 활성 테마의 theme.json 이 지정한 로고·파비콘이 관리자 화면과 공개 화면에 나오고(`TestThemeLogoAndFaviconReachAdminAndPublic`), 지정이 없으면 기본 마크·아이콘이다(`TestDefaultBrandWithoutThemeLogo`). static/ 밖·이미지 아님·파일 없음은 무시하고 활성화가 경고한다(`TestBrandComesFromTheManifest`·`TestBrandMistakesAreWarnedAtActivation`). SVG 는 <img> 로만 (FR-310) |
 | W6-28 | 구조 점검 2차의 결함 2건 | — | A-203 본문 상한·파싱 순서, `adminScreenTitles` | 재인증이 필요한 세션의 테마 업로드도 24 MiB 를 넘으면 413 이고 설치를 부르지 않는다 — 본문 상한과 파싱이 재인증(폼의 비밀번호 읽기)보다 먼저다(`TestThemeUploadBodyIsCappedBeforeReauth`). 모든 관리자 화면 템플릿이 제목을 가진다 — A-210 은 「파일 저장소」(`TestEveryAdminScreenHasATitle`) (FR-307, FR-717) |
 | W6-29 | 환불 결과 기록·품목 환불액을 한 곳으로 | W6-28 | `handlers_order.go` 환불 결과 기록, `commerce` 품목 환불액 | A-507·A-511(교환 차액·반품 정산)이 PG 결과를 같은 규칙으로 남긴다: 「확정」은 PG 확정 뒤에만, 실패는 「PG 처리 실패 — 한도 선점 유지」, 돈이 나간 뒤 주문 기록만 실패하면 그 환불 건을 서버 로그에 남기고 성공으로 다룬다(`TestReturnSettleReportsAGatewayFailure`·`TestRefundSentButNotSettledIsShownAsDone`·`TestCheaperExchangeSentButNotSettledIsLogged`). 부분 환불과 반품 정산이 품목 환불액(할인 몫·교환 차액 빼기)을 같은 함수로 낸다(`TestExchangeCreditIsNotRefundedTwice`·`TestExchangeCreditAlsoAppliesToPartialRefunds`) (FR-611) |
+| W6-30 | 검색 노출 태그를 테마 조각으로 | — | `internal/theme/builtin/partials/seo.html`, `X-Robots-Tag` | noindex·소유 확인·canonical·`og:url`·트위터 카드·JSON-LD 가 `partials/seo.html` 에 있고 내장 `head.html` 이 부른다. `head.html` 을 덮어쓴 테마가 그 한 줄을 부르면 같은 태그를 받고, 부르지 않아도 「검색 노출 끄기」는 `X-Robots-Tag: noindex` 헤더로 간다. 끄면 헤더가 없다(`TestSEOPartialReachesAThemeThatOverridesHead`·`TestSearchSettingsReachTheHeadAndRobots`) (FR-718, FR-719, FR-511) |
+| W6-31 | 홈 Organization 에 테마 로고 | W6-30 | `siteJSONLD` logo | `site_url` 이 있으면 홈 JSON-LD Organization 에 활성 테마 theme.json 의 로고가 절대 주소로 실리고(`TestSEOPartialReachesAThemeThatOverridesHead`), 없으면 싣지 않는다(`TestThemeLogoAndFaviconReachAdminAndPublic`) (FR-719, FR-310) |
+| W6-32 | 사업자 정보에 업무시간 | — | `business.hours` | A-201 에 업무시간 칸이 있고 저장한 값이 바닥글에 「업무시간」으로 나온다. 표시 의무가 아니라 `shop` 미입력 경고에 들지 않는다(`TestSiteSettingsHoldBusinessInfo`·`TestBusinessInfoRendersInCmsModeToo`·`TestMissingBusinessKeysNamesTheEmptyOnes`) (FR-711) |
 
 ## 작업 수 요약
 
@@ -494,5 +497,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 29 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **167** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 32 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **170** | **9** | — |
