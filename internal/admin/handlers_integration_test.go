@@ -1889,7 +1889,7 @@ func TestMailTestSendsOnlyToTheAdminItself(t *testing.T) {
 	ctx := context.Background()
 	var sentTo []string
 	var fail error
-	d.SendMailTest = func(_ context.Context, to string) error {
+	d.SendMailTest = func(_ context.Context, to, _, _ string) error {
 		sentTo = append(sentTo, to)
 		return fail
 	}
@@ -1951,6 +1951,64 @@ func TestMailTestSendsOnlyToTheAdminItself(t *testing.T) {
 	before = len(sentTo)
 	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusForbidden || len(sentTo) != before {
 		t.Errorf("settings.update 만 있는 운영자 = HTTP %d·발송 %d회, want 403·0회", rec.Code, len(sentTo)-before)
+	}
+}
+
+// **시험 메일은 운영자가 쓴 제목·내용으로 보낼 수 있고, 비우면 기본 문구다** (FR-708, D19 A-205).
+// 받는 사람은 그대로 로그인한 관리자 본인이다. 제목은 한 줄 — 줄바꿈은 머리글을 끊으려는 시도로 보고
+// 보내지 않는다. 거부한 입력은 시간당 한도를 쓰지 않고 폼에 되살아난다.
+func TestMailTestTakesASubjectAndBody(t *testing.T) {
+	su := &fakeCaller{superuser: true, email: "su@example.com"}
+	d, _ := fixture(t, su)
+	type mail struct{ to, subject, body string }
+	var got []mail
+	d.SendMailTest = func(_ context.Context, to, subject, body string) error {
+		got = append(got, mail{to, subject, body})
+		return nil
+	}
+	d.Limiter = auth.NewLimiter()
+	d.Limits = auth.DefaultLimits()
+	var shown map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
+		w.WriteHeader(code)
+		shown, _ = data.(map[string]any)
+	}
+
+	post(d.MailTest, "/admin/settings/mail/test", nil)
+	post(d.MailTest, "/admin/settings/mail/test", url.Values{
+		"subject": {"  안내 메일 미리보기 "}, "body": {"첫 줄\n둘째 줄\n"}})
+	if len(got) != 2 {
+		t.Fatalf("발송 %d회, want 2", len(got))
+	}
+	if got[0] != (mail{"su@example.com", mailTestSubject, mailTestBody}) {
+		t.Errorf("빈 칸으로 보낸 메일 %+v, want 기본 제목·내용", got[0])
+	}
+	if got[1] != (mail{"su@example.com", "안내 메일 미리보기", "첫 줄\n둘째 줄"}) {
+		t.Errorf("쓴 제목·내용으로 보낸 메일 %+v", got[1])
+	}
+
+	for name, form := range map[string]url.Values{
+		"줄바꿈 제목":   {"subject": {"점검\r\nBcc: x@example.com"}},
+		"201자 제목":  {"subject": {strings.Repeat("가", 201)}},
+		"5001자 내용": {"body": {strings.Repeat("가", 5001)}},
+	} {
+		if rec := post(d.MailTest, "/admin/settings/mail/test", form); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s = HTTP %d, want 422", name, rec.Code)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("거부한 입력으로 %d통이 더 나갔다", len(got)-2)
+	}
+	post(d.MailTest, "/admin/settings/mail/test", url.Values{"subject": {strings.Repeat("나", 201)}, "body": {"남는 내용"}})
+	if shown["TestSubject"] != strings.Repeat("나", 201) || shown["TestBody"] != "남는 내용" {
+		t.Errorf("거부한 입력이 폼에 없다: 제목 %v · 내용 %v", shown["TestSubject"], shown["TestBody"])
+	}
+	// 거부한 네 번은 한도를 쓰지 않았다 — 두 번 보낸 뒤 세 번 더 보낼 수 있다(시간당 5).
+	for i := 0; i < 3; i++ {
+		post(d.MailTest, "/admin/settings/mail/test", nil)
+	}
+	if len(got) != 5 {
+		t.Errorf("발송 %d회, want 5 — 거부한 입력이 시간당 한도를 썼다", len(got))
 	}
 }
 
