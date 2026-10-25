@@ -708,29 +708,39 @@ func (d *Deps) pgGateway() commerce.Gateway {
 	return d.Gateway()
 }
 
-// finishRefund 는 PG 로 보낸 결과를 기록하고 화면을 정한다. 새 접수와 「실행」이
+// finishRefund 는 A-507 이 PG 로 보낸 결과를 기록하고 화면을 정한다. 새 접수·전체 취소·「실행」이
 // 같은 길을 지난다. 실패는 502 — 선점은 유지되고, 작업 로그에 그 사실을
 // 남긴다 (D19 A-507 「선점 해제 여부까지 기록」).
 func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
 	order *commerce.OrderDetail, refundID string, amount int, to commerce.Status, err error) {
 
-	if err != nil && !errors.Is(err, commerce.ErrRefundSentNotSettled) {
-		d.Logger.Error("환불 실행", "order", order.OrderNo, "refund", refundID, "err", err)
-		d.log(r, c, "order.refund", "order", order.OrderNo,
-			"환불 "+itoa(amount)+"원 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)
+	logf := func(msg string) { d.log(r, c, "order.refund", "order", order.OrderNo, msg) }
+	if !d.refundSent(logf, "환불 "+itoa(amount)+"원", refundID, to, err) {
 		d.renderRefund(w, r, c, order, http.StatusBadGateway,
 			"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
 		return
 	}
-	d.log(r, c, "order.refund", "order", order.OrderNo, "환불 "+itoa(amount)+"원 PG 확정")
-	// 환불이 끝났으면 commerce 가 주문을 끝냈다(to). 돈은 이미 움직였으므로 그 기록의
-	// 실패는 로그만 남기고 화면은 정상으로 돌아간다.
-	if err != nil {
-		d.Logger.Error("전액 환불 뒤 주문 종료", "order", order.OrderNo, "err", err)
-	} else if to != "" {
-		d.log(r, c, "order.refund", "order", order.OrderNo, "환불이 끝나 주문 "+string(to))
-	}
 	http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+}
+
+// refundSent 는 PG 로 보낸 환불(ExecuteRefund·RetryRefund)의 결과를 남긴다 — A-507 과 A-511(교환 차액·
+// 반품 정산)이 같은 말을 쓴다. 「확정」은 PG 가 확정한 뒤에만 쓴다. 실패면 false 이고 선점은 유지된다 —
+// 그 사실을 남겼으니 호출자는 502 화면만 그린다. PG 는 확정했는데 주문 기록만 실패했으면
+// (commerce.ErrRefundSentNotSettled) 돈은 이미 나갔다: 서버 로그에 그 환불 건을 남기고 성공으로 다룬다 —
+// 주문은 A-507 「주문 종료」가 닫는다. 환불이 끝나 commerce 가 주문을 옮겼으면(to) 그것도 남긴다.
+func (d *Deps) refundSent(logf func(string), what, refundID string, to commerce.Status, err error) bool {
+	if err != nil && !errors.Is(err, commerce.ErrRefundSentNotSettled) {
+		d.Logger.Error(what+" 실행", "refund", refundID, "err", err)
+		logf(what + " PG 처리 실패 — 한도 선점 유지, 환불 건 " + refundID)
+		return false
+	}
+	logf(what + " PG 확정 — 환불 건 " + refundID)
+	if err != nil {
+		d.Logger.Error(what+" 뒤 주문 기록", "refund", refundID, "err", err)
+	} else if to != "" {
+		logf("환불이 끝나 주문 " + string(to))
+	}
+	return true
 }
 
 func readAdminRefundLines(r *http.Request) []commerce.RefundLine {
@@ -842,18 +852,13 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil && refundID != "" {
 			// 차액 환불을 PG 로 보낸다 (환불 확정과 같은 순서). 주문은 교환발송이라 닫을 것이 없다.
-			if _, err = d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511"); errors.Is(err, commerce.ErrRefundSentNotSettled) {
-				err = nil
-			}
-			if err != nil {
-				d.Logger.Error("교환 차액 환불 실행", "return", returnNo, "err", err)
-				d.log(r, c, "return.exchange", "return", returnNo,
-					"교환 차액 환불 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)
+			sent, perr := d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511")
+			logf := func(msg string) { d.log(r, c, "return.exchange", "return", returnNo, msg) }
+			if !d.refundSent(logf, "교환 차액 환불", refundID, sent, perr) {
 				d.renderReturns(w, r, c, order, http.StatusBadGateway,
 					"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
 				return
 			}
-			d.log(r, c, "return.exchange", "return", returnNo, "교환 차액 환불 PG 확정 — 환불 건 "+refundID)
 		}
 	case "settle":
 		// **환불 확정 단계는 `order.refund` 다** (D15 2.2: "A-507, A-511
@@ -878,22 +883,17 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 			amount, refundID, err = d.Commerce.SettleReturn(r.Context(), order.OrderNo, returnNo, "A-511", key)
 			if err == nil {
 				d.log(r, c, "return.settle", "return", returnNo,
-					"반품 환불 "+itoa(amount)+"원 확정")
+					"반품 환불 "+itoa(amount)+"원 접수")
 				// 정산이 만든 환불 건을 PG 로 보낸다 (A-507 과 같은 순서). 교환 차액으로 이미 다 돌려준
 				// 품목이면 환불 건이 없다(refundID ""). 주문은 같은 tx 에서 이미 옮겼다.
-				if refundID == "" {
-					err = nil
-				} else if _, err = d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511"); errors.Is(err, commerce.ErrRefundSentNotSettled) {
-					d.Logger.Error("반품 환불 뒤 주문 종료", "return", returnNo, "err", err)
-					err = nil
-				}
-				if err != nil {
-					d.Logger.Error("반품 환불 실행", "return", returnNo, "err", err)
-					d.log(r, c, "return.settle", "return", returnNo,
-						"반품 환불 PG 처리 실패 — 한도 선점 유지, 환불 건 "+refundID)
-					d.renderReturns(w, r, c, order, http.StatusBadGateway,
-						"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
-					return
+				if refundID != "" {
+					sent, perr := d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511")
+					logf := func(msg string) { d.log(r, c, "return.settle", "return", returnNo, msg) }
+					if !d.refundSent(logf, "반품 환불", refundID, sent, perr) {
+						d.renderReturns(w, r, c, order, http.StatusBadGateway,
+							"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
+						return
+					}
 				}
 			}
 		}

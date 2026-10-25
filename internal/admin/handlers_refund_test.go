@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/emirue/ondolith/internal/commerce"
@@ -2176,6 +2178,7 @@ func TestReturnSettleReportsAGatewayFailure(t *testing.T) {
 	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
 		id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
 	gw := &cancelCounter{err: errors.New("결제사 503")}
 	d.Gateway = func() commerce.Gateway { return gw }
 	ctx := context.Background()
@@ -2189,6 +2192,10 @@ func TestReturnSettleReportsAGatewayFailure(t *testing.T) {
 	if rec := postAdmin(t, d.ReturnAction, returns, pv, url.Values{"return_no": {returnNo},
 		"action": {"settle"}}); rec.Code != http.StatusBadGateway {
 		t.Fatalf("PG 실패 = HTTP %d, want 502", rec.Code)
+	}
+	// 「확정」은 PG 가 확정한 뒤에만 쓴다 — 작업 로그만 보는 운영자에게 실패한 정산이 돈이 나간 것으로 읽혔다.
+	if s := opSummaries(t, pool); strings.Contains(s, "확정") || !strings.Contains(s, "반품 환불 PG 처리 실패") {
+		t.Errorf("PG 실패 뒤 작업 로그 %q", s)
 	}
 	var id, orderStatus string
 	if err := pool.QueryRow(ctx, `SELECT id FROM refunds`).Scan(&id); err != nil {
@@ -2233,14 +2240,9 @@ func TestRefundSentButNotSettledIsShownAsDone(t *testing.T) {
 		id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
 	d.OpLog = content.NewStore(pool).OpLog()
-	ctx := context.Background()
-	summaries := func() string {
-		var all string
-		if err := pool.QueryRow(ctx, `SELECT coalesce(string_agg(summary, ' | '), '') FROM operation_logs`).Scan(&all); err != nil {
-			t.Fatal(err)
-		}
-		return all
-	}
+	var logs strings.Builder
+	d.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	summaries := func() string { return opSummaries(t, pool) }
 
 	// A-507 새 접수.
 	order, _ := paidAdminOrder(t, d, pool)
@@ -2267,6 +2269,65 @@ func TestRefundSentButNotSettledIsShownAsDone(t *testing.T) {
 		"action": {"settle"}}); rec.Code != http.StatusSeeOther {
 		t.Errorf("A-511 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
 	}
+	if s := summaries(); !strings.Contains(s, "반품 환불 PG 확정") {
+		t.Errorf("정산 환불의 PG 확정이 작업 로그에 없다: %q", s)
+	}
+	// 돈은 나갔고 주문 기록만 실패했다 — 그 환불 건을 서버 로그에 남겨야 운영자가 찾아 닫는다.
+	refundIDsLogged(t, pool, logs.String(), 2)
+}
+
+// **교환 차액 환불도 같은 규칙이다** — 돈이 나간 뒤 주문 기록만 실패한 것을 로그 없이 삼켰다.
+func TestCheaperExchangeSentButNotSettledIsLogged(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true, "order.refund": true},
+		id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	var logs strings.Builder
+	d.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	order, returnNo := cheaperExchangePickedUp(t, d, pool)
+	d.Gateway = func() commerce.Gateway { return renamingGateway{pool: pool, orderNo: order.OrderNo} }
+
+	if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo},
+		url.Values{"return_no": {returnNo}, "action": {"exchange"}}); rec.Code != http.StatusSeeOther {
+		t.Errorf("교환 완료 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
+	}
+	if s := opSummaries(t, pool); !strings.Contains(s, "교환 차액 환불 PG 확정") || strings.Contains(s, "PG 처리 실패") {
+		t.Errorf("작업 로그 %q", s)
+	}
+	refundIDsLogged(t, pool, logs.String(), 1)
+}
+
+// refundIDsLogged 는 환불 건이 want 개이고 모두 서버 로그에 나오는지 본다.
+func refundIDsLogged(t *testing.T, pool *pgxpool.Pool, logs string, want int) {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `SELECT id FROM refunds`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != want {
+		t.Fatalf("환불 건 %d개, want %d", len(ids), want)
+	}
+	for _, id := range ids {
+		if !strings.Contains(logs, id) {
+			t.Errorf("환불 건 %s 가 서버 로그에 없다:\n%s", id, logs)
+		}
+	}
+}
+
+// opSummaries 는 작업 로그 요약을 기록 순서대로 이어 붙인다.
+func opSummaries(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	var all string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT coalesce(string_agg(summary, ' | ' ORDER BY created_at), '') FROM operation_logs`).Scan(&all); err != nil {
+		t.Fatal(err)
+	}
+	return all
 }
 
 // **환불은 끝났는데 열린 채 남은 주문을 A-507 「주문 종료」가 닫는다** (FR-611). PG 확정 뒤
@@ -2386,32 +2447,9 @@ func TestAdminCheaperExchangeRefundsTheDifference(t *testing.T) {
 	caller := &fakeCaller{perms: map[string]bool{"order.return": true}, id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
 	ctx := context.Background()
-	order, _ := paidAdminOrder(t, d, pool)
-	for _, to := range []commerce.Status{commerce.StatusPreparing, commerce.StatusShipping, commerce.StatusDelivered} {
-		if err := d.Commerce.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var newVariant string
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
-		SELECT product_id,'{"크기":"S"}',0,5 FROM order_items WHERE id = $1 RETURNING id`,
-		order.Items[0].ID).Scan(&newVariant); err != nil {
-		t.Fatal(err)
-	}
-	ret, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
-		Kind: commerce.KindExchange, NewVariantID: newVariant,
-		Lines: []commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 1}}}, "P-512", time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	setFeeSetting(t, pool, "차감", 0)
+	order, returnNo := cheaperExchangePickedUp(t, d, pool)
 	path, pv := "/admin/orders/"+order.OrderNo+"/returns", map[string]string{"no": order.OrderNo}
-	if rec := postAdmin(t, d.ReturnAction, path, pv, url.Values{"return_no": {ret.ReturnNo},
-		"action": {"pickup"}, "fault": {"구매자"}}); rec.Code != http.StatusSeeOther {
-		t.Fatalf("수거 확인 = HTTP %d", rec.Code)
-	}
-	exchange := url.Values{"return_no": {ret.ReturnNo}, "action": {"exchange"}}
+	exchange := url.Values{"return_no": {returnNo}, "action": {"exchange"}}
 	if rec := postAdmin(t, d.ReturnAction, path, pv, exchange); rec.Code != http.StatusForbidden {
 		t.Errorf("order.refund 없이 차액 환불 교환 = HTTP %d, want 403", rec.Code)
 	}
@@ -2432,4 +2470,37 @@ func TestAdminCheaperExchangeRefundsTheDifference(t *testing.T) {
 	if amount != 1000 || status != "완료" {
 		t.Errorf("차액 환불 %d원 %s, want 1000원 완료", amount, status)
 	}
+}
+
+// cheaperExchangePickedUp 은 L(+1,000원) 한 개를 S(+0원)로 바꾸는 교환을 열고 수거까지 확인한다 — 다음
+// 「교환 완료」가 차액 1,000원을 돌려준다.
+func cheaperExchangePickedUp(t *testing.T, d *Deps, pool *pgxpool.Pool) (*commerce.OrderDetail, string) {
+	t.Helper()
+	ctx := context.Background()
+	order, _ := paidAdminOrder(t, d, pool)
+	for _, to := range []commerce.Status{commerce.StatusPreparing, commerce.StatusShipping, commerce.StatusDelivered} {
+		if err := d.Commerce.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		SELECT product_id,'{"크기":"S"}',0,5 FROM order_items WHERE id = $1 RETURNING id`,
+		order.Items[0].ID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
+		Kind: commerce.KindExchange, NewVariantID: newVariant,
+		Lines: []commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 1}}}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setFeeSetting(t, pool, "차감", 0)
+	if rec := postAdmin(t, d.ReturnAction, "/admin/orders/"+order.OrderNo+"/returns",
+		map[string]string{"no": order.OrderNo}, url.Values{"return_no": {ret.ReturnNo},
+			"action": {"pickup"}, "fault": {"구매자"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인 = HTTP %d", rec.Code)
+	}
+	return order, ret.ReturnNo
 }
