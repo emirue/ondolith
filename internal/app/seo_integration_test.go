@@ -348,6 +348,12 @@ func TestShareTagsUseTheSiteURL(t *testing.T) {
 		!strings.Contains(home, `<link rel="canonical" href="https://site.example/">`) {
 		t.Error("홈의 og:type·canonical 이 틀렸다")
 	}
+	// 검색 노출 태그는 partials/seo.html 한 곳에서만 나온다 — head.html 에 옛 줄이 남으면 두 번 나간다.
+	for _, tag := range []string{`rel="canonical"`, `property="og:url"`, `name="twitter:card"`, `application/ld+json`} {
+		if n := strings.Count(home, tag); n != 1 {
+			t.Errorf("내장 테마 홈에 %s 가 %d 번", tag, n)
+		}
+	}
 }
 
 // site_url 이 없으면 canonical·og:url 을 싣지 않는다 (위 시험의 짝).
@@ -496,6 +502,9 @@ func TestSEOPartialReachesAThemeThatOverridesHead(t *testing.T) {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("head.html 을 덮어쓴 테마의 홈 HTTP %d", resp.StatusCode)
+	}
 	home := string(b)
 	for _, want := range []string{
 		`<meta name="robots" content="noindex">`,

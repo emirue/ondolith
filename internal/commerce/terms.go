@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -179,7 +180,8 @@ var disclosureKeys = []string{
 
 // BusinessKeys are A-201's 사업자 정보 fields in form order: the eight above, then 업무시간 — 바닥글에
 // 싣지만 표시 의무가 아니라 비어 있어도 알리지 않는다.
-var BusinessKeys = append(append([]string(nil), disclosureKeys...), "business.hours")
+// Clip 으로 용량을 길이에 맞춘다 — 남는 용량이 있으면 누가 append 한 결과가 요청끼리 같은 배열을 쓴다.
+var BusinessKeys = slices.Clip(append(append([]string(nil), disclosureKeys...), "business.hours"))
 
 // BusinessLabels names them for the form and the footer.
 var BusinessLabels = map[string]string{

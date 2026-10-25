@@ -334,7 +334,7 @@ themes/{이름}/
 
 | 이름 | 내용 |
 |---|---|
-| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 테마 로고·파비콘(`.Site.Logo`·`.Site.Favicon` — FR-310. `theme.json` 이 지정했을 때의 자산 주소, 없으면 빈 값), 검색 노출(`.Site.SEO` — FR-718. 소유 확인 `GoogleVerify`·`NaverVerify`·`BingVerify` 와 `NoIndex`. 내장 `partials/head.html` 이 메타 태그로 싣는다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 소유 확인이 된다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
+| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 테마 로고·파비콘(`.Site.Logo`·`.Site.Favicon` — FR-310. `theme.json` 이 지정했을 때의 자산 주소, 없으면 빈 값), 검색 노출(`.Site.SEO` — FR-718. 소유 확인 `GoogleVerify`·`NaverVerify`·`BingVerify` 와 `NoIndex`. 내장 `partials/seo.html` 이 메타 태그로 싣는다. `<head>` 를 덮어쓴 테마는 블록을 옮겨 적지 말고 `{{template "partials/seo.html" .}}` 한 줄을 부른다 — 옮겨 적고 그 줄까지 두면 canonical·JSON-LD 가 두 번 나온다. `NoIndex` 는 테마와 상관없이 `X-Robots-Tag` 헤더로도 간다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
 | `.Menu` | 메뉴 트리 (FR-405) |
 | `.User` | 로그인 사용자 (미로그인이면 nil). 이메일·표시이름만. **역할·권한 원본은 넘기지 않는다** |
 | `.Can` | 미리 계산된 권한 불리언 맵 ([D15](15-access-control.md) 4.3) |
