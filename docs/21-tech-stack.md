@@ -44,7 +44,8 @@
 |---|---|
 | 릴리즈 전 | **`make vuln`을 반드시 돌린다.** 네트워크가 필요해 `make check`에는 넣지 않았다 |
 | 취약점 발견 시 | 툴체인부터 올린다. 애플리케이션 코드로 우회하지 않는다 |
-| `go.mod`의 `go` 지시자 | 실제로 검증한 버전으로 유지한다. 올릴 때 `make check` + `make test-integration`을 다시 돌린다 |
+| Go 버전 | **최신 안정판을 쓴다** ([DEC-2.4](../.ai/DECISIONS.md)) — `curl -s 'https://go.dev/VERSION?m=text'` 의 첫 줄. 새 판(패치 포함)이 나오면 올린다 |
+| `go.mod`의 `go` 지시자 | 실제로 검증한 버전으로 유지한다. 올릴 때 `make check` + `make test-integration`을 다시 돌린다. 주 버전이 바뀌면 릴리스 노트의 호환성 항목을 읽고 전체 검증까지 |
 | 로컬 툴체인 | 저장소의 `mise.toml` 이 mise 에게 `go.mod` 의 버전을 쓰게 한다(`idiomatic_version_file_enable_tools`) — 버전은 `go.mod` 한 곳에만 적는다. 처음 한 번 `mise trust` 와 `mise install` |
 
 ---
