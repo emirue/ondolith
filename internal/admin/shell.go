@@ -54,6 +54,7 @@ var nav = []NavItem{
 	{Screen: "A-406", Title: "회원 항목", Path: "/admin/user-fields", Group: "사용자", Permission: "user.update", Order: 31},
 	{Screen: "A-403", Title: "역할·권한", Path: "/admin/roles", Group: "사용자", Permission: "role.view", Order: 40},
 	{Screen: "A-201", Title: "사이트 설정", Path: "/admin/settings", Group: "설정", Permission: "settings.update", Order: 50},
+	{Screen: "A-211", Title: "검색 노출", Path: "/admin/settings/seo", Group: "설정", Permission: "settings.update", Order: 55},
 	{Screen: "A-205", Title: "메일", Path: "/admin/settings/mail", Group: "설정", Permission: "settings.update", Order: 60},
 	{Screen: "A-206", Title: "소셜 로그인", Path: "/admin/settings/social", Group: "설정", Permission: "settings.update", Order: 65},
 	{Screen: "A-210", Title: "파일 저장소", Path: "/admin/settings/storage", Group: "설정", Permission: "settings.update", Order: 70},

@@ -241,7 +241,6 @@ want "T5.6 커머스 전에는 /shop 이 없다" 404 "$(code GET /shop)"
 
 want "T5.1 사이트 유형을 커머스로" 303 "$(code POST /admin/settings \
 	--data-urlencode "site.name=E2E" --data-urlencode "site.type=shop" \
-	--data-urlencode "site.meta_description=" --data-urlencode "site.og_image=" \
 	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
 want "T5.1 설정이 저장됐다" shop "$(sql "select value from settings where key='site.type'")"
 # **저장이 곧 반영이다** (D20 모듈 게이팅 — 운영 트리를 다시 조립해 원자 교체).
@@ -318,7 +317,6 @@ want "T5.6 PG 미설정이면 주문서를 거절한다" 503 "$(code GET /checko
 # 않는다 — 실제로 그 상태였고, 유형 분기를 지워도 아무것도 실패하지 않았다.
 want "T3.6 cms 로 되돌리기" 303 "$(code POST /admin/settings \
 	--data-urlencode "site.name=E2E" --data-urlencode "site.type=cms" \
-	--data-urlencode "site.meta_description=" --data-urlencode "site.og_image=" \
 	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
 restart || exit 1
 code POST /login --data-urlencode "email=admin@example.com" \
@@ -329,7 +327,6 @@ body GET / | grep -q "새로 들어온 상품" &&
 
 want "T3.6 다시 shop 으로" 303 "$(code POST /admin/settings \
 	--data-urlencode "site.name=E2E" --data-urlencode "site.type=shop" \
-	--data-urlencode "site.meta_description=" --data-urlencode "site.og_image=" \
 	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
 restart || exit 1
 code POST /login --data-urlencode "email=admin@example.com" \

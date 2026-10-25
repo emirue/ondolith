@@ -22,8 +22,6 @@ type boardDeps struct {
 	attachments *content.Attachments
 	authStore   *auth.Store
 	log         *slog.Logger
-	// siteURL is config.SiteURL — 운영자가 정한 출처. 사이트맵·robots 가 쓴다.
-	siteURL string
 	// media 는 에디터로 올린 본문 사진이다 (P-213·P-214, FR-514).
 	media *content.MediaStore
 	spam  spamGuard
@@ -198,6 +196,11 @@ func (d *boardDeps) postView(w http.ResponseWriter, r *http.Request) {
 	d.countView(w, r, p.ID)
 
 	v := d.view(r, p.Title, firstLine(p.Body))
+	// 링크 미리보기는 글의 첫 사진이다 — 갤러리 카드와 같은 사진 (FR-511, FR-515).
+	v.Meta.Type = "article"
+	if id := content.CoverOf(p.BodyHTML); id != "" {
+		v.Meta.OGImage = d.absURL("/media/" + id)
+	}
 	commentForm := map[string]any{"Action": "/board/" + b.Slug + "/" + p.ID + "/comments",
 		"Turnstile": v.Site.Turnstile}
 	// 「답글」(?reply=댓글)은 같은 폼을 그 댓글에 대한 답글로 연다 (FR-505). 이 글의

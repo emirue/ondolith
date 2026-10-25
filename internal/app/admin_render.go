@@ -131,6 +131,7 @@ func (a *adminRenderer) lookup(name string) (*template.Template, error) {
 var adminScreenTitles = map[string]string{
 	"admin/dashboard.html":        "대시보드",
 	"admin/settings.html":         "사이트 설정",
+	"admin/seo.html":              "검색 노출",
 	"admin/mail.html":             "메일 설정",
 	"admin/pages.html":            "페이지",
 	"admin/page-edit.html":        "페이지 편집",

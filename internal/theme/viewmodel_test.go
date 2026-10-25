@@ -110,6 +110,8 @@ func TestSiteCarriesOnlyRenderableFields(t *testing.T) {
 		"Maps": true,
 		// 가입을 닫았는지 — 가입 링크를 감추는 데 쓴다 (FR-217).
 		"SignupClosed": true,
+		// 검색엔진 소유 확인 값과 noindex — 검색엔진이 읽도록 <head> 에 싣는 공개값이다 (FR-718).
+		"SEO": true,
 	}
 	for i := 0; i < ty.NumField(); i++ {
 		if f := ty.Field(i); !allowed[f.Name] {

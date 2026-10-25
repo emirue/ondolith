@@ -259,7 +259,7 @@ func TestTurnstileKeysOnSiteSettings(t *testing.T) {
 	}
 }
 
-// **GA4 측정 ID 는 형식이 맞을 때만 저장한다** (FR-714). 이 값은 공개 화면의 `<script>` 에
+// **GA4 측정 ID 는 형식이 맞을 때만 저장한다** (FR-714). 「검색 노출」(A-211)에서 넣는다. 이 값은 공개 화면의 `<script>` 에
 // 들어간다 — 「G- + 영숫자」(Google 문서) 밖의 값을 받으면 오타는 조용히 측정을 끄고, 이상한
 // 값은 스크립트 주소를 바꾼다. 붙여넣은 공백·소문자는 고쳐 저장하고, 빈 값은 끄기다.
 func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
@@ -272,99 +272,163 @@ func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
 		}
 		return kv["analytics.ga4_id"]
 	}
-	if rec := post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {" g-psw1my7hb4 "}}); rec.Code != http.StatusSeeOther {
+	if rec := post(d.SEOSave, "/admin/settings/seo", url.Values{"analytics.ga4_id": {" g-psw1my7hb4 "}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("맞는 ID = HTTP %d", rec.Code)
 	}
 	if got := saved(); got != "G-PSW1MY7HB4" {
 		t.Errorf("저장된 ID = %q, want G-PSW1MY7HB4", got)
 	}
 	for _, bad := range []string{"UA-12345-1", "G-", "G-PSW1\"><script>", "PSW1MY7HB4", "G-" + strings.Repeat("A", 40)} {
-		if rec := post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {bad}}); rec.Code != http.StatusUnprocessableEntity {
+		if rec := post(d.SEOSave, "/admin/settings/seo", url.Values{"analytics.ga4_id": {bad}}); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%q = HTTP %d, want 422", bad, rec.Code)
 		}
 	}
 	if got := saved(); got != "G-PSW1MY7HB4" {
 		t.Errorf("거부한 값이 저장됐다: %q", got)
 	}
-	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {""}})
+	post(d.SEOSave, "/admin/settings/seo", url.Values{"analytics.ga4_id": {""}})
 	if got := saved(); got != "" {
 		t.Errorf("빈 값으로 끌 수 없다: %q", got)
 	}
 }
 
-// **A-201 저장은 작업 로그에 남는다** (D19 A-201 「저장 성공 → 남김」, D15 7절).
-//
-// 사이트 유형과 Turnstile 만 남기고 나머지는 흔적이 없었다. GA4 측정 ID 는 방문 기록이
-// 어느 GA 속성으로 가는지를 정한다 — `settings.update` 를 가진 운영자가 자기 속성으로
-// 바꿔도 아무도 몰랐다 (2026-10-21 점검). 그래서 GA4 는 값까지 남긴다(공개값이다).
+// **A-201 저장은 작업 로그에 남는다** (D19 A-201 「저장 성공 → 남김」, D15 7절). 바뀐 키 이름만
+// 남기고 값은 남기지 않는다. 바뀐 것이 없으면 남기지 않는다.
 func TestSiteSettingsSaveIsLogged(t *testing.T) {
 	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"})
-	ctx := context.Background()
-	summaries := func() []string {
-		rows, err := pool.Query(ctx, `SELECT summary FROM operation_logs WHERE target_id = 'site' ORDER BY created_at`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rows.Close()
-		var out []string
-		for rows.Next() {
-			var s string
-			if err := rows.Scan(&s); err != nil {
-				t.Fatal(err)
-			}
-			out = append(out, s)
-		}
-		return out
+	post(d.SettingsSave, "/admin/settings", url.Values{"site.name": {"새 이름"}})
+	post(d.SettingsSave, "/admin/settings", url.Values{"site.name": {"새 이름"}}) // 바뀐 것 없음
+	got := logSummaries(t, pool, "site")
+	if len(got) != 1 || !strings.Contains(got[0], "site.name") || strings.Contains(got[0], "새 이름") {
+		t.Errorf("작업 로그 %q, want 키 이름만 한 건", got)
 	}
+}
 
-	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-AAAA1111"}})
-	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-BBBB2222"}, "site.name": {"새 이름"}})
-	post(d.SettingsSave, "/admin/settings", url.Values{"analytics.ga4_id": {"G-BBBB2222"}}) // 바뀐 것 없음
+// **A-211 저장은 작업 로그에 남고 GA4 측정 ID 는 값까지 남긴다** (D19 A-211, D15 7절). GA4 는
+// 방문 기록이 어느 GA 속성으로 가는지를 정한다 — `settings.update` 를 가진 운영자가 자기 속성으로
+// 바꿔도 아무도 몰랐다 (2026-10-21 점검). 공개값이라 값을 남겨도 된다.
+func TestSEOSettingsSaveIsLogged(t *testing.T) {
+	d, pool := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"})
+	post(d.SEOSave, "/admin/settings/seo", url.Values{"analytics.ga4_id": {"G-AAAA1111"}})
+	post(d.SEOSave, "/admin/settings/seo", url.Values{"analytics.ga4_id": {"G-BBBB2222"}, "site.meta_description": {"새 설명"}})
+	post(d.SEOSave, "/admin/settings/seo", url.Values{"analytics.ga4_id": {"G-BBBB2222"}}) // 바뀐 것 없음
 
-	got := summaries()
+	got := logSummaries(t, pool, "seo")
 	if len(got) != 2 {
 		t.Fatalf("작업 로그 %d건 %q, want 2 (바뀐 저장만)", len(got), got)
 	}
 	if !strings.Contains(got[0], "G-AAAA1111") {
 		t.Errorf("첫 GA4 지정이 값 없이 남았다: %q", got[0])
 	}
-	if !strings.Contains(got[1], "G-AAAA1111 → G-BBBB2222") || !strings.Contains(got[1], "site.name") {
-		t.Errorf("GA4 교체·이름 변경이 남지 않았다: %q", got[1])
+	if !strings.Contains(got[1], "G-AAAA1111 → G-BBBB2222") || !strings.Contains(got[1], "site.meta_description") {
+		t.Errorf("GA4 교체·설명 변경이 남지 않았다: %q", got[1])
 	}
-	if strings.Contains(got[1], "새 이름") {
+	if strings.Contains(got[1], "새 설명") {
 		t.Errorf("GA4 밖의 값까지 남겼다: %q", got[1])
 	}
 }
 
-// **A-201 은 D19 가 적은 검사를 한다** — 사이트 이름 1~100자(공백만은 거부), 메타 설명
-// 300자, OG 이미지 http·https 또는 내부 경로. 명세에만 있고 구현이 없었다 (2026-10-21
-// 점검). OG 이미지는 `<meta content>` 에 이스케이프돼 들어가 XSS 는 아니지만,
-// `javascript:`·`//남의호스트` 같은 값이 링크 미리보기에 그대로 실렸다.
+// logSummaries is the operation log for one settings target, oldest first.
+func logSummaries(t *testing.T, pool *pgxpool.Pool, target string) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT summary FROM operation_logs WHERE target_id = $1 ORDER BY created_at`, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// **A-201 은 D19 가 적은 검사를 한다** — 사이트 이름 1~100자(공백만은 거부). 명세에만 있고
+// 구현이 없었다 (2026-10-21 점검).
 func TestSiteSettingsValidateTheD19Fields(t *testing.T) {
 	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
 	for _, bad := range []url.Values{
 		{"site.name": {"   "}},
 		{"site.name": {strings.Repeat("가", 101)}},
-		{"site.meta_description": {strings.Repeat("a", 301)}},
-		{"site.og_image": {"javascript:alert(1)"}},
-		{"site.og_image": {"//evil.example/x.png"}},
-		{"site.og_image": {"ftp://example.com/x.png"}},
-		{"site.og_image": {`/\evil.example/x.png`}},
 	} {
 		if rec := post(d.SettingsSave, "/admin/settings", bad); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%v = HTTP %d, want 422", bad, rec.Code)
 		}
 	}
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{"site.name": {strings.Repeat("가", 100)}}); rec.Code != http.StatusSeeOther {
+		t.Errorf("100자 이름 = HTTP %d, want 303 (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// **A-211 은 D19 가 적은 검사를 한다** — 메타 설명 300자, OG 이미지 http·https 또는 내부 경로,
+// 소유 확인 값은 영문·숫자·-·_·= 100자, 검색 노출 끄기는 켬/끔 둘, robots 규칙은 지시어·주석
+// 줄만. OG 이미지는 `<meta content>` 에 이스케이프돼 들어가 XSS 는 아니지만, `javascript:`·
+// `//남의호스트` 같은 값이 링크 미리보기에 그대로 실렸다 (2026-10-21 점검).
+func TestSEOSettingsValidateTheD19Fields(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	for _, bad := range []url.Values{
+		{"site.meta_description": {strings.Repeat("a", 301)}},
+		{"site.og_image": {"javascript:alert(1)"}},
+		{"site.og_image": {"//evil.example/x.png"}},
+		{"site.og_image": {"ftp://example.com/x.png"}},
+		{"site.og_image": {`/\evil.example/x.png`}},
+		{"seo.google_verification": {`abc"><script>`}},
+		{"seo.naver_verification": {strings.Repeat("a", 101)}},
+		{"seo.noindex": {"yes"}},
+		{"seo.robots_extra": {"Disallow: /tmp\n이것은 규칙이 아니다"}},
+		{"seo.robots_extra": {strings.Repeat("# 주석\n", 401)}},
+	} {
+		if rec := post(d.SEOSave, "/admin/settings/seo", bad); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%v = HTTP %d, want 422", bad, rec.Code)
+		}
+	}
 	for _, ok := range []url.Values{
-		{"site.name": {strings.Repeat("가", 100)}},
 		{"site.meta_description": {strings.Repeat("가", 300)}},
 		{"site.og_image": {"https://cdn.example.com/og.png"}},
 		{"site.og_image": {"/media/0e7f0c3a-0000-4000-8000-000000000000"}},
 		{"site.og_image": {""}},
+		{"seo.noindex": {"1"}},
+		{"seo.robots_extra": {"User-agent: Yeti\r\nDisallow: /tmp\n\n# 주석\nCrawl-delay: 5\nSitemap: https://example.com/extra.xml"}},
 	} {
-		if rec := post(d.SettingsSave, "/admin/settings", ok); rec.Code != http.StatusSeeOther {
+		if rec := post(d.SEOSave, "/admin/settings/seo", ok); rec.Code != http.StatusSeeOther {
 			t.Errorf("%v = HTTP %d, want 303 (%s)", ok, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// **소유 확인 값은 태그를 통째로 붙여 넣어도 값만 저장한다** (FR-718). 구글·네이버·빙 모두
+// 콘솔이 `<meta name="…" content="값" />` 한 줄을 주고, 운영자는 그것을 그대로 붙여 넣는다.
+// 또 A-201 은 이제 검색 노출 칸을 받지 않는다 — 같은 키를 두 화면이 쓰면 한쪽이 다른 쪽을 덮는다.
+func TestSEOVerificationTakesTheValueFromAPastedTag(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"settings.update": true}})
+	ctx := context.Background()
+	if rec := post(d.SEOSave, "/admin/settings/seo", url.Values{
+		"seo.google_verification": {`<meta name="google-site-verification" content="dBw5Cv_bur-Axi537" />`},
+		"seo.naver_verification":  {" 0123456789abcdef0123456789abcdef01234567 "},
+		"seo.bing_verification":   {`<meta name='msvalidate.01' content='0123456789ABCDEF0123456789ABCDEF'>`},
+	}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("저장 = HTTP %d (%s)", rec.Code, rec.Body.String())
+	}
+	kv, err := d.Content.Settings(ctx, "seo.google_verification", "seo.naver_verification", "seo.bing_verification")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"seo.google_verification": "dBw5Cv_bur-Axi537",
+		"seo.naver_verification": "0123456789abcdef0123456789abcdef01234567",
+		"seo.bing_verification":  "0123456789ABCDEF0123456789ABCDEF"}
+	for k, v := range want {
+		if kv[k] != v {
+			t.Errorf("%s = %q, want %q", k, kv[k], v)
+		}
+	}
+	post(d.SettingsSave, "/admin/settings", url.Values{"site.name": {"온돌"}, "site.meta_description": {"A-201 이 쓴 설명"}})
+	if kv, _ := d.Content.Settings(ctx, "site.meta_description"); kv["site.meta_description"] != "" {
+		t.Errorf("A-201 이 검색 노출 칸을 저장했다: %q", kv["site.meta_description"])
 	}
 }
 

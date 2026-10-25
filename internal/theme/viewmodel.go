@@ -60,6 +60,18 @@ type Site struct {
 	// SignupClosed is A-201's 「회원가입 받지 않음」 (FR-217). 테마는 가입 링크·폼을 감춘다 —
 	// 막는 것은 P-103 이고 이것은 안내다.
 	SignupClosed bool
+	// SEO is A-211's search-engine output (FR-718).
+	SEO SEO
+}
+
+// SEO is what A-211 puts in <head>: 검색엔진 소유 확인 값(구글·네이버·빙, 공개값)과
+// 「검색 노출 끄기」. 값의 모양은 A-211 이 본다(영문·숫자·-·_·=).
+type SEO struct {
+	GoogleVerify string
+	NaverVerify  string
+	BingVerify   string
+	// NoIndex puts `noindex` on every public page.
+	NoIndex bool
 }
 
 // MapKeys are A-201's map keys (FR-716): 네이버 ncpKeyId, 카카오 JavaScript 키, 구글 API
@@ -96,7 +108,17 @@ type Flash struct {
 type Meta struct {
 	Title       string
 	Description string
-	OGImage     string
+	// OGImage is an absolute URL when the site's address is known (site_url), else as stored.
+	OGImage string
+	// URL is the canonical address — og:url too. **비어 있으면 싣지 않는다**: site_url 이 없는
+	// 설치에서 요청의 Host 로 짐작한 주소를 정본으로 알리면 잘못된 주소가 검색에 굳는다.
+	URL string
+	// Type is og:type — "website", or "article" for a post.
+	Type string
+	// JSONLD is the page's structured data (FR-719) or nil. 템플릿은
+	// `<script type="application/ld+json">{{.}}</script>` 로 그대로 싣는다 — html/template 이
+	// JSON 으로 이스케이프한다.
+	JSONLD any
 }
 
 // NewView builds a View with every collection non-nil.

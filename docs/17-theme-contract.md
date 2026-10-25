@@ -324,12 +324,12 @@ themes/{이름}/
 
 | 이름 | 내용 |
 |---|---|
-| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
+| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 검색 노출(`.Site.SEO` — FR-718. 소유 확인 `GoogleVerify`·`NaverVerify`·`BingVerify` 와 `NoIndex`. 내장 `partials/head.html` 이 메타 태그로 싣는다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 소유 확인이 된다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
 | `.Menu` | 메뉴 트리 (FR-405) |
 | `.User` | 로그인 사용자 (미로그인이면 nil). 이메일·표시이름만. **역할·권한 원본은 넘기지 않는다** |
 | `.Can` | 미리 계산된 권한 불리언 맵 ([D15](15-access-control.md) 4.3) |
 | `.Flash` | 이번 요청의 메시지 |
-| `.Meta` | 이 화면의 제목·설명·OG 이미지 (FR-511) |
+| `.Meta` | 이 화면의 제목·설명·OG 이미지 (FR-511), canonical 주소 `URL`(site_url 이 없으면 빈 값 — 그때는 싣지 않는다), og:type `Type`(`website`·글은 `article`), 구조화 데이터 `JSONLD`(FR-719, 없으면 nil — `<script type="application/ld+json">{{.}}</script>` 로 그대로 싣는다. html/template 이 JSON 으로 이스케이프한다) |
 | `.Path` | 현재 경로 |
 
 화면별 데이터는 `.Data` 아래 온다. 각 화면이 무엇을 넘기는지는

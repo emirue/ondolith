@@ -88,9 +88,9 @@ login
 
 req -o /dev/null -X POST "$BASE/admin/settings" \
 	--data-urlencode "site.name=화면 점검" --data-urlencode "site.type=shop" \
-	--data-urlencode "site.meta_description=모든 화면을 열어 본다" \
-	--data-urlencode "site.og_image=" --data-urlencode "site.dev_mode=" \
-	--data-urlencode "auth.email_verification_required="
+	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required="
+req -o /dev/null -X POST "$BASE/admin/settings/seo" \
+	--data-urlencode "site.meta_description=모든 화면을 열어 본다" --data-urlencode "site.og_image="
 
 # 커머스 라우트는 조립 시점에 정해진다 (FR-710).
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null

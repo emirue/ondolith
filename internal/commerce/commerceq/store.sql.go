@@ -7,6 +7,7 @@ package commerceq
 
 import (
 	"context"
+	"time"
 )
 
 const addVariantStock = `-- name: AddVariantStock :exec
@@ -420,6 +421,36 @@ type SetCategoryParentParams struct {
 func (q *Queries) SetCategoryParent(ctx context.Context, arg SetCategoryParentParams) error {
 	_, err := q.db.Exec(ctx, setCategoryParent, arg.ParentID, arg.ID)
 	return err
+}
+
+const sitemapProducts = `-- name: SitemapProducts :many
+SELECT slug, updated_at FROM products WHERE is_visible ORDER BY updated_at DESC, id LIMIT $1
+`
+
+type SitemapProductsRow struct {
+	Slug      string
+	UpdatedAt time.Time
+}
+
+// 사이트맵(P-901)의 상품 — 노출 상품만, 최근 바뀐 것부터 (FR-510). 미노출은 404 다.
+func (q *Queries) SitemapProducts(ctx context.Context, limit int32) ([]SitemapProductsRow, error) {
+	rows, err := q.db.Query(ctx, sitemapProducts, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SitemapProductsRow{}
+	for rows.Next() {
+		var i SitemapProductsRow
+		if err := rows.Scan(&i.Slug, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateCategoryNameOrder = `-- name: UpdateCategoryNameOrder :execrows

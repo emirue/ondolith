@@ -165,6 +165,11 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "settings.update", Handler: ad.SettingsForm})
 	r.Add(Route{Screen: "A-201", Method: "POST", Pattern: "/admin/settings", Class: SC5,
 		Permission: "settings.update", Handler: ad.SettingsSave})
+	// A-211 검색 노출 (FR-718). 사이트 유형과 상관없다 — 검색엔진은 cms 사이트도 읽는다.
+	r.Add(Route{Screen: "A-211", Method: "GET", Pattern: "/admin/settings/seo", Class: SC4,
+		Permission: "settings.update", Handler: ad.SEOForm})
+	r.Add(Route{Screen: "A-211", Method: "POST", Pattern: "/admin/settings/seo", Class: SC5,
+		Permission: "settings.update", Handler: ad.SEOSave})
 	r.Add(Route{Screen: "A-205", Method: "GET", Pattern: "/admin/settings/mail", Class: SC4,
 		Permission: "settings.update", Handler: ad.MailSettingsForm})
 	r.Add(Route{Screen: "A-205", Method: "POST", Pattern: "/admin/settings/mail", Class: SC5,

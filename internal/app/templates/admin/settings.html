@@ -5,14 +5,7 @@
       <span>사이트 이름</span>
       <input type="text" name="site.name" value="{{index .Settings "site.name"}}">
     </label>
-    <label class="adm-field">
-      <span>기본 메타 설명</span>
-      <input type="text" name="site.meta_description" value="{{index .Settings "site.meta_description"}}">
-    </label>
-    <label class="adm-field">
-      <span>기본 OG 이미지 URL</span>
-      <input type="text" name="site.og_image" value="{{index .Settings "site.og_image"}}">
-    </label>
+    <p class="adm-hint">검색 결과·링크 미리보기에 쓰이는 설명과 대표 이미지, 방문 통계(GA4)는 <a href="/admin/settings/seo">검색 노출</a>에 있습니다.</p>
 
     <div class="adm-field-row">
       <label class="adm-field">
@@ -76,13 +69,6 @@
           저장된 값은 화면에 다시 표시하지 않습니다. 키는 Cloudflare 대시보드의 Turnstile 에서 만듭니다.</span>
       </label>
     </div>
-
-    {{/* 방문 통계 (FR-714). 공개 화면의 <head> 에 Google gtag.js 가 붙는다. */}}
-    <label class="adm-field">
-      <span>GA4 측정 ID</span>
-      <input type="text" name="analytics.ga4_id" value="{{index .Settings "analytics.ga4_id"}}" maxlength="32" placeholder="G-XXXXXXXXXX" autocomplete="off">
-      <span class="adm-hint">Google 애널리틱스 → 관리 → 데이터 스트림 → 웹 스트림의 첫 줄에 있습니다. 비우면 측정 스크립트가 붙지 않습니다.</span>
-    </label>
 
     {{/* 지도 (FR-716). 키가 있는 지도사만 에디터의 「지도 넣기」 에 나오고, 글 화면이 그 지도사 SDK 로
          지도를 그린다. 키는 페이지에 실리는 공개값이라 다시 보인다 — 각 콘솔에 이 사이트 도메인을 등록해야 동작한다. */}}
