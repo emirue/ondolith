@@ -134,17 +134,12 @@ func (s *Store) RequestRefund(ctx context.Context, orderNo string, lines []Refun
 			return "", 0, ErrReturnInProgress
 		}
 
-		part, err := RefundableAmount(int(it.LineAmount), int(it.DiscountAmount),
+		part, err := itemRefundable(ctx, q, l.OrderItemID, int(it.LineAmount), int(it.DiscountAmount),
 			int(it.Quantity), int(it.SettledQuantity), l.Quantity)
 		if err != nil {
 			return "", 0, err
 		}
-		credit, err := q.ExchangeCreditForItem(ctx, l.OrderItemID)
-		if err != nil {
-			return "", 0, err
-		}
-		amount += capByExchangeCredit(part, int(it.LineAmount), int(it.DiscountAmount),
-			int(it.Quantity), int(it.SettledQuantity), int(credit))
+		amount += part
 
 		if err := q.SettleOrderItem(ctx, commerceq.SettleOrderItemParams{
 			ID: l.OrderItemID, Quantity: int32(l.Quantity)}); err != nil {
@@ -196,6 +191,23 @@ func (s *Store) RequestRefund(ctx context.Context, orderNo string, lines []Refun
 		return "", 0, err
 	}
 	return refundID, amount, nil
+}
+
+// itemRefundable is what returning n units of one order item pays back: 할인 몫을 나눈 값(RefundableAmount)에서
+// 더 싼 조합 교환으로 이미 돌려준 차액을 뺀다(capByExchangeCredit). 부분 환불(RequestRefund)과 반품 정산
+// (returnGross)이 이것을 지난다 — 한쪽에만 규칙을 넣으면 다른 쪽으로 이중 환불이 나간다.
+func itemRefundable(ctx context.Context, q *commerceq.Queries, itemID string,
+	lineAmount, discount, quantity, settled, n int) (int, error) {
+
+	part, err := RefundableAmount(lineAmount, discount, quantity, settled, n)
+	if err != nil {
+		return 0, err
+	}
+	credit, err := q.ExchangeCreditForItem(ctx, itemID)
+	if err != nil {
+		return 0, err
+	}
+	return capByExchangeCredit(part, lineAmount, discount, quantity, settled, int(credit)), nil
 }
 
 // RejectRefund puts the reserved amount back.

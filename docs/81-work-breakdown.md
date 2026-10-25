@@ -482,6 +482,8 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-25 | 대장의 알려진 결함 5건 고치기 | W6-21 | A-507 「전체 취소」, P-507 요청 키, `SettleReturn` 부분 반품, `CompleteExchange` 음수 차액, A-201 개발 모드 | 배송 전 주문은 A-507 「전체 취소」가 남은 금액을 배송비까지 돌려주고 취소한다(`order.cancel` + 재인증, `TestAdminFullCancelReturnsTheRestAndCancels`). P-507 을 두 번 눌러도 요청이 한 건이다(`TestMemberPartialRefundDoubleSubmit`). 부분 반품 정산 뒤 주문이 배송완료로 돌아오고 전부 반품되면 환불이다(`TestPartialReturnSendsTheOrderBackToDelivered`). 더 싼 조합 교환은 차액을 환불한다(`TestNegativeExchangeDifferenceIsRefunded`·`TestAdminCheaperExchangeRefundsTheDifference`). 개발 모드가 A-201 에 있고 바뀌면 재조립하며 켜져 있으면 경고한다(`TestSiteSettingsWarnWhileDevModeIsOn`). 차액을 돌려준 품목의 반품·부분 환불은 그 차액을 뺀다(`TestExchangeCreditIsNotRefundedTwice`·`TestExchangeCreditAlsoAppliesToPartialRefunds`), 수거한 반품은 거부하지 않는다(`TestPickedUpReturnCannotBeRejected`) (FR-611, FR-617, FR-618, FR-306) |
 | W6-26 | 로그인 아이디 저장 (P-101) | — | `remember_email` 쿠키, `auth/login.html` 체크박스 | 체크하고 로그인에 성공하면 다음 로그인 화면의 이메일 칸이 채워지고 체크가 켜진다. 쿠키는 HttpOnly·Path=/login·SameSite=Lax·30일이고 이메일만 담는다. 실패한 로그인은 남기지 않고 끄고 로그인하면 지운다. 손댄 값은 쓰지 않는다(`TestRememberEmailCookie`·`TestRememberedEmailIgnoresAForgedCookie`) (FR-218) |
 | W6-27 | 테마의 로고·파비콘 | — | `theme.Manifest` logo·favicon, `Loader.Brand`, 관리자 레이아웃·내장 머리글·head | 활성 테마의 theme.json 이 지정한 로고·파비콘이 관리자 화면과 공개 화면에 나오고(`TestThemeLogoAndFaviconReachAdminAndPublic`), 지정이 없으면 기본 마크·아이콘이다(`TestDefaultBrandWithoutThemeLogo`). static/ 밖·이미지 아님·파일 없음은 무시하고 활성화가 경고한다(`TestBrandComesFromTheManifest`·`TestBrandMistakesAreWarnedAtActivation`). SVG 는 <img> 로만 (FR-310) |
+| W6-28 | 구조 점검 2차의 결함 2건 | — | A-203 본문 상한·파싱 순서, `adminScreenTitles` | 재인증이 필요한 세션의 테마 업로드도 24 MiB 를 넘으면 413 이고 설치를 부르지 않는다 — 본문 상한과 파싱이 재인증(폼의 비밀번호 읽기)보다 먼저다(`TestThemeUploadBodyIsCappedBeforeReauth`). 모든 관리자 화면 템플릿이 제목을 가진다 — A-210 은 「파일 저장소」(`TestEveryAdminScreenHasATitle`) (FR-307, FR-717) |
+| W6-29 | 환불 결과 기록·품목 환불액을 한 곳으로 | W6-28 | `handlers_order.go` 환불 결과 기록, `commerce` 품목 환불액 | A-507·A-511(교환 차액·반품 정산)이 PG 결과를 같은 규칙으로 남긴다: 「확정」은 PG 확정 뒤에만, 실패는 「PG 처리 실패 — 한도 선점 유지」, 돈이 나간 뒤 주문 기록만 실패하면 그 환불 건을 서버 로그에 남기고 성공으로 다룬다(`TestReturnSettleReportsAGatewayFailure`·`TestRefundSentButNotSettledIsShownAsDone`·`TestCheaperExchangeSentButNotSettledIsLogged`). 부분 환불과 반품 정산이 품목 환불액(할인 몫·교환 차액 빼기)을 같은 함수로 낸다(`TestExchangeCreditIsNotRefundedTwice`·`TestExchangeCreditAlsoAppliesToPartialRefunds`) (FR-611) |
 
 ## 작업 수 요약
 
@@ -492,5 +494,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 27 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **165** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 29 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **167** | **9** | — |

@@ -376,18 +376,12 @@ func returnGross(ctx context.Context, tx pgx.Tx, returnID string) (int, []return
 	gross := 0
 	var lines []returnLine
 	for _, r := range rows {
-		part, err := RefundableAmount(int(r.LineAmount), int(r.DiscountAmount),
+		part, err := itemRefundable(ctx, q, r.OrderItemID, int(r.LineAmount), int(r.DiscountAmount),
 			int(r.Quantity), int(r.SettledQuantity), int(r.ReturnQuantity))
 		if err != nil {
 			return 0, nil, err
 		}
-		// 더 싼 조합 교환으로 이미 돌려준 차액은 뺀다 (capByExchangeCredit).
-		credit, err := q.ExchangeCreditForItem(ctx, r.OrderItemID)
-		if err != nil {
-			return 0, nil, err
-		}
-		gross += capByExchangeCredit(part, int(r.LineAmount), int(r.DiscountAmount),
-			int(r.Quantity), int(r.SettledQuantity), int(credit))
+		gross += part
 		lines = append(lines, returnLine{r.OrderItemID, int(r.ReturnQuantity)})
 	}
 	return gross, lines, nil

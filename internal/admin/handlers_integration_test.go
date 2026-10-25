@@ -1277,13 +1277,51 @@ func TestThemeUploadRequiresReauth(t *testing.T) {
 		return nil
 	}
 
-	rec := post(d.ThemeUpload, "/admin/themes/upload", nil)
+	rec := postThemeUpload(d, "", 10)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("재인증 없이 업로드가 HTTP %d 로 진행됐다", rec.Code)
 	}
 	if called {
 		t.Error("재인증 전에 설치가 호출됐다")
 	}
+}
+
+// **본문 상한은 재인증보다 먼저 걸린다.** 재인증이 비밀번호를 폼에서 읽으므로, 그 뒤에 상한을 걸면
+// 본문은 이미 상한 없이 다 읽힌 다음이다 — 재인증 창이 지난 평소의 업로드가 바로 그 경우였다.
+func TestThemeUploadBodyIsCappedBeforeReauth(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{
+		perms: map[string]bool{"theme.upload": true}, id: "me", reauth: true, password: "pw",
+	})
+	var called bool
+	d.InstallTheme = func(string, io.ReaderAt, int64, bool) error {
+		called = true
+		return nil
+	}
+
+	rec := postThemeUpload(d, "pw", maxThemeUploadBytes+1)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("상한을 넘는 본문이 재인증과 함께 HTTP %d", rec.Code)
+	}
+	if called {
+		t.Error("상한을 넘는 본문으로 설치가 호출됐다")
+	}
+}
+
+// postThemeUpload 는 A-203 폼처럼 비밀번호·이름·zip 칸을 multipart 로 보낸다. 내용은 zip 이
+// 아니어도 된다 — 시험하는 것은 압축 해제기 앞의 문이다.
+func postThemeUpload(d *Deps, password string, size int) *httptest.ResponseRecorder {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("password", password)
+	_ = mw.WriteField("name", "big")
+	fw, _ := mw.CreateFormFile("theme", "big.zip")
+	_, _ = fw.Write(bytes.Repeat([]byte("a"), size))
+	_ = mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/admin/themes/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	d.ThemeUpload(rec, req)
+	return rec
 }
 
 // **A-307 의 글 삭제도 첨부 실물까지 지운다** (OPEN-40 결정).

@@ -884,6 +884,28 @@ func TestAccountScreensHaveTabTitles(t *testing.T) {
 	}
 }
 
+// **관리자 화면은 모두 제목이 있다.** 제목은 adminScreenTitles 에 따로 적고, 라우트·메뉴와 달리
+// 대조하는 곳이 없었다 — A-210 파일 저장소가 빠져 탭이 「 — 관리자」, 머리 제목이 빈칸이었다.
+func TestEveryAdminScreenHasATitle(t *testing.T) {
+	entries, err := fs.ReadDir(adminFS, "templates/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanned := 0
+	for _, e := range entries {
+		if path.Ext(e.Name()) != ".html" || e.Name() == "layout.html" {
+			continue
+		}
+		scanned++
+		if name := "admin/" + e.Name(); adminScreenTitles[name] == "" {
+			t.Errorf("%s 의 제목이 없다 — 탭과 머리 제목이 빈다", name)
+		}
+	}
+	if scanned < 40 {
+		t.Fatalf("화면을 %d 개밖에 못 찾았다 — 검사가 헛돌았다", scanned)
+	}
+}
+
 // **어두운 팔레트는 `color-scheme: dark` 를 함께 선언한다.** 체크박스·선택 상자의 펼친 목록·
 // 스크롤 막대는 브라우저가 그리고, 색 토큰을 따르지 않는다. 선언이 없으면 어두운 주문서에
 // 약관 체크박스만 흰 네모로 남았다.
