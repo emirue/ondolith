@@ -107,15 +107,8 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 	// 읽고 둘 다 진행하므로 막지 못한다 (D50 「멱등성」).
 	paymentID, err := s.q.WithTx(tx).ReservePayment(ctx, commerceq.ReservePaymentParams{
 		OrderID: orderID, Pg: pgName, PaymentKey: paymentKey, ApprovedAmount: int32(stored)})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		// 어느 유니크에 걸렸는지 구분한다. 둘을 한 오류로 접으면 "이 주문은
-		// 이미 결제됐습니다" 가 실제로는 **다른 주문**의 승인 키가 겹쳤다는
-		// 뜻일 수 있고, 그러면 사람이 엉뚱한 주문을 들여다본다.
-		if pgErr.ConstraintName == "payments_pg_key_idx" {
-			return nil, fmt.Errorf("%w: %s/%s", ErrPaymentKeyReused, pgName, paymentKey)
-		}
-		return nil, ErrAlreadyPaid
+	if cerr := paymentConflict(err, pgName, paymentKey); cerr != nil {
+		return nil, cerr
 	}
 	if err != nil {
 		return nil, err
@@ -222,6 +215,23 @@ func (s *Store) ConfirmPayment(ctx context.Context, gw Gateway, pgName string,
 		return res, ErrDepositPending
 	}
 	return res, nil
+}
+
+// paymentConflict names the unique violation a payment reservation hit, or nil
+// when err is not one (FR-608). 주문 결제(P-408)와 교환 차액(P-514)이 같은 구분을 쓴다.
+//
+// 어느 유니크에 걸렸는지 구분한다. 둘을 한 오류로 접으면 "이 주문은 이미
+// 결제됐습니다" 가 실제로는 **다른 결제**의 승인 키가 겹쳤다는 뜻일 수 있고,
+// 그러면 사람이 엉뚱한 주문을 들여다본다.
+func paymentConflict(err error, pgName, paymentKey string) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return nil
+	}
+	if pgErr.ConstraintName == "payments_pg_key_idx" {
+		return fmt.Errorf("%w: %s/%s", ErrPaymentKeyReused, pgName, paymentKey)
+	}
+	return ErrAlreadyPaid
 }
 
 // moveOrder is the compare-and-swap every payment-driven transition uses.

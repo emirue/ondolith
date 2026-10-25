@@ -889,14 +889,8 @@ func (s *Store) ConfirmExchangeDiff(ctx context.Context, gw Gateway, pgName, ord
 	paymentID, err := s.q.ReserveExchangePayment(ctx, commerceq.ReserveExchangePaymentParams{
 		OrderID: d.OrderID, ReturnID: &d.ReturnID, Pg: pgName, PaymentKey: paymentKey,
 		ApprovedAmount: int32(d.Amount)})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		// ConfirmPayment 와 같은 구분이다: 승인 키가 겹친 것은 「이미 결제됨」이
-		// 아니라 다른 결제의 키가 다시 온 것이다.
-		if pgErr.ConstraintName == "payments_pg_key_idx" {
-			return fmt.Errorf("%w: %s/%s", ErrPaymentKeyReused, pgName, paymentKey)
-		}
-		return ErrAlreadyPaid
+	if cerr := paymentConflict(err, pgName, paymentKey); cerr != nil {
+		return cerr
 	}
 	if err != nil {
 		return err
