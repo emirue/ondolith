@@ -164,7 +164,7 @@ func TestForbiddenIs403(t *testing.T) {
 
 // **같은 화면이 메뉴에 두 번 있으면 안 된다.**
 //
-// A-207 약관과 A-208 사업자 정보가 표에 각각 두 줄씩 있었다. Order 도 같아서
+// A-207 약관과 사업자 정보 화면이 표에 각각 두 줄씩 있었다. Order 도 같아서
 // 정렬해도 붙어 나왔고, 관리자 사이드바에 같은 링크가 나란히 두 번 그려졌다.
 // 순서 테스트는 정렬된 순서만 봤으므로 통과했다 — 중복은 순서를 어기지 않는다.
 func TestNoScreenAppearsTwiceInTheMenu(t *testing.T) {

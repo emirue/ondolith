@@ -100,61 +100,6 @@ func (d *Deps) renderTerms(w http.ResponseWriter, r *http.Request, code int, msg
 	d.Render(w, r, "admin/terms.html", code, data)
 }
 
-// BusinessForm is A-208 GET.
-func (d *Deps) BusinessForm(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "settings.update"); !ok {
-		return
-	}
-	d.renderBusiness(w, r, http.StatusOK, "", nil)
-}
-
-// BusinessSave is A-208 POST.
-//
-// **미입력을 저장 거부 사유로 삼지 않는다** (D19 A-208). 설치 직후는 항상
-// 비어 있고, 거부하면 여덟 항목을 다 채우기 전에는 아무것도 저장할 수 없다.
-// `shop` 모드의 미입력은 경고다 (FR-711).
-func (d *Deps) BusinessSave(w http.ResponseWriter, r *http.Request) {
-	c, ok := d.require(w, r, "settings.update")
-	if !ok {
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
-		return
-	}
-	kv := map[string]string{}
-	for _, k := range commerce.BusinessKeys {
-		kv[k] = strings.TrimSpace(r.PostFormValue(k))
-	}
-	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		d.serverError(w, r, err)
-		return
-	}
-	d.log(r, c, "settings.update", "settings", "business", "사업자 정보 수정")
-	http.Redirect(w, r, "/admin/business", http.StatusSeeOther)
-}
-
-func (d *Deps) renderBusiness(w http.ResponseWriter, r *http.Request, code int,
-	msg string, form map[string]string) {
-
-	kv := form
-	if kv == nil {
-		stored, err := d.Content.Settings(r.Context(), commerce.BusinessKeys...)
-		if err != nil {
-			d.serverError(w, r, err)
-			return
-		}
-		kv = stored
-	}
-	data := map[string]any{"Business": kv, "Keys": commerce.BusinessKeys,
-		"Labels": commerce.BusinessLabels, "Error": msg}
-	if missing := commerce.MissingBusinessKeys(kv); len(missing) > 0 {
-		data["Warning"] = "쇼핑몰로 운영 중인데 표시 의무 항목이 비어 있습니다: " +
-			strings.Join(missing, ", ")
-	}
-	d.Render(w, r, "admin/business.html", code, data)
-}
-
 // ---- A-209 결제 설정 -----------------------------------------------------------
 
 // paymentSettingKeys are what A-209 writes.

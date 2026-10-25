@@ -323,7 +323,6 @@ func TestAdminTextHidesInternalCodes(t *testing.T) {
 			"ActionLabels": map[string]string{"settings.update": "설정 변경"}, "Count": int64(1), "PageNo": 1},
 		"admin/user-fields.html": {"Fields": nil, "Types": content.FieldTypes()},
 		"admin/page-edit.html":   {"Page": &content.Page{ID: "p1", Title: "소개", Slug: "about"}},
-		"admin/business.html":    {"Business": map[string]string{}},
 	}
 	for name, data := range pages {
 		out := renderAdmin(t, name, data)

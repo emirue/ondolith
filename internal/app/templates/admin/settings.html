@@ -111,6 +111,20 @@
       </label>
     </div>
 
+    {{/* 사업자 정보 (FR-711). 필수 입력은 없다 — 입력한 항목만 공개 화면 푸터에 나간다.
+         여덟 항목과 이름은 서버가 준다(commerce.BusinessKeys). */}}
+    <fieldset>
+      <legend>사업자 정보</legend>
+      <span class="adm-hint">입력한 항목만 공개 화면 아래쪽(푸터)에 나옵니다. 쇼핑몰로 운영하면 전자상거래법 표시 의무 항목이라 비어 있을 때 경고합니다.</span>
+      {{$s := .Settings}}{{$l := .BusinessLabels}}
+      {{range .BusinessKeys}}
+      <label class="adm-field">
+        <span>{{index $l .}}</span>
+        <input type="text" name="{{.}}" maxlength="200" value="{{index $s .}}">
+      </label>
+      {{end}}
+    </fieldset>
+
     {{/* 사이트 유형 전환은 파괴적 작업이다 (D15 SC-5 4항) — 유형이 바뀔 때만 본다. */}}
     {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">

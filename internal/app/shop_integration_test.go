@@ -300,8 +300,10 @@ func TestBusinessInfoRendersInTheFooter(t *testing.T) {
 	}
 }
 
-// cms 모드에는 표시 의무가 없다. 여덟 줄을 그리면 그 자체가 오류로 보인다.
-func TestBusinessInfoIsAbsentInCmsMode(t *testing.T) {
+// **사업자 정보는 사이트 유형과 상관없이 입력한 항목만 푸터에 나온다** (FR-711). 회사
+// 홈페이지(cms)도 사업자 정보를 싣는다 — 쇼핑몰에서만 그리던 판은 cms 사이트가 넣을 자리도
+// 볼 자리도 없었다. 빈 항목은 그리지 않으므로 cms 의 빈 사업자 정보는 아무것도 그리지 않는다.
+func TestBusinessInfoRendersInCmsModeToo(t *testing.T) {
 	srv, pool := liveSite(t)
 	if _, err := pool.Exec(context.Background(), `
 		INSERT INTO settings (key, value) VALUES ('business.name','온돌리스')
@@ -314,8 +316,11 @@ func TestBusinessInfoIsAbsentInCmsMode(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	if strings.Contains(string(b), "온돌리스") {
-		t.Error("cms 모드인데 사업자 정보가 푸터에 나왔다")
+	if !strings.Contains(string(b), "<dt>상호</dt><dd>온돌리스</dd>") {
+		t.Error("cms 모드에서 입력한 사업자 정보가 푸터에 없다")
+	}
+	if strings.Contains(string(b), "<dt>사업자등록번호</dt>") {
+		t.Error("비어 있는 항목이 그려졌다")
 	}
 }
 

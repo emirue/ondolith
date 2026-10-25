@@ -519,16 +519,12 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		r.Add(Route{Screen: "A-603", Method: "GET", Pattern: "/admin/webhooks", Class: SC4,
 			Permission: "payment.view", Handler: ad.WebhookLog})
 
-		// A-207 약관 · A-208 사업자 정보. 커머스 전용이다 — cms 모드에는
-		// 결제 화면이 없어 받을 동의도, 표시 의무도 없다.
+		// A-207 약관. 커머스 전용이다 — cms 모드에는 결제 화면이 없어 받을 동의가 없다.
+		// 사업자 정보는 유형과 상관없이 A-201 에 있다 (FR-711).
 		r.Add(Route{Screen: "A-207", Method: "GET", Pattern: "/admin/terms", Class: SC4,
 			Permission: "settings.update", Handler: ad.TermsList})
 		r.Add(Route{Screen: "A-207", Method: "POST", Pattern: "/admin/terms", Class: SC5,
 			Permission: "settings.update", Handler: ad.TermsAdd})
-		r.Add(Route{Screen: "A-208", Method: "GET", Pattern: "/admin/settings/business", Class: SC4,
-			Permission: "settings.update", Handler: ad.BusinessForm})
-		r.Add(Route{Screen: "A-208", Method: "POST", Pattern: "/admin/settings/business", Class: SC5,
-			Permission: "settings.update", Handler: ad.BusinessSave})
 
 		// A-209 결제 설정. **시크릿 키는 화면으로 돌아오지 않는다** — 설정
 		// 여부만 표시한다 (D19 A-205 와 같은 규칙). 여기가 없으면 상점은

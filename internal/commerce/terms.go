@@ -191,7 +191,7 @@ var BusinessLabels = map[string]string{
 
 // MissingBusinessKeys reports which of the eight are empty.
 //
-// **저장을 거부하지 않는다** (D19 A-208). 설치 직후는 항상 비어 있고, 거부하면
+// **저장을 거부하지 않는다** (D19 A-201). 설치 직후는 항상 비어 있고, 거부하면
 // 운영자가 사업자 정보를 다 채우기 전에는 아무 설정도 저장할 수 없다. 대신
 // `shop` 모드에서 경고 대상이 된다 (FR-711).
 func MissingBusinessKeys(kv map[string]string) []string {
