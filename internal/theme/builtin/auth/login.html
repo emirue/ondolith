@@ -10,6 +10,11 @@
          value="{{with .Data}}{{.Email}}{{end}}">
   <label for="password">비밀번호</label>
   <input id="password" name="password" type="password" required autocomplete="current-password">
+  {{/* 아이디 저장 (FR-218) — 이 브라우저에 이메일만 30일 남긴다. 공용 컴퓨터를 생각해 기본은 끔이다. */}}
+  <label class="checkbox">
+    <input type="checkbox" name="remember_email" value="1"{{with .Data}}{{if .RememberEmail}} checked{{end}}{{end}}>
+    아이디 저장
+  </label>
   <input type="hidden" name="next" value="{{with .Data}}{{.Next}}{{end}}">
   <button type="submit">로그인</button>
 </form>

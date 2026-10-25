@@ -316,7 +316,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		return out
 	}
 
-	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits,
+	lg := &loginDeps{sm: sessions, store: authStore, limiter: limiter, limits: limits, secureCookies: cfg.SecureCookies,
 		render: pub.renderNamed, log: log, social: func() []auth.SocialConfig { return enabledSocial() }}
 	siteName := func() string { return site().Name }
 	mailer := auth.NewMailer(settingsSender{settings: setting, log: log, site: siteName}, log)

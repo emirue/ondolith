@@ -300,3 +300,74 @@ func TestLoginDuringAnUncommittedRevokeDoesNotSurviveIt(t *testing.T) {
 		t.Error("회수가 커밋된 뒤에도 그 전에 로그인한 세션이 살아 있다")
 	}
 }
+
+func rememberedCookie(rec *httptest.ResponseRecorder) *http.Cookie {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == rememberCookie {
+			return c
+		}
+	}
+	return nil
+}
+
+// **「아이디 저장」은 로그인 화면 전용 쿠키에 이메일만 둔다** (FR-218). 비밀번호·세션과 상관없고 인증에 쓰지
+// 않는다 — 로그인 화면의 이메일 칸을 채울 뿐이다. HttpOnly(스크립트가 못 읽는다)·Path=/login(다른 주소로
+// 가지 않는다)·SameSite=Lax·30일. 성공한 로그인만 남긴다 — 실패한 입력을 남기면 남이 친 주소가 그 브라우저의
+// 다음 로그인 화면에 뜬다. 체크하지 않고 로그인하면 지운다.
+func TestRememberEmailCookie(t *testing.T) {
+	d, h, store := loginFixture(t)
+	mkAccount(t, store, "a@example.com", "correct-horse-battery")
+
+	if c := rememberedCookie(postForm(h, "/login", url.Values{"email": {"a@example.com"},
+		"password": {"wrong-password"}, "remember_email": {"1"}}, nil)); c != nil {
+		t.Errorf("실패한 로그인이 쿠키를 남겼다: %v", c)
+	}
+	rec := postForm(h, "/login", url.Values{"email": {"A@Example.com"},
+		"password": {"correct-horse-battery"}, "remember_email": {"1"}}, nil)
+	c := rememberedCookie(rec)
+	if c == nil {
+		t.Fatalf("아이디 저장 쿠키가 없다 (HTTP %d)", rec.Code)
+	}
+	if !c.HttpOnly || c.Path != "/login" || c.SameSite != http.SameSiteLaxMode || c.MaxAge != 30*24*60*60 || c.Secure {
+		t.Errorf("쿠키 속성 %+v — HttpOnly·Path=/login·Lax·30일·(시험 설정은 Secure 끔)", c)
+	}
+	if got := rememberedEmail(c.Value); got != "a@example.com" {
+		t.Errorf("쿠키의 이메일 = %q, want a@example.com (정규화된 값)", got)
+	}
+
+	// 로그인 화면이 칸을 채우고 체크를 켠다.
+	var data map[string]any
+	d.render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, v any) {
+		w.WriteHeader(code)
+		data, _ = v.(map[string]any)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	req.AddCookie(c)
+	d.sm.LoadAndSave(http.HandlerFunc(d.loginForm)).ServeHTTP(httptest.NewRecorder(), req)
+	if data["Email"] != "a@example.com" || data["RememberEmail"] != true {
+		t.Errorf("로그인 화면 = 이메일 %v · 체크 %v, want a@example.com · true", data["Email"], data["RememberEmail"])
+	}
+
+	// 체크하지 않고 로그인하면 지운다.
+	rec = postForm(h, "/login", url.Values{"email": {"a@example.com"}, "password": {"correct-horse-battery"}},
+		[]*http.Cookie{c})
+	if gone := rememberedCookie(rec); gone == nil || gone.MaxAge >= 0 {
+		t.Errorf("체크를 끄고 로그인했는데 쿠키를 지우지 않았다: %v", gone)
+	}
+}
+
+// **손댄 쿠키로는 칸을 채우지 않는다** (FR-218). 값은 이메일 모양일 때만 쓴다 — 템플릿이 이스케이프하더라도
+// 남이 심은 값(형제 호스트의 쿠키 등)으로 로그인 칸을 채우게 두지 않는다.
+func TestRememberedEmailIgnoresAForgedCookie(t *testing.T) {
+	for _, v := range []string{
+		"", "not base64!!", rememberValue(`<script>alert(1)</script>`),
+		rememberValue("no-at-sign"), rememberValue(strings.Repeat("a", 250) + "@example.com"),
+	} {
+		if got := rememberedEmail(v); got != "" {
+			t.Errorf("rememberedEmail(%q) = %q, want 빈 값", v, got)
+		}
+	}
+	if got := rememberedEmail(rememberValue(" A@Example.com ")); got != "a@example.com" {
+		t.Errorf("정상 값 = %q, want a@example.com", got)
+	}
+}

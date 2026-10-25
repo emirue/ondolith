@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -32,6 +33,47 @@ type loginDeps struct {
 	// within the per-account limit. refused=false lets the login through; sent
 	// reports whether a mail went out this time. nil 이면 검사하지 않는다.
 	unverified func(ctx context.Context, u *auth.User) (refused, sent bool)
+	// secureCookies is config.SecureCookies — 「아이디 저장」 쿠키도 세션 쿠키와 같은 Secure 를 단다.
+	secureCookies bool
+}
+
+// 「아이디 저장」 (FR-218). 로그인 화면의 이메일 칸을 채우는 데만 쓴다 — 비밀번호·세션과 상관없고 인증에
+// 쓰지 않는다. 쿠키는 HttpOnly(스크립트가 못 읽는다)·Path=/login(다른 주소로 가지 않는다)·SameSite=Lax 이고
+// Secure 는 세션 쿠키를 따른다. 값은 base64 다 — 이메일에는 쿠키 값에 쓸 수 없는 글자가 올 수 있다.
+const (
+	rememberCookie = "remember_email"
+	rememberFor    = 30 * 24 * time.Hour
+)
+
+// rememberValue is the cookie value for email.
+func rememberValue(email string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(email))
+}
+
+// rememberedEmail reads a cookie value back, or "" — 이메일 모양이 아니면 버린다. 남이 심은 값(형제 호스트의
+// 쿠키 등)으로 로그인 칸을 채우지 않는다.
+func rememberedEmail(v string) string {
+	b, err := base64.RawURLEncoding.DecodeString(v)
+	if err != nil {
+		return ""
+	}
+	email, err := content.ValidateEmail(string(b))
+	if err != nil || len(email) > 254 {
+		return ""
+	}
+	return email
+}
+
+// remember sets or clears the cookie after a successful login — 체크했으면 남기고 아니면 지운다.
+func (d *loginDeps) remember(w http.ResponseWriter, email string, on bool) {
+	c := &http.Cookie{Name: rememberCookie, Path: "/login", HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: d.secureCookies}
+	if on {
+		c.Value, c.MaxAge = rememberValue(email), int(rememberFor/time.Second)
+	} else {
+		c.MaxAge = -1
+	}
+	http.SetCookie(w, c)
 }
 
 // socialButtons is what the login screen draws. 켠 것이 없으면 빈 목록이다.
@@ -50,6 +92,11 @@ func (d *loginDeps) loginForm(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{
 		"Next": auth.SafeNext(r.URL.Query().Get("next")), "Social": d.socialButtons(),
+	}
+	if c, err := r.Cookie(rememberCookie); err == nil {
+		if email := rememberedEmail(c.Value); email != "" {
+			data["Email"], data["RememberEmail"] = email, true
+		}
 	}
 	// 소셜 콜백이 실패하면 안내를 세션에 담아 여기로 보낸다 (socialFail).
 	if msg := d.sm.PopString(r.Context(), sessSocialError); msg != "" {
@@ -81,6 +128,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 	email := content.NormalizeEmail(r.PostFormValue("email"))
 	password := r.PostFormValue("password")
 	next := auth.SafeNext(r.PostFormValue("next"))
+	rememberOn := r.PostFormValue("remember_email") != ""
 
 	// Two buckets: per IP stops a spray across many accounts, per account stops
 	// a focused guess from a botnet. Either alone leaves the other open
@@ -91,7 +139,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "60")
 		d.render(w, r, "auth/login.html", http.StatusTooManyRequests, map[string]any{
 			"Error": "시도가 너무 잦습니다. 잠시 후 다시 시도하세요.",
-			"Next":  next,
+			"Next":  next, "RememberEmail": rememberOn,
 		})
 		return
 	}
@@ -106,7 +154,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 		d.render(w, r, "auth/login.html", http.StatusBadRequest, map[string]any{
 			"Error": "이메일 또는 비밀번호가 올바르지 않습니다.",
 			"Email": email,
-			"Next":  next,
+			"Next":  next, "RememberEmail": rememberOn,
 		})
 		return
 	}
@@ -124,7 +172,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 				msg = "이메일 인증이 끝나지 않았습니다. 받은 인증 메일의 링크를 누른 뒤 로그인하세요. 인증 메일은 한 시간에 세 번까지 보냅니다."
 			}
 			d.render(w, r, "auth/login.html", http.StatusForbidden, map[string]any{
-				"Error": msg, "Email": email, "Next": next})
+				"Error": msg, "Email": email, "Next": next, "RememberEmail": rememberOn})
 			return
 		}
 	}
@@ -149,5 +197,7 @@ func (d *loginDeps) login(w http.ResponseWriter, r *http.Request) {
 	// 그 제한이 막으려던 여러 계정 대입이 열린다 (D15 4.3-2).
 	d.limiter.Forget("login:acct:" + email)
 
+	// 성공한 로그인만 「아이디 저장」을 바꾼다 — 실패한 입력을 남기면 남이 친 주소가 다음 화면에 뜬다.
+	d.remember(w, email, rememberOn)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
