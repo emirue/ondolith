@@ -487,6 +487,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-30 | 검색 노출 태그를 테마 조각으로 **(완료 — `TestSEOPartialReachesAThemeThatOverridesHead`·`TestSearchSettingsReachTheHeadAndRobots`, Go 1.27.3 통합·실제 브라우저 2026-10-26)** | — | `internal/theme/builtin/partials/seo.html`, `X-Robots-Tag` | noindex·소유 확인·canonical·`og:url`·트위터 카드·JSON-LD 가 `partials/seo.html` 에 있고 내장 `head.html` 이 부른다. `head.html` 을 덮어쓴 테마가 그 한 줄을 부르면 같은 태그를 받고, 부르지 않아도 「검색 노출 끄기」는 `X-Robots-Tag: noindex` 헤더로 간다. 끄면 헤더가 없다(`TestSEOPartialReachesAThemeThatOverridesHead`·`TestSearchSettingsReachTheHeadAndRobots`) (FR-718, FR-719, FR-511) |
 | W6-31 | 홈 Organization 에 테마 로고 **(완료 — `TestSEOPartialReachesAThemeThatOverridesHead`·`TestThemeLogoAndFaviconReachAdminAndPublic`, 실제 브라우저 2026-10-26)** | W6-30 | `siteJSONLD` logo | `site_url` 이 있으면 홈 JSON-LD Organization 에 활성 테마 theme.json 의 로고가 절대 주소로 실리고(`TestSEOPartialReachesAThemeThatOverridesHead`), 없으면 싣지 않는다(`TestThemeLogoAndFaviconReachAdminAndPublic`) (FR-719, FR-310) |
 | W6-32 | 사업자 정보에 업무시간 **(완료 — `TestSiteSettingsHoldBusinessInfo`·`TestBusinessInfoRendersInCmsModeToo`·`TestMissingBusinessKeysNamesTheEmptyOnes`, 실제 브라우저·DB 2026-10-26)** | — | `business.hours` | A-201 에 업무시간 칸이 있고 저장한 값이 바닥글에 「업무시간」으로 나온다. 표시 의무가 아니라 `shop` 미입력 경고에 들지 않는다(`TestSiteSettingsHoldBusinessInfo`·`TestBusinessInfoRendersInCmsModeToo`·`TestMissingBusinessKeysNamesTheEmptyOnes`) (FR-711) |
+| W6-33 | 메일 시험 발송에 제목·내용 (A-205) | — | `internal/admin/handlers.go` `MailTest`, `admin/mail.html` | 시험 발송 폼에서 제목·내용을 적어 보내면 그대로 관리자 본인에게 가고, 비우면 기본 문구다. 줄바꿈 든 제목·200자 넘는 제목·5,000자 넘는 내용은 422 이고 보내지 않으며 시간당 한도를 쓰지 않고 입력이 폼에 남는다(`TestMailTestTakesASubjectAndBody`). 받는 사람은 바꿀 수 없다(`TestMailTestSendsOnlyToTheAdminItself`) (FR-708) |
 
 ## 작업 수 요약
 
@@ -497,5 +498,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 32 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **170** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 33 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **171** | **9** | — |
