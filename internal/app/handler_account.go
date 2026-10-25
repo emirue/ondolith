@@ -90,7 +90,7 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 	// 나중에 「내 정보」에서만 받으면, 필수로 지정한 항목이 필수가 아니게 된다.
 	fields, _, err := d.profileFields(r, "")
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	// 거절은 적은 값을 칸에 남긴 채 다시 그린다 — 항목 칸이 빠지면 고쳐 낸 뒤에야 「필수 항목」
@@ -124,7 +124,7 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := auth.HashPassword(f.Password)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 
@@ -145,14 +145,14 @@ func (d *accountDeps) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	// 항목 값은 계정이 생긴 뒤에 쓴다 — CreateUser 는 항목의 존재를 모르고,
 	// 알게 하면 auth 가 content 의 스키마를 알아야 한다.
 	if len(custom) > 0 {
 		if err := d.store.UpdateProfile(ctx, userID, f.DisplayName, custom); err != nil {
-			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			plainServerError(d.log, w, r, err)
 			return
 		}
 	}
@@ -259,18 +259,18 @@ func (d *accountDeps) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	// 다른 기기의 세션까지 끝낸다. withActor 가 비활성 계정의 세션을 다음
 	// 요청에서 파기하지만, 그것은 그 세션이 다시 요청을 보낼 때다 — 컷오프를
 	// 옮겨 두면 지금 끝난다 (D15 5.4).
 	if err := d.store.InvalidateSessions(ctx, a.User.ID); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	if err := d.sm.Destroy(ctx); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -336,7 +336,7 @@ func (d *accountDeps) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.store.MarkEmailVerified(ctx, userID); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	d.render(w, r, "auth/verify.html", http.StatusOK, nil)
@@ -354,7 +354,7 @@ func (d *accountDeps) signupForm(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, _, err := d.profileFields(r, "")
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	d.render(w, r, "auth/signup.html", http.StatusOK,
@@ -370,7 +370,7 @@ func (d *accountDeps) profileForm(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, values, err := d.profileFields(r, a.User.ID)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	d.render(w, r, "account/profile.html", http.StatusOK, map[string]any{
@@ -458,7 +458,7 @@ func (d *accountDeps) updateProfile(w http.ResponseWriter, r *http.Request) {
 	name := r.PostFormValue("display_name")
 	fields, prev, err := d.profileFields(r, a.User.ID)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	redraw := func(code int, msg string) {
@@ -481,7 +481,7 @@ func (d *accountDeps) updateProfile(w http.ResponseWriter, r *http.Request) {
 	// Ownership is the session's user id, never a form field: SC-3 says the
 	// subject comes from the session, so there is no id to tamper with.
 	if err := d.store.UpdateProfile(r.Context(), a.User.ID, name, custom); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	http.Redirect(w, r, "/me", http.StatusSeeOther)
@@ -517,7 +517,7 @@ func (d *accountDeps) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := auth.HashPassword(next)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	// SetPassword also moves sessions_valid_from, ending every OTHER session,
@@ -530,14 +530,14 @@ func (d *accountDeps) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	// ...including this one, so it is renewed and re-stamped: the person who
 	// just proved they know the password stays logged in, everyone else does
 	// not.
 	if err := d.sm.RenewToken(ctx); err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 	d.sm.Put(ctx, sessUserID, a.User.ID)

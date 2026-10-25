@@ -1,10 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/alexedwards/scs/v2"
@@ -72,7 +75,7 @@ func runWithSession(t *testing.T, sm *scs.SessionManager, store *auth.Store,
 		seen = ActorFrom(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
-	h := sm.LoadAndSave(withActor(sm, store)(inner))
+	h := sm.LoadAndSave(withActor(sm, store, nil)(inner))
 
 	// First pass: populate the session and capture its cookie.
 	rec := httptest.NewRecorder()
@@ -225,5 +228,42 @@ func TestSessionNamingMissingUserIsDestroyed(t *testing.T) {
 	}
 	if a.IsAuthenticated() {
 		t.Error("존재하지 않는 사용자로 인증됐다")
+	}
+}
+
+// 저장소가 죽으면 모든 요청이 500 이다 — 원인이 로그에 한 줄 남아야 운영자가 장애를
+// 안다. 세션이 있는 요청(계정 조회)과 없는 요청(익명 권한) 두 갈래 다.
+func TestWithActorStoreFailureIsLogged(t *testing.T) {
+	store, pool, sm := authFixture(t)
+	hash, err := auth.HashPassword("correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.CreateUser(context.Background(), "member@example.com", hash, "회원")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prep := httptest.NewRecorder()
+	sm.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		sm.Put(r.Context(), sessUserID, id)
+	})).ServeHTTP(prep, httptest.NewRequest(http.MethodGet, "/", nil))
+	pool.Close()
+
+	for name, cookies := range map[string][]*http.Cookie{"익명": nil, "회원": prep.Result().Cookies()} {
+		var buf bytes.Buffer
+		h := sm.LoadAndSave(withActor(sm, store, slog.New(slog.NewTextHandler(&buf, nil)))(
+			http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Errorf("%s: 다음 핸들러까지 갔다", name) })))
+		req := httptest.NewRequest(http.MethodGet, "/board/notice", nil)
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "일시적인 오류입니다.") {
+			t.Errorf("%s: 상태 %d, 화면 %q", name, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(buf.String(), "/board/notice") || !strings.Contains(buf.String(), "err=") {
+			t.Errorf("%s: 원인이 로그에 없다: %q", name, buf.String())
+		}
 	}
 }

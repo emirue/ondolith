@@ -23,9 +23,7 @@ func (d *Deps) refusal(r *http.Request, msg string, err error) string {
 	if msg != "" {
 		return msg
 	}
-	if d.Logger != nil {
-		d.Logger.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
-	}
+	d.logFailure(r, err)
 	return "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."
 }
 

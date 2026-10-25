@@ -133,7 +133,7 @@ func (d *Deps) reconcilePage(w http.ResponseWriter, r *http.Request, c Caller,
 
 	rows, err := d.Commerce.PaymentsToReconcile(r.Context(), *p.Since, *p.Until)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// 클로저가 nil 인 경우(배선 전)와 반환값이 nil 인 경우(PG 「사용 안 함」)를
@@ -178,7 +178,7 @@ func (d *Deps) WebhookLog(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.Commerce.WebhookHistory(r.Context(), p.Since, p.Until,
 		webhookPageSize+1, (page-1)*webhookPageSize)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	more := len(rows) > webhookPageSize

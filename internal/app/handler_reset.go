@@ -144,7 +144,7 @@ func (d *accountDeps) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := auth.HashPassword(pw)
 	if err != nil {
-		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+		plainServerError(d.log, w, r, err)
 		return
 	}
 

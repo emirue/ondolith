@@ -138,7 +138,7 @@ func socialRun(t *testing.T, sm *scs.SessionManager, store *auth.Store, h http.H
 		req.AddCookie(c)
 	}
 	rec := httptest.NewRecorder()
-	sm.LoadAndSave(withActor(sm, store)(h)).ServeHTTP(rec, req)
+	sm.LoadAndSave(withActor(sm, store, nil)(h)).ServeHTTP(rec, req)
 	return rec
 }
 

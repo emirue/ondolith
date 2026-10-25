@@ -16,8 +16,8 @@ import (
 //
 // **형식 오류(422)와 없는 조합(404)을 구분한다.** `variant_id` 는 A-517 의 행이
 // 싣는 값이라 형식이 깨진 것은 사람의 실수가 아니고, 없는 조합은 그 사이 삭제된
-// 것이다.
-func stockError(err error) (int, string) {
+// 것이다. 그 밖의 오류는 화면에 한 문장, 원인은 로그로 간다 (D22 3절).
+func (d *Deps) stockError(r *http.Request, err error) (int, string) {
 	switch {
 	case errors.Is(err, commerce.ErrScanFormat):
 		return http.StatusUnprocessableEntity, "잘못된 요청입니다."
@@ -30,6 +30,7 @@ func stockError(err error) (int, string) {
 	case errors.Is(err, commerce.ErrOutOfStock):
 		return http.StatusUnprocessableEntity, "재고가 0보다 작아집니다."
 	default:
+		d.logFailure(r, err)
 		return http.StatusInternalServerError, "일시적인 오류입니다."
 	}
 }
@@ -148,7 +149,7 @@ func (d *Deps) renderStock(w http.ResponseWriter, r *http.Request, c Caller, cod
 	find.Q = strings.TrimSpace(find.Q)
 	found, err := d.Commerce.FindVariants(r.Context(), find)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	page := find.Page
@@ -198,7 +199,7 @@ func (d *Deps) StockReceive(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PostFormValue("variant_id"))
 	v, err := d.Commerce.ScanVariant(r.Context(), id)
 	if err != nil {
-		refuse(stockError(err))
+		refuse(d.stockError(r, err))
 		return
 	}
 	qty, err := strconv.Atoi(strings.TrimSpace(r.PostFormValue("quantity")))
@@ -209,7 +210,7 @@ func (d *Deps) StockReceive(w http.ResponseWriter, r *http.Request) {
 
 	after, err := d.Commerce.ReceiveStock(r.Context(), id, qty)
 	if err != nil {
-		refuse(stockError(err))
+		refuse(d.stockError(r, err))
 		return
 	}
 	// D15 7절 「재고 수기 변경」: 조합·수량·입고 전후 재고.
@@ -251,7 +252,7 @@ func (d *Deps) Stocktake(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PostFormValue("variant_id"))
 	v, err := d.Commerce.ScanVariant(r.Context(), id)
 	if err != nil {
-		refuse(stockError(err))
+		refuse(d.stockError(r, err))
 		return
 	}
 	counted, cerr := strconv.Atoi(strings.TrimSpace(r.PostFormValue("counted")))
@@ -272,7 +273,7 @@ func (d *Deps) Stocktake(w http.ResponseWriter, r *http.Request) {
 
 	res, err := d.Commerce.Stocktake(r.Context(), id, counted, ledger)
 	if err != nil {
-		code, msg := stockError(err)
+		code, msg := d.stockError(r, err)
 		if code == http.StatusConflict {
 			// **그 조합 한 행으로 현재 재고와 함께 다시 그린다.** 사용자는 다시
 			// 세어 실측만 넣으면 된다 — 새 장부 값은 행이 다시 싣는다.
@@ -350,7 +351,7 @@ func (d *Deps) PickCheck(w http.ResponseWriter, r *http.Request) {
 		// 식별은 A-517 과 같은 함수가 한다 (FR-627): QR·SKU·바코드.
 		found, err := d.Commerce.FindVariants(r.Context(), commerce.VariantQuery{Q: value})
 		if err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		v, err := found.One()
@@ -419,7 +420,7 @@ func (d *Deps) QRLabel(w http.ResponseWriter, r *http.Request) {
 	// 그 조합은 입고 스캔을 할 수 없어 영원히 품절로 남는다.
 	variants, err := d.Commerce.Variants(r.Context(), productID, false)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 
@@ -427,7 +428,7 @@ func (d *Deps) QRLabel(w http.ResponseWriter, r *http.Request) {
 	for _, v := range variants {
 		svg, err := qrSVG(v.ID, 128)
 		if err != nil {
-			d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+			d.serverError(w, r, err)
 			return
 		}
 		labels = append(labels, map[string]any{

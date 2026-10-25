@@ -97,7 +97,7 @@ func (d *Deps) StorageSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 하는 바로 그 길이 막힌다 (D60 「저장된 자격증명」).
 	saved, _, err := d.Content.SettingsForForm(r.Context(), content.StorageSettingKeys...)
 	if err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// 확인은 **폼의 값으로** 한다 — 저장 전에 맞는지 알아야 한다. 비워 둔 시크릿만 저장된 것을 쓴다.
@@ -123,7 +123,7 @@ func (d *Deps) StorageSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := d.Content.PutSettings(r.Context(), kv); err != nil {
-		d.refuse(w, r, http.StatusInternalServerError, "일시적인 오류입니다.")
+		d.serverError(w, r, err)
 		return
 	}
 	// 행선지가 바뀐 것은 이전·새 값으로 남긴다. 버킷을 바꾸거나 비우면 그 전 버킷의 파일이
