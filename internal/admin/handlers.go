@@ -209,7 +209,7 @@ func (d *Deps) fail(w http.ResponseWriter, r *http.Request, err error) bool {
 // siteSettingKeys is what A-201 owns. Listing them is what keeps one screen
 // from writing another screen's keys: there is no generic settings editor
 // (D30 settings).
-var siteSettingKeys = []string{
+var siteSettingKeys = append([]string{
 	"site.name", "site.meta_description", "site.og_image", "site.dev_mode", "site.type",
 	"auth.email_verification_required",
 	// 회원가입을 닫는다 (FR-217). 빈 값이 「받음」이라 이 키가 없던 사이트는 지금처럼 열려 있다.
@@ -223,7 +223,9 @@ var siteSettingKeys = []string{
 	"analytics.ga4_id",
 	// 지도 키 (FR-716) — mapKeyNames 와 같은 목록이다.
 	"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id",
-}
+	// 사업자 정보 여덟 칸이 뒤에 붙는다 (FR-711). 쇼핑몰에서만 열리던 화면에 있었는데,
+	// 회사 홈페이지(cms)도 푸터에 싣는다.
+}, commerce.BusinessKeys...)
 
 // mapKeyNames are the map providers' browser keys (FR-716): 네이버 ncpKeyId, 카카오
 // JavaScript 키, 구글 API 키와 Map ID. **공개값이다** — 페이지에 실려 SDK 를 부르고, 각
@@ -250,7 +252,7 @@ func (d *Deps) SettingsForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// renderSettings 를 거친다 — Turnstile 비밀키는 「저장됐는지」 만 나간다.
-	d.renderSettings(w, r, "admin/settings.html", siteSettingKeys, http.StatusOK, "")
+	d.renderSite(w, r, http.StatusOK, "")
 }
 
 // ogImageURL is D19 A-201's 「스킴 허용목록 http/https 또는 내부 상대경로」. 빈 값은
@@ -297,25 +299,36 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	dropBlankSecrets(kv)
 	// D19 A-201 의 길이·형식. 사이트 이름은 P-001 의 site_name 과 같은 상한이다.
 	if v, ok := kv["site.name"]; ok && (strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > 100) {
-		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+		d.renderSite(w, r,
 			http.StatusUnprocessableEntity, "사이트 이름은 1~100자입니다.")
 		return
 	}
 	if utf8.RuneCountInString(kv["site.meta_description"]) > 300 {
-		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+		d.renderSite(w, r,
 			http.StatusUnprocessableEntity, "기본 메타 설명은 300자 이내입니다.")
 		return
 	}
 	if !ogImageURL(kv["site.og_image"]) {
-		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+		d.renderSite(w, r,
 			http.StatusUnprocessableEntity, "OG 이미지는 http·https 주소이거나 /로 시작하는 이 사이트의 경로여야 합니다.")
 		return
+	}
+	// 사업자 정보는 비워도 저장한다 — 필수가 아니다. 쇼핑몰의 빈 항목은 경고다 (FR-711).
+	for _, k := range commerce.BusinessKeys {
+		if v, ok := kv[k]; ok {
+			kv[k] = strings.TrimSpace(v)
+			if utf8.RuneCountInString(kv[k]) > 200 {
+				d.renderSite(w, r,
+					http.StatusUnprocessableEntity, "사업자 정보는 항목마다 200자 이내입니다.")
+				return
+			}
+		}
 	}
 	// 붙여넣은 공백·소문자는 고쳐 받는다. 빈 값은 끄기다.
 	if v, ok := kv["analytics.ga4_id"]; ok {
 		kv["analytics.ga4_id"] = strings.ToUpper(strings.TrimSpace(v))
 		if v := kv["analytics.ga4_id"]; v != "" && !ga4ID.MatchString(v) {
-			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			d.renderSite(w, r,
 				http.StatusUnprocessableEntity, "GA4 측정 ID 는 G- 로 시작하는 영문·숫자입니다 (예: G-PSW1MY7HB4).")
 			return
 		}
@@ -324,7 +337,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		if v, ok := kv[k]; ok {
 			kv[k] = strings.TrimSpace(v)
 			if !mapKey.MatchString(kv[k]) {
-				d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+				d.renderSite(w, r,
 					http.StatusUnprocessableEntity, "지도 키는 영문·숫자·-·_ 로 100자 이내입니다.")
 				return
 			}
@@ -332,7 +345,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, k := range []string{"turnstile.site_key", "turnstile.secret_key"} {
 		if len(kv[k]) > 200 {
-			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			d.renderSite(w, r,
 				http.StatusUnprocessableEntity, "Turnstile 키가 너무 깁니다 (200자 이내).")
 			return
 		}
@@ -340,7 +353,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// FR-710: the site type is a closed vocabulary. An unknown value would
 	// leave the router assembling a tree nobody described.
 	if t, ok := kv["site.type"]; ok && t != "cms" && t != "shop" {
-		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+		d.renderSite(w, r,
 			http.StatusUnprocessableEntity, "사이트 유형은 cms 또는 shop 이어야 합니다.")
 		return
 	}
@@ -348,7 +361,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 찍히고, admin.css 의 어느 블록과도 매치되지 않아 콘솔이 기본으로 보인다 —
 	// 저장은 됐는데 아무 일도 안 일어나는 상태다.
 	if t, ok := kv["admin.theme"]; ok && !adminThemes[t] {
-		d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+		d.renderSite(w, r,
 			http.StatusUnprocessableEntity, "관리자 배색은 1a~1e 중 하나여야 합니다.")
 		return
 	}
@@ -379,14 +392,14 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 			if n > 0 {
 				d.log(r, c, "settings.update", "settings", "site.type",
 					"사이트 유형 전환 거부: 미완결 주문 "+strconv.Itoa(n)+"건")
-				d.renderSettings(w, r, "admin/settings.html", siteSettingKeys, http.StatusConflict,
+				d.renderSite(w, r, http.StatusConflict,
 					"완결되지 않은 주문이 "+strconv.Itoa(n)+"건 있습니다. 완결 후 다시 시도하세요.")
 				return
 			}
 		}
 		// 파괴적 전환이다 (D15 SC-5 4항, D19 A-201 거부 조건).
 		if !reauthOK(c, r) {
-			d.renderSettings(w, r, "admin/settings.html", siteSettingKeys,
+			d.renderSite(w, r,
 				http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 			return
 		}
@@ -511,14 +524,51 @@ func (d *Deps) renderSettings(w http.ResponseWriter, r *http.Request,
 func (d *Deps) renderSettingsNotice(w http.ResponseWriter, r *http.Request,
 	screen string, keys []string, code int, msg, notice string,
 ) {
+	d.renderSettingsData(w, r, screen, keys, code, msg, notice, nil)
+}
+
+// renderSettingsData is the shared body; more adds what one screen draws besides its keys.
+func (d *Deps) renderSettingsData(w http.ResponseWriter, r *http.Request,
+	screen string, keys []string, code int, msg, notice string,
+	more func(kv map[string]string, data map[string]any),
+) {
 	kv, unreadable, err := d.Content.SettingsForForm(r.Context(), keys...)
 	if err != nil {
 		d.serverError(w, r, err)
 		return
 	}
 	shown, saved := formSettings(kv)
-	d.Render(w, r, screen, code, map[string]any{"Settings": shown, "SecretSaved": saved,
-		"Error": msg, "Notice": notice, "Warning": unreadableWarning(unreadable)})
+	data := map[string]any{"Settings": shown, "SecretSaved": saved,
+		"Error": msg, "Notice": notice, "Warning": unreadableWarning(unreadable)}
+	if more != nil {
+		more(kv, data)
+	}
+	d.Render(w, r, screen, code, data)
+}
+
+// renderSite is A-201's form. 사업자 정보 칸의 이름과 순서를 함께 넘기고, 쇼핑몰인데 빈
+// 항목이 있으면 대시보드와 같은 말로 알린다 (FR-711).
+func (d *Deps) renderSite(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	d.renderSettingsData(w, r, "admin/settings.html", siteSettingKeys, code, msg, "",
+		func(kv map[string]string, data map[string]any) {
+			data["BusinessKeys"], data["BusinessLabels"] = commerce.BusinessKeys, commerce.BusinessLabels
+			if bw := businessWarning(kv); bw != "" {
+				data["Warning"] = strings.TrimSpace(data["Warning"].(string) + " " + bw)
+			}
+		})
+}
+
+// businessWarning is FR-711's 「쇼핑몰인데 표시 의무 항목이 비었다」, or "". 저장을 막지
+// 않기로 했으므로(설치 직후는 항상 비어 있다) 대시보드와 A-201 이 이 말을 띄운다.
+func businessWarning(kv map[string]string) string {
+	if kv["site.type"] != "shop" {
+		return ""
+	}
+	missing := commerce.MissingBusinessKeys(kv)
+	if len(missing) == 0 {
+		return ""
+	}
+	return "사업자 정보가 비어 있습니다: " + strings.Join(missing, ", ") + " — 전자상거래법 표시 의무 항목입니다."
 }
 
 func (d *Deps) MailSettingsForm(w http.ResponseWriter, r *http.Request) {
@@ -788,11 +838,8 @@ func (d *Deps) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// 관리자가 반드시 지나는 화면이다.
 	kv, err := d.Content.Settings(r.Context(), append(
 		[]string{"site.type"}, commerce.BusinessKeys...)...)
-	if err == nil && kv["site.type"] == "shop" {
-		if missing := commerce.MissingBusinessKeys(kv); len(missing) > 0 {
-			data["Warning"] = "사업자 정보가 비어 있습니다: " +
-				strings.Join(missing, ", ") + " — 전자상거래법 표시 의무 항목입니다."
-		}
+	if bw := businessWarning(kv); err == nil && bw != "" {
+		data["Warning"] = bw
 	}
 	// **메일(SMTP)이 비어 있으면 알린다** (FR-708). 새 설치는 인증이 켜진 채로
 	// 시작하므로(FR-214) SMTP 전에는 가입한 회원이 인증 메일을 받지 못하는데, 공개

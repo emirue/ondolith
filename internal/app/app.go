@@ -239,21 +239,19 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		if key, secret := turnstileKeys(); key != "" && secret != "" {
 			s.Turnstile = key
 		}
-		// 사업자 정보는 shop 모드에서만 푸터에 나간다 (FR-711). cms 사이트는
-		// 표시 의무가 없고, 비어 있는 여덟 줄을 그리면 그것이 곧 오류로 보인다.
-		if s.Type == "shop" {
-			raw := setting(commerce.BusinessKeys...)
-			s.Business = map[string]string{}
-			for _, k := range commerce.BusinessKeys {
-				if v := raw[k]; v != "" {
-					// **키가 아니라 항목 이름으로 넘긴다.** 테마는 우리 설정 키를
-					// 몰라야 하고, `business.reg_no` 는 방문자가 읽을 말이 아니다.
-					s.Business[commerce.BusinessLabels[k]] = v
-				}
+		// 사업자 정보는 사이트 유형과 상관없이 **입력한 항목만** 푸터에 나간다 (FR-711).
+		// 회사 홈페이지(cms)도 싣는다. 빈 항목을 그리면 그것이 곧 오류로 보이므로 뺀다.
+		raw := setting(commerce.BusinessKeys...)
+		s.Business = map[string]string{}
+		for _, k := range commerce.BusinessKeys {
+			if v := raw[k]; v != "" {
+				// **키가 아니라 항목 이름으로 넘긴다.** 테마는 우리 설정 키를
+				// 몰라야 하고, `business.reg_no` 는 방문자가 읽을 말이 아니다.
+				s.Business[commerce.BusinessLabels[k]] = v
 			}
-			if len(s.Business) == 0 {
-				s.Business = nil
-			}
+		}
+		if len(s.Business) == 0 {
+			s.Business = nil
 		}
 		return s
 	}

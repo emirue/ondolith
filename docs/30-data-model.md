@@ -480,7 +480,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `backup.auto` · `backup.hour` · `backup.keep` | bool / int 0~23 (기본 0) / int 1~30 (기본 7) | A-604 | 6 |
 | `mail.smtp_host` · `smtp_port` · `smtp_user` · `smtp_password` · `tls_mode` · `from_address` · `from_name` | text / int / text / **자격증명** / `none`\|`starttls`\|`tls` / text / text | A-205 | 1 |
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
-| `business.*` | text | A-208 | 3 |
+| `business.*` | text | A-201 | 3 |
 | `pg.provider` · `pg.client_key` · `pg.secret_key` | `toss` \| 빈 값(사용 안 함) / text — 공개값 / **자격증명** | A-209 | 3 |
 | `storage.backend` · `storage.s3.endpoint` · `storage.s3.region` · `storage.s3.bucket` · `storage.s3.access_key` · `storage.s3.secret_key` · `storage.s3.path_style` | 빈 값(로컬) \| `s3` / text(빈 값 = AWS S3) / text / text / text / **자격증명** / bool (FR-717) | A-210 | 6 |
 | `upload.max_bytes` · `upload.max_per_post` · `upload.deny_ext` | int / int / text | **쓰는 화면이 없다** — 코드 기본값 ([GAP-31](85-gaps.md)) | 2 |

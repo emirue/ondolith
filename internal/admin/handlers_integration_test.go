@@ -1409,6 +1409,51 @@ func TestDashboardWarnsAboutMissingBusinessInfoInShopMode(t *testing.T) {
 	}
 }
 
+// **사업자 정보는 사이트 설정(A-201)에서 저장한다** (FR-711). 비워도 저장되고 항목마다
+// 200자를 넘으면 422 다. 쇼핑몰인데 빈 항목이 있으면 A-201 도 대시보드와 같이 알린다 —
+// 쇼핑몰에서만 열리던 사업자 정보 화면이 없어졌으니 운영자가 고치는 자리가 여기다.
+func TestSiteSettingsHoldBusinessInfo(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"settings.update": true}, id: "u1", email: "op@example.com"}
+	d, _ := fixture(t, caller)
+	ctx := context.Background()
+
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{"site.name": {"온돌"},
+		"business.name": {" 온돌리스 "}, "business.reg_no": {""}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	kv, err := d.Content.Settings(ctx, "business.name", "business.reg_no")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["business.name"] != "온돌리스" || kv["business.reg_no"] != "" {
+		t.Errorf("저장된 값 %q", kv)
+	}
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+		"business.address": {strings.Repeat("가", 201)}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("201자 주소 = HTTP %d, want 422", rec.Code)
+	}
+
+	var data map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, c int, v any) {
+		w.WriteHeader(c)
+		data, _ = v.(map[string]any)
+	}
+	get(d.SettingsForm, "/admin/settings")
+	if w, _ := data["Warning"].(string); w != "" {
+		t.Errorf("cms 인데 경고 %q", w)
+	}
+	if err := d.Content.PutSettings(ctx, map[string]string{"site.type": "shop"}); err != nil {
+		t.Fatal(err)
+	}
+	get(d.SettingsForm, "/admin/settings")
+	if w, _ := data["Warning"].(string); !strings.Contains(w, "사업자등록번호") {
+		t.Errorf("쇼핑몰의 빈 항목을 알리지 않았다: %q", w)
+	}
+	if shown, _ := data["Settings"].(map[string]string); shown["business.name"] != "온돌리스" {
+		t.Errorf("폼에 상호가 없다: %v", data["Settings"])
+	}
+}
+
 // **배포된 약관을 고치려는 요청을 조용히 무시하지 않고 거부한다** (D19 A-207).
 //
 // 무시하면 운영자는 본문이 고쳐졌다고 믿는다. `order_agreements` 가 가리키는
