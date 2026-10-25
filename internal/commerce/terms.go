@@ -162,11 +162,11 @@ func (s *Store) TermsByID(ctx context.Context, id string) (*Terms, error) {
 	return &t, nil
 }
 
-// BusinessKeys are D50's fixed eight (전자상거래법 표시 의무 항목).
+// disclosureKeys are D50's fixed eight (전자상거래법 표시 의무 항목) — MissingBusinessKeys 가 보는 것.
 //
 // 자유 키/값으로 두지 않는다 — 빠뜨린 항목을 아무도 모르고, `shop` 모드
 // 미입력 경고(FR-711)를 띄울 대상도 정할 수 없다.
-var BusinessKeys = []string{
+var disclosureKeys = []string{
 	"business.name",       // 상호
 	"business.owner",      // 대표자명
 	"business.reg_no",     // 사업자등록번호
@@ -176,6 +176,10 @@ var BusinessKeys = []string{
 	"business.email",      // 이메일
 	"business.privacy_on", // 개인정보관리책임자
 }
+
+// BusinessKeys are A-201's 사업자 정보 fields in form order: the eight above, then 업무시간 — 바닥글에
+// 싣지만 표시 의무가 아니라 비어 있어도 알리지 않는다.
+var BusinessKeys = append(append([]string(nil), disclosureKeys...), "business.hours")
 
 // BusinessLabels names them for the form and the footer.
 var BusinessLabels = map[string]string{
@@ -187,6 +191,7 @@ var BusinessLabels = map[string]string{
 	"business.phone":      "전화번호",
 	"business.email":      "이메일",
 	"business.privacy_on": "개인정보관리책임자",
+	"business.hours":      "업무시간",
 }
 
 // MissingBusinessKeys reports which of the eight are empty.
@@ -196,7 +201,7 @@ var BusinessLabels = map[string]string{
 // `shop` 모드에서 경고 대상이 된다 (FR-711).
 func MissingBusinessKeys(kv map[string]string) []string {
 	var missing []string
-	for _, k := range BusinessKeys {
+	for _, k := range disclosureKeys {
 		if kv[k] == "" {
 			missing = append(missing, BusinessLabels[k])
 		}

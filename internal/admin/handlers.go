@@ -221,7 +221,7 @@ var siteSettingKeys = append([]string{
 	// 기본 설명·대표 이미지·GA4 는 「검색 노출」(A-211, seoSettingKeys)에 있다.
 	// 지도 키 (FR-716) — mapKeyNames 와 같은 목록이다.
 	"map.naver_key", "map.kakao_key", "map.google_key", "map.google_map_id",
-	// 사업자 정보 여덟 칸이 뒤에 붙는다 (FR-711). 쇼핑몰에서만 열리던 화면에 있었는데,
+	// 사업자 정보 아홉 칸(표시 의무 여덟 + 업무시간)이 뒤에 붙는다 (FR-711). 쇼핑몰에서만 열리던 화면에 있었는데,
 	// 회사 홈페이지(cms)도 푸터에 싣는다.
 }, commerce.BusinessKeys...)
 
