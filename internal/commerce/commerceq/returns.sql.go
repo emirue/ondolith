@@ -164,7 +164,7 @@ func (q *Queries) InsertReturnItem(ctx context.Context, arg InsertReturnItemPara
 const insertReturnRefund = `-- name: InsertReturnRefund :one
 INSERT INTO refunds (order_id, payment_id, return_id, status, requester,
                      amount, reason, request_key)
-VALUES ($1,$2,$3,'요청','관리자',$4,'반품 환불',$5) RETURNING id
+VALUES ($1,$2,$3,'요청','관리자',$4,$5,$6) RETURNING id
 `
 
 type InsertReturnRefundParams struct {
@@ -172,15 +172,18 @@ type InsertReturnRefundParams struct {
 	PaymentID  string
 	ReturnID   *string
 	Amount     int32
+	Reason     string
 	RequestKey string
 }
 
+// 반품 정산(「반품 환불」)과 더 싼 조합으로 바꾼 교환의 차액(「교환 차액 환불」)이 쓴다.
 func (q *Queries) InsertReturnRefund(ctx context.Context, arg InsertReturnRefundParams) (string, error) {
 	row := q.db.QueryRow(ctx, insertReturnRefund,
 		arg.OrderID,
 		arg.PaymentID,
 		arg.ReturnID,
 		arg.Amount,
+		arg.Reason,
 		arg.RequestKey,
 	)
 	var id string

@@ -65,6 +65,22 @@ func (q *Queries) CompleteRefund(ctx context.Context, arg CompleteRefundParams) 
 	return result.RowsAffected(), nil
 }
 
+const exchangeCreditForItem = `-- name: ExchangeCreditForItem :one
+SELECT COALESCE(sum(f.amount), 0)::int AS credit FROM refunds f
+JOIN returns r ON r.id = f.return_id AND r.kind = '교환'
+WHERE f.status <> '거부'
+  AND EXISTS (SELECT 1 FROM return_items ri WHERE ri.return_id = r.id AND ri.order_item_id = $1)
+`
+
+// 더 싼 조합으로 바꾸며 그 품목에 돌려준(선점 포함) 차액 (capByExchangeCredit). 한 교환에 품목이 여럿이면
+// 차액 전부를 품목마다 센다 — 덜 돌려주는 쪽으로 치우친다(미환불이 이중환불보다 낫다, D13).
+func (q *Queries) ExchangeCreditForItem(ctx context.Context, orderItemID string) (int32, error) {
+	row := q.db.QueryRow(ctx, exchangeCreditForItem, orderItemID)
+	var credit int32
+	err := row.Scan(&credit)
+	return credit, err
+}
+
 const insertCancelRefund = `-- name: InsertCancelRefund :one
 INSERT INTO refunds (order_id, payment_id, status, requester, amount, reason, request_key)
 VALUES ($1, $2, '요청', $3, $4, '주문 취소', $5) RETURNING id
@@ -299,6 +315,18 @@ func (q *Queries) OrderItemStock(ctx context.Context, orderID string) ([]OrderIt
 		return nil, err
 	}
 	return items, nil
+}
+
+const refundKeyTaken = `-- name: RefundKeyTaken :one
+SELECT EXISTS (SELECT 1 FROM refunds WHERE request_key = $1)::boolean AS taken
+`
+
+// 같은 폼의 재전송인지 — 수량 검사보다 먼저 본다 (RequestRefund).
+func (q *Queries) RefundKeyTaken(ctx context.Context, requestKey string) (bool, error) {
+	row := q.db.QueryRow(ctx, refundKeyTaken, requestKey)
+	var taken bool
+	err := row.Scan(&taken)
+	return taken, err
 }
 
 const refundedTotal = `-- name: RefundedTotal :one

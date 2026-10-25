@@ -37,6 +37,15 @@
 
     <div class="adm-field-row">
       <label class="adm-field">
+        <span>개발 모드</span>
+        {{/* 테마 템플릿을 요청마다 다시 읽는다 (FR-306). 운영에서 켜면 느려진다 — 화면이 경고한다. */}}
+        <select name="site.dev_mode">
+          <option value="">끔</option>
+          <option value="1"{{if index .Settings "site.dev_mode"}} selected{{end}}>켬 — 테마 파일을 고치면 바로 보임</option>
+        </select>
+        <span class="adm-hint">테마를 만들 때만 켭니다. 요청마다 템플릿을 다시 읽어 느려집니다. 저장하면 바로 반영됩니다.</span>
+      </label>
+      <label class="adm-field">
         <span>관리자 배색</span>
         {{/* **빈 값이 곧 기본(1b)이다.** 여기서 "1b" 를 골라 놓으면 「고르지
              않았다」와 「1b 를 골랐다」가 같은 모양이 되고, admin.css 의

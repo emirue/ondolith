@@ -27,6 +27,8 @@
   <p class="notice">환불할 수 있는 금액이 남아 있지 않습니다.</p>
   {{else}}
   <form method="post" action="/orders/{{.Order.OrderNo}}/refund" class="form">
+    {{/* 화면이 발급한 요청 키다. 두 번 눌러도 같은 키로 와서 서버가 한 건으로 알아본다. */}}
+    <input type="hidden" name="request_key" value="{{.RequestKey}}">
     <fieldset>
       <legend>환불할 품목</legend>
       {{range .Order.Items}}

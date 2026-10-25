@@ -51,9 +51,10 @@ SELECT id FROM payments
 WHERE order_id = $1 AND kind = '주문결제' AND status = '승인';
 
 -- name: InsertReturnRefund :one
+-- 반품 정산(「반품 환불」)과 더 싼 조합으로 바꾼 교환의 차액(「교환 차액 환불」)이 쓴다.
 INSERT INTO refunds (order_id, payment_id, return_id, status, requester,
                      amount, reason, request_key)
-VALUES ($1,$2,$3,'요청','관리자',$4,'반품 환불',$5) RETURNING id;
+VALUES ($1,$2,$3,'요청','관리자',$4,sqlc.arg('reason'),sqlc.arg('request_key')) RETURNING id;
 
 -- name: CloseReturnItems :exec
 UPDATE return_items SET is_open = false, updated_at = now() WHERE return_id = $1;

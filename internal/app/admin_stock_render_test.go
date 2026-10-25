@@ -606,3 +606,24 @@ func TestPickScreenSaysWhenNothingIsLeftToShip(t *testing.T) {
 		t.Error("보낼 것이 없는데 스캔 폼이 있다")
 	}
 }
+
+// **더 싼 조합 교환의 「교환 완료」 폼에는 재인증 칸과 돌려줄 차액이 있다** — 서버가 재인증을 요구하는데
+// 폼에 칸이 없으면 그 교환은 끝낼 수 없다(리뷰가 찾음). 차액이 음수가 아니면 칸이 없다.
+func TestCheaperExchangeFormAsksForThePassword(t *testing.T) {
+	data := func(diff int) map[string]any {
+		return map[string]any{"Order": &commerce.OrderDetail{OrderNo: "N1"}, "NeedsReauth": true,
+			"Returns": []commerce.Return{{ReturnNo: "R1", Kind: commerce.KindExchange,
+				Status: commerce.StatusExchangePicked, PriceDiff: diff}}}
+	}
+	out := renderAdmin(t, "admin/returns.html", data(-1000))
+	exchange := out[strings.Index(out, `value="exchange"`):]
+	exchange = exchange[:strings.Index(exchange, "</form>")]
+	if !strings.Contains(exchange, `name="password"`) || !strings.Contains(exchange, "-1,000") {
+		t.Errorf("더 싼 교환의 폼에 비밀번호 칸·차액이 없다:\n%s", exchange)
+	}
+	out = renderAdmin(t, "admin/returns.html", data(0))
+	exchange = out[strings.Index(out, `value="exchange"`):]
+	if exchange = exchange[:strings.Index(exchange, "</form>")]; strings.Contains(exchange, `name="password"`) {
+		t.Error("차액 없는 교환에 비밀번호 칸이 있다 — 돈이 나가지 않는다")
+	}
+}

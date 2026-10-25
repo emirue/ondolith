@@ -234,3 +234,27 @@ func TestApportionDoesNotOverflowAtTheAmountCeiling(t *testing.T) {
 		t.Errorf("합계 %d, want %d (%v)", sum, discount, got)
 	}
 }
+
+// **더 싼 조합으로 바꾸며 돌려준 차액은 그 품목의 남은 몫에서 빠진다** (FR-618). 빼지 않으면 차액을
+// 돌려준 품목을 반품할 때 원래 값 전액이 또 나간다 — 품목 하나에 낸 것보다 많이 돌려준다. 차액은 남은
+// 몫의 끝에서 깎인다: 앞 단위는 제 몫을 받고 마지막 단위가 덜 받는다. 합계는 정확히 할인후 금액 − 차액이다.
+func TestCapByExchangeCredit(t *testing.T) {
+	// 11,000원 하나, 1,000원 싼 조합으로 바꿨다 — 반품은 10,000원이다.
+	if got := capByExchangeCredit(11000, 11000, 0, 1, 0, 1000); got != 10000 {
+		t.Errorf("한 개 = %d, want 10000", got)
+	}
+	// 둘 중 하나를 바꿨다: 첫 반품은 제 몫, 둘째가 차액만큼 덜 받는다. 합 21,000 + 차액 1,000 = 22,000.
+	first := capByExchangeCredit(11000, 22000, 0, 2, 0, 1000)
+	second := capByExchangeCredit(11000, 22000, 0, 2, 1, 1000)
+	if first != 11000 || second != 10000 {
+		t.Errorf("두 개 = %d·%d, want 11000·10000", first, second)
+	}
+	// 차액이 남은 몫보다 크면 0 이다 — 음수 환불은 없다.
+	if got := capByExchangeCredit(11000, 11000, 0, 1, 0, 12000); got != 0 {
+		t.Errorf("차액이 더 크면 = %d, want 0", got)
+	}
+	// 차액이 없으면 그대로다.
+	if got := capByExchangeCredit(12500, 25000, 0, 2, 0, 0); got != 12500 {
+		t.Errorf("차액 없음 = %d, want 12500", got)
+	}
+}

@@ -65,7 +65,8 @@ func (d *shopDeps) refundRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orderNo := r.PathValue("orderNo")
-	if _, err := d.visibleOrder(r, orderNo); err != nil {
+	order, err := d.visibleOrder(r, orderNo)
+	if err != nil {
 		d.notFound(w, r)
 		return
 	}
@@ -77,9 +78,17 @@ func (d *shopDeps) refundRequest(w http.ResponseWriter, r *http.Request) {
 		d.refundError(w, r, orderNo, "환불할 품목과 수량을 고르세요.")
 		return
 	}
-	// BUG-03: POST 마다 새 키라 두 번 누르면 요청이 두 건이다.
-	key, err := commerce.NewRequestKey()
-	if err != nil {
+	// 요청 키는 P-508 이 발급하고 폼이 되돌려 준다 (A-507 과 같다). POST 마다 만들면 같은 폼의 재전송이
+	// 매번 새 키라 UNIQUE 가 아무것도 막지 못해, 두 번 누르면 요청이 두 건이었다. 주문에 묶으므로 남의
+	// 키를 알아도 남의 요청을 막지 못한다. 키를 싣지 않는 옛 테마의 폼은 지금처럼 서버가 만든다.
+	key := ""
+	if formKey := r.PostFormValue("request_key"); formKey != "" {
+		if !commerce.ValidRequestKey(formKey) {
+			d.refundError(w, r, orderNo, "요청이 올바르지 않습니다. 화면을 새로 고친 뒤 다시 시도하세요.")
+			return
+		}
+		key = commerce.MemberRefundKey(order.ID, formKey)
+	} else if key, err = commerce.NewRequestKey(); err != nil {
 		d.serverError(w, r, err)
 		return
 	}
@@ -94,7 +103,8 @@ func (d *shopDeps) refundRequest(w http.ResponseWriter, r *http.Request) {
 		d.refundError(w, r, orderNo, "환불 가능 금액을 넘었습니다.")
 		return
 	case errors.Is(err, commerce.ErrRefundDuplicate):
-		d.refundError(w, r, orderNo, "이미 접수된 요청입니다.")
+		// 같은 폼의 재전송이다. 첫 요청이 이미 접수했다 — 첫 결과(요청 현황)로 보낸다.
+		http.Redirect(w, r, "/orders/"+orderNo+"/refunds", http.StatusSeeOther)
 		return
 	case errors.Is(err, commerce.ErrRefundQuantity), errors.Is(err, commerce.ErrQuantityRange):
 		d.refundError(w, r, orderNo, "환불 수량이 남은 수량을 넘습니다.")
@@ -126,9 +136,14 @@ func (d *shopDeps) refundStatus(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, perr)
 		return
 	}
+	key, err := commerce.NewRequestKey()
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 	d.renderPage(w, r, "order/refunds.html", http.StatusOK,
 		d.shopView(r, "취소·환불", map[string]any{
-			"Order": order, "Refunds": refunds,
+			"Order": order, "Refunds": refunds, "RequestKey": key,
 			"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
 			"CanCancel": canCancel(order),
 		}))
@@ -149,9 +164,11 @@ func (d *shopDeps) refundError(w http.ResponseWriter, r *http.Request, orderNo, 
 	}
 	refunds, _ := d.store.Refunds(r.Context(), order.ID)
 	approved, refunded, _ := d.store.RefundedTotal(r.Context(), orderNo)
+	// 거절된 요청은 접수되지 않았으므로 새 키를 준다 — 고쳐서 다시 보내면 새 요청이다.
+	key, _ := commerce.NewRequestKey()
 	d.renderPage(w, r, "order/refunds.html", http.StatusUnprocessableEntity,
 		d.shopView(r, "취소·환불", map[string]any{
-			"Order": order, "Refunds": refunds, "Error": msg,
+			"Order": order, "Refunds": refunds, "Error": msg, "RequestKey": key,
 			"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded,
 			"CanCancel": canCancel(order),
 		}))

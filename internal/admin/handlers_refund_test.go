@@ -22,6 +22,12 @@ import (
 // paidAdminOrder makes an approved order with two units of one item.
 func paidAdminOrder(t *testing.T, d *Deps, pool *pgxpool.Pool) (*commerce.OrderDetail, int) {
 	t.Helper()
+	return paidAdminOrderWithFee(t, d, pool, 0)
+}
+
+// paidAdminOrderWithFee is paidAdminOrder with a flat shipping fee on the order.
+func paidAdminOrderWithFee(t *testing.T, d *Deps, pool *pgxpool.Pool, fee int) (*commerce.OrderDetail, int) {
+	t.Helper()
 	ctx := context.Background()
 	var productID, variantID string
 	if err := pool.QueryRow(ctx,
@@ -43,7 +49,7 @@ func paidAdminOrder(t *testing.T, d *Deps, pool *pgxpool.Pool) (*commerce.OrderD
 		Postcode: "12345", Address1: "서울",
 		OrdererEmail: "a@example.com", OrdererPhone: "010-1111-1111",
 	}
-	order, err := d.Commerce.CreateOrder(ctx, owner, "", form, commerce.Shipping{}, 0, time.Now())
+	order, err := d.Commerce.CreateOrder(ctx, owner, "", form, commerce.Shipping{FlatFee: fee}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2191,8 +2197,10 @@ func TestReturnSettleReportsAGatewayFailure(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT status FROM orders WHERE order_no = $1`, order.OrderNo).Scan(&orderStatus); err != nil {
 		t.Fatal(err)
 	}
-	if got := refundRowStatus(t, pool, id); got != "요청" || orderStatus != string(commerce.StatusRefunded) {
-		t.Errorf("환불 건 %s · 주문 %s, want 요청·환불", got, orderStatus)
+	// 두 개 중 하나를 반품했으므로 주문은 배송완료로 돌아온다(부분 반품 정산). 정산은 커밋됐고
+	// PG 만 실패했다 — 환불 건은 요청으로 남아 A-507 이 다시 보낸다.
+	if got := refundRowStatus(t, pool, id); got != "요청" || orderStatus != string(commerce.StatusDelivered) {
+		t.Errorf("환불 건 %s · 주문 %s, want 요청·배송완료", got, orderStatus)
 	}
 
 	gw.err = nil
@@ -2265,7 +2273,7 @@ func TestRefundSentButNotSettledIsShownAsDone(t *testing.T) {
 // 종료 기록이 실패하면(ErrRefundSentNotSettled) 「실행」은 완료된 건을 받지 않아 그 주문을
 // 닫을 길이 없었다. 단추는 닫을 곳이 있을 때만 보이고, 돈이 나가지 않아 재인증이 없다.
 func TestCloseActionClosesARefundedOrder(t *testing.T) {
-	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, id: "", email: "op@example.com"}
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true, "order.cancel": true}, id: "", email: "op@example.com"}
 	d, pool := fixture(t, caller)
 	d.OpLog = content.NewStore(pool).OpLog()
 	ctx := context.Background()
@@ -2302,6 +2310,12 @@ func TestCloseActionClosesARefundedOrder(t *testing.T) {
 	if got := closeTo(); got != commerce.StatusCancelled {
 		t.Errorf("닫기 전 단추 = %v, want 취소", got)
 	}
+	// 취소로 닫히므로 order.cancel 이 있어야 한다 (D19 A-507 동작별 권한).
+	caller.perms["order.cancel"] = false
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("order.cancel 없이 취소로 닫기 = HTTP %d, want 403", rec.Code)
+	}
+	caller.perms["order.cancel"] = true
 	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("주문 종료 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
@@ -2318,5 +2332,104 @@ func TestCloseActionClosesARefundedOrder(t *testing.T) {
 	}
 	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("다시 종료 = HTTP %d, want 422", rec.Code)
+	}
+}
+
+// **배송 전 주문은 A-507 「전체 취소」로 남은 금액을 배송비까지 돌려주고 취소한다** (D50 「전체 취소일
+// 때만 배송비를 포함」). 품목 환불은 배송비를 주지 않아, 관리자가 품목을 다 환불해도 주문은 결제완료로
+// 발송 대기 줄에 남았다 — 배송비를 돌려주며 닫는 길이 구매자의 P-506 뿐이었다. 취소는 `order.cancel` 을
+// 요구한다 (D19 A-507 동작별 권한) — 화면 권한(order.refund)만으로는 안 된다.
+func TestAdminFullCancelReturnsTheRestAndCancels(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.refund": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	d.OpLog = content.NewStore(pool).OpLog()
+	ctx := context.Background()
+	order, total := paidAdminOrderWithFee(t, d, pool, 3000)
+	item := order.Items[0]
+	path, pv := "/admin/orders/"+order.OrderNo+"/refund", map[string]string{"no": order.OrderNo}
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"item_id": {item.ID}, "qty_" + item.ID: {"1"},
+		"request_key": {refundFormKey(t, d, order.OrderNo)}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("한 개 환불 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"cancel"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("order.cancel 없이 전체 취소 = HTTP %d, want 403", rec.Code)
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaid)
+
+	caller.perms["order.cancel"] = true
+	caller.reauth = true // 돈이 나간다 — 재인증이 지나야 한다
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"cancel"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("재인증 없이 전체 취소 = HTTP %d, want 403", rec.Code)
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPaid)
+	caller.reauth = false
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"cancel"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("전체 취소 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusCancelled)
+	approved, refunded, err := d.Commerce.RefundedTotal(ctx, order.OrderNo)
+	if err != nil || approved != total || refunded != total {
+		t.Errorf("결제 %d · 환불 %d (%v), want 둘 다 %d — 배송비까지 돌아가야 한다", approved, refunded, err, total)
+	}
+	var last string
+	if err := pool.QueryRow(ctx, `SELECT status FROM refunds ORDER BY created_at DESC LIMIT 1`).Scan(&last); err != nil || last != "완료" {
+		t.Errorf("취소 환불 건 = %q (%v), want 완료 — PG 로 보내야 한다", last, err)
+	}
+	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"cancel"}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("다시 취소 = HTTP %d, want 422", rec.Code)
+	}
+}
+
+// **더 싼 조합으로 바꾼 교환을 완료하면 A-511 이 차액을 돌려준다** (D14 「교환 차액」). 돈이 나가므로
+// 환불 확정과 같은 order.refund 가 있어야 한다 — 수거만 맡은 order.return 계정은 403 이다.
+func TestAdminCheaperExchangeRefundsTheDifference(t *testing.T) {
+	caller := &fakeCaller{perms: map[string]bool{"order.return": true}, id: "", email: "op@example.com"}
+	d, pool := fixture(t, caller)
+	ctx := context.Background()
+	order, _ := paidAdminOrder(t, d, pool)
+	for _, to := range []commerce.Status{commerce.StatusPreparing, commerce.StatusShipping, commerce.StatusDelivered} {
+		if err := d.Commerce.TransitionOrder(ctx, order.OrderNo, to, "A-506"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var newVariant string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO product_variants (product_id,option_values,price_delta,stock)
+		SELECT product_id,'{"크기":"S"}',0,5 FROM order_items WHERE id = $1 RETURNING id`,
+		order.Items[0].ID).Scan(&newVariant); err != nil {
+		t.Fatal(err)
+	}
+	ret, err := d.Commerce.OpenReturn(ctx, order.OrderNo, commerce.ReturnRequest{
+		Kind: commerce.KindExchange, NewVariantID: newVariant,
+		Lines: []commerce.RefundLine{{OrderItemID: order.Items[0].ID, Quantity: 1}}}, "P-512", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setFeeSetting(t, pool, "차감", 0)
+	path, pv := "/admin/orders/"+order.OrderNo+"/returns", map[string]string{"no": order.OrderNo}
+	if rec := postAdmin(t, d.ReturnAction, path, pv, url.Values{"return_no": {ret.ReturnNo},
+		"action": {"pickup"}, "fault": {"구매자"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("수거 확인 = HTTP %d", rec.Code)
+	}
+	exchange := url.Values{"return_no": {ret.ReturnNo}, "action": {"exchange"}}
+	if rec := postAdmin(t, d.ReturnAction, path, pv, exchange); rec.Code != http.StatusForbidden {
+		t.Errorf("order.refund 없이 차액 환불 교환 = HTTP %d, want 403", rec.Code)
+	}
+	caller.perms["order.refund"] = true
+	caller.reauth = true // 돈이 나간다 — 재인증이 지나야 한다
+	if rec := postAdmin(t, d.ReturnAction, path, pv, exchange); rec.Code != http.StatusForbidden {
+		t.Errorf("재인증 없이 차액 환불 교환 = HTTP %d, want 403", rec.Code)
+	}
+	caller.reauth = false
+	if rec := postAdmin(t, d.ReturnAction, path, pv, exchange); rec.Code != http.StatusSeeOther {
+		t.Fatalf("교환 완료 = HTTP %d (%q)", rec.Code, rec.Body.String())
+	}
+	var amount int
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT amount, status FROM refunds WHERE reason = '교환 차액 환불'`).Scan(&amount, &status); err != nil {
+		t.Fatal(err)
+	}
+	if amount != 1000 || status != "완료" {
+		t.Errorf("차액 환불 %d원 %s, want 1000원 완료", amount, status)
 	}
 }

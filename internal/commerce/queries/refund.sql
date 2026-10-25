@@ -72,6 +72,18 @@ VALUES ($1, $2, '요청', $3, $4, '주문 취소', $5) RETURNING id;
 -- 소진된 몫도 창고를 떠난 적이 없다 (D50 「배송 전 부분 환불의 재고」).
 SELECT variant_id, quantity FROM order_items WHERE order_id = $1;
 
+-- name: RefundKeyTaken :one
+-- 같은 폼의 재전송인지 — 수량 검사보다 먼저 본다 (RequestRefund).
+SELECT EXISTS (SELECT 1 FROM refunds WHERE request_key = $1)::boolean AS taken;
+
+-- name: ExchangeCreditForItem :one
+-- 더 싼 조합으로 바꾸며 그 품목에 돌려준(선점 포함) 차액 (capByExchangeCredit). 한 교환에 품목이 여럿이면
+-- 차액 전부를 품목마다 센다 — 덜 돌려주는 쪽으로 치우친다(미환불이 이중환불보다 낫다, D13).
+SELECT COALESCE(sum(f.amount), 0)::int AS credit FROM refunds f
+JOIN returns r ON r.id = f.return_id AND r.kind = '교환'
+WHERE f.status <> '거부'
+  AND EXISTS (SELECT 1 FROM return_items ri WHERE ri.return_id = r.id AND ri.order_item_id = $1);
+
 -- name: ApprovedPaymentAmounts :one
 SELECT approved_amount, refunded_amount FROM payments
 WHERE order_id = $1 AND kind = '주문결제' AND status = '승인';

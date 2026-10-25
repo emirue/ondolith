@@ -47,6 +47,13 @@
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="exchange">
     {{if gt .PriceDiff 0}}<p>차액 {{money .PriceDiff}} — 구매자 결제 후 발송됩니다.</p>{{end}}
+    {{/* 새 조합이 더 싸면 교환 완료가 그 차액을 돌려준다 — 돈이 나가므로 환불 확정과 같은 재인증이다. */}}
+    {{if lt .PriceDiff 0}}<p>차액 {{money .PriceDiff}} — 새 조합이 더 싸서 교환 완료 때 구매자에게 돌려줍니다.</p>
+    {{if $.NeedsReauth}}
+    <label>비밀번호 확인
+      <input name="password" type="password" required autocomplete="current-password">
+    </label>
+    {{end}}{{end}}
     <button type="submit">교환 완료</button>
   </form>
   {{end}}

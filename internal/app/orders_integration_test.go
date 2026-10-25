@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -282,9 +283,10 @@ func TestRefusedRefundStillOffersCancel(t *testing.T) {
 	}
 }
 
-// **부분 환불 요청(P-507)을 두 번 누르면 지금은 요청이 두 건 생긴다** (지금 동작 — BUG-03).
-// 키를 POST 마다 새로 만들어 refunds_request_key_uniq 가 막을 것이 없다. A-507 은 폼이 키를
-// 들고 와 재전송을 알아본다(TestAdminRefundResubmitIsRecognisedNotRepeated). 고치면 이 단언을 바꾼다.
+// **부분 환불 요청(P-507)을 두 번 눌러도 요청은 한 건이다** (FR-611). 키를 POST 마다 새로 만들던 판은
+// refunds_request_key_uniq 가 막을 것이 없어 같은 요청이 두 건 접수됐고, 관리자가 알아보지 못하면
+// 구매자가 고른 것보다 많이 환불됐다. 이제 A-507 처럼 P-508 이 키를 발급하고 폼이 되돌려 준다 —
+// 두 번째 제출은 첫 결과(요청 현황)로 간다.
 func TestMemberPartialRefundDoubleSubmit(t *testing.T) {
 	srv, pool, variant := shopSite(t)
 	c := client()
@@ -315,7 +317,13 @@ func TestMemberPartialRefundDoubleSubmit(t *testing.T) {
 	}
 	g := client()
 	post(t, g, srv.URL+"/orders/guest", url.Values{"order_no": {no}, "phone": {"010-1111-1111"}}).Body.Close()
-	form := url.Values{"item_id": {itemID}, "qty_" + itemID: {"1"}, "reason": {"변심"}}
+	_, page := mustGet(t, g, srv.URL+"/orders/"+no+"/refunds")
+	m := regexp.MustCompile(`name="request_key" value="([A-Za-z0-9_-]{32})"`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("P-508 폼에 request_key 가 없다")
+	}
+	// 남은 두 개를 다 고른다 — 두 번째 제출이 수량 검사보다 먼저 같은 요청으로 알아봐져야 한다.
+	form := url.Values{"item_id": {itemID}, "qty_" + itemID: {"2"}, "reason": {"변심"}, "request_key": {m[1]}}
 	for i := range 2 {
 		resp := post(t, g, srv.URL+"/orders/"+no+"/refund", form)
 		resp.Body.Close()
@@ -327,7 +335,11 @@ func TestMemberPartialRefundDoubleSubmit(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refunds WHERE order_id = $1`, orderID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Errorf("요청 %d 건 — 지금 동작은 2 건이다", n)
+	if n != 1 {
+		t.Errorf("요청 %d 건, want 1 — 두 번 누른 같은 폼이 두 번 접수됐다", n)
+	}
+	bad := url.Values{"item_id": {itemID}, "qty_" + itemID: {"1"}, "request_key": {"not-a-key"}}
+	if resp := post(t, g, srv.URL+"/orders/"+no+"/refund", bad); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("모양이 틀린 키 = HTTP %d, want 422", resp.StatusCode)
 	}
 }

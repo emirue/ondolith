@@ -382,6 +382,7 @@ func TestSEOSettingsValidateTheD19Fields(t *testing.T) {
 		{"seo.noindex": {"yes"}},
 		{"seo.robots_extra": {"Disallow: /tmp\n이것은 규칙이 아니다"}},
 		{"seo.robots_extra": {strings.Repeat("# 주석\n", 401)}},
+		{"seo.robots_extra": {"Disallow: /x\r이것은 규칙이 아니다"}},
 	} {
 		if rec := post(d.SEOSave, "/admin/settings/seo", bad); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%v = HTTP %d, want 422", bad, rec.Code)

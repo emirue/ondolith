@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,8 +161,10 @@ func (d *publicDeps) page(w http.ResponseWriter, r *http.Request) {
 // 쪽 뒤는 다른 목록이라 쪽 번호는 남긴다(1쪽은 붙이지 않는다).
 func canonicalURL(base string, u *url.URL) string {
 	out := strings.TrimRight(base, "/") + u.EscapedPath()
-	if p := u.Query().Get("page"); p != "" && p != "1" {
-		out += "?page=" + url.QueryEscape(p)
+	// 쪽 번호는 목록이 읽는 대로 접는다(pageOf) — 숫자가 아니거나 상한을 넘는 값을 그대로 실으면
+	// 같은 목록이 주소 여러 개로 갈린다.
+	if n, err := strconv.Atoi(u.Query().Get("page")); err == nil && n > 1 {
+		out += "?page=" + strconv.Itoa(min(n, content.MaxPage))
 	}
 	return out
 }

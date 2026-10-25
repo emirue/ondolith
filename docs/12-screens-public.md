@@ -348,7 +348,8 @@
 - **결정됨**: 미결제 방치 **14일** (`order.exchange_unpaid_days`) 뒤 `차액미납` 표시. 자동 취소하지 않는다 ([D50](50-commerce.md) 「Phase 3 정책값」)
 
 ### P-506 취소 요청 · P-507 부분 환불 요청 (SC-6)
-- **입력**: `order_item_id`와 수량. **환불 금액은 받지 않는다**
+- **입력**: `order_item_id`와 수량. **환불 금액은 받지 않는다**. P-507 폼은 P-508 이 발급한 요청 키
+  (`.Data.RequestKey`)를 `request_key` 로 되돌려 보낸다 — 두 번 눌러도 한 건이다
 - **보안**: 환불액은 `order_items` 스냅샷에서 서버가 계산한다.
   누적 상한은 `payments.refunded_amount` + `CHECK (refunded_amount <= approved_amount)`로
   **DB에서 강제**한다. 같은 트랜잭션에서 `refunds`를 넣는다 — 동시 요청이 둘 다 애플리케이션
