@@ -2272,8 +2272,13 @@ func TestRefundSentButNotSettledIsShownAsDone(t *testing.T) {
 	if s := summaries(); !strings.Contains(s, "반품 환불 PG 확정") {
 		t.Errorf("정산 환불의 PG 확정이 작업 로그에 없다: %q", s)
 	}
-	// 돈은 나갔고 주문 기록만 실패했다 — 그 환불 건을 서버 로그에 남겨야 운영자가 찾아 닫는다.
+	// 돈은 나갔고 주문 기록만 실패했다 — 그 환불 건과 주문·반품 번호를 서버 로그에 남겨야 운영자가 찾아 닫는다.
 	refundIDsLogged(t, pool, logs.String(), 2)
+	for _, want := range []string{"order=" + order.OrderNo, "return=" + returnNo} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("서버 로그에 %s 가 없다:\n%s", want, logs.String())
+		}
+	}
 }
 
 // **교환 차액 환불도 같은 규칙이다** — 돈이 나간 뒤 주문 기록만 실패한 것을 로그 없이 삼켰다.
@@ -2296,6 +2301,9 @@ func TestCheaperExchangeSentButNotSettledIsLogged(t *testing.T) {
 		t.Errorf("작업 로그 %q", s)
 	}
 	refundIDsLogged(t, pool, logs.String(), 1)
+	if !strings.Contains(logs.String(), "return="+returnNo) {
+		t.Errorf("서버 로그에 반품 번호가 없다:\n%s", logs.String())
+	}
 }
 
 // refundIDsLogged 는 환불 건이 want 개이고 모두 서버 로그에 나오는지 본다.

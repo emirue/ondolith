@@ -715,7 +715,7 @@ func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
 	order *commerce.OrderDetail, refundID string, amount int, to commerce.Status, err error) {
 
 	logf := func(msg string) { d.log(r, c, "order.refund", "order", order.OrderNo, msg) }
-	if !d.refundSent(logf, "환불 "+itoa(amount)+"원", refundID, to, err) {
+	if !d.refundSent(logf, "환불 "+itoa(amount)+"원", refundID, to, err, "order", order.OrderNo) {
 		d.renderRefund(w, r, c, order, http.StatusBadGateway,
 			"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
 		return
@@ -728,15 +728,17 @@ func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
 // 그 사실을 남겼으니 호출자는 502 화면만 그린다. PG 는 확정했는데 주문 기록만 실패했으면
 // (commerce.ErrRefundSentNotSettled) 돈은 이미 나갔다: 서버 로그에 그 환불 건을 남기고 성공으로 다룬다 —
 // 주문은 A-507 「주문 종료」가 닫는다. 환불이 끝나 commerce 가 주문을 옮겼으면(to) 그것도 남긴다.
-func (d *Deps) refundSent(logf func(string), what, refundID string, to commerce.Status, err error) bool {
+// target 은 서버 로그에 붙일 주문·반품 번호다("order", 번호) — 운영자가 그 주문을 찾는 열쇠다.
+func (d *Deps) refundSent(logf func(string), what, refundID string, to commerce.Status, err error, target ...any) bool {
+	attrs := append([]any{"refund", refundID, "err", err}, target...)
 	if err != nil && !errors.Is(err, commerce.ErrRefundSentNotSettled) {
-		d.Logger.Error(what+" 실행", "refund", refundID, "err", err)
+		d.Logger.Error("환불 실행", attrs...)
 		logf(what + " PG 처리 실패 — 한도 선점 유지, 환불 건 " + refundID)
 		return false
 	}
 	logf(what + " PG 확정 — 환불 건 " + refundID)
 	if err != nil {
-		d.Logger.Error(what+" 뒤 주문 기록", "refund", refundID, "err", err)
+		d.Logger.Error("환불 확정 뒤 주문 기록", attrs...)
 	} else if to != "" {
 		logf("환불이 끝나 주문 " + string(to))
 	}
@@ -854,7 +856,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 			// 차액 환불을 PG 로 보낸다 (환불 확정과 같은 순서). 주문은 교환발송이라 닫을 것이 없다.
 			sent, perr := d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511")
 			logf := func(msg string) { d.log(r, c, "return.exchange", "return", returnNo, msg) }
-			if !d.refundSent(logf, "교환 차액 환불", refundID, sent, perr) {
+			if !d.refundSent(logf, "교환 차액 환불", refundID, sent, perr, "return", returnNo) {
 				d.renderReturns(w, r, c, order, http.StatusBadGateway,
 					"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
 				return
@@ -889,7 +891,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 				if refundID != "" {
 					sent, perr := d.Commerce.ExecuteRefund(r.Context(), d.pgGateway(), refundID, "A-511")
 					logf := func(msg string) { d.log(r, c, "return.settle", "return", returnNo, msg) }
-					if !d.refundSent(logf, "반품 환불", refundID, sent, perr) {
+					if !d.refundSent(logf, "반품 환불", refundID, sent, perr, "return", returnNo) {
 						d.renderReturns(w, r, c, order, http.StatusBadGateway,
 							"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
 						return
