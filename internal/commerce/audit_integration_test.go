@@ -193,6 +193,20 @@ func TestCancelAndRejectLockItemsBeforeThePayment(t *testing.T) {
 	})
 }
 
+// 취소도 주문을 FOR NO KEY UPDATE 로 잡는다. 품목을 쥔 부분 환불(RequestRefund)이 환불 행을
+// 넣을 때의 외래키 검사(FOR KEY SHARE)가 지나가야 한다 — 막으면 그 환불은 주문을, 취소는
+// 품목을 기다린다 (TestReturnSettleLetsForeignKeyChecksThrough 와 같은 교착).
+func TestCancelLetsForeignKeyChecksThrough(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, _, _ := paidOrder(t, s, pool, "cancel-fk", 1)
+	item := itemsOf(t, s, orderNo)[0].ID
+	probe := `SELECT 1 FROM orders WHERE order_no = '` + orderNo + `' FOR KEY SHARE NOWAIT`
+	whileWaitingOn(t, pool, item, probe, func() error {
+		_, err := s.CancelOrder(context.Background(), orderNo, "P-506", "cancel-fk-key")
+		return err
+	})
+}
+
 // OpenReturn 은 폼이 준 순서대로 품목을 잡았다. 역순으로 온 요청은 같은 주문의
 // 환불 요청(id 오름차순)과 서로의 품목을 기다렸다.
 func TestOpenReturnLocksItemsInIDOrder(t *testing.T) {

@@ -97,11 +97,11 @@ WHERE (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('until')::timestamptz IS NULL OR created_at < sqlc.narg('until'))
 ORDER BY created_at DESC, id LIMIT sqlc.arg('limit')::int OFFSET sqlc.arg('offset')::int;
 
+-- FOR NO KEY UPDATE: 주문 상태를 쓰는 흐름끼리는 그대로 줄을 서고, 그 주문을 가리키는
+-- 행의 INSERT(외래키 검사, FOR KEY SHARE)는 지나간다. FOR UPDATE 면 품목을 잡고 환불 행을
+-- 넣는 부분 환불과, 주문을 잡고 그 품목을 기다리는 반품 정산이 교착한다 (LockVariantStock 과 같은 이유).
 -- name: LockOrderByNo :one
-SELECT id, status, delivered_at FROM orders WHERE order_no = $1 FOR UPDATE;
-
--- name: SetOrderStatus :exec
-UPDATE orders SET status = $2, updated_at = now() WHERE id = $1;
+SELECT id, status, delivered_at FROM orders WHERE order_no = $1 FOR NO KEY UPDATE;
 
 -- name: MarkDelivered :exec
 UPDATE orders SET delivered_at = now() WHERE id = $1 AND delivered_at IS NULL;

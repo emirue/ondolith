@@ -554,6 +554,16 @@ func (s *Store) AdminOrders(ctx context.Context, status string, since, until *ti
 	return out, more, nil
 }
 
+// lockOrder locks the order row by its number; a number nobody has is ErrNotFound.
+// 주문 상태를 쓰는 흐름은 전부 이것으로 시작한다 — 잠근 상태가 moveOrder 의 from 이다.
+func lockOrder(ctx context.Context, q *commerceq.Queries, orderNo string) (commerceq.LockOrderByNoRow, error) {
+	o, err := q.LockOrderByNo(ctx, orderNo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return o, ErrNotFound
+	}
+	return o, err
+}
+
 // TransitionOrder is A-506's write: the state machine decides, then the row moves.
 //
 // 잠그고 읽는다. 두 관리자가 동시에 서로 다른 전이를 하면 하나만 성공해야
@@ -567,31 +577,12 @@ func (s *Store) TransitionOrder(ctx context.Context, orderNo string, to Status, 
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
-	row, err := q.LockOrderByNo(ctx, orderNo)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
-	}
+	row, err := lockOrder(ctx, q, orderNo)
 	if err != nil {
 		return err
 	}
-	id, from := row.ID, row.Status
-	if err := CanTransition(Status(from), to, actor); err != nil {
+	if err := s.moveOrder(ctx, tx, row.ID, Status(row.Status), to, actor); err != nil {
 		return err
-	}
-	if err := q.SetOrderStatus(ctx, commerceq.SetOrderStatusParams{ID: id, Status: string(to)}); err != nil {
-		return err
-	}
-	// 배송완료 전이는 시각을 남긴다. A-512 의 반품 기간·자동 확정이 전부 이
-	// 시각 기준이고, operation_logs 는 감사 흔적이지 운영 데이터가 아니다 (D30).
-	if to == StatusDelivered {
-		if err := q.MarkDelivered(ctx, id); err != nil {
-			return err
-		}
-	}
-	if to == StatusConfirmed {
-		if err := q.MarkConfirmed(ctx, id); err != nil {
-			return err
-		}
 	}
 	return tx.Commit(ctx)
 }
@@ -786,9 +777,7 @@ func (s *Store) releaseUnpaid(ctx context.Context, tx pgx.Tx, orderID string, fr
 	if err := s.AdjustStock(ctx, tx, deltas); err != nil {
 		return err
 	}
-	_, err = s.q.WithTx(tx).MoveOrderStatus(ctx, commerceq.MoveOrderStatusParams{
-		ID: orderID, ToStatus: string(StatusPaymentFailed), FromStatus: string(from)})
-	return err
+	return s.moveOrder(ctx, tx, orderID, from, StatusPaymentFailed, ActorSystem)
 }
 
 func (s *Store) expireOne(ctx context.Context, orderID string) error {
