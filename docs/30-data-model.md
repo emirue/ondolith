@@ -469,11 +469,13 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 
 | 키 | 값 | 화면 | Phase |
 |---|---|---|---|
-| `site.name` · `site.meta_description` · `site.og_image` · `site.dev_mode` · `site.type` | text / text / text / bool / `cms`\|`shop` | A-201 | 1 |
+| `site.name` · `site.dev_mode` · `site.type` | text / bool / `cms`\|`shop` | A-201 | 1 |
+| `site.meta_description` · `site.og_image` | text / text | A-211 | 1 |
 | `auth.email_verification_required` | bool | A-201 | 1 |
 | `auth.signup_closed` | bool — 빈 값이 「받음」 (FR-217) | A-201 | 6 |
 | `turnstile.site_key` · `turnstile.secret_key` | text / **자격증명** | A-201 | 6 |
-| `analytics.ga4_id` | text (`G-…`) | A-201 | 6 |
+| `analytics.ga4_id` | text (`G-…`) | A-211 | 6 |
+| `seo.google_verification` · `seo.naver_verification` · `seo.bing_verification` · `seo.noindex` · `seo.robots_extra` | text — 공개값 / bool — 빈 값이 「노출」 / text — robots 지시어·주석 줄 (FR-718) | A-211 | 6 |
 | `admin.theme` | 빈 값(기본 배색) \| `1a`~`1e` | A-201 | 6 |
 | `theme.active` | text — 테마 폴더 이름 | A-202 | 1 |
 | `map.naver_key` · `map.kakao_key` · `map.google_key` · `map.google_map_id` | text — 공개값 (FR-716) | A-201 | 6 |
