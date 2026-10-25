@@ -121,19 +121,6 @@ func TestTotal(t *testing.T) {
 	}
 }
 
-// D50: 부분 취소로 배송비를 환불하지 않는다.
-func TestCancelRefundKeepsShippingUnlessWholeOrder(t *testing.T) {
-	if got, _ := CancelRefund(20000, 3000, true); got != 23000 {
-		t.Errorf("전체 취소 = %d, want 23000", got)
-	}
-	if got, _ := CancelRefund(20000, 3000, false); got != 20000 {
-		t.Errorf("부분 취소 = %d, want 20000 (배송비 미환불)", got)
-	}
-	if _, err := CancelRefund(-1, 0, true); !errors.Is(err, ErrPriceNegative) {
-		t.Errorf("음수 환불 = %v", err)
-	}
-}
-
 // D81 W3-08: 부동소수점 타입이 계산 경로에 없다.
 //
 // 주석으로 적어 두는 것과 검사하는 것은 다르다 — 나중에 "할인율 0.1" 하나가

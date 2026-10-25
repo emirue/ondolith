@@ -3,8 +3,11 @@ package commerce
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func refundStatus(t *testing.T, s *Store, refundID string) string {
@@ -36,7 +39,7 @@ func TestExecuteRefundCallsThePGOnceAndCompletes(t *testing.T) {
 	gw := okGateway()
 	gw.cancelResponse = &Payment{PaymentKey: "pk-tee", Status: PaymentApproved,
 		Raw: []byte(`{"status":"PARTIAL_CANCELED","card":{"number":"1234********5678"}}`)}
-	if err := s.ExecuteRefund(ctx, gw, id); err != nil {
+	if _, err := s.ExecuteRefund(ctx, gw, id, "A-507"); err != nil {
 		t.Fatalf("환불 실행 = %v", err)
 	}
 	if got := refundStatus(t, s, id); got != "완료" {
@@ -50,7 +53,7 @@ func TestExecuteRefundCallsThePGOnceAndCompletes(t *testing.T) {
 		t.Errorf("취소 요청 %+v — 금액·키·멱등키가 접수와 다르다 (amount=%d)", req, amount)
 	}
 	// 재전송은 같은 결과이고 PG 를 다시 부르지 않는다.
-	if err := s.ExecuteRefund(ctx, gw, id); err != nil {
+	if _, err := s.ExecuteRefund(ctx, gw, id, "A-507"); err != nil {
 		t.Errorf("완료된 건 재실행 = %v, want nil", err)
 	}
 	if len(gw.cancelReqs) != 1 {
@@ -102,13 +105,13 @@ func TestExecuteRefundKeepsUnknownResultsAndRetriesDeclines(t *testing.T) {
 
 	unknown := okGateway()
 	unknown.cancelErr = ErrPaymentUnknown
-	if err := s.ExecuteRefund(ctx, unknown, id); !errors.Is(err, ErrPaymentUnknown) {
+	if _, err := s.ExecuteRefund(ctx, unknown, id, "A-507"); !errors.Is(err, ErrPaymentUnknown) {
 		t.Fatalf("결과 불명 = %v", err)
 	}
 	if got := refundStatus(t, s, id); got != "승인" {
 		t.Errorf("결과 불명 뒤 상태 %s, want 승인 (다시 부르면 이중 환불)", got)
 	}
-	if err := s.ExecuteRefund(ctx, unknown, id); !errors.Is(err, ErrRefundState) {
+	if _, err := s.ExecuteRefund(ctx, unknown, id, "A-507"); !errors.Is(err, ErrRefundState) {
 		t.Errorf("'승인' 건을 다시 실행 = %v, want ErrRefundState", err)
 	}
 	if len(unknown.cancelReqs) != 1 {
@@ -123,13 +126,13 @@ func TestExecuteRefundKeepsUnknownResultsAndRetriesDeclines(t *testing.T) {
 	}
 	declined := okGateway()
 	declined.cancelErr = errors.New("commerce: 결제 요청이 거부되었습니다 (HTTP 400, INVALID)")
-	if err := s.ExecuteRefund(ctx, declined, id2); err == nil {
+	if _, err := s.ExecuteRefund(ctx, declined, id2, "A-507"); err == nil {
 		t.Fatal("확정 실패가 성공으로 돌아왔다")
 	}
 	if got := refundStatus(t, s, id2); got != "요청" {
 		t.Errorf("확정 실패 뒤 상태 %s, want 요청", got)
 	}
-	if err := s.ExecuteRefund(ctx, okGateway(), id2); err != nil {
+	if _, err := s.ExecuteRefund(ctx, okGateway(), id2, "A-507"); err != nil {
 		t.Errorf("재시도 = %v", err)
 	}
 	if got := refundStatus(t, s, id2); got != "완료" {
@@ -150,7 +153,7 @@ func TestCancelReturnsItsRefundForExecution(t *testing.T) {
 		t.Fatal("결제된 주문의 취소가 환불 건을 돌려주지 않았다")
 	}
 	gw := okGateway()
-	if err := s.ExecuteRefund(ctx, gw, id); err != nil {
+	if _, err := s.ExecuteRefund(ctx, gw, id, "P-506"); err != nil {
 		t.Fatal(err)
 	}
 	if len(gw.cancelReqs) != 1 || gw.cancelReqs[0].Amount != total {
@@ -228,7 +231,7 @@ func TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives(t *testing.T) {
 		}
 		gw := okGateway()
 		gw.cancelErr = ErrPaymentUnknown
-		if err := s.ExecuteRefund(ctx, gw, id); !errors.Is(err, ErrPaymentUnknown) {
+		if _, err := s.ExecuteRefund(ctx, gw, id, "A-507"); !errors.Is(err, ErrPaymentUnknown) {
 			t.Fatalf("결과 불명 = %v", err)
 		}
 		return id
@@ -236,7 +239,7 @@ func TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives(t *testing.T) {
 
 	id := unknownRefund("rk-retry")
 	gw := okGateway()
-	if err := s.RetryRefund(ctx, gw, id, time.Now()); err != nil {
+	if _, err := s.RetryRefund(ctx, gw, id, time.Now(), "A-507"); err != nil {
 		t.Fatalf("키가 살아 있는 결과 불명 재실행 = %v", err)
 	}
 	if got := refundStatus(t, s, id); got != "완료" {
@@ -248,10 +251,151 @@ func TestRetryRefundResendsAnUnknownRefundOnlyWhileTheKeyLives(t *testing.T) {
 
 	old := unknownRefund("rk-old")
 	late := okGateway()
-	if err := s.RetryRefund(ctx, late, old, time.Now().Add(RefundRetryWindow+time.Hour)); !errors.Is(err, ErrRefundRetryExpired) {
+	if _, err := s.RetryRefund(ctx, late, old, time.Now().Add(RefundRetryWindow+time.Hour), "A-507"); !errors.Is(err, ErrRefundRetryExpired) {
 		t.Errorf("키가 죽은 뒤 재실행 = %v, want ErrRefundRetryExpired", err)
 	}
 	if len(late.cancelReqs) != 0 || refundStatus(t, s, old) != "승인" {
 		t.Errorf("키가 죽은 뒤 취소 %d번·상태 %s, want 0번·승인", len(late.cancelReqs), refundStatus(t, s, old))
+	}
+}
+
+// **같은 환불 건을 두 요청이 동시에 실행해도 PG 취소는 한 번이다** (지금 동작). 환불 행
+// 잠금이 둘을 줄 세우고, 뒤의 것은 「호출 중(승인)」 을 보고 상태 오류로 돌아선다 — 이중 환불은
+// 결국 취소 API 호출 수다.
+func TestConcurrentExecuteSendsOnce(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo, _, _ := paidOrder(t, s, pool, "tee", 2)
+	id, _ := refundAll(t, s, orderNo, "rk-race")
+	gw := okGateway()
+	gw.onCancel = func() { time.Sleep(200 * time.Millisecond) } // 앞 호출이 PG 에 머무는 동안
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = s.ExecuteRefund(context.Background(), gw, id, "A-507")
+		}()
+	}
+	wg.Wait()
+	if len(gw.cancelReqs) != 1 {
+		t.Errorf("취소 API %d 번 — 이중 환불", len(gw.cancelReqs))
+	}
+	ok, busy := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrRefundState):
+			busy++
+		default:
+			t.Errorf("예상 밖 오류: %v", err)
+		}
+	}
+	if ok != 1 || busy != 1 {
+		t.Errorf("성공 %d · 상태 오류 %d — 하나씩이어야 한다", ok, busy)
+	}
+	if got := refundStatus(t, s, id); got != "완료" {
+		t.Errorf("환불 상태 %s, want 완료", got)
+	}
+}
+
+// **배송비가 있는 주문의 품목을 A-507 로 전부 환불해도 주문은 열린 채다** (지금 동작).
+// 품목 단위 환불은 배송비를 돌려주지 않으므로(D50) 환불액이 결제액에 못 미쳐 「전액」이
+// 아니다 — 배송 전 주문이면 발송 대기 줄에 그대로 남는다. 정책을 정하면 이 시험을 바꾼다.
+func TestFullItemRefundWithShippingFeeLeavesTheOrderOpen(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, total, goods := paidOrder(t, s, pool, "tee", 1)
+	if total == goods {
+		t.Fatalf("배송비가 없는 주문이다 (결제 %d) — 전제가 틀렸다", total)
+	}
+	id, _ := refundAll(t, s, orderNo, "rk-all-items")
+	to, err := s.ExecuteRefund(ctx, okGateway(), id, "A-507")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if to != "" {
+		t.Errorf("주문이 %s 로 닫혔다", to)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusPaid)
+}
+
+// freeShippingOrder is a paid order above the free-shipping line (13,000 × 4), so
+// refunding every item is refunding the whole payment.
+func freeShippingOrder(t *testing.T, s *Store, pool *pgxpool.Pool, slug string) string {
+	t.Helper()
+	orderNo, total, goods := paidOrder(t, s, pool, slug, 4)
+	if total != goods {
+		t.Fatalf("배송비 %d 원이 붙었다 — 전제가 틀렸다", total-goods)
+	}
+	return orderNo
+}
+
+// **PG 가 확정한 환불이 결제액 전부면 주문도 끝난다** (D14: 배송 전 → 취소, 배송 후 → 환불).
+// 그 결정은 환불을 실행하는 쪽이 한다 — 화면마다 따로 기억하면 한 화면이 잊는다.
+func TestExecuteRefundClosesAFullyRefundedOrder(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo := freeShippingOrder(t, s, pool, "full")
+	id, _ := refundAll(t, s, orderNo, "rk-full")
+	to, err := s.ExecuteRefund(context.Background(), okGateway(), id, "A-507")
+	if err != nil || to != StatusCancelled {
+		t.Fatalf("= %q, %v — want 취소", to, err)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusCancelled)
+}
+
+// 부분 환불은 주문을 그대로 둔다 — 남은 물건은 아직 간다.
+func TestExecuteRefundLeavesAPartialOrder(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo := freeShippingOrder(t, s, pool, "part")
+	id, _, err := s.RequestRefund(context.Background(), orderNo,
+		[]RefundLine{{OrderItemID: itemsOf(t, s, orderNo)[0].ID, Quantity: 1}}, "관리자", "", "rk-part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if to, err := s.ExecuteRefund(context.Background(), okGateway(), id, "A-507"); err != nil || to != "" {
+		t.Fatalf("= %q, %v — want 그대로", to, err)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusPaid)
+}
+
+// 결과를 몰라 다시 보낸 환불(A-507 「실행」)도 전액이면 주문을 끝낸다.
+func TestRetryRefundClosesToo(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo := freeShippingOrder(t, s, pool, "retry")
+	id, _ := refundAll(t, s, orderNo, "rk-retry")
+	unknown := okGateway()
+	unknown.cancelErr = ErrPaymentUnknown
+	if _, err := s.ExecuteRefund(ctx, unknown, id, "A-507"); !errors.Is(err, ErrPaymentUnknown) {
+		t.Fatalf("첫 실행 = %v, want ErrPaymentUnknown", err)
+	}
+	to, err := s.RetryRefund(ctx, okGateway(), id, time.Now(), "A-507")
+	if err != nil || to != StatusCancelled {
+		t.Fatalf("다시 실행 = %q, %v — want 취소", to, err)
+	}
+}
+
+// **돈이 나간 뒤 주문 종료 기록이 실패해도 환불을 되돌리지 않는다** — 환불 건은 완료이고,
+// 호출자는 ErrRefundSentNotSettled 를 보고 로그만 남긴다(돈은 이미 움직였다).
+func TestSettleFailureAfterPGIsReportedNotUndone(t *testing.T) {
+	s, pool := testStore(t)
+	orderNo := freeShippingOrder(t, s, pool, "lost")
+	id, _ := refundAll(t, s, orderNo, "rk-lost")
+	gw := okGateway()
+	// PG 왕복 중에 주문을 찾을 수 없게 만든다 — 종료 단계의 잠금이 실패한다.
+	gw.onCancel = func() {
+		if _, err := pool.Exec(context.Background(),
+			`UPDATE orders SET order_no = order_no || '-x' WHERE order_no = $1`, orderNo); err != nil {
+			t.Error(err)
+		}
+	}
+	_, err := s.ExecuteRefund(context.Background(), gw, id, "A-507")
+	if !errors.Is(err, ErrRefundSentNotSettled) {
+		t.Fatalf("= %v, want ErrRefundSentNotSettled", err)
+	}
+	if got := refundStatus(t, s, id); got != "완료" {
+		t.Errorf("환불 상태 %s, want 완료 — 나간 돈의 기록을 되돌렸다", got)
 	}
 }

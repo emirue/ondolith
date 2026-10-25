@@ -342,7 +342,7 @@ func (s *Store) restockOrder(ctx context.Context, tx pgx.Tx, orderID string) err
 	return s.AdjustStock(ctx, tx, deltas)
 }
 
-// SettleFullRefund closes an order whose 주문결제 has now been refunded in full
+// settleFullRefund closes an order whose 주문결제 has now been refunded in full
 // (D14 5절, D19 A-507 「목표 상태는 상태머신이 정한다」): 배송 전이면 취소 —
 // 재고도 되돌린다 — 배송 뒤면 환불. 부분 환불이거나 상태머신이 두 전이를
 // 모두 막는 상태면 아무것도 바꾸지 않고 "" 를 돌려준다.
@@ -350,7 +350,7 @@ func (s *Store) restockOrder(ctx context.Context, tx pgx.Tx, orderID string) err
 // A-507 이 품목 단위로 환불하므로 전액에 이르는 순간이 따로 없었다 — 돈은
 // 전부 돌아갔는데 주문은 결제완료로 남아 발송 대기 줄에 서 있었다
 // (2026-10-01 실측).
-func (s *Store) SettleFullRefund(ctx context.Context, orderNo string, actor Actor) (Status, error) {
+func (s *Store) settleFullRefund(ctx context.Context, orderNo string, actor Actor) (Status, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -455,60 +455,85 @@ const RefundRetryWindow = 14 * 24 * time.Hour
 // 확정된 실패(4xx)는 '요청' 으로 되돌려 다시 시도할 수 있게 한다. 결과 불명
 // (타임아웃·5xx·IDEMPOTENT_REQUEST_PROCESSING)은 '승인' 에 둔다 —
 // **미환불이 이중환불보다 낫다** (D13).
-func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string) error {
-	return s.executeRefund(ctx, gw, refundID, time.Time{})
+//
+// PG 가 확정하면(이미 완료였어도) 결제액 전부가 돌아갔는지 보고 주문을 끝낸다 —
+// 옮긴 상태를 돌려주고, 부분이면 "" 다 (settleFullRefund). actor 는 그 전이를 일으키는
+// 화면이다. 그 기록이 실패하면 ErrRefundSentNotSettled 다.
+func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string, actor Actor) (Status, error) {
+	return s.executeAndSettle(ctx, gw, refundID, time.Time{}, actor)
 }
 
 // RetryRefund is A-507's 「다시 실행」 for a stuck refund. '요청' 은 처음 실행과
 // 같고, '승인'(결과 불명)은 같은 멱등키로 다시 부른다 — 접수가 RefundRetryWindow
 // 안일 때만. 그 밖은 ErrRefundRetryExpired 이고 사람이 결제사 화면에서 확인한다.
-func (s *Store) RetryRefund(ctx context.Context, gw Gateway, refundID string, now time.Time) error {
-	return s.executeRefund(ctx, gw, refundID, now)
+func (s *Store) RetryRefund(ctx context.Context, gw Gateway, refundID string, now time.Time, actor Actor) (Status, error) {
+	return s.executeAndSettle(ctx, gw, refundID, now, actor)
 }
 
-// executeRefund 의 now 가 영(zero)이면 '승인' 을 다시 부르지 않는다.
-func (s *Store) executeRefund(ctx context.Context, gw Gateway, refundID string, now time.Time) error {
+// ErrRefundSentNotSettled 는 PG 가 환불을 확정했는데 주문 종료 기록이 실패했다는
+// 뜻이다. 돈은 이미 나갔다 — 호출자는 로그만 남기고 성공으로 다룬다. 주문은 열린 채
+// 남고, 지금은 화면에서 다시 닫을 길이 없다(A-507 「실행」 은 완료된 건을 받지 않는다).
+var ErrRefundSentNotSettled = errors.New("commerce: 환불은 확정됐지만 주문 상태를 바꾸지 못했습니다")
+
+// executeAndSettle 은 PG 호출과 주문 종료를 한 트랜잭션에 묶지 않는다 — PG 왕복 동안
+// 주문을 잠가 두지 않고, 종료가 실패해도 나간 돈의 기록을 되돌리지 않는다.
+func (s *Store) executeAndSettle(ctx context.Context, gw Gateway, refundID string, now time.Time, actor Actor) (Status, error) {
 	ctx, cancel := moneyCtx(ctx) // PG 호출 뒤 기록까지 끝낸다 (payment.go)
 	defer cancel()
+	orderNo, err := s.executeRefund(ctx, gw, refundID, now)
+	if err != nil {
+		return "", err
+	}
+	to, err := s.settleFullRefund(ctx, orderNo, actor)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrRefundSentNotSettled, err)
+	}
+	return to, nil
+}
+
+// executeRefund 의 now 가 영(zero)이면 '승인' 을 다시 부르지 않는다. 돌려주는 것은
+// 그 환불의 주문번호다.
+func (s *Store) executeRefund(ctx context.Context, gw Gateway, refundID string, now time.Time) (string, error) {
 	if gw == nil {
-		return errors.New("commerce: PG 가 설정되어 있지 않아 환불을 실행할 수 없습니다")
+		return "", errors.New("commerce: PG 가 설정되어 있지 않아 환불을 실행할 수 없습니다")
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
 	r, err := q.LockRefundForExecute(ctx, refundID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return "", ErrNotFound
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	status, reason, requestKey, paymentKey, amount := r.Status, r.Reason, r.RequestKey, r.PaymentKey, int(r.Amount)
+	orderNo := r.OrderNo
 	switch status {
 	case "완료":
-		return nil // 이미 나갔다. 재전송은 같은 결과다
+		return orderNo, nil // 이미 나갔다. 재전송은 같은 결과다
 	case "요청":
 		if err := q.MarkRefundExecuting(ctx, refundID); err != nil {
-			return err
+			return "", err
 		}
 	case "승인":
 		if now.IsZero() {
-			return fmt.Errorf("%w: 상태 %s", ErrRefundState, status)
+			return "", fmt.Errorf("%w: 상태 %s", ErrRefundState, status)
 		}
 		if now.Sub(r.CreatedAt) > RefundRetryWindow {
-			return ErrRefundRetryExpired
+			return "", ErrRefundRetryExpired
 		}
 	default:
-		return fmt.Errorf("%w: 상태 %s", ErrRefundState, status)
+		return "", fmt.Errorf("%w: 상태 %s", ErrRefundState, status)
 	}
 	// 호출 중 표시를 커밋한다. 트랜잭션을 연 채 PG 를 부르면 잠금이 그 시간만큼
 	// 유지되고, 프로세스가 도중에 죽으면 '요청' 으로 남아 두 번째 호출을 부른다.
 	if err := tx.Commit(ctx); err != nil {
-		return err
+		return "", err
 	}
 
 	res, err := gw.Cancel(ctx, CancelRequest{
@@ -517,12 +542,12 @@ func (s *Store) executeRefund(ctx context.Context, gw Gateway, refundID string, 
 	})
 	if err != nil {
 		if errors.Is(err, ErrPaymentUnknown) {
-			return err // '승인' 에 둔다. 사람이 조회로 확인한다
+			return "", err // '승인' 에 둔다. 사람이 조회로 확인한다
 		}
 		if uerr := s.q.RevertRefundToRequested(ctx, refundID); uerr != nil {
-			return errors.Join(err, uerr)
+			return "", errors.Join(err, uerr)
 		}
-		return err
+		return "", err
 	}
 	var raw []byte
 	if res != nil {
@@ -530,12 +555,12 @@ func (s *Store) executeRefund(ctx context.Context, gw Gateway, refundID string, 
 	}
 	n, err := s.q.CompleteRefund(ctx, commerceq.CompleteRefundParams{ID: refundID, PgResponse: nullIfEmptyBytes(raw)})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if n == 0 {
-		return fmt.Errorf("%w: 호출하는 사이 상태가 바뀌었습니다", ErrRefundState)
+		return "", fmt.Errorf("%w: 호출하는 사이 상태가 바뀌었습니다", ErrRefundState)
 	}
-	return nil
+	return orderNo, nil
 }
 
 // cancelReasonMax is Toss's limit on cancelReason (D50: ≤ 200자). refunds.reason
@@ -557,14 +582,4 @@ func nullIfEmptyBytes(b []byte) []byte {
 		return nil
 	}
 	return b
-}
-
-// RefundForReturn finds the refund a return settlement produced, so the caller
-// can execute it.
-func (s *Store) RefundForReturn(ctx context.Context, orderNo, returnNo string) (string, error) {
-	id, err := s.q.RefundForReturn(ctx, commerceq.RefundForReturnParams{OrderNo: orderNo, ReturnNo: returnNo})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return id, err
 }

@@ -48,7 +48,7 @@ func (d *shopDeps) orderCancel(w http.ResponseWriter, r *http.Request) {
 	// 취소를 되돌리지 않는다: 환불 건은 '요청'/'승인' 으로 남아 P-508 에 보이고,
 	// 미환불이 이중환불보다 낫다 (D13).
 	if refundID != "" {
-		if err := d.store.ExecuteRefund(r.Context(), d.gateway(), refundID); err != nil {
+		if _, err := d.store.ExecuteRefund(r.Context(), d.gateway(), refundID, "P-506"); err != nil {
 			d.log.Error("취소 환불 실행", "order", orderNo, "refund", refundID, "err", err)
 		}
 	}

@@ -77,9 +77,9 @@ SELECT approved_amount, refunded_amount FROM payments
 WHERE order_id = $1 AND kind = '주문결제' AND status = '승인';
 
 -- name: LockRefundForExecute :one
-SELECT r.status, r.reason, r.request_key, r.amount, r.created_at, p.payment_key
-FROM refunds r JOIN payments p ON p.id = r.payment_id
-WHERE r.id = $1 FOR UPDATE;
+SELECT r.status, r.reason, r.request_key, r.amount, r.created_at, p.payment_key, o.order_no
+FROM refunds r JOIN payments p ON p.id = r.payment_id JOIN orders o ON o.id = r.order_id
+WHERE r.id = $1 FOR UPDATE OF r, p;
 
 -- name: MarkRefundExecuting :exec
 UPDATE refunds SET status = '승인', updated_at = now() WHERE id = $1 AND status = '요청';
@@ -90,10 +90,3 @@ UPDATE refunds SET status = '요청', updated_at = now() WHERE id = $1 AND statu
 -- name: CompleteRefund :execrows
 UPDATE refunds SET status = '완료', pg_response = sqlc.narg('pg_response'), updated_at = now()
 WHERE id = sqlc.arg('id') AND status = '승인';
-
--- name: RefundForReturn :one
-SELECT rf.id FROM refunds rf
-JOIN returns rt ON rt.id = rf.return_id
-JOIN orders o ON o.id = rf.order_id
-WHERE o.order_no = $1 AND rt.return_no = $2
-ORDER BY rf.created_at DESC, rf.id DESC LIMIT 1;

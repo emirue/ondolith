@@ -55,7 +55,7 @@
 
 ## 4. 트랜잭션 소유 함수 (29)
 
-commerce 22: OpenReturn, ConfirmPickup, SettleReturn, RejectReturn, CompleteExchange, ConfirmExchangeDiff, CreateOrder, TransitionOrder, expireOne, RequestRefund, RejectRefund, CancelOrder, SettleFullRefund, ExecuteRefund, Reparent, EditVariants, SetOptions, AddToCart, MergeCarts, ConfirmPayment(tx·tx2 연속 — 사이에 PG 호출), processWebhook.
+commerce 22: OpenReturn, ConfirmPickup, SettleReturn, RejectReturn, CompleteExchange, ConfirmExchangeDiff, CreateOrder, TransitionOrder, expireOne, RequestRefund, RejectRefund, CancelOrder, settleFullRefund, ExecuteRefund, Reparent, EditVariants, SetOptions, AddToCart, MergeCarts, ConfirmPayment(tx·tx2 연속 — 사이에 PG 호출), processWebhook.
 content 2: PutSettings(봉인 훅 포함), CreateBoard. auth 5: withLastSuperuserGuard(→SetActive/DeleteUser), UnlinkSocial, IssueResetToken, ResetPassword, IssueToken.
 `pgx.Tx` 를 인자로 받는 헬퍼 9개(AdjustStock, moveOrder, cartID, restockOrder, restockDeltas, returnFeeSetting, returnGross, requiredTermIDs, withLastSuperuserGuard) — 호출 19회.
 
