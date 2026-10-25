@@ -76,6 +76,13 @@ SELECT variant_id, quantity FROM order_items WHERE order_id = $1;
 SELECT approved_amount, refunded_amount FROM payments
 WHERE order_id = $1 AND kind = '주문결제' AND status = '승인';
 
+-- name: OpenRefundExists :one
+-- 아직 PG 로 가지 않았거나 결과를 모르는 환불 (refundCloseTarget).
+SELECT EXISTS (SELECT 1 FROM refunds WHERE order_id = $1 AND status IN ('요청','승인'))::boolean AS open;
+
+-- name: UnsettledItemCount :one
+SELECT count(*) FROM order_items WHERE order_id = $1 AND settled_quantity < quantity;
+
 -- name: LockRefundForExecute :one
 SELECT r.status, r.reason, r.request_key, r.amount, r.created_at, p.payment_key, o.order_no
 FROM refunds r JOIN payments p ON p.id = r.payment_id JOIN orders o ON o.id = r.order_id

@@ -247,6 +247,18 @@ func (q *Queries) MarkRefundExecuting(ctx context.Context, id string) error {
 	return err
 }
 
+const openRefundExists = `-- name: OpenRefundExists :one
+SELECT EXISTS (SELECT 1 FROM refunds WHERE order_id = $1 AND status IN ('요청','승인'))::boolean AS open
+`
+
+// 아직 PG 로 가지 않았거나 결과를 모르는 환불 (refundCloseTarget).
+func (q *Queries) OpenRefundExists(ctx context.Context, orderID string) (bool, error) {
+	row := q.db.QueryRow(ctx, openRefundExists, orderID)
+	var open bool
+	err := row.Scan(&open)
+	return open, err
+}
+
 const openReturnItemCount = `-- name: OpenReturnItemCount :one
 SELECT count(*) FROM return_items WHERE order_item_id = $1 AND is_open
 `
@@ -445,4 +457,15 @@ WHERE ri.refund_id = $1 AND oi.id = ri.order_item_id
 func (q *Queries) UnsettleRefundItems(ctx context.Context, refundID string) error {
 	_, err := q.db.Exec(ctx, unsettleRefundItems, refundID)
 	return err
+}
+
+const unsettledItemCount = `-- name: UnsettledItemCount :one
+SELECT count(*) FROM order_items WHERE order_id = $1 AND settled_quantity < quantity
+`
+
+func (q *Queries) UnsettledItemCount(ctx context.Context, orderID string) (int64, error) {
+	row := q.db.QueryRow(ctx, unsettledItemCount, orderID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
