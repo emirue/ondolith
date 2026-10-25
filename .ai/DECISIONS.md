@@ -133,7 +133,8 @@ goose에는 `stdlib.OpenDBFromPool(pool)`로 `*sql.DB`를 만들어 넘긴다. �
 - **올리기**: `go mod edit -go=<판>` → `mise install` → `make check`·`make test-integration` · 주 버전이 바뀌면
   공식 릴리스 노트의 호환성 항목을 읽고 전체 검증(`make ui`·`screens`·`crawl`·`e2e`)까지
 - **버전은 `go.mod` 한 곳에만 적는다.** CI 는 `go-version-file: go.mod`, 로컬 mise 는 저장소 `mise.toml` 의
-  `idiomatic_version_file_enable_tools = ["go"]` 로 `go.mod` 를 읽는다. 다른 문서는 판 번호를 되풀이하지 않고 「`go.mod`」를 가리킨다 — 판 번호와 확인 시점은 D21 1절 표에만 둔다
+  `idiomatic_version_file_enable_tools = ["go"]` 로 `go.mod` 를 읽는다. 안내 문서(README·CONTRIBUTING 등)는 판 번호를 되풀이하지 않고 「`go.mod`」를 가리킨다 — 판 번호는 D21 1절(표·이력)과
+  CHANGELOG 의 기록에만 남는다
 
 ---
 
