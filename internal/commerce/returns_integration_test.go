@@ -1306,7 +1306,7 @@ func TestReturnSettleLetsForeignKeyChecksThrough(t *testing.T) {
 	s, pool := testStore(t)
 	orderNo, returnNo, itemID := pickedUpReturn(t, s, pool)
 	probe := `SELECT 1 FROM orders WHERE order_no = '` + orderNo + `' FOR KEY SHARE NOWAIT`
-	whileWaitingOn(t, pool, itemID, probe, func() error {
+	whileWaitingOn(t, pool, itemLock(itemID), probe, func() error {
 		_, _, err := s.SettleReturn(context.Background(), orderNo, returnNo, "A-511", "fk-probe")
 		return err
 	})

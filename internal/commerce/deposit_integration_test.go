@@ -413,6 +413,44 @@ func TestResolvingAFailedDepositReleasesTheOrder(t *testing.T) {
 	}
 }
 
+// **A-508 반영은 주문 → 결제 순서로 잠근다** (FR-609). 입금 만료(expireDeposit)와
+// 입금 웹훅(P-905)이 그 순서인데, 반영이 결제를 먼저 쥐고 주문을 기다리면 둘이 서로를
+// 기다린다 — PostgreSQL 이 한쪽을 교착으로 끊고, 반영이면 운영자는 「결제사 조회에
+// 실패했습니다」(502)를 본다. 주문이 잠긴 동안 결제 행이 비어 있어야 한다.
+func TestResolveLocksTheOrderBeforeThePayment(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pg   PaymentStatus
+		want Status
+	}{
+		{"승인", PaymentApproved, StatusPaid},
+		{"실패", PaymentFailed, StatusPaymentFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, pool := testStore(t)
+			ctx := context.Background()
+			orderNo, total := seedOrder(t, s, pool, "va-lock", 1)
+			depositOrder(t, s, pool, orderNo, total, "s3cret")
+			var paymentID string
+			if err := pool.QueryRow(ctx, `SELECT id FROM payments WHERE kind = '주문결제'`).Scan(&paymentID); err != nil {
+				t.Fatal(err)
+			}
+			gw := &fakeGateway{getResponse: &Payment{PaymentKey: "pk-va", OrderNo: orderNo, Status: tc.pg,
+				Amount: total, Raw: []byte(`{}`)}}
+			whileWaitingOn(t, pool,
+				`SELECT 1 FROM orders WHERE order_no = '`+orderNo+`' FOR UPDATE`,
+				`SELECT 1 FROM payments WHERE id = '`+paymentID+`' FOR UPDATE NOWAIT`,
+				func() error {
+					_, err := s.ResolvePendingPayment(ctx, gw, paymentID)
+					return err
+				})
+			if got := statusOf(t, s, orderNo); got != tc.want {
+				t.Errorf("주문 %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 // keyedGateway 는 결제키마다 다르게 답한다 — fail 의 키는 조회가 실패한다.
 type keyedGateway struct {
 	*fakeGateway

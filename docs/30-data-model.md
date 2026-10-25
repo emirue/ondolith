@@ -1379,6 +1379,8 @@ orders (한 행) → product_variants (id 오름차순) → order_items (id 오�
   경로(예전의 `CancelOrder`·`RejectRefund`)는 그것과 서로를 기다린다 — 실측으로 교착이 났다
 - 재고 잠금은 `FOR NO KEY UPDATE` 다. 갱신이 키를 바꾸지 않으므로, 그 조합을 장바구니에 담는
   INSERT(외래키 검사)를 막을 이유가 없다
+- 결제 대사 반영(A-508 `ResolvePendingPayment`)도 **주문 → 결제**다. 결제를 먼저 쥐던 판은 같은
+  순서의 입금 만료·입금 웹훅(P-905)과 서로를 기다렸다 (`TestResolveLocksTheOrderBeforeThePayment`)
 
 새 경로를 더할 때 이 순서를 지킨다. `internal/commerce/audit_integration_test.go` 가 세 경로
 (`CancelOrder`·`RejectRefund`·`OpenReturn`)를 관측으로 확인한다.

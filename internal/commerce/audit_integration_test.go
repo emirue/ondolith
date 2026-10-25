@@ -114,11 +114,11 @@ func TestTermsWithTheSameEffectiveTimeAreRefused(t *testing.T) {
 	}
 }
 
-// whileWaitingOn holds a row lock on order_items.id = held, starts fn — which
-// must wait for that row — and, while it waits, checks that `probe` can still
-// be locked. 그것이 「held 를 probe 보다 먼저 잡는다」의 관측이다: 순서가 거꾸로면
-// fn 은 probe 를 쥔 채 held 를 기다리고, 그 모양이 교착의 절반이다.
-func whileWaitingOn(t *testing.T, pool *pgxpool.Pool, held, probe string, fn func() error) {
+// whileWaitingOn holds the row lock `hold` takes, starts fn — which must wait
+// for that row — and, while it waits, checks that `probe` can still be locked.
+// 그것이 「hold 의 행을 probe 보다 먼저 잡는다」의 관측이다: 순서가 거꾸로면
+// fn 은 probe 를 쥔 채 hold 의 행을 기다리고, 그 모양이 교착의 절반이다.
+func whileWaitingOn(t *testing.T, pool *pgxpool.Pool, hold, probe string, fn func() error) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
@@ -126,7 +126,7 @@ func whileWaitingOn(t *testing.T, pool *pgxpool.Pool, held, probe string, fn fun
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM order_items WHERE id = $1 FOR UPDATE`, held); err != nil {
+	if _, err := tx.Exec(ctx, hold); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,7 +146,7 @@ func whileWaitingOn(t *testing.T, pool *pgxpool.Pool, held, probe string, fn fun
 		}
 		select {
 		case err := <-done:
-			t.Fatalf("잠긴 품목을 기다리지 않고 끝났다: %v", err)
+			t.Fatalf("잠긴 행을 기다리지 않고 끝났다: %v", err)
 		default:
 		}
 		if time.Now().After(deadline) {
@@ -156,7 +156,7 @@ func whileWaitingOn(t *testing.T, pool *pgxpool.Pool, held, probe string, fn fun
 	}
 
 	if _, err := pool.Exec(ctx, probe); err != nil {
-		t.Errorf("품목을 기다리는 동안 뒤 순서의 행을 이미 쥐고 있다 — 잠금 순서가 거꾸로다: %v", err)
+		t.Errorf("잠긴 행을 기다리는 동안 뒤 순서의 행을 이미 쥐고 있다 — 잠금 순서가 거꾸로다: %v", err)
 	}
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
@@ -164,6 +164,11 @@ func whileWaitingOn(t *testing.T, pool *pgxpool.Pool, held, probe string, fn fun
 	if err := <-done; err != nil {
 		t.Errorf("잠금이 풀린 뒤 실패했다: %v", err)
 	}
+}
+
+// itemLock is the hold for whileWaitingOn that takes one order_items row.
+func itemLock(id string) string {
+	return `SELECT 1 FROM order_items WHERE id = '` + id + `' FOR UPDATE`
 }
 
 // 잠금 순서는 order_items(id 오름차순) → payments 다. CancelOrder·RejectRefund 는
@@ -179,7 +184,7 @@ func TestCancelAndRejectLockItemsBeforeThePayment(t *testing.T) {
 	t.Run("CancelOrder", func(t *testing.T) {
 		orderNo, _, _ := paidOrder(t, s, pool, "cancel", 1)
 		item := itemsOf(t, s, orderNo)[0].ID
-		whileWaitingOn(t, pool, item, paymentFree(orderNo), func() error {
+		whileWaitingOn(t, pool, itemLock(item), paymentFree(orderNo), func() error {
 			_, err := s.CancelOrder(ctx, orderNo, "P-506", "cancel-key")
 			return err
 		})
@@ -188,7 +193,7 @@ func TestCancelAndRejectLockItemsBeforeThePayment(t *testing.T) {
 		orderNo, _, _ := paidOrder(t, s, pool, "reject", 1)
 		refundID, _ := refundAll(t, s, orderNo, "reject-key")
 		item := itemsOf(t, s, orderNo)[0].ID
-		whileWaitingOn(t, pool, item, paymentFree(orderNo),
+		whileWaitingOn(t, pool, itemLock(item), paymentFree(orderNo),
 			func() error { return s.RejectRefund(ctx, refundID, "거부") })
 	})
 }
@@ -201,7 +206,7 @@ func TestCancelLetsForeignKeyChecksThrough(t *testing.T) {
 	orderNo, _, _ := paidOrder(t, s, pool, "cancel-fk", 1)
 	item := itemsOf(t, s, orderNo)[0].ID
 	probe := `SELECT 1 FROM orders WHERE order_no = '` + orderNo + `' FOR KEY SHARE NOWAIT`
-	whileWaitingOn(t, pool, item, probe, func() error {
+	whileWaitingOn(t, pool, itemLock(item), probe, func() error {
 		_, err := s.CancelOrder(context.Background(), orderNo, "P-506", "cancel-fk-key")
 		return err
 	})
@@ -240,7 +245,7 @@ func TestOpenReturnLocksItemsInIDOrder(t *testing.T) {
 
 	// 작은 id 를 쥐고, 폼은 큰 id 를 먼저 보낸다. 정렬했다면 작은 쪽에서 기다리므로
 	// 큰 쪽은 아직 잡히지 않았다.
-	whileWaitingOn(t, pool, low,
+	whileWaitingOn(t, pool, itemLock(low),
 		`SELECT 1 FROM order_items WHERE id = '`+high+`' FOR UPDATE NOWAIT`,
 		func() error {
 			_, err := s.OpenReturn(ctx, order.OrderNo, ReturnRequest{Kind: KindReturn,
