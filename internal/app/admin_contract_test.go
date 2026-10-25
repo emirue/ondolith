@@ -461,7 +461,7 @@ func TestEmptyTableRowsCarryTheMarker(t *testing.T) {
 // 없다). 브라우저로 다크를 찍어 보고 알았다: 파일 이름만 dark 고 화면은 밝았다.
 func TestAdminDefaultThemeIsUnstamped(t *testing.T) {
 	// 값이 비면 비운 채로 둔다 — 여기서 채우면 위의 구분이 사라진다.
-	r, err := newAdminRenderer(func() string { return "s" }, "", false,
+	r, err := newAdminRenderer(func() string { return "s" }, nil, "", false,
 		slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("렌더러: %v", err)
@@ -470,7 +470,7 @@ func TestAdminDefaultThemeIsUnstamped(t *testing.T) {
 		t.Errorf("고르지 않았는데 theme = %q 로 채워졌다 — 다크 블록이 죽는다", r.theme)
 	}
 	// 고른 값은 그대로 간다.
-	r2, err := newAdminRenderer(func() string { return "s" }, "1c", false,
+	r2, err := newAdminRenderer(func() string { return "s" }, nil, "1c", false,
 		slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("렌더러: %v", err)

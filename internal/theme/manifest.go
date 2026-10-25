@@ -36,6 +36,9 @@ type Manifest struct {
 	Author  string `json:"author"`
 	// Requires is the minimum Ondolith version. Absent means no minimum.
 	Requires string `json:"requires"`
+	// Logo·Favicon 은 static/ 아래 이미지 경로다 (FR-310). 관리자 화면과 내장 테마가 쓴다 — Brand.
+	Logo    string `json:"logo"`
+	Favicon string `json:"favicon"`
 }
 
 // ReadManifest reads theme.json from a theme directory.

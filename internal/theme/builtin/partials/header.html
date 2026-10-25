@@ -1,5 +1,6 @@
 <header class="site-header">
-  <a class="site-name" href="/">{{.Site.Name}}</a>
+  {{/* 활성 테마가 로고를 지정했으면 이름 앞에 그린다 (FR-310). <img> 다 — 남의 SVG 를 문서에 끼우지 않는다. */}}
+  <a class="site-name" href="/">{{with .Site.Logo}}<img class="site-logo" src="{{.}}" alt="">{{end}}{{.Site.Name}}</a>
   {{template "partials/menu.html" .}}
 
   {{/* **검색은 사이트 유형을 따른다** (FR-710). 쇼핑몰의 머리글 검색이 글을

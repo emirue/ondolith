@@ -71,6 +71,15 @@ themes/{이름}/
 | `version` | 테마 버전 |
 | `author` | 제작자 |
 | `requires` | 이 테마가 요구하는 Ondolith 최소 버전 |
+| `logo` | 로고 이미지 — `static/` 아래 경로(예: `img/logo.svg`). svg·png·jpg·jpeg·webp·gif (FR-310) |
+| `favicon` | 파비콘 — `static/` 아래 경로(예: `img/favicon.png`). ico·png·svg (FR-310) |
+
+**`logo`·`favicon`** (FR-310). 지정하면 그 테마가 활성인 동안 **관리자 화면** 머리글의 마크와 파비콘이 그것으로
+바뀌고, 뷰 모델의 `.Site.Logo`·`.Site.Favicon` 에 자산 주소(해시가 붙은 `/static/…`)로 온다 — 내장
+`partials/header.html` 은 로고를 이름 앞에, 내장 `partials/head.html` 은 파비콘을 싣는다. 머리글·`<head>` 를
+덮어쓴 테마는 그 값을 직접 쓴다. 지정이 없거나 틀리면(`static/` 밖·이미지가 아님·파일 없음) 빈 값이고 기본
+마크·아이콘이 나오며, 활성화(A-202)가 경고한다(거부하지 않는다). **로고는 `<img>` 로만 그린다** — 남이 만든
+테마의 SVG 를 문서에 끼우면 그 안의 스크립트가 사이트 출처로 돈다.
 
 **`requires` 비교 규칙**
 
@@ -324,7 +333,7 @@ themes/{이름}/
 
 | 이름 | 내용 |
 |---|---|
-| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 검색 노출(`.Site.SEO` — FR-718. 소유 확인 `GoogleVerify`·`NaverVerify`·`BingVerify` 와 `NoIndex`. 내장 `partials/head.html` 이 메타 태그로 싣는다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 소유 확인이 된다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
+| `.Site` | 사이트 이름, 기본 메타, 사이트 유형(`cms`/`shop`), 사업자 정보, Turnstile 사이트 키(`.Site.Turnstile`, 꺼져 있으면 빈 값 — FR-216), GA4 측정 ID(`.Site.Analytics`, 없으면 빈 값 — FR-714. 내장 `partials/head.html` 이 gtag.js 를 붙인다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 측정된다), 테마 로고·파비콘(`.Site.Logo`·`.Site.Favicon` — FR-310. `theme.json` 이 지정했을 때의 자산 주소, 없으면 빈 값), 검색 노출(`.Site.SEO` — FR-718. 소유 확인 `GoogleVerify`·`NaverVerify`·`BingVerify` 와 `NoIndex`. 내장 `partials/head.html` 이 메타 태그로 싣는다. `<head>` 를 덮어쓴 테마는 그 블록을 옮겨 적어야 소유 확인이 된다), 가입 닫힘(`.Site.SignupClosed` — FR-217. 내장 테마는 머리글·로그인 화면의 가입 링크를 감추고 `auth/signup.html` 이 폼 대신 이유를 보인다. 막는 것은 서버다 — 링크를 남긴 테마는 403 화면으로 안내할 뿐이다) |
 | `.Menu` | 메뉴 트리 (FR-405) |
 | `.User` | 로그인 사용자 (미로그인이면 nil). 이메일·표시이름만. **역할·권한 원본은 넘기지 않는다** |
 | `.Can` | 미리 계산된 권한 불리언 맵 ([D15](15-access-control.md) 4.3) |

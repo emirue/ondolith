@@ -481,6 +481,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-24 | 구조화 데이터 (JSON-LD) **(완료 — `TestStructuredDataOnHomeAndProduct`·`TestProductJSONLDOffers`)** | W6-22 | `<head>` JSON-LD | 홈에 WebSite·Organization(사업자 정보 항목만), 상품 화면에 Product(이름·이미지·설명·KRW 가격·재고 상태)가 JSON-LD 로 있고 본문의 `</script>` 같은 값이 스크립트를 끊지 않는다 (FR-719) |
 | W6-25 | 대장의 알려진 결함 5건 고치기 | W6-21 | A-507 「전체 취소」, P-507 요청 키, `SettleReturn` 부분 반품, `CompleteExchange` 음수 차액, A-201 개발 모드 | 배송 전 주문은 A-507 「전체 취소」가 남은 금액을 배송비까지 돌려주고 취소한다(`order.cancel` + 재인증, `TestAdminFullCancelReturnsTheRestAndCancels`). P-507 을 두 번 눌러도 요청이 한 건이다(`TestMemberPartialRefundDoubleSubmit`). 부분 반품 정산 뒤 주문이 배송완료로 돌아오고 전부 반품되면 환불이다(`TestPartialReturnSendsTheOrderBackToDelivered`). 더 싼 조합 교환은 차액을 환불한다(`TestNegativeExchangeDifferenceIsRefunded`·`TestAdminCheaperExchangeRefundsTheDifference`). 개발 모드가 A-201 에 있고 바뀌면 재조립하며 켜져 있으면 경고한다(`TestSiteSettingsWarnWhileDevModeIsOn`). 차액을 돌려준 품목의 반품·부분 환불은 그 차액을 뺀다(`TestExchangeCreditIsNotRefundedTwice`·`TestExchangeCreditAlsoAppliesToPartialRefunds`), 수거한 반품은 거부하지 않는다(`TestPickedUpReturnCannotBeRejected`) (FR-611, FR-617, FR-618, FR-306) |
 | W6-26 | 로그인 아이디 저장 (P-101) | — | `remember_email` 쿠키, `auth/login.html` 체크박스 | 체크하고 로그인에 성공하면 다음 로그인 화면의 이메일 칸이 채워지고 체크가 켜진다. 쿠키는 HttpOnly·Path=/login·SameSite=Lax·30일이고 이메일만 담는다. 실패한 로그인은 남기지 않고 끄고 로그인하면 지운다. 손댄 값은 쓰지 않는다(`TestRememberEmailCookie`·`TestRememberedEmailIgnoresAForgedCookie`) (FR-218) |
+| W6-27 | 테마의 로고·파비콘 | — | `theme.Manifest` logo·favicon, `Loader.Brand`, 관리자 레이아웃·내장 머리글·head | 활성 테마의 theme.json 이 지정한 로고·파비콘이 관리자 화면과 공개 화면에 나오고(`TestThemeLogoAndFaviconReachAdminAndPublic`), 지정이 없으면 기본 마크·아이콘이다(`TestDefaultBrandWithoutThemeLogo`). static/ 밖·이미지 아님·파일 없음은 무시하고 활성화가 경고한다(`TestBrandComesFromTheManifest`·`TestBrandMistakesAreWarnedAtActivation`). SVG 는 <img> 로만 (FR-310) |
 
 ## 작업 수 요약
 
@@ -491,5 +492,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 26 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **164** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 27 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **165** | **9** | — |

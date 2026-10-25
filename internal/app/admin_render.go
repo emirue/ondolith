@@ -43,6 +43,9 @@ type adminRenderer struct {
 	// 인라인이라 요청이 늘지 않으며, currentColor 를 쓰므로 헤더가 밝든 어둡든
 	// 파일 한 벌로 끝난다.
 	logo template.HTML
+	// brand is the active theme's logo·favicon (FR-310). 테마는 실행 중에 바뀌므로(A-202) 값이 아니라
+	// 함수다. 테마의 로고는 <img> 로만 그린다 — 남이 만든 SVG 를 인라인하면 그 안의 스크립트가 돈다.
+	brand func() theme.Brand
 	// theme selects one of the handoff's five directions (1a~1e). Empty means
 	// defaultAdminTheme.
 	theme string
@@ -62,7 +65,7 @@ type adminRenderer struct {
 // 대조한다.
 const defaultAdminTheme = "1b"
 
-func newAdminRenderer(site func() string, theme string, shop bool, log *slog.Logger) (*adminRenderer, error) {
+func newAdminRenderer(site func() string, brand func() theme.Brand, adminTheme string, shop bool, log *slog.Logger) (*adminRenderer, error) {
 	b, err := adminFS.ReadFile("templates/admin/admin.css")
 	if err != nil {
 		return nil, err
@@ -81,7 +84,8 @@ func newAdminRenderer(site func() string, theme string, shop bool, log *slog.Log
 		// 임베드된 우리 파일이지 사용자 입력이 아니다 — template.HTML 이
 		// 아니면 html/template 이 SVG 를 통째로 이스케이프해 글자로 그린다.
 		logo:  template.HTML(mark),
-		theme: theme,
+		brand: brand,
+		theme: adminTheme,
 		cache: map[string]*template.Template{},
 	}, nil
 }
@@ -178,6 +182,13 @@ var adminScreenTitles = map[string]string{
 // The status code is written before the body, and a template failure after that
 // point cannot change it — so the parse happens first and a broken template
 // becomes a 500 instead of a half-drawn page under a 200.
+func (a *adminRenderer) currentBrand() theme.Brand {
+	if a.brand == nil {
+		return theme.Brand{}
+	}
+	return a.brand()
+}
+
 func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name string, code int, data any) {
 	t, err := a.lookup(name)
 	if err != nil {
@@ -192,6 +203,7 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 		"Title":      adminScreenTitles[name],
 		"SiteName":   a.site(),
 		"Logo":       a.logo,
+		"Brand":      a.currentBrand(),
 		"Nav":        groups,
 		"Current":    admin.CurrentGroup(groups, r.URL.Path),
 		"CSS":        a.css,

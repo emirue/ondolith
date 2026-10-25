@@ -688,6 +688,8 @@ button,
 /* 마크는 글자 옆에 선다. 크기를 글꼴 크기에 묶어 두면 헤더 높이를 바꿔도
  * 따라오고, currentColor 라 안 색은 헤더 토큰이 정한다. */
 .adm-mark { display: inline-flex; width: 1.55em; height: 1.55em; }
+/* 활성 테마의 로고 (FR-310) — 마크와 같은 높이에 선다. 가로로 긴 로고는 너비가 따라 늘되 넘치지 않는다. */
+.adm-logo-img { height: 1.55em; width: auto; max-width: 160px; }
 .adm-mark svg { width: 100%; height: 100%; }
 
 /* ═══ 폼 구조 ══════════════════════════════════════════════════════════════

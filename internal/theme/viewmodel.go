@@ -62,6 +62,10 @@ type Site struct {
 	SignupClosed bool
 	// SEO is A-211's search-engine output (FR-718).
 	SEO SEO
+	// Logo·Favicon 은 활성 테마가 theme.json 에 지정한 자산 주소다 (FR-310). 없으면 빈 값 — 내장
+	// 테마는 머리글에 이름만, 파비콘은 기본 아이콘을 쓴다.
+	Logo    string
+	Favicon string
 }
 
 // SEO is what A-211 puts in <head>: 검색엔진 소유 확인 값(구글·네이버·빙, 공개값)과

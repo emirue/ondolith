@@ -72,12 +72,19 @@ a:hover { color: var(--link-hover); }
 }
 
 .site-name {
+  /* 테마가 지정한 로고(FR-310)와 이름이 한 줄에 선다. */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: -.02em;
   text-decoration: none;
   color: inherit;
 }
+
+/* 높이를 글자에 묶어 머리글 높이가 로고 파일 크기를 따라가지 않는다. */
+.site-logo { height: 1.6em; width: auto; max-width: 160px; }
 
 /* 메뉴가 많거나 이름이 길면 **항목 단위로** 다음 줄로 간다. 한 줄에 우겨 넣으면 좁은
    화면에서 항목 안의 글자가 「고객/센터」「자유게/시판」처럼 갈라졌다(375px 실측). */
