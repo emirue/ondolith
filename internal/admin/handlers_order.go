@@ -661,12 +661,12 @@ func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
 		return
 	}
 	d.log(r, c, "order.refund", "order", order.OrderNo, "환불 "+itoa(amount)+"원 PG 확정")
-	// 전액이면 commerce 가 주문을 끝냈다(to). 돈은 이미 움직였으므로 그 기록의
+	// 환불이 끝났으면 commerce 가 주문을 끝냈다(to). 돈은 이미 움직였으므로 그 기록의
 	// 실패는 로그만 남기고 화면은 정상으로 돌아간다.
 	if err != nil {
 		d.Logger.Error("전액 환불 뒤 주문 종료", "order", order.OrderNo, "err", err)
 	} else if to != "" {
-		d.log(r, c, "order.refund", "order", order.OrderNo, "전액 환불 — 주문 "+string(to))
+		d.log(r, c, "order.refund", "order", order.OrderNo, "환불이 끝나 주문 "+string(to))
 	}
 	http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
 }

@@ -365,6 +365,14 @@ func (s *Store) CloseRefundedOrder(ctx context.Context, orderNo string, actor Ac
 		return "", err
 	}
 	orderID, status := o.ID, Status(o.Status)
+	// **품목을 잡은 뒤에 판정한다.** 환불 접수·거부는 주문 행을 잡지 않고 품목 → 결제로
+	// 잡으므로, 잠그지 않고 읽으면 판정의 세 SELECT 사이에 거부가 커밋될 수 있다 —
+	// 「전액」을 읽은 뒤 한도가 풀려도 닫고, 아래에서 품목을 다시 전부 소진한다.
+	// id 오름차순이다 (RequestRefund 와 같은 순서) — 아니면 품목이 둘 이상인 주문에서
+	// 환불 요청과 교착한다.
+	if _, err := q.LockOrderItems(ctx, orderID); err != nil {
+		return "", err
+	}
 	to, err := refundCloseTarget(ctx, q, orderID, status, actor)
 	if err != nil || to == "" {
 		return "", err
@@ -373,11 +381,6 @@ func (s *Store) CloseRefundedOrder(ctx context.Context, orderNo string, actor Ac
 		if err := s.restockOrder(ctx, tx, orderID); err != nil {
 			return "", err
 		}
-	}
-	// 품목은 id 오름차순으로 잡는다 (RequestRefund 와 같은 순서). 아래 UPDATE 가
-	// 제 순서대로 잡게 두면 품목이 둘 이상인 주문에서 환불 요청과 교착한다.
-	if _, err := q.LockOrderItems(ctx, orderID); err != nil {
-		return "", err
 	}
 	if err := q.SettleAllOrderItems(ctx, orderID); err != nil {
 		return "", err
@@ -389,6 +392,8 @@ func (s *Store) CloseRefundedOrder(ctx context.Context, orderNo string, actor Ac
 }
 
 // RefundCloseTarget is where A-507 「주문 종료」 would send the order — "" 이면 단추가 없다.
+// 종료 기록이 실패한 주문과, 이 판정이 생기기 전에 배송비 때문에 열린 채 남은 배송 뒤
+// 주문이 여기에 걸린다.
 // 잠그지 않고 읽는다. 누르면 CloseRefundedOrder 가 잠근 채 다시 판정한다.
 func (s *Store) RefundCloseTarget(ctx context.Context, orderID string, status Status, actor Actor) (Status, error) {
 	return refundCloseTarget(ctx, s.q, orderID, status, actor)
@@ -491,8 +496,8 @@ const RefundRetryWindow = 14 * 24 * time.Hour
 // (타임아웃·5xx·IDEMPOTENT_REQUEST_PROCESSING)은 '승인' 에 둔다 —
 // **미환불이 이중환불보다 낫다** (D13).
 //
-// PG 가 확정하면(이미 완료였어도) 결제액 전부가 돌아갔는지 보고 주문을 끝낸다 —
-// 옮긴 상태를 돌려주고, 부분이면 "" 다 (CloseRefundedOrder). actor 는 그 전이를 일으키는
+// PG 가 확정하면(이미 완료였어도) 환불이 끝났는지 보고 주문을 끝낸다 — 옮긴 상태를
+// 돌려주고, 아직이면 "" 다 (CloseRefundedOrder). actor 는 그 전이를 일으키는
 // 화면이다. 그 기록이 실패하면 ErrRefundSentNotSettled 다.
 func (s *Store) ExecuteRefund(ctx context.Context, gw Gateway, refundID string, actor Actor) (Status, error) {
 	return s.executeAndSettle(ctx, gw, refundID, time.Time{}, actor)

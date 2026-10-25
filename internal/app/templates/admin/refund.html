@@ -7,8 +7,9 @@
   <dt>환불 접수·완료</dt><dd>{{money .Refunded}}</dd>
   <dt>남은 금액</dt><dd><strong>{{money .Remaining}}</strong></dd>
 </dl>
-{{/* 환불은 끝났는데 주문 종료 기록이 실패해 열린 채 남은 주문 (D19 A-507 `close`).
-     돈이 나가지 않아 재인증을 묻지 않는다. */}}
+{{/* 환불은 끝났는데 열린 채 남은 주문 (D19 A-507 `close`) — 종료 기록이 실패했거나, 배송
+     뒤 품목을 전부 환불하고도 배송비 때문에 닫히지 않던 판에 남은 주문이다. 돈이 나가지
+     않아 재인증을 묻지 않는다. */}}
 {{if .CloseTo}}
 <form method="post" class="adm-form">
   <input type="hidden" name="action" value="close">

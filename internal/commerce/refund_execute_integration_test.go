@@ -3,6 +3,7 @@ package commerce
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -328,6 +329,9 @@ func TestFullItemRefundWithShippingFeeLeavesTheOrderOpen(t *testing.T) {
 func TestAllItemsRefundedAfterShippingClosesTheOrder(t *testing.T) {
 	s, pool := testStore(t)
 	orderNo, goods := deliveredOrder(t, s, pool, "tee", 1)
+	if approved, _, err := s.RefundedTotal(context.Background(), orderNo); err != nil || approved <= goods {
+		t.Fatalf("결제 %d, 상품 %d, %v — 배송비가 붙은 주문이어야 한다", approved, goods, err)
+	}
 	id, amount := refundAll(t, s, orderNo, "rk-shipped")
 	if amount != goods {
 		t.Fatalf("환불액 %d, want %d (배송비 제외)", amount, goods)
@@ -441,6 +445,55 @@ func TestSettleFailureAfterPGIsReportedNotUndone(t *testing.T) {
 	if got := refundStatus(t, s, id); got != "완료" {
 		t.Errorf("환불 상태 %s, want 완료 — 나간 돈의 기록을 되돌렸다", got)
 	}
+}
+
+// **주문 종료는 품목을 잠근 뒤에 판정한다** (FR-611). 환불 접수·거부는 주문 행을 잡지 않고
+// 품목 → 결제로 잡는다. 판정(결제액·남은 환불·소진 수량을 차례로 읽는다)을 잠그지 않고 하면
+// 그 사이에 거부가 커밋될 수 있다 — 「전액」을 읽은 뒤 거부로 한도가 풀려도 주문은 취소로
+// 닫히고, 품목을 다시 전부 소진해 그 몫은 돌려줄 길이 없어진다. 품목이 잡혀 있으면 판정
+// 전에 기다려야 한다. 닫을 곳이 없는 주문이라야 관측된다(닫을 곳이 있으면 어차피 품목을 잡는다).
+func TestCloseDecidesUnderTheItemLock(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo := freeShippingOrder(t, s, pool, "decide")
+	item := itemsOf(t, s, orderNo)[0].ID
+	first, _, err := s.RequestRefund(ctx, orderNo, []RefundLine{{OrderItemID: item, Quantity: 3}}, "관리자", "", "rk-d1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.RequestRefund(ctx, orderNo, []RefundLine{{OrderItemID: item, Quantity: 1}}, "관리자", "", "rk-d2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExecuteRefund(ctx, okGateway(), first, "A-507"); err != nil {
+		t.Fatal(err)
+	}
+	whileWaitingOn(t, pool, itemLock(item),
+		`SELECT 1 FROM payments WHERE order_id = (SELECT id FROM orders WHERE order_no = '`+orderNo+`') FOR UPDATE NOWAIT`,
+		func() error {
+			to, err := s.CloseRefundedOrder(ctx, orderNo, "A-507")
+			if err == nil && to != "" {
+				return fmt.Errorf("남은 환불이 있는데 %s 로 닫았다", to)
+			}
+			return err
+		})
+	assertOrderStatus(t, pool, orderNo, StatusPaid)
+}
+
+// **배송 뒤라도 품목이 남아 있으면 닫지 않는다** — 남은 물건은 구매자에게 있고 반품·구매확정이
+// 아직 그 주문으로 온다.
+func TestPartialRefundAfterShippingLeavesTheOrderOpen(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	orderNo, _ := deliveredOrder(t, s, pool, "tee", 2)
+	id, _, err := s.RequestRefund(ctx, orderNo,
+		[]RefundLine{{OrderItemID: itemsOf(t, s, orderNo)[0].ID, Quantity: 1}}, "관리자", "", "rk-shipped-part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if to, err := s.ExecuteRefund(ctx, okGateway(), id, "A-507"); err != nil || to != "" {
+		t.Fatalf("= %q, %v — want 그대로", to, err)
+	}
+	assertOrderStatus(t, pool, orderNo, StatusDelivered)
 }
 
 // **자동 종료가 실패해 열린 채 남은 주문은 A-507 「주문 종료」가 닫는다** (FR-611). 돈은 이미
