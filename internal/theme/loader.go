@@ -49,6 +49,9 @@ type Loader struct {
 	mu     sync.RWMutex
 	cache  map[string]*template.Template
 	assets *assetHasher
+
+	brandOnce sync.Once
+	brand     Brand
 }
 
 // New returns a loader over the built-in FS, optionally overlaid with dir.
@@ -291,7 +294,7 @@ func ValidateThemeDir(dir, current string) (warn string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return joinWarnings(w, contractWarnings(dir)), nil
+	return joinWarnings(w, append(contractWarnings(dir), brandWarnings(dir, m)...)), nil
 }
 
 // contractWarnings reports where a candidate theme leaves D17 unmet.

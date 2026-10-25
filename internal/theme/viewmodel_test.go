@@ -112,6 +112,8 @@ func TestSiteCarriesOnlyRenderableFields(t *testing.T) {
 		"SignupClosed": true,
 		// 검색엔진 소유 확인 값과 noindex — 검색엔진이 읽도록 <head> 에 싣는 공개값이다 (FR-718).
 		"SEO": true,
+		// 테마가 지정한 로고·파비콘의 자산 주소 — 페이지가 그대로 싣는 공개 경로다 (FR-310).
+		"Logo": true, "Favicon": true,
 	}
 	for i := 0; i < ty.NumField(); i++ {
 		if f := ty.Field(i); !allowed[f.Name] {

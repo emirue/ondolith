@@ -19,7 +19,7 @@ import (
 // renderAdmin 은 관리자 템플릿 하나를 실제 렌더러로 그린다. DB 가 필요 없다.
 func renderAdmin(t *testing.T, name string, data map[string]any) string {
 	t.Helper()
-	r, err := newAdminRenderer(func() string { return "s" }, "", true, slog.New(slog.DiscardHandler))
+	r, err := newAdminRenderer(func() string { return "s" }, nil, "", true, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

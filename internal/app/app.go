@@ -290,7 +290,15 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 관리자 폼 하나로 켜지고, 테마 작업(FR-306 재파싱)을 위해 켜 둔 채 잊으면
 	// 공개 500 페이지가 pgx 오류·파일 경로를 찍는다 — D60 이 원문을 허용한
 	// 화면은 설치 페이지 하나다. 재파싱은 dev_mode 가, 원문 노출은 빌드가 정한다.
-	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: site, siteURL: cfg.SiteURL,
+	// 공개 화면의 사이트 모델은 활성 테마의 로고·파비콘을 싣는다 (FR-310). 테마는 실행 중에 바뀌므로
+	// (A-202) 요청마다 지금 로더에서 읽는다.
+	brandedSite := func() theme.Site {
+		s := site()
+		b := loader().Brand()
+		s.Logo, s.Favicon = b.Logo, b.Favicon
+		return s
+	}
+	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: brandedSite, siteURL: cfg.SiteURL,
 		dev:            dev && theme.IsDevBuild(version),
 		verifyRequired: verifyRequired,
 		// P-907. 풀을 통째로 넘기지 않는다 — 헬스체크가 필요한 것은
@@ -372,7 +380,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 	}
 	adminUI, err := newAdminRenderer(func() string { return site().Name },
-		setting("admin.theme")["admin.theme"], shopMode, log)
+		func() theme.Brand { return loader().Brand() }, setting("admin.theme")["admin.theme"], shopMode, log)
 	if err != nil {
 		return fail(fmt.Errorf("app: 관리자 스타일: %w", err))
 	}
