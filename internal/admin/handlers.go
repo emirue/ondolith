@@ -112,8 +112,9 @@ type Deps struct {
 	SendReset func(email, token string)
 	// SendMailTest sends A-205's test mail with the saved SMTP settings and
 	// waits for the answer — unlike SendReset, the point is to see the result.
-	// The address is always the signed-in administrator's (D13).
-	SendMailTest func(ctx context.Context, to string) error
+	// The address is always the signed-in administrator's (D13); the subject and
+	// body are the operator's or mailTestSubject·mailTestBody.
+	SendMailTest func(ctx context.Context, to, subject, body string) error
 	// Limiter and Limits carry D15 4.3-2's thresholds into the screens that
 	// have one (A-205 test send: per account, 5 an hour).
 	Limiter *auth.Limiter
@@ -614,6 +615,19 @@ func (d *Deps) MailTest(w http.ResponseWriter, r *http.Request) {
 		d.refuse(w, r, http.StatusNotFound, "시험 발송을 쓸 수 없습니다.")
 		return
 	}
+	// 제목·내용은 운영자가 정한다 — 비우면 기본 문구. 한도보다 먼저 본다: 잘못 넣은 요청이 시간당 5회를 쓰지 않는다.
+	subject, body := strings.TrimSpace(r.PostFormValue("subject")), strings.TrimSpace(r.PostFormValue("body"))
+	if problem := mailTestProblem(subject, body); problem != "" {
+		d.renderSettingsData(w, r, "admin/mail.html", mailSettingKeys, http.StatusUnprocessableEntity, problem, "",
+			func(_ map[string]string, data map[string]any) { data["TestSubject"], data["TestBody"] = subject, body })
+		return
+	}
+	if subject == "" {
+		subject = mailTestSubject
+	}
+	if body == "" {
+		body = mailTestBody
+	}
 	if d.Limiter != nil && !d.Limiter.Allow("mail-test:acct:"+c.Email(), d.Limits.MailTestAccount) {
 		w.Header().Set("Retry-After", "3600")
 		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusTooManyRequests,
@@ -621,7 +635,7 @@ func (d *Deps) MailTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	to := c.Email()
-	if err := d.SendMailTest(r.Context(), to); err != nil {
+	if err := d.SendMailTest(r.Context(), to, subject, body); err != nil {
 		reason := err.Error()
 		if len([]rune(reason)) > 200 {
 			reason = string([]rune(reason)[:200]) + "…"
@@ -633,6 +647,29 @@ func (d *Deps) MailTest(w http.ResponseWriter, r *http.Request) {
 	}
 	d.renderSettingsNotice(w, r, "admin/mail.html", mailSettingKeys, http.StatusOK, "",
 		to+" 로 시험 메일을 보냈습니다. 받은편지함과 스팸함을 확인하세요.")
+}
+
+// 시험 메일의 기본 제목·내용 (D19 A-205) — 운영자가 칸을 비우면 이것으로 보낸다. 사이트 이름 머리말은
+// 발송기가 붙인다.
+const (
+	mailTestSubject    = "메일 설정 시험"
+	mailTestBody       = "관리자 화면에서 보낸 메일 설정 시험입니다. 이 메일을 받으셨다면 SMTP 설정이 맞습니다."
+	mailTestSubjectMax = 200
+	mailTestBodyMax    = 5000
+)
+
+// mailTestProblem is the refusal for A-205's test subject and body, or "". 제목은 한 줄이다 — 줄바꿈은
+// 머리글을 끊으려는 시도다(발송기가 인코딩하지만 화면에서 먼저 막는다).
+func mailTestProblem(subject, body string) string {
+	switch {
+	case strings.ContainsAny(subject, "\r\n"):
+		return "제목은 한 줄로 적습니다."
+	case utf8.RuneCountInString(subject) > mailTestSubjectMax:
+		return "제목은 200자까지입니다."
+	case utf8.RuneCountInString(body) > mailTestBodyMax:
+		return "내용은 5,000자까지입니다."
+	}
+	return ""
 }
 
 // mailSettingsProblem checks the non-empty SMTP fields and normalizes them in

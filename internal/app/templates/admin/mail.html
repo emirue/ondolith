@@ -67,6 +67,16 @@
   <form method="post" action="/admin/settings/mail/test">
     <h2>시험 발송</h2>
     <p class="adm-hint">저장된 설정으로 지금 로그인한 관리자 본인의 주소에 시험 메일을 보냅니다. 설정을 바꿨다면 먼저 저장하세요.</p>
+    {{/* 제목·내용은 선택 — 비우면 기본 문구(서버의 mailTestSubject·mailTestBody)로 보낸다. */}}
+    <label class="adm-field">
+      <span>제목</span>
+      <input type="text" name="subject" maxlength="200" value="{{.TestSubject}}" placeholder="메일 설정 시험">
+    </label>
+    <label class="adm-field">
+      <span>내용</span>
+      <textarea name="body" rows="5" maxlength="5000" placeholder="관리자 화면에서 보낸 메일 설정 시험입니다. 이 메일을 받으셨다면 SMTP 설정이 맞습니다.">{{.TestBody}}</textarea>
+      <span class="adm-hint">비워 두면 위의 기본 제목·내용으로 보냅니다. 받는 사람은 바꿀 수 없습니다(로그인한 관리자 본인).</span>
+    </label>
     {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn">시험 메일 보내기</button>
