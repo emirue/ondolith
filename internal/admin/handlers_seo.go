@@ -2,11 +2,12 @@ package admin
 
 import (
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/emirue/ondolith/internal/content"
 )
 
 // ---- A-211 검색 노출 -----------------------------------------------------------
@@ -28,19 +29,6 @@ var seoSettingKeys = []string{
 // ga4ID is a GA4 measurement ID: 「G- + 숫자·문자」 (Google 애널리틱스 도움말, 2026-10-08 확인).
 // 길이 상한은 문서에 없다 — 30자는 실제 ID(10자 안팎)보다 넉넉한 우리 상한이다.
 var ga4ID = regexp.MustCompile(`^G-[A-Z0-9]{1,30}$`)
-
-// ogImageURL is D19 A-211's 「스킴 허용목록 http/https 또는 내부 상대경로」. 빈 값은
-// 「없음」이다. `//호스트`·`/\호스트` 는 브라우저가 다른 호스트로 읽는 경로라 내부가 아니다.
-func ogImageURL(v string) bool {
-	if v == "" {
-		return true
-	}
-	if strings.HasPrefix(v, "/") {
-		return !strings.HasPrefix(v, "//") && !strings.Contains(v, `\`)
-	}
-	u, err := url.Parse(v)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
-}
 
 func orNone(v string) string {
 	if v == "" {
@@ -125,7 +113,7 @@ func (d *Deps) SEOSave(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity, "기본 메타 설명은 300자 이내입니다.")
 		return
 	}
-	if !ogImageURL(kv["site.og_image"]) {
+	if !content.IsLinkURL(kv["site.og_image"]) {
 		d.renderSettings(w, r, "admin/seo.html", seoSettingKeys,
 			http.StatusUnprocessableEntity, "OG 이미지는 http·https 주소이거나 /로 시작하는 이 사이트의 경로여야 합니다.")
 		return

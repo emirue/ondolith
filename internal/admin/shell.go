@@ -11,6 +11,8 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 // NavItem is one entry in the administrator menu.
@@ -90,11 +92,15 @@ type NavGroup struct {
 // Hiding an item is UX, not security (D15 4.3) — every path still checks on its
 // own. But a menu that advertises screens the caller cannot open is a list of
 // things to go and try, so the filter is worth having.
-func Nav(can func(string) bool, shop bool) []NavGroup {
+//
+// extra are menu entries that do not come from this list — the active theme's
+// screens (ThemeNav), already filtered by their screen scope.
+func Nav(can func(string) bool, shop bool, extra ...NavItem) []NavGroup {
 	byGroup := map[string][]NavItem{}
 	var order []string
-	items := append([]NavItem(nil), nav...)
-	sort.Slice(items, func(i, j int) bool { return items[i].Order < items[j].Order })
+	items := append(append([]NavItem(nil), nav...), extra...)
+	// 안정 정렬 — 순서가 같으면 코어 메뉴가 먼저, 테마 화면은 선언 순서대로다.
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Order < items[j].Order })
 
 	for _, it := range items {
 		if it.Shop && !shop {
@@ -111,6 +117,22 @@ func Nav(can func(string) bool, shop bool) []NavGroup {
 	out := make([]NavGroup, 0, len(order))
 	for _, g := range order {
 		out = append(out, NavGroup{Title: g, Items: byGroup[g]})
+	}
+	return out
+}
+
+// ThemeNav is the menu entries for the active theme's screens (D41 5절): one per
+// screen the caller may open, under the declared group and order. 판정은 화면
+// 단위라 Permission 칸으로 걸 수 없다 — 여기서 거르고 Nav 에는 거른 것만 준다.
+// 경로는 부팅 점검(NavPaths)에 들지 않는다: 테마가 실행 중에 바뀌므로 고정 목록이
+// 아니고, 모두 A-212 한 라우트(`/admin/theme/{key}`)가 받는다.
+func ThemeNav(screens []theme.Screen, canScreen func(key string) bool) []NavItem {
+	var out []NavItem
+	for _, s := range screens {
+		if canScreen(s.Key) {
+			out = append(out, NavItem{Screen: "A-212", Title: s.Title, Path: "/admin/theme/" + s.Key,
+				Group: s.Group, Order: s.Order})
+		}
 	}
 	return out
 }

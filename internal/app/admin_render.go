@@ -46,6 +46,9 @@ type adminRenderer struct {
 	// brand is the active theme's logo·favicon (FR-310). 테마는 실행 중에 바뀌므로(A-202) 값이 아니라
 	// 함수다. 테마의 로고는 <img> 로만 그린다 — 남이 만든 SVG 를 인라인하면 그 안의 스크립트가 돈다.
 	brand func() theme.Brand
+	// themeScreens is the active theme's admin.json screens (D41) — 메뉴에 화면 단위 판정을
+	// 통과한 것만 붙인다. nil 이면 테마 화면이 없다.
+	themeScreens func() []theme.Screen
 	// theme selects one of the handoff's five directions (1a~1e). Empty means
 	// defaultAdminTheme.
 	theme string
@@ -138,6 +141,7 @@ var adminScreenTitles = map[string]string{
 	"admin/seo.html":              "검색 노출",
 	"admin/mail.html":             "메일 설정",
 	"admin/storage.html":          "파일 저장소",
+	"admin/theme-screen.html":     "테마 화면", // 처리기가 선언의 title 로 덮어쓴다 (D41 5절)
 	"admin/pages.html":            "페이지",
 	"admin/page-edit.html":        "페이지 편집",
 	"admin/menus.html":            "메뉴",
@@ -199,7 +203,13 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	}
 
 	actor := ActorFrom(r.Context())
-	groups := admin.Nav(actor.Can, a.shop)
+	var screens []theme.Screen
+	if a.themeScreens != nil {
+		screens = a.themeScreens()
+	}
+	groups := admin.Nav(actor.Can, a.shop, admin.ThemeNav(screens, func(key string) bool {
+		return actor.CanOnScreen(auth.ThemeContentPermission, key)
+	})...)
 	view := map[string]any{
 		"Title":      adminScreenTitles[name],
 		"SiteName":   a.site(),
@@ -263,6 +273,7 @@ func (c adminCaller) Can(perm string) bool { return c.a.Can(perm) }
 func (c adminCaller) CanOn(perm string, board auth.BoardID) bool {
 	return c.a.CanOn(perm, board)
 }
+func (c adminCaller) CanOnScreen(perm, screen string) bool { return c.a.CanOnScreen(perm, screen) }
 func (c adminCaller) Email() string {
 	if c.a == nil || c.a.User == nil {
 		return ""

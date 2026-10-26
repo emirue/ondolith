@@ -251,6 +251,9 @@ cat "$PUBLIC_URLS" >>"$ANON_URLS"
 	printf '/admin/boards/%s/fields\n' "$(sql "select id from boards limit 1")"
 	printf '/admin/pages/%s\n' "$(sql "select id from pages limit 1")"
 	printf '/admin/users/%s\n' "$(sql "select id from users where email='member@example.com'")"
+	# 테마 화면 (A-212) — lib-seed 가 켠 qa 테마의 설정형·모음형 목록·행 추가·행 수정
+	printf '%s\n' /admin/theme/hero /admin/theme/partners /admin/theme/partners/new
+	printf '/admin/theme/partners/%s\n' "$(sql "select id from theme_items where screen_key='partners' limit 1")"
 } >"$ADMIN_URLS"
 # `/admin/` 은 끝이 슬래시라 위 목록에서 함께 적기 어렵다 — 따로 넣는다.
 printf '/admin/\n' >>"$ADMIN_URLS"
@@ -269,6 +272,14 @@ live() {
 	while read -r u; do
 		[ -n "$u" ] || continue
 		st=$(code GET "$u")
+		# **상한에 걸린 주소를 「없는 화면」으로 세지 않는다.** 관리자 주소가 분당 60건(D15 4.3-2)을
+		# 넘으면 뒤쪽이 429 가 되고, 그 화면은 조용히 감사에서 빠진다 — 테마 화면(A-212) 넷을 더하자
+		# 대시보드(`/admin/`)까지 그렇게 빠졌다. 창이 지나길 기다려 한 번 더 묻는다.
+		if [ "$st" = "429" ]; then
+			printf '  · 요청 상한 — 창이 지나가길 기다린다 (61초)\n'
+			sleep 61
+			st=$(code GET "$u")
+		fi
 		[ "$st" = "200" ] && printf '%s\n' "$u" >>"$dst" ||
 			printf '  · 건너뜀 %s (HTTP %s)\n' "$u" "$st"
 	done <"$src"

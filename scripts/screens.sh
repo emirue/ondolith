@@ -120,6 +120,10 @@ printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwA
 	base64 --decode >"$WORK/dot.png"
 req -o /dev/null -F "file-0=@$WORK/dot.png;type=image/png" "$BASE/board/notice/media"
 MEDIA=$(sql "select id from media limit 1")
+# **A-212 은 admin.json 을 선언한 테마가 켜져 있어야 열린다** (D41). 선언은 lib-seed 와 같은
+# scripts/qa-theme/admin.json 이고 base.html 은 내장 것 그대로다.
+mkdir -p "$WORK/themes/qa" && cp internal/theme/builtin/base.html scripts/qa-theme/admin.json "$WORK/themes/qa/"
+req -o /dev/null -X POST "$BASE/admin/themes" --data-urlencode "theme=qa"
 
 # **A-509 는 이동 전용 화면이다** — 생성 폼이 없다. 카테고리를 만드는 화면이
 # D11 에 없는 것이 맞는지는 별개 문제이고(A-509 미결), 여기서는 P-302 를 그릴
@@ -167,6 +171,7 @@ subst() {
 	echo "$1" |
 		sed "s|{slug}|about|; s|{id}|PLACEHOLDER|; s|{no}|$ORDER|; s|{token}|nosuchtoken|; \
 		     s|{provider}|google|; s|{orderNo}|$ORDER|; s|{returnNo}|R1|; s|{path\.\.\.}|css/style.css|; \
+		     s|{key}|hero|; \
 		     s|{\$}||"
 }
 

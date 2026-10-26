@@ -183,20 +183,27 @@ func (q *Queries) FindUserByID(ctx context.Context, id string) (FindUserByIDRow,
 }
 
 const grantPermission = `-- name: GrantPermission :exec
-INSERT INTO role_permissions (role_id, permission_id, board_id)
-SELECT r.id, p.id, NULLIF($1::text, '')::uuid FROM roles r, permissions p
-WHERE r.key = $2 AND p.key = $3
+INSERT INTO role_permissions (role_id, permission_id, board_id, theme_screen)
+SELECT r.id, p.id, NULLIF($1::text, '')::uuid, NULLIF($2::text, '')
+FROM roles r, permissions p
+WHERE r.key = $3 AND p.key = $4
 ON CONFLICT ON CONSTRAINT role_permissions_uniq DO NOTHING
 `
 
 type GrantPermissionParams struct {
 	Board   string
+	Screen  string
 	RoleKey string
 	PermKey string
 }
 
 func (q *Queries) GrantPermission(ctx context.Context, arg GrantPermissionParams) error {
-	_, err := q.db.Exec(ctx, grantPermission, arg.Board, arg.RoleKey, arg.PermKey)
+	_, err := q.db.Exec(ctx, grantPermission,
+		arg.Board,
+		arg.Screen,
+		arg.RoleKey,
+		arg.PermKey,
+	)
 	return err
 }
 
@@ -304,7 +311,7 @@ WITH effective AS (
 SELECT
     coalesce(bool_or(e.is_superuser), false)::bool AS superuser,
     coalesce(
-        array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+        array_agg(p.key || ' ' || coalesce(rp.board_id::text, '') || ' ' || coalesce(rp.theme_screen, ''))
             FILTER (WHERE p.key IS NOT NULL),
         '{}'
     )::text[] AS perms
@@ -327,7 +334,7 @@ func (q *Queries) LoadPermissions(ctx context.Context, userID string) (LoadPermi
 
 const loadRolePermissions = `-- name: LoadRolePermissions :one
 SELECT coalesce(
-    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+    array_agg(p.key || ' ' || coalesce(rp.board_id::text, '') || ' ' || coalesce(rp.theme_screen, ''))
         FILTER (WHERE p.key IS NOT NULL),
     '{}')::text[] AS perms
 FROM roles r

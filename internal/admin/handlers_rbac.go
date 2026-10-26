@@ -196,7 +196,7 @@ func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, cod
 		return
 	}
 	d.Render(w, r, "admin/roles.html", code, map[string]any{
-		"Roles": roles, "Permissions": perms, "Boards": boards,
+		"Roles": roles, "Permissions": perms, "Boards": boards, "ThemeScreens": d.themeScreens(),
 		"NeedsReauth": c.NeedsReauth(), "Error": msg})
 }
 
@@ -223,6 +223,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	roleKey := r.PostFormValue("role")
 	permKey := r.PostFormValue("permission")
 	board := auth.BoardID(r.PostFormValue("board_id"))
+	screen := r.PostFormValue("theme_screen")
 
 	role, err := d.Auth.RoleByKey(ctx, roleKey)
 	if errors.Is(err, auth.ErrNoRole) {
@@ -250,6 +251,17 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// D41 4절: 테마 화면 스코프는 theme.edit_content 에만, 게시판 없이. 그리고 활성 테마가
+	// 선언한 화면만 — 없는 키에 준 부여는 아무것도 열지 않으면서 A-403 에는 준 것으로 남는다.
+	if err := auth.ValidateScreenGrant(permKey, board, screen); err != nil {
+		d.renderRoles(w, r, c, http.StatusUnprocessableEntity, "테마 화면은 「테마 화면 편집」 권한에만, 게시판 없이 줄 수 있습니다.")
+		return
+	}
+	if _, declared := d.findThemeScreen(screen); screen != "" && !declared {
+		d.renderRoles(w, r, c, http.StatusUnprocessableEntity, "활성 테마가 선언한 화면이 아닙니다.")
+		return
+	}
+
 	// D15 2.4: only is_scoped permissions may carry a board. The database
 	// cannot express this, so the handler and the seed share this one function.
 	scoped, err := d.Auth.PermissionIsScoped(ctx, permKey)
@@ -262,11 +274,15 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := d.Auth.GrantPermission(ctx, role.Key, permKey, board); err != nil {
+	if err := d.Auth.GrantPermission(ctx, role.Key, permKey, board, screen); err != nil {
 		d.serverError(w, r, err)
 		return
 	}
-	d.log(r, c, "role.manage", "role", role.Key, "권한 부여: "+permKey)
+	summary := "권한 부여: " + permKey
+	if screen != "" {
+		summary += " (테마 화면 " + screen + ")"
+	}
+	d.log(r, c, "role.manage", "role", role.Key, summary)
 	http.Redirect(w, r, "/admin/roles", http.StatusSeeOther)
 }
 

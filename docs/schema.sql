@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict eLFhTHyhMegF6178DEzXt6nKxfcrpqU3E8WnoIgke6iW2JQTeaLGymSRJvXoqQt
+\restrict Tft6St473o8jEmQRbnKQjWp9FMQE8u5Xa9uuwfjfPBc7dXmaceQRsoeGP4zNDFo
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -672,7 +672,10 @@ CREATE TABLE public.role_permissions (
     permission_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    board_id uuid
+    board_id uuid,
+    theme_screen text,
+    CONSTRAINT role_permissions_one_scope CHECK (((board_id IS NULL) OR (theme_screen IS NULL))),
+    CONSTRAINT role_permissions_theme_screen_check CHECK ((theme_screen ~ '^[a-z][a-z0-9_]{0,31}$'::text))
 );
 
 
@@ -768,6 +771,37 @@ CREATE TABLE public.terms (
     CONSTRAINT terms_kind_check CHECK (((length(kind) >= 1) AND (length(kind) <= 50))),
     CONSTRAINT terms_no_backdate CHECK ((effective_at >= created_at)),
     CONSTRAINT terms_version_check CHECK (((length(version) >= 1) AND (length(version) <= 20)))
+);
+
+
+--
+-- Name: theme_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.theme_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    screen_key text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    data jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT theme_items_data_check CHECK ((jsonb_typeof(data) = 'object'::text)),
+    CONSTRAINT theme_items_screen_key_check CHECK ((screen_key ~ '^[a-z][a-z0-9_]{0,31}$'::text))
+);
+
+
+--
+-- Name: theme_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.theme_settings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    screen_key text NOT NULL,
+    data jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT theme_settings_data_check CHECK ((jsonb_typeof(data) = 'object'::text)),
+    CONSTRAINT theme_settings_screen_key_check CHECK ((screen_key ~ '^[a-z][a-z0-9_]{0,31}$'::text))
 );
 
 
@@ -1241,7 +1275,7 @@ ALTER TABLE ONLY public.role_permissions
 --
 
 ALTER TABLE ONLY public.role_permissions
-    ADD CONSTRAINT role_permissions_uniq UNIQUE NULLS NOT DISTINCT (role_id, permission_id, board_id);
+    ADD CONSTRAINT role_permissions_uniq UNIQUE NULLS NOT DISTINCT (role_id, permission_id, board_id, theme_screen);
 
 
 --
@@ -1322,6 +1356,30 @@ ALTER TABLE ONLY public.terms
 
 ALTER TABLE ONLY public.terms
     ADD CONSTRAINT terms_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: theme_items theme_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.theme_items
+    ADD CONSTRAINT theme_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: theme_settings theme_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.theme_settings
+    ADD CONSTRAINT theme_settings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: theme_settings theme_settings_screen_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.theme_settings
+    ADD CONSTRAINT theme_settings_screen_key_key UNIQUE (screen_key);
 
 
 --
@@ -1810,6 +1868,13 @@ CREATE UNIQUE INDEX terms_kind_effective_uniq ON public.terms USING btree (kind,
 
 
 --
+-- Name: theme_items_screen_sort_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX theme_items_screen_sort_idx ON public.theme_items USING btree (screen_key, sort_order);
+
+
+--
 -- Name: user_roles_role_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2295,5 +2360,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict eLFhTHyhMegF6178DEzXt6nKxfcrpqU3E8WnoIgke6iW2JQTeaLGymSRJvXoqQt
+\unrestrict Tft6St473o8jEmQRbnKQjWp9FMQE8u5Xa9uuwfjfPBc7dXmaceQRsoeGP4zNDFo
 

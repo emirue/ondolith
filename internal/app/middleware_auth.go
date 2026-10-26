@@ -64,6 +64,14 @@ func (a *Actor) CanOn(perm string, board auth.BoardID) bool {
 	return a.Perms.CanOn(perm, board)
 }
 
+// CanOnScreen is the theme-screen-scoped form (D41 4절).
+func (a *Actor) CanOnScreen(perm, screen string) bool {
+	if a == nil {
+		return false
+	}
+	return a.Perms.CanOnScreen(perm, screen)
+}
+
 // Times go into the session as Unix nanoseconds, not as time.Time.
 //
 // scs gob-encodes session data, and an unregistered type makes the commit fail

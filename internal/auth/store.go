@@ -70,8 +70,8 @@ func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permission
 	return NewPermissions(row.Superuser, parseGrants(row.Perms)), nil
 }
 
-// parseGrants splits the "<permission> <board_id>" pairs the queries above pack
-// into one array.
+// parseGrants splits the "<permission> <board_id> <theme_screen>" triples the
+// queries above pack into one array. 화면 칸이 없는 두 칸짜리도 읽는다.
 //
 // Two columns would need two aggregates and a second pass to line them up; one
 // string keeps the whole permission set at ONE query, which is what D15 4.3-1
@@ -80,8 +80,9 @@ func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permission
 func parseGrants(rows []string) []Grant {
 	out := make([]Grant, 0, len(rows))
 	for _, r := range rows {
-		key, board, _ := strings.Cut(r, " ")
-		out = append(out, Grant{Permission: key, Board: BoardID(board)})
+		key, rest, _ := strings.Cut(r, " ")
+		board, screen, _ := strings.Cut(rest, " ")
+		out = append(out, Grant{Permission: key, Board: BoardID(board), Screen: screen})
 	}
 	return out
 }
@@ -431,9 +432,10 @@ func (s *Store) PermissionIsScoped(ctx context.Context, key string) (bool, error
 // **board 가 곧 범위다** (D15 2.4). 검증만 하고 버리면 게시판 하나에 주려던
 // 권한이 전역으로 저장되고, A-403 목록은 범위를 보여주지 않아 그 사실이
 // 보이지 않는다 — 받은 쪽은 모든 게시판에서 그 권한을 갖는다.
-func (s *Store) GrantPermission(ctx context.Context, roleKey, permKey string, board BoardID) error {
+// screen 은 테마 화면 스코프다 (D41 4절, 빈 값 = 모든 화면). 같은 이유로 버리지 않는다.
+func (s *Store) GrantPermission(ctx context.Context, roleKey, permKey string, board BoardID, screen string) error {
 	return s.q.GrantPermission(ctx, authq.GrantPermissionParams{
-		RoleKey: roleKey, PermKey: permKey, Board: string(board)})
+		RoleKey: roleKey, PermKey: permKey, Board: string(board), Screen: screen})
 }
 
 // AssignRole gives a user a role, ignoring a repeat.

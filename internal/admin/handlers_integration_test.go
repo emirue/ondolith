@@ -30,7 +30,9 @@ const dsnEnv = "ONDOLITH_TEST_DSN"
 type fakeCaller struct {
 	perms map[string]bool
 	// scoped[board][perm] — 스코프 권한은 게시판마다 답이 다르다 (D15 2.4).
-	scoped    map[string]map[string]bool
+	scoped map[string]map[string]bool
+	// screens 는 theme.edit_content 를 화면 단위로 받은 화면 키다 (D41 4절).
+	screens   map[string]bool
 	id        string
 	email     string
 	superuser bool
@@ -46,6 +48,12 @@ func (f *fakeCaller) CanOn(p string, board auth.BoardID) bool {
 		return true
 	}
 	return f.scoped[string(board)][p]
+}
+func (f *fakeCaller) CanOnScreen(p, screen string) bool {
+	if f.superuser || f.perms[p] {
+		return true
+	}
+	return p == auth.ThemeContentPermission && f.screens[screen]
 }
 func (f *fakeCaller) Email() string     { return f.email }
 func (f *fakeCaller) UserID() string    { return f.id }

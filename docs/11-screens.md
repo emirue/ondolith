@@ -200,6 +200,7 @@
 | A-209 | 결제 설정 | `/admin/settings/payment` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-605, FR-607 |
 | A-210 | 파일 저장소 설정 | `/admin/settings/storage` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-717 |
 | A-211 | 검색 노출 | `/admin/settings/seo` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-718, FR-511, FR-714 |
+| A-212 | 테마 화면 | `/admin/theme/{key}` | GET, POST | 권한:theme.edit_content | 있음 | SC-7 | FR-311 |
 
 ### A-3xx 콘텐츠 관리
 

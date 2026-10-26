@@ -16,6 +16,7 @@ import (
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 // Caller is what a handler needs to know about the request's actor. The app
@@ -26,6 +27,9 @@ type Caller interface {
 	// CanOn answers for a board-scoped permission (D15 2.4). A moderator of one
 	// board is not a moderator of the next.
 	CanOn(perm string, board auth.BoardID) bool
+	// CanOnScreen answers for a theme screen (D41 4절) — 화면 하나를 맡은 역할은
+	// 다른 화면을 열지 못한다.
+	CanOnScreen(perm, screen string) bool
 	UserID() string
 	// Email is the audit snapshot: the log keeps it even after the account is
 	// deleted (D30 operation_logs).
@@ -98,6 +102,9 @@ type Deps struct {
 	InstalledThemes func() ([]string, error)
 	// BoardSkins lists the board skins the built-in theme carries (A-305 의 선택칸, theme.Loader.BoardSkins).
 	BoardSkins func() []string
+	// ThemeScreens is the active theme's admin.json screens (D41, theme.Loader.AdminScreens).
+	// 테마는 실행 중에 바뀌므로(A-202) 값이 아니라 함수다.
+	ThemeScreens func() []theme.Screen
 	// Gateway 는 A-508 이 PG 에 실제 상태를 물을 때 쓴다. nil 이면 대사가
 	// 우리 기록만 보여준다 — 조회 없이 「일치」로 그리지 않는다.
 	Gateway func() commerce.Gateway
@@ -148,6 +155,7 @@ var actionLabels = map[string]string{
 	"order.update": "주문 변경", "order.transition": "주문 상태 변경", "order.shipment": "송장 입력",
 	"order.refund": "환불", "return.pickup": "반품 수거", "return.settle": "반품 환불 확정",
 	"return.reject": "반품 거부", "return.exchange": "교환 처리", "payment.reconcile": "결제 대사",
+	"theme.edit_content": "테마 화면 편집",
 }
 
 // require is the per-handler permission check.

@@ -8,7 +8,7 @@ WITH effective AS (
 SELECT
     coalesce(bool_or(e.is_superuser), false)::bool AS superuser,
     coalesce(
-        array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+        array_agg(p.key || ' ' || coalesce(rp.board_id::text, '') || ' ' || coalesce(rp.theme_screen, ''))
             FILTER (WHERE p.key IS NOT NULL),
         '{}'
     )::text[] AS perms
@@ -19,7 +19,7 @@ LEFT JOIN permissions p       ON p.id = rp.permission_id;
 -- name: LoadRolePermissions :one
 -- 한 역할(anonymous·member)이 가진 권한 — 사용자가 아니라 역할을 묻는다.
 SELECT coalesce(
-    array_agg(p.key || ' ' || coalesce(rp.board_id::text, ''))
+    array_agg(p.key || ' ' || coalesce(rp.board_id::text, '') || ' ' || coalesce(rp.theme_screen, ''))
         FILTER (WHERE p.key IS NOT NULL),
     '{}')::text[] AS perms
 FROM roles r
@@ -132,8 +132,9 @@ GROUP BY r.id, r.key, r.is_superuser;
 SELECT is_scoped FROM permissions WHERE key = $1;
 
 -- name: GrantPermission :exec
-INSERT INTO role_permissions (role_id, permission_id, board_id)
-SELECT r.id, p.id, NULLIF(sqlc.arg('board')::text, '')::uuid FROM roles r, permissions p
+INSERT INTO role_permissions (role_id, permission_id, board_id, theme_screen)
+SELECT r.id, p.id, NULLIF(sqlc.arg('board')::text, '')::uuid, NULLIF(sqlc.arg('screen')::text, '')
+FROM roles r, permissions p
 WHERE r.key = sqlc.arg('role_key') AND p.key = sqlc.arg('perm_key')
 ON CONFLICT ON CONSTRAINT role_permissions_uniq DO NOTHING;
 
