@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -385,5 +386,31 @@ func TestGrantPermissionWithAThemeScreen(t *testing.T) {
 	if code := grant(url.Values{"role": {"editor"}, "permission": {auth.ThemeContentPermission},
 		"theme_screen": {"partners"}, "board_id": {board}}); code != http.StatusUnprocessableEntity {
 		t.Errorf("게시판과 화면을 함께 = HTTP %d, want 422", code)
+	}
+}
+
+// 리뷰 #1: 처리기가 받는 요청은 미들웨어가 WithContext 로 만든 사본이라 서버의 자동 정리(원본만
+// 본다)가 닿지 않는다. 8 MiB 를 넘는 파일은 $TMPDIR/multipart-* 로 쓰이고, 지우지 않으면 쌓인다.
+func TestThemeUploadTempFilesAreRemoved(t *testing.T) {
+	d, _ := themeFixture(t, &fakeCaller{superuser: true})
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	b, ct := multipartBody(t, url.Values{"headline": {"제목"}}, map[string]int{"photo": 9 << 20})
+	if rec := themeReq(d.ThemeScreenSave, "POST", "/admin/theme/hero", b, ct, "key", "hero"); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("사진 아닌 큰 파일 = HTTP %d", rec.Code)
+	}
+	left, _ := os.ReadDir(tmp)
+	if len(left) != 0 {
+		t.Errorf("업로드 임시 파일 %d 개가 남았다", len(left))
+	}
+}
+
+// 리뷰 #2: 사진 크기만큼의 상한은 multipart 에만 준다. urlencoded 본문은 net/http 가 상한 안에서
+// 통째로 메모리에 읽으므로, 사진 칸 열 개면 요청 하나에 200 MiB 를 읽게 된다.
+func TestThemeURLEncodedBodyKeepsTheSmallCap(t *testing.T) {
+	d, _ := themeFixture(t, &fakeCaller{superuser: true})
+	b, ct := formBody(url.Values{"headline": {strings.Repeat("가", 1<<20)}})
+	if rec := themeReq(d.ThemeScreenSave, "POST", "/admin/theme/hero", b, ct, "key", "hero"); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("1 MiB 를 넘는 urlencoded 본문 = HTTP %d, want 413", rec.Code)
 	}
 }

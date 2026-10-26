@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
@@ -145,6 +146,7 @@ func (d *Deps) ThemeScreenSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	defer removeUploads(r)
 	form, files, limits, ok := d.themeForm(w, r, s)
 	if !ok {
 		return
@@ -209,6 +211,7 @@ func (d *Deps) ThemeItemSave(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer removeUploads(r)
 	form, files, limits, ok := d.themeForm(w, r, s)
 	if !ok {
 		return
@@ -275,21 +278,38 @@ func (d *Deps) ThemeItemDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/theme/"+s.Key, http.StatusSeeOther)
 }
 
+// removeUploads deletes the multipart temp files. 처리기가 받는 r 은 미들웨어가 WithContext 로
+// 만든 사본이라 서버의 자동 정리(원본 요청만 본다)가 닿지 않는다 — 다른 업로드 처리기와 같다.
+func removeUploads(r *http.Request) {
+	if r.MultipartForm != nil {
+		_ = r.MultipartForm.RemoveAll()
+	}
+}
+
 // themeForm reads the body under D41 6절's cap — **파싱보다 먼저 건다** (W6-28) —
-// and returns the form with the picture files that came.
+// and returns the form with the picture files that came. 사진 크기만큼의 상한은 multipart 에만
+// 준다: urlencoded 본문은 net/http 가 상한 안에서 통째로 메모리에 읽는다.
 func (d *Deps) themeForm(w http.ResponseWriter, r *http.Request, s theme.Screen) (url.Values, map[string]*multipart.FileHeader, content.UploadLimits, bool) {
 	limits := content.DefaultUploadLimits()
-	if s.ImageFields() > 0 {
+	bodyCap := int64(1 << 20)
+	isMultipart := strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
+	if s.ImageFields() > 0 && isMultipart {
 		l, err := d.Attachments.Limits(r.Context())
 		if err != nil {
 			d.serverError(w, r, err)
 			return nil, nil, limits, false
 		}
 		limits = l
+		bodyCap += int64(s.ImageFields()) * limits.MaxBytes
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, int64(s.ImageFields())*limits.MaxBytes+1<<20)
-	err := r.ParseMultipartForm(8 << 20)
-	if errors.Is(err, http.ErrNotMultipart) {
+	r.Body = http.MaxBytesReader(w, r.Body, bodyCap)
+	// **파서는 하나만 부른다.** ParseMultipartForm 은 urlencoded 본문의 ParseForm 오류(상한 초과)를
+	// 들고 있다가 ErrNotMultipart 를 먼저 돌려준다 — 그때 ParseForm 을 다시 부르면 이미 만들어진
+	// 빈 폼에 오류 없이 돌아와, 상한을 넘은 본문이 빈 폼으로 처리됐다.
+	var err error
+	if isMultipart {
+		err = r.ParseMultipartForm(8 << 20)
+	} else {
 		err = r.ParseForm()
 	}
 	if err != nil {
@@ -315,7 +335,9 @@ func (d *Deps) themeForm(w http.ResponseWriter, r *http.Request, s theme.Screen)
 
 // applyThemeForm checks the form, stores the pictures, and returns the merged
 // values — or draws the refusal and returns false. **검사가 사진 저장보다 먼저다**:
-// 거부될 폼이 사진 파일을 남기지 않는다 (theme.Screen.Apply 의 두 번 호출).
+// 칸 검사에서 거부될 폼은 사진 파일을 남기지 않는다 (theme.Screen.Apply 의 두 번 호출).
+// 사진 저장이 시작된 뒤의 실패(둘째 사진 거부·DB 쓰기 실패)는 앞서 저장한 사진을 media 에
+// 남긴다 — media 는 지우지 않는 설계다 (D41 1절, D85 GAP-33).
 func (d *Deps) applyThemeForm(w http.ResponseWriter, r *http.Request, c Caller, s theme.Screen,
 	prev map[string]any, form url.Values, files map[string]*multipart.FileHeader,
 	limits content.UploadLimits, item *content.ThemeItem, sortErr string) (map[string]any, bool) {
@@ -397,7 +419,7 @@ func themeInputs(s theme.Screen, stored map[string]any, form url.Values, errs []
 		case form != nil:
 			in.Value = form.Get(f.Key)
 		default:
-			in.Value = formatThemeValue(stored[f.Key])
+			in.Value = formatThemeValue(f.Value(stored[f.Key]))
 		}
 		out = append(out, in)
 	}

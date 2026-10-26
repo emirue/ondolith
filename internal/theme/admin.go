@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/emirue/ondolith/internal/content"
@@ -376,7 +377,7 @@ func (f Field) Coerce(raw string) (any, error) {
 		if utf8.RuneCountInString(v) > maxURL {
 			return nil, errors.New("2,000자까지입니다.")
 		}
-		if !content.IsLinkURL(v) {
+		if !linkOK(v) {
 			return nil, errors.New("http·https 주소나 / 로 시작하는 사이트 안 경로만 받습니다.")
 		}
 		return v, nil
@@ -415,7 +416,8 @@ func (s Screen) Apply(prev map[string]any, form url.Values, uploads map[string]m
 			case form.Get(f.Key+ClearSuffix) != "":
 				delete(out, f.Key)
 			}
-			present = present || out[f.Key] != nil
+			// 다른 테마가 같은 키에 남긴 사진 아닌 값은 채운 것이 아니다 — 템플릿은 빈 사진을 받는다.
+			present = present || viewValue(f, out[f.Key]) != nil
 		} else {
 			v, err := f.Coerce(form.Get(f.Key))
 			if err != nil {
@@ -466,7 +468,7 @@ func viewValue(f Field, v any) any {
 			return s
 		}
 	case FieldURL:
-		if s, ok := v.(string); ok && s != "" && content.IsLinkURL(s) {
+		if s, ok := v.(string); ok && s != "" && linkOK(s) {
 			return s
 		}
 	case FieldSelect:
@@ -492,6 +494,17 @@ func viewValue(f Field, v any) any {
 		return Image{URL: "/media/" + id, Thumb: "/media/" + id + "/thumb", Width: int(w), Height: int(h)}
 	}
 	return nil
+}
+
+// Value is a stored value as templates read it, or nil when it is absent or does not
+// fit the declaration — 기본값은 대신하지 않는다. 폼이 미리 채울 값이다: 맞지 않는 옛 값을
+// 채우면 운영자가 건드리지 않은 칸 때문에 저장이 거부된다.
+func (f Field) Value(v any) any { return viewValue(f, v) }
+
+// linkOK is A-211's link rule plus no control characters. 브라우저는 URL 의 탭·줄바꿈을 지우므로
+// `/\t/evil.example` 은 JS 문맥에서 `//evil.example` 이 된다 — href 는 %09 로 막아도 테마가 어디에 쓸지 모른다.
+func linkOK(s string) bool {
+	return content.IsLinkURL(s) && !strings.ContainsFunc(s, unicode.IsControl)
 }
 
 func zeroValue(f Field) any {

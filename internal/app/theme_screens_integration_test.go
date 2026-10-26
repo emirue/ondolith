@@ -104,3 +104,43 @@ func TestThemeScreensReachTheMenuAndThePage(t *testing.T) {
 		t.Error("테마를 되돌렸는데 값이 돌아오지 않았다")
 	}
 }
+
+// 리뷰 #6: 값을 읽지 못해도 .Theme 은 선언된 키와 기본값을 갖는다 (D17 규약 1). 빈 맵이면 기본값이
+// 사라지고, 테마가 `len`·`index` 를 쓰면 페이지가 통째로 깨진다.
+func TestThemeDataKeepsDefaultsWhenTheValuesCannotBeRead(t *testing.T) {
+	_, pool := liveSite(t)
+	root := t.TempDir()
+	base, err := fs.ReadFile(theme.Builtin(), "base.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"decl/base.html":  string(base),
+		"decl/admin.json": `{"screens": [{"key": "hero", "title": "배너", "kind": "settings", "fields": [{"key": "headline", "label": "제목", "type": "text", "default": "환영합니다"}]}]}`,
+		"decl/home.html":  `{{define "body"}}<p id="t-head">{{.Theme.hero.headline}}</p>{{end}}`,
+	} {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO settings (key, value) VALUES ('theme.active', 'decl')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	srv := restartOnSameSchema(t, func(c *config.Config) { c.ThemeDir = root })
+	// 읽기를 실패시킨다 — 표가 없으면 질의가 오류다.
+	if _, err := pool.Exec(ctx, `ALTER TABLE theme_settings RENAME TO theme_settings_gone`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `ALTER TABLE theme_settings_gone RENAME TO theme_settings`)
+	})
+	if code, home := mustGet(t, client(), srv.URL+"/"); code != http.StatusOK || !strings.Contains(home, `<p id="t-head">환영합니다</p>`) {
+		t.Errorf("읽기 실패 때 기본값이 나와야 한다: HTTP %d", code)
+	}
+}

@@ -376,3 +376,28 @@ func TestQAThemeDeclarationIsClean(t *testing.T) {
 		t.Errorf("예시가 칸 종류 여섯을 다 쓰지 않는다: %v", types)
 	}
 }
+
+// 리뷰 #3: 다른 테마가 같은 키(photo)를 글 칸으로 쓰며 남긴 값은 사진이 아니다 — 필수 사진을
+// 채운 것으로 보면 템플릿은 빈 사진을 받는다.
+func TestRequiredImageIgnoresAValueThatIsNotAPicture(t *testing.T) {
+	screens, _ := ParseAdmin([]byte(`{"screens": [{"key": "s", "title": "x", "kind": "settings", "fields": [
+		{"key": "photo", "label": "사진", "type": "image", "required": true}]}]}`))
+	if _, errs := screens[0].Apply(map[string]any{"photo": "abc"}, url.Values{}, nil); len(errs) != 1 {
+		t.Errorf("사진이 아닌 저장값으로 필수 사진이 통과했다: %v", errs)
+	}
+}
+
+// 리뷰 #7: 링크 가운데의 제어문자. href 에서는 %09 가 되지만 JS 문맥에서는 브라우저가 탭을 지워
+// `/\t/evil.example` 이 `//evil.example` 이 된다.
+func TestLinkRefusesControlCharacters(t *testing.T) {
+	f := Field{Key: "link", Type: FieldURL}
+	for _, raw := range []string{"/\t/evil.example", "/a\x00b", "https://exa\nmple.com"} {
+		if _, err := f.Coerce(raw); err == nil {
+			t.Errorf("제어문자가 든 링크 %q 를 받았다", raw)
+		}
+	}
+	s := Screen{Fields: []Field{{Key: "link", Type: FieldURL, Default: "/shop"}}}
+	if v := ScreenValues(s, map[string]any{"link": "/\t/evil.example"})["link"]; v != "/shop" {
+		t.Errorf("저장된 제어문자 링크가 템플릿에 갔다: %q", v)
+	}
+}
