@@ -160,3 +160,66 @@ func TestEffectiveRoles(t *testing.T) {
 		})
 	}
 }
+
+// D41 4절: 테마 화면은 게시판과 같은 모양의 스코프다 — 권한 하나에 화면 키를 단다.
+// 화면 스코프가 게시판 스코프나 다른 화면으로 새면, 협력사 목록만 맡긴 편집자가
+// 메인 배너를 고친다.
+func TestCanOnScreen(t *testing.T) {
+	const perm = ThemeContentPermission
+	tests := []struct {
+		name   string
+		super  bool
+		gives  []Grant
+		screen string
+		want   bool
+	}{
+		{"최고 관리자는 부여 없이 통과", true, nil, "hero", true},
+		{"전역 부여는 모든 화면 통과", false, []Grant{{Permission: perm}}, "hero", true},
+		{"그 화면 부여는 그 화면만", false, []Grant{{Permission: perm, Screen: "hero"}}, "hero", true},
+		{"다른 화면 부여는 거부", false, []Grant{{Permission: perm, Screen: "partners"}}, "hero", false},
+		{"게시판 스코프 부여는 화면을 열지 않는다", false, []Grant{{Permission: perm, Board: "free"}}, "hero", false},
+		{"다른 권한의 화면 부여는 거부", false, []Grant{{Permission: "menu.manage", Screen: "hero"}}, "hero", false},
+		{"부여가 없으면 거부", false, nil, "hero", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewPermissions(tc.super, tc.gives)
+			if got := p.CanOnScreen(perm, tc.screen); got != tc.want {
+				t.Errorf("CanOnScreen(%q) = %v, want %v", tc.screen, got, tc.want)
+			}
+		})
+	}
+	var nilSet *Permissions
+	if nilSet.CanOnScreen(perm, "hero") {
+		t.Error("nil 권한 집합이 화면을 통과시켰다")
+	}
+}
+
+// 화면 부여는 전역 질문에 답하지 않는다 — Can 이 통과하면 화면 하나를 맡은 역할이
+// 화면 판정이 없는 경로(A-404 의 R4 등)에서 전역 권한을 가진 것처럼 보인다.
+func TestScreenGrantDoesNotAnswerGlobally(t *testing.T) {
+	p := NewPermissions(false, []Grant{{Permission: ThemeContentPermission, Screen: "hero"}})
+	if p.Can(ThemeContentPermission) {
+		t.Error("화면 부여인데 Can 이 통과시켰다")
+	}
+}
+
+// 질의는 부여 한 행을 "<권한> <게시판> <화면>" 한 문자열로 싣는다 (store.sql).
+// 화면 칸이 없는 옛 모양("<권한> <게시판>")도 읽어야 한다.
+func TestParseGrantsReadsScreenScope(t *testing.T) {
+	got := parseGrants([]string{
+		"theme.edit_content  hero",
+		"post.read 9b2f3c1e-0000-4000-8000-000000000001 ",
+		"settings.update ",
+		"menu.manage",
+	})
+	want := []Grant{
+		{Permission: "theme.edit_content", Screen: "hero"},
+		{Permission: "post.read", Board: "9b2f3c1e-0000-4000-8000-000000000001"},
+		{Permission: "settings.update"},
+		{Permission: "menu.manage"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("parseGrants = %#v\nwant %#v", got, want)
+	}
+}

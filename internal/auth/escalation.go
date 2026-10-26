@@ -26,6 +26,8 @@ var (
 	ErrSuperuserAccountOp = errors.New("auth: superuser 보유자에 대한 계정 조작은 superuser 만 한다 (R6)")
 	// D15 2.4
 	ErrScopeNotAllowed = errors.New("auth: 스코프 부여는 is_scoped 권한에만 허용된다")
+	// D41 4절
+	ErrScreenScopeNotAllowed = errors.New("auth: 테마 화면 스코프는 theme.edit_content 에만, 게시판 없이 허용된다")
 )
 
 // Actor is the caller, as far as these rules are concerned.
@@ -120,6 +122,20 @@ func (p *Permissions) isSuperuser() bool { return p != nil && p.Superuser }
 func ValidateGrantScope(permissionIsScoped bool, board BoardID) error {
 	if board != Global && !permissionIsScoped {
 		return ErrScopeNotAllowed
+	}
+	return nil
+}
+
+// ValidateScreenGrant enforces D41 4절: a theme screen scope belongs to
+// theme.edit_content alone and never rides with a board. The column CHECK only
+// sees its own row's shape, not which permission the row names, so the grant
+// handler and the seed share this function — 같은 이유로 ValidateGrantScope 가 있다.
+func ValidateScreenGrant(perm string, board BoardID, screen string) error {
+	if screen == "" {
+		return nil
+	}
+	if perm != ThemeContentPermission || board != Global {
+		return ErrScreenScopeNotAllowed
 	}
 	return nil
 }

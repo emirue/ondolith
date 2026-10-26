@@ -16,11 +16,18 @@ type BoardID string
 // about a resource that has no board.
 const Global BoardID = ""
 
+// ThemeContentPermission opens the screens a theme declares in admin.json (D41).
+// 화면마다 권한 키를 만들지 않는다 — 부여 행의 theme_screen 이 범위다 (D15 P1·2.4).
+const ThemeContentPermission = "theme.edit_content"
+
 // Grant is one row of role_permissions, already resolved to the permission key.
 type Grant struct {
 	Permission string
 	// Board is Global for a grant that applies to every board.
 	Board BoardID
+	// Screen is the theme screen key a theme.edit_content grant is limited to,
+	// or "" for every screen (D41 4절).
+	Screen string
 }
 
 // Permissions is what a request may do. Build it once per request from the
@@ -34,8 +41,9 @@ type Permissions struct {
 	// out by editing their own role (D15 1.3).
 	Superuser bool
 
-	global map[string]struct{}
-	scoped map[string]map[BoardID]struct{}
+	global  map[string]struct{}
+	scoped  map[string]map[BoardID]struct{}
+	screens map[string]map[string]struct{}
 }
 
 // NewPermissions builds the set. A caller with no grants gets a set that says
@@ -46,8 +54,16 @@ func NewPermissions(superuser bool, grants []Grant) *Permissions {
 		Superuser: superuser,
 		global:    make(map[string]struct{}),
 		scoped:    make(map[string]map[BoardID]struct{}),
+		screens:   make(map[string]map[string]struct{}),
 	}
 	for _, g := range grants {
+		if g.Screen != "" {
+			if p.screens[g.Permission] == nil {
+				p.screens[g.Permission] = make(map[string]struct{})
+			}
+			p.screens[g.Permission][g.Screen] = struct{}{}
+			continue
+		}
 		if g.Board == Global {
 			p.global[g.Permission] = struct{}{}
 			continue
@@ -83,6 +99,23 @@ func (p *Permissions) CanOn(perm string, board BoardID) bool {
 	// lookup below already answers false — a guard here would be a branch no
 	// test could distinguish from its own absence.
 	_, ok := p.scoped[perm][board]
+	return ok
+}
+
+// CanOnScreen is CanOn for a theme screen (D41 4절): a global grant or a grant
+// limited to that screen key. A board-scoped grant never answers — the two
+// scopes are different resources.
+func (p *Permissions) CanOnScreen(perm, screen string) bool {
+	if p == nil {
+		return false
+	}
+	if p.Superuser {
+		return true
+	}
+	if _, ok := p.global[perm]; ok {
+		return true
+	}
+	_, ok := p.screens[perm][screen]
 	return ok
 }
 

@@ -173,3 +173,31 @@ func TestSameIDReadsUUIDSpellingsAlike(t *testing.T) {
 		t.Errorf("대문자 표기로 자기 역할을 바꿨다: %v", err)
 	}
 }
+
+// D41 4절의 불변식. DB 는 「theme_screen 은 theme.edit_content 에만」을 말할 수
+// 없으므로 부여 처리기와 시드가 이 함수 하나를 지난다.
+func TestValidateScreenGrant(t *testing.T) {
+	tests := []struct {
+		name   string
+		perm   string
+		board  BoardID
+		screen string
+		wantOK bool
+	}{
+		{"화면 없이는 무엇이든 통과", "menu.manage", Global, "", true},
+		{"테마 화면 권한에 화면 지정", ThemeContentPermission, Global, "hero", true},
+		{"다른 권한에 화면 지정", "menu.manage", Global, "hero", false},
+		{"게시판과 화면을 함께", ThemeContentPermission, "free", "hero", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateScreenGrant(tc.perm, tc.board, tc.screen)
+			if tc.wantOK && err != nil {
+				t.Errorf("허용되어야 하는데 거부됐다: %v", err)
+			}
+			if !tc.wantOK && !errors.Is(err, ErrScreenScopeNotAllowed) {
+				t.Errorf("거부되어야 하는데 %v", err)
+			}
+		})
+	}
+}

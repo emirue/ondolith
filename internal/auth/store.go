@@ -70,8 +70,8 @@ func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permission
 	return NewPermissions(row.Superuser, parseGrants(row.Perms)), nil
 }
 
-// parseGrants splits the "<permission> <board_id>" pairs the queries above pack
-// into one array.
+// parseGrants splits the "<permission> <board_id> <theme_screen>" triples the
+// queries above pack into one array. 화면 칸이 없는 두 칸짜리도 읽는다.
 //
 // Two columns would need two aggregates and a second pass to line them up; one
 // string keeps the whole permission set at ONE query, which is what D15 4.3-1
@@ -80,8 +80,9 @@ func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permission
 func parseGrants(rows []string) []Grant {
 	out := make([]Grant, 0, len(rows))
 	for _, r := range rows {
-		key, board, _ := strings.Cut(r, " ")
-		out = append(out, Grant{Permission: key, Board: BoardID(board)})
+		key, rest, _ := strings.Cut(r, " ")
+		board, screen, _ := strings.Cut(rest, " ")
+		out = append(out, Grant{Permission: key, Board: BoardID(board), Screen: screen})
 	}
 	return out
 }
