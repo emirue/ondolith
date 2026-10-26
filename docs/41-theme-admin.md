@@ -247,3 +247,56 @@ theme_items    (id uuid PK, screen_key text, sort_order integer, data jsonb, cre
 | [D85](85-gaps.md) | GAP-33 에 테마 화면 사진 |
 | [.ai/DECISIONS.md](../.ai/DECISIONS.md) | [DEC-3.10](../.ai/DECISIONS.md) 의 적용 범위 — 코어 관리자 화면은 직접 만든다. 테마 선언 화면은 생성기 라이브러리가 아니라 이 문서의 기능이다 |
 | [CHANGELOG.md](../CHANGELOG.md) | 추가 항목, 마이그레이션과 내릴 때 값이 사라진다는 것 |
+
+## 11. 마이그레이션 `00031_theme_content.sql`
+
+**새 표 둘, `role_permissions` 의 컬럼 하나와 제약 둘, 권한 한 행과 부여 한 행이다. 기존 행은 고치거나 지우지 않는다.**
+goose 는 마이그레이션 파일 하나를 트랜잭션 하나로 돌린다(공식 README, 이 파일에 `-- +goose NO TRANSACTION` 이 없다) —
+중간에 실패하면 전부 되돌아가고 부팅이 멈춘다. 반쯤 적용된 스키마는 남지 않는다.
+
+### 11.1 Up 이 하는 일
+
+| # | 문 | 기존 데이터에 미치는 것 |
+|---|---|---|
+| 1 | `CREATE TABLE theme_settings` | 없다 — 새 표 |
+| 2 | `CREATE TABLE theme_items` + `theme_items_screen_sort_idx` | 없다 — 빈 표의 인덱스라 즉시 끝난다 |
+| 3 | `ALTER TABLE role_permissions ADD COLUMN theme_screen text CHECK (…)` | 기존 행은 `NULL` — 지금까지의 전역·게시판 부여 뜻이 그대로다. 기본값 없는 NULL 컬럼이라 표를 다시 쓰지 않는다 |
+| 4 | `ADD CONSTRAINT role_permissions_one_scope CHECK (board_id IS NULL OR theme_screen IS NULL)` | 기존 행은 `theme_screen` 이 NULL 이라 전부 통과한다 |
+| 5 | `role_permissions_uniq` 를 지우고 같은 이름으로 `(role_id, permission_id, board_id, theme_screen)` 유일성을 만든다 | 기존 행은 넷째 칸이 모두 NULL 이고 `NULLS NOT DISTINCT` 라, 옛 셋 칸 유일성을 지키던 행은 새 제약도 지킨다. 이름이 같아 부여 질의(`ON CONFLICT ON CONSTRAINT role_permissions_uniq`)는 그대로다 |
+| 6 | `INSERT INTO permissions` — `theme.edit_content` (`is_scoped = false`) | 새 행. `is_scoped` 는 게시판 스코프를 뜻하므로 거짓이다 — 화면 스코프는 `auth.ValidateScreenGrant` 가 정한다 |
+| 7 | `INSERT INTO role_permissions` — `operator` 에 전역 부여 | 새 행. `JOIN roles` 라 `operator` 가 없는 설치처는 아무것도 넣지 않는다(실패하지 않는다). `admin` 은 superuser 라 부여가 필요 없다 |
+
+### 11.2 올리는 절차
+
+[D70](70-operations.md) 「업그레이드 절차」 그대로다 — **백업 → 바이너리 교체 → 재시작.** 재시작하면 부팅이 대기 마이그레이션을
+적용한 뒤에 요청을 받는다. 손으로 SQL 을 돌리는 단계는 없다.
+
+올린 뒤 확인:
+
+- 관리자 「시스템 정보」(A-602)의 대기 마이그레이션이 0 이다
+- 또는 DB 에서
+
+```sql
+SELECT max(version_id) FROM goose_db_version;                                   -- 31
+SELECT key, is_scoped FROM permissions WHERE key = 'theme.edit_content';         -- theme.edit_content | f
+SELECT count(*) FROM role_permissions WHERE theme_screen IS NOT NULL;             -- 0 (아직 아무도 화면 단위로 주지 않았다)
+```
+
+- 테마 화면을 쓰려면 `admin.json` 이 든 테마를 올리고(A-203) 켠다(A-202). 선언 오류는 그 활성화 화면이 경고한다
+
+### 11.3 되돌리는 길
+
+| 하려는 것 | 길 |
+|---|---|
+| 바이너리만 이전 릴리즈로 (스키마는 31 그대로) | 된다 — 이전 바이너리는 모르는 표·컬럼을 읽지 않고, 유일성 제약 이름이 같아 부여 질의도 그대로 돈다. 값은 남아 다시 올리면 돌아온다. 부팅 로그에 「어떤 라우트도 쓰지 않는 권한: theme.edit_content」 경고가 한 줄 나온다. **단, 활성 테마의 템플릿이 `.Theme` 을 쓰면 이전 바이너리에서는 그 자리에서 렌더링이 실패한다** (`can't evaluate field Theme`) — 상태 코드는 이미 200 으로 나가 페이지가 잘린다. 되돌리기 전에 `.Theme` 을 쓰지 않는 테마(내장 테마 등)로 바꾼다 |
+| 스키마까지 이전 상태로 | **업그레이드 전 백업을 복원한다** ([D70](70-operations.md) 「다운그레이드」, NFR-308). 이 바이너리에는 Down 을 돌리는 명령이 없다. `-- +goose Down` 은 시험(`TestEveryMigrationRollsBackCompletely`)이 매번 적용하고 되돌려 흔적이 남지 않음을 확인하는 대상이다 |
+| Down 을 돌렸을 때 잃는 것 | `theme_settings`·`theme_items` 의 값 전부, 화면 단위 부여 행, `theme.edit_content` 와 그 부여. 사진 파일과 `media` 행은 남는다 |
+
+### 11.4 실측
+
+| 확인 | 결과 (2026-10-26) |
+|---|---|
+| `make verify-upgrade` — v0.4.0 태그를 빌드해 설치·데이터 → 백업 → 새 바이너리로 교체·재시작 | 대기 마이그레이션 `00031_theme_content.sql` 이 부팅 때 적용, 기존 행·설정·업로드·테마 파일 그대로, 업그레이드 뒤 관리자 로그인·A-602 대기 0, **이전 바이너리로 되돌려도 뜨고 데이터가 남음**, 백업 복원으로 원래 상태, 로그에 DSN·자격증명 없음 |
+| 적용 시간 — v0.4.0 스키마(30)에 게시판 2,000 개·부여 10,043 행을 넣고 00031 만 적용 (PostgreSQL 18 컨테이너, 개발 기계) | 0.56초(프로세스 기동 포함, 대기 없는 기동만 0.05초). 뒤에 부여 행은 10,044 — operator 전역 부여 한 행만 늘었고 화면 부여는 0, 제약 `role_permissions_uniq`·`role_permissions_one_scope`·`role_permissions_theme_screen_check` |
+| 바이너리만 되돌리기 — 테마 화면 값(설정 1·행 2·화면 부여 1)이 든 DB 에서 v0.4.0 으로 교체 → 다시 새 바이너리 | v0.4.0: healthz·홈·관리자 로그인·`/admin/`·역할 화면 정상, 값 건드리지 않음, 위 경고 한 줄. **`.Theme` 을 쓰는 홈 템플릿은 렌더링 실패**(11.3). 새 바이너리로 돌아오면 테마 화면·값·공개 화면 그대로 |
+| 시험 | `TestThemeContentSchemaBites`(제약·시드), `TestAllMigrationsApply`, `TestEveryMigrationRollsBackCompletely`(Down 뒤 흔적 없음), `TestSeedMatchesAccessControlDoc`(D15 대조) |

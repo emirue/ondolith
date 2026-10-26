@@ -20,7 +20,7 @@
 
 | 파일 | 내용 |
 |---|---|
-| `00031_theme_content.sql` | 테마 선언 관리자 화면의 값 — `theme_settings`·`theme_items` 표, `role_permissions.theme_screen`(화면 스코프)과 유일성 교체, 권한 `theme.edit_content`(operator 전역 부여) (FR-311, [D41](docs/41-theme-admin.md)). 기존 부여 행은 그대로다. **Down 은 두 표를 지운다 — 테마 화면에 입력한 값이 사라진다.** 값을 지키려면 내리기 전 백업을 복원한다. 사진 파일은 `media` 에 남는다. 절차와 실측은 D41 「마이그레이션」 |
+| `00031_theme_content.sql` | 테마 선언 관리자 화면의 값 — `theme_settings`·`theme_items` 표, `role_permissions.theme_screen`(화면 스코프)과 유일성 교체, 권한 `theme.edit_content`(operator 전역 부여) (FR-311, [D41](docs/41-theme-admin.md)). 기존 부여 행은 그대로다. **Down 은 두 표를 지운다 — 테마 화면에 입력한 값이 사라진다.** 값을 지키려면 내리기 전 백업을 복원한다. 사진 파일은 `media` 에 남는다. 적용 0.56초(부여 1만 행, 개발 기계). 바이너리만 v0.4.0 으로 되돌려도 뜨고 값이 남지만, 활성 테마가 `.Theme` 을 쓰면 그 템플릿은 이전 바이너리에서 렌더링이 실패한다 — 되돌리기 전에 테마를 바꾼다. 절차와 실측은 D41 11절 |
 
 ### Added
 
