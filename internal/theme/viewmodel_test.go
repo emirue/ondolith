@@ -10,7 +10,7 @@ import (
 // which is not here fails to render, so the set is a contract with theme
 // authors and not an implementation detail.
 func TestViewHasContractKeys(t *testing.T) {
-	want := []string{"Site", "Menu", "User", "Can", "Flash", "Meta", "Path"}
+	want := []string{"Site", "Menu", "User", "Can", "Flash", "Meta", "Path", "Theme"}
 	ty := reflect.TypeOf(View{})
 	have := map[string]bool{}
 	for i := 0; i < ty.NumField(); i++ {
@@ -35,6 +35,9 @@ func TestNewViewHasNoNilCollections(t *testing.T) {
 	}
 	if v.Flash == nil {
 		t.Error(".Flash 가 nil 이다")
+	}
+	if v.Theme == nil {
+		t.Error(".Theme 이 nil 이다 (선언이 없는 테마도 빈 맵)")
 	}
 	// .User is the one deliberate nil: "not logged in" has to be expressible.
 	if v.User != nil {

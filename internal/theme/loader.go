@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -52,6 +53,9 @@ type Loader struct {
 
 	brandOnce sync.Once
 	brand     Brand
+
+	adminOnce sync.Once
+	admin     []Screen
 }
 
 // New returns a loader over the built-in FS, optionally overlaid with dir.
@@ -294,7 +298,8 @@ func ValidateThemeDir(dir, current string) (warn string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return joinWarnings(w, append(contractWarnings(dir), brandWarnings(dir, m)...)), nil
+	_, adminWarns := ReadAdmin(dir)
+	return joinWarnings(w, slices.Concat(contractWarnings(dir), brandWarnings(dir, m), adminWarns)), nil
 }
 
 // contractWarnings reports where a candidate theme leaves D17 unmet.

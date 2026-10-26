@@ -7,6 +7,7 @@ package content
 import (
 	"errors"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -174,3 +175,17 @@ var uuidPattern = regexp.MustCompile(
 // **바로 그 커밋에서 새로 만든** 카테고리 삭제, 그리고 장바구니의 `variant_id`.
 // 판정을 한 곳에 두는 이유가 그것이다.
 func IsUUID(s string) bool { return uuidPattern.MatchString(s) }
+
+// IsLinkURL is D19 A-211's 「스킴 허용목록 http/https 또는 내부 상대경로」 — 대표
+// 이미지 주소와 테마 화면의 링크 칸(D41)이 같은 규칙이다. 빈 값은 「없음」이다.
+// `//호스트`·`/\호스트` 는 브라우저가 다른 호스트로 읽는 경로라 내부가 아니다.
+func IsLinkURL(v string) bool {
+	if v == "" {
+		return true
+	}
+	if strings.HasPrefix(v, "/") {
+		return !strings.HasPrefix(v, "//") && !strings.Contains(v, `\`)
+	}
+	u, err := url.Parse(v)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}

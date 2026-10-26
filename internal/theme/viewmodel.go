@@ -21,6 +21,9 @@ type View struct {
 	Flash []Flash
 	Meta  Meta
 	Path  string
+	// Theme is what the operator entered on the screens this theme declares in
+	// admin.json, by screen key (D41 7절). 선언이 없으면 빈 맵이다.
+	Theme map[string]any
 
 	// Data is the screen's own payload. Each screen documents its contents in
 	// D12/D13.
@@ -137,5 +140,6 @@ func NewView(site Site, path string) View {
 		Can:   map[string]bool{},
 		Flash: []Flash{},
 		Path:  path,
+		Theme: map[string]any{},
 	}
 }
