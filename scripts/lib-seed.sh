@@ -145,6 +145,17 @@ want "시행 중인 약관이 있다" 1 \
 code POST /admin/settings/payment --data-urlencode "pg.provider=toss" \
 	--data-urlencode "pg.client_key=crawl_ck" --data-urlencode "pg.secret_key=crawl_sk" >/dev/null
 
+# **테마 화면(A-212)은 admin.json 을 선언한 테마가 켜져 있어야 열린다** (D41) — 내장 테마에는
+# 선언이 없어 그 화면은 영영 재지 못한다. 선언은 scripts/qa-theme/admin.json 하나를 시드가 함께
+# 쓰고, base.html 은 내장 것 그대로라 다른 화면의 모습은 바뀌지 않는다. 모음형에 행을 하나 넣어
+# 목록과 행 폼이 빈 화면이 아니게 한다.
+mkdir -p "$WORK/themes/qa" && cp internal/theme/builtin/base.html scripts/qa-theme/admin.json "$WORK/themes/qa/"
+code POST /admin/themes --data-urlencode "theme=qa" >/dev/null
+want "테마 화면을 선언한 테마가 켜졌다" qa "$(sql "select value from settings where key='theme.active'")"
+code POST /admin/theme/partners/new --data-urlencode "name=가나상사" \
+	--data-urlencode "url=https://example.com" --data-urlencode "_sort=1" >/dev/null
+want "테마 화면에 행이 있다" 1 "$(sql "select count(*) from theme_items where screen_key='partners'")"
+
 
 # **필수 약관에 동의하지 않으면 주문이 만들어지지 않는다** (FR-619).
 #

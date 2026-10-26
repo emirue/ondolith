@@ -354,3 +354,25 @@ func TestBuildThemeData(t *testing.T) {
 		t.Error("선언이 없으면 nil")
 	}
 }
+
+// 시드(lib-seed·screens)가 켜는 예시 선언이 경고 없이 읽혀야 `make ui`·`screens`·`crawl` 이
+// A-212 를 잰다 — 깨지면 그 화면이 조용히 404 가 되고 게이트는 「없는 화면」으로 운다.
+func TestQAThemeDeclarationIsClean(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "scripts", "qa-theme", "admin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	screens, warns := ParseAdmin(b)
+	if len(warns) != 0 || len(screens) != 2 {
+		t.Fatalf("예시 선언: 화면 %d, 경고 %v", len(screens), warns)
+	}
+	types := map[string]bool{}
+	for _, s := range screens {
+		for _, f := range s.Fields {
+			types[f.Type] = true
+		}
+	}
+	if len(types) != 6 {
+		t.Errorf("예시가 칸 종류 여섯을 다 쓰지 않는다: %v", types)
+	}
+}

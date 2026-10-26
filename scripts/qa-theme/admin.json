@@ -1,0 +1,31 @@
+{
+  "screens": [
+    {
+      "key": "hero",
+      "title": "메인 배너",
+      "group": "디자인",
+      "order": 100,
+      "kind": "settings",
+      "fields": [
+        {"key": "headline", "label": "큰 제목", "type": "text", "default": "환영합니다", "help": "홈 맨 위의 한 줄"},
+        {"key": "body", "label": "설명", "type": "textarea"},
+        {"key": "photo", "label": "배경 사진", "type": "image", "help": "가로 1600px 이상"},
+        {"key": "link", "label": "버튼 링크", "type": "url", "default": "/shop"},
+        {"key": "tone", "label": "글자색", "type": "select", "options": ["밝게", "어둡게"], "default": "밝게"},
+        {"key": "count", "label": "표시 개수", "type": "number", "default": 3}
+      ]
+    },
+    {
+      "key": "partners",
+      "title": "협력사",
+      "group": "디자인",
+      "order": 101,
+      "kind": "collection",
+      "fields": [
+        {"key": "name", "label": "이름", "type": "text", "required": true},
+        {"key": "logo", "label": "로고", "type": "image"},
+        {"key": "url", "label": "누리집", "type": "url"}
+      ]
+    }
+  ]
+}
