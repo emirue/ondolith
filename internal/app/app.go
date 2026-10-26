@@ -277,7 +277,31 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	newLoader := func(dir string) *theme.Loader {
 		return theme.New(theme.Builtin(), dir, dev, funcs)
 	}
-	loaderRef.Store(newLoader(themeDir()))
+	// 부팅 때도 활성 테마의 requires 를 본다 (FR-313). A-202 는 켤 때 보지만, 켜진 테마의 파일을 바꾸고
+	// 재시작하는 배포는 그 검사를 지나지 않는다. 코어가 낮으면 사이트를 내리지 않고 내장 테마로 띄운다 —
+	// theme.active 는 그대로라 코어를 올리면 그 테마로 돌아온다. 까닭은 A-602 가 보이고, 다른 테마를 켜면 걷힌다.
+	var themeFallback atomic.Pointer[string]
+	bootDir := themeDir()
+	if bootDir != "" {
+		m, err := theme.ReadManifest(bootDir)
+		if err != nil {
+			log.Warn("활성 테마 theme.json", "dir", bootDir, "err", err)
+		}
+		warn, err := theme.CheckRequires(m.Requires, version)
+		switch {
+		case errors.Is(err, theme.ErrRequiresNewer):
+			msg := fmt.Sprintf("활성 테마 「%s」 대신 내장 테마로 띄웠습니다 — %v. 코어를 올리면 그 테마로 돌아오고, 테마 화면(A-202)에서 다른 테마를 켜도 됩니다.",
+				filepath.Base(bootDir), err)
+			log.Error("활성 테마가 더 높은 코어를 요구해 내장 테마로 띄웁니다", "theme", filepath.Base(bootDir), "requires", m.Requires, "version", version)
+			themeFallback.Store(&msg)
+			bootDir = ""
+		case err != nil:
+			log.Warn("활성 테마 요구 버전", "theme", filepath.Base(bootDir), "err", err)
+		case warn != "":
+			log.Warn("활성 테마 요구 버전", "theme", filepath.Base(bootDir), "경고", warn)
+		}
+	}
+	loaderRef.Store(newLoader(bootDir))
 	limiter := auth.NewLimiter()
 	limits := auth.DefaultLimits()
 
@@ -298,7 +322,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		s.Logo, s.Favicon = b.Logo, b.Favicon
 		return s
 	}
-	pub := &publicDeps{content: contentStore, loader: loader, log: log, site: brandedSite, siteURL: cfg.SiteURL,
+	pub := &publicDeps{content: contentStore, loader: loader, builtin: newLoader(""), log: log, site: brandedSite, siteURL: cfg.SiteURL,
 		dev:            dev && theme.IsDevBuild(version),
 		verifyRequired: verifyRequired,
 		// P-907. 풀을 통째로 넘기지 않는다 — 헬스체크가 필요한 것은
@@ -387,7 +411,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 테마 화면 (D41). 테마는 실행 중에 바뀌므로 요청마다 지금 로더에서 읽는다.
 	adminUI.themeScreens = func() []theme.Screen { return loader().AdminScreens() }
 	// 선언 오류는 활성화(A-202)가 보여 주지만, 이미 켜진 테마로 부팅할 때는 로그가 유일한 자리다.
-	if _, warns := theme.ReadAdmin(themeDir()); len(warns) > 0 {
+	if _, warns := theme.ReadAdmin(bootDir); len(warns) > 0 {
 		log.Warn("테마 화면 선언 (admin.json)", "경고", strings.Join(warns, " · "))
 	}
 	// 콜백 주소는 **요청에서** 만든다 (A-206 은 표시만 한다). 설정으로 두면
@@ -436,8 +460,17 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		// themePath 를 여기서도 거친다. 이름과 경로를 섞으면 세 곳(로더 초기화·
 		// 검증·교체)이 서로 다른 것을 가리키고, 검증에 통과한 테마가 그려지지
 		// 않는다 — 그 셋이 어긋난 상태를 통합 테스트가 잡았다.
-		OnThemeChange: func(name string) { loaderRef.Store(newLoader(themePath(cfg, name))) },
-		Rebuild:       rebuild,
+		OnThemeChange: func(name string) {
+			themeFallback.Store(nil) // 운영자가 테마를 골랐다 — 내장으로 띄운 까닭은 더 이상 없다
+			loaderRef.Store(newLoader(themePath(cfg, name)))
+		},
+		ThemeFallback: func() string {
+			if p := themeFallback.Load(); p != nil {
+				return *p
+			}
+			return ""
+		},
+		Rebuild: rebuild,
 		InstallTheme: func(name string, rd io.ReaderAt, size int64, replace bool) error {
 			return theme.Install(cfg.Themes(), name, rd, size, replace)
 		},

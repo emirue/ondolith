@@ -62,6 +62,9 @@ type Deps struct {
 	// the thing that is unwell.
 	Version    string
 	Migrations func(context.Context) (applied []string, pending int, err error)
+	// ThemeFallback is why boot served the built-in theme instead of the active one
+	// (FR-313), or "" — A-602 shows it. nil reads as "".
+	ThemeFallback func() string
 	// ValidateTheme checks a candidate theme directory before A-202 switches to
 	// it, returning a warning for a check it could not make. Injected so admin
 	// does not import theme.
@@ -1262,6 +1265,12 @@ func (d *Deps) System(w http.ResponseWriter, r *http.Request) {
 		"Applied":    applied,
 		"Pending":    pending,
 		"DBReadable": err == nil,
+	}
+	// 레이아웃의 경고 띠로 나간다 — 부팅이 활성 테마 대신 내장 테마로 띄웠다는 것 (FR-313).
+	if d.ThemeFallback != nil {
+		if msg := d.ThemeFallback(); msg != "" {
+			data["Warning"] = msg
+		}
 	}
 	d.Render(w, r, "admin/system.html", http.StatusOK, data)
 }
