@@ -31,7 +31,21 @@ bad() { fail=$((fail + 1)); printf '  ✗ %s\n' "$*"; }
 want() { [ "$2" = "$3" ] && ok "$1" || bad "$1 — want $2, got $3"; }
 
 JAR=$WORK/jar
-code() { m=$1; p=$2; shift 2; curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -c "$JAR" -X "$m" "$BASE$p" "$@"; }
+# **상한에 걸린 요청을 결함으로 세지 않는다.** 관리자 주소는 IP 당 분당 60건이다 (D15 4.3-2).
+# 관리자 크롤이 그 한도를 다 쓰면 크롤 뒤쪽 화면이 「죽은 링크」가 되고, 바로 이어지는 교환 처리
+# (A-511)도 상태를 바꾸지 못한다 — 테마 화면(A-212)이 크롤에 더해지자 CI 에서 둘 다 났다.
+# 429 는 핸들러 앞(withAdminRateLimit)에서 나므로 같은 요청을 다시 보내도 두 번 처리되지 않는다.
+# 창이 지나가길 기다려 한 번 더 보낸다. curl 인자를 그대로 받아 응답 코드만 찍는다.
+curl_retry() {
+	_st=$(curl "$@")
+	if [ "$_st" = 429 ]; then
+		printf '  · 요청 상한 — 창이 지나가길 기다린다 (61초)\n' >&2
+		sleep 61
+		_st=$(curl "$@")
+	fi
+	printf '%s' "$_st"
+}
+code() { m=$1; p=$2; shift 2; curl_retry -s -o /dev/null -w '%{http_code}' -b "$JAR" -c "$JAR" -X "$m" "$BASE$p" "$@"; }
 sql() { docker exec "$CID" psql -U ondolith -d "$DB" -tAc "$1" 2>/dev/null | tr -d '\r'; }
 
 cleanup() {
@@ -66,7 +80,7 @@ crawl() {
 		printf '%s\n' "$url" >>"$seen"
 
 		out=$WORK/page
-		st=$(curl -s -b "$JAR" -c "$JAR" -o "$out" -w '%{http_code}' "$BASE$url")
+		st=$(curl_retry -s -b "$JAR" -c "$JAR" -o "$out" -w '%{http_code}' "$BASE$url")
 		n=$((n + 1))
 
 		# 4xx·5xx 는 전부 실패다. 링크는 **화면이 만든 것**이므로, 그 주소가
@@ -180,11 +194,11 @@ RET=$(sql "select return_no from returns limit 1")
 # 수거 확인은 관리자가 한다 (A-511) — 여기서 차액이 확정되고 차액결제대기가 된다.
 JAR_MEMBER=$JAR
 JAR=$WORK/jar
-code POST "/admin/orders/$ORDER_NO/returns" --data-urlencode "return_no=$RET" \
-	--data-urlencode "action=pickup" --data-urlencode "fault=구매자" >/dev/null
+want "수거 확인" 303 "$(code POST "/admin/orders/$ORDER_NO/returns" --data-urlencode "return_no=$RET" \
+	--data-urlencode "action=pickup" --data-urlencode "fault=구매자")"
 # 수거 다음이 차액 확정이다 (D14 5절: 교환수거 → 차액결제대기, 차액 > 0).
-code POST "/admin/orders/$ORDER_NO/returns" --data-urlencode "return_no=$RET" \
-	--data-urlencode "action=exchange" >/dev/null
+want "교환 처리" 303 "$(code POST "/admin/orders/$ORDER_NO/returns" --data-urlencode "return_no=$RET" \
+	--data-urlencode "action=exchange")"
 want "교환이 차액결제대기가 됐다" 차액결제대기 \
 	"$(sql "select status from returns where return_no='$RET'")"
 JAR=$JAR_MEMBER
