@@ -165,7 +165,7 @@
 | P-901 | sitemap.xml | `/sitemap.xml` | GET | 공개 | 없음 | SC-1 | FR-510 |
 | P-902 | robots.txt | `/robots.txt` | GET | 공개 | 없음 | SC-1 | FR-510 |
 | P-903 | 404 오류 | `/*` | GET | 공개 | 없음 | SC-1 | FR-403, NFR-210 |
-| P-904 | 500 오류 | `(오류 렌더링)` | GET | 공개 | 없음 | SC-1 | NFR-210 |
+| P-904 | 500 오류 | `(오류 렌더링)` | GET | 공개 | 없음 | SC-1 | NFR-210, FR-312 |
 | P-905 | 결제 웹훅 수신 | `/webhooks/payment/{pg}` | POST | 공개 | 있음 | SC-8 | FR-610 |
 | P-906 | 테마 정적 자산 | `/static/{path...}` | GET | 공개 | 없음 | SC-7 | FR-301, FR-309, NFR-206 |
 | P-907 | 헬스체크 | `/healthz` | GET | 공개 | 없음 | SC-1 | NFR-101, NFR-210 |
@@ -259,7 +259,7 @@
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
 | A-601 | 작업 로그 | `/admin/oplog` | GET | 권한:log.view | 없음 | SC-4 | FR-707, FR-712 |
-| A-602 | 시스템 정보 | `/admin/system` | GET | 권한:settings.view | 없음 | SC-4 | NFR-302, NFR-303, NFR-305 |
+| A-602 | 시스템 정보 | `/admin/system` | GET | 권한:settings.view | 없음 | SC-4 | NFR-302, NFR-303, NFR-305, FR-313 |
 | A-603 | 웹훅 수신 이력 | `/admin/webhooks` | GET | 권한:payment.view | 없음 | SC-4 | FR-610, FR-712 |
 | A-604 | 백업 내려받기 | `/admin/backup` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-713, FR-715 |
 

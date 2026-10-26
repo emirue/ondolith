@@ -1,8 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -23,8 +25,11 @@ type publicDeps struct {
 	// server runs and FR-303 says the next request uses it. Holding the loader
 	// itself would mean "restart to change theme".
 	loader func() *theme.Loader
-	log    *slog.Logger
-	site   func() theme.Site
+	// builtin is the theme compiled into the binary, alone. 활성 테마의 템플릿이 실패하면
+	// 오류 화면을 이것으로 그린다 — 실패한 테마의 error.html 에 다시 기대지 않는다 (FR-312).
+	builtin *theme.Loader
+	log     *slog.Logger
+	site    func() theme.Site
 	// siteURL is config.SiteURL — 운영자가 정한 출처. 사이트맵·robots·canonical 이 쓴다.
 	siteURL string
 	// verifyRequired mirrors auth.email_verification_required (FR-214). 켜져
@@ -252,19 +257,44 @@ func (d *publicDeps) renderPage(w http.ResponseWriter, r *http.Request, name str
 	if v.Site.SEO.NoIndex {
 		w.Header().Set("X-Robots-Tag", "noindex")
 	}
-	w.WriteHeader(code)
-	if err := d.loader().Render(w, name, v); err != nil {
-		// The status line is already sent, so this cannot become a 500 — log it
-		// and let the truncated page speak for itself.
-		d.log.Error("템플릿 렌더링 실패", "template", name, "err", err)
-	}
+	d.writeRendered(w, name, code, v, (*theme.Loader).Render)
 }
 
 // renderPartial writes a screen's block with no page chrome — for htmx swaps.
 func (d *publicDeps) renderPartial(w http.ResponseWriter, r *http.Request, name string, v theme.View) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := d.loader().RenderPartial(w, name, v); err != nil {
-		d.log.Error("조각 렌더링 실패", "template", name, "err", err)
+	d.writeRendered(w, name, http.StatusOK, v, (*theme.Loader).RenderPartial)
+}
+
+// writeRendered draws the whole response before the status line goes out (FR-312).
+//
+// 상태 줄을 먼저 쓰면 템플릿이 중간에 실패해도 200 이 이미 나갔고, 잘린 페이지가 정상으로 간다 —
+// 없는 필드·인자 형 불일치·테마가 요구하는 기능이 없는 코어가 그렇게 된다. 관리자 화면(adminRenderer)과
+// 같은 방식이다. 실패하면 테마가 쓴 것은 버리고 500 과 **코어 내장** 오류 화면을 보낸다: 실패한
+// 테마의 error.html 도 같은 이유로 실패할 수 있다. 화면이면 문서 전체, 조각이면 조각이다.
+func (d *publicDeps) writeRendered(w http.ResponseWriter, name string, code int, v theme.View,
+	render func(*theme.Loader, io.Writer, string, any) error,
+) {
+	var buf bytes.Buffer
+	if err := render(d.loader(), &buf, name, v); err != nil {
+		d.log.Error("템플릿 렌더링 실패", "template", name, "err", err)
+		buf.Reset()
+		code = http.StatusInternalServerError
+		// 실패한 화면의 메타(구조화 데이터 등)는 싣지 않는다 — 사이트·메뉴·로그인 상태만 남긴다.
+		v.Meta = theme.Meta{Title: "일시적인 오류", Description: v.Site.MetaDescription, Type: "website"}
+		v.Data = nil
+		if d.dev {
+			v.Data = map[string]string{"Detail": err.Error()}
+		}
+		if err := render(d.builtin, &buf, "error.html", v); err != nil {
+			d.log.Error("내장 오류 화면 렌더링 실패", "err", err)
+			http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(code)
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		d.log.Error("응답 쓰기", "template", name, "err", err)
 	}
 }
 
