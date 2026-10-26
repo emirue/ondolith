@@ -68,7 +68,7 @@
 
 | 파일 | 무엇 | 원본 | 다시 만들기 |
 |---|---|---|---|
-| [schema.sql](schema.sql) | 통합 DDL — ERD 도구(erdmates 등)에 올리는 파일. 테이블 37개 | `internal/migrations/*.sql` | `make schema` |
+| [schema.sql](schema.sql) | 통합 DDL — ERD 도구(erdmates 등)에 올리는 파일. 테이블 42개(goose 기록표 포함) | `internal/migrations/*.sql` | `make schema` |
 
 DB **설계 의도**(정규화 근거·외래키 정책·JSONB 커스텀 필드)는 [D30](30-data-model.md)이
 설명한다. `schema.sql` 은 그 결과물이지 설명이 아니다 — 둘 다 읽어야 한다.

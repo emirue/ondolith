@@ -547,7 +547,7 @@ func TestGrantPermissionKeepsBoardScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.GrantPermission(ctx, "mod_x", "post.moderate", BoardID(board)); err != nil {
+	if err := s.GrantPermission(ctx, "mod_x", "post.moderate", BoardID(board), ""); err != nil {
 		t.Fatal(err)
 	}
 	p, err := s.LoadPermissions(ctx, uid)
@@ -562,11 +562,55 @@ func TestGrantPermissionKeepsBoardScope(t *testing.T) {
 	}
 
 	// 범위 없이 주면 전역이다 — 두 경로가 갈라지지 않는다.
-	if err := s.GrantPermission(ctx, "mod_x", "post.read_secret", Global); err != nil {
+	if err := s.GrantPermission(ctx, "mod_x", "post.read_secret", Global, ""); err != nil {
 		t.Fatal(err)
 	}
 	p, _ = s.LoadPermissions(ctx, uid)
 	if !p.Can("post.read_secret") {
 		t.Error("범위 없는 부여가 전역이 아니다")
+	}
+}
+
+// D41 4절: 화면 스코프 부여가 저장되고, 읽어서 그 화면만 연다. 버리면 화면 하나에
+// 주려던 권한이 전역으로 저장되어 모든 테마 화면이 열린다.
+func TestGrantPermissionKeepsTheThemeScreen(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	uid, err := s.CreateUser(ctx, "theme@example.com", "h", "테마")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='editor'`, uid); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.GrantPermission(ctx, "editor", ThemeContentPermission, Global, "partners"); err != nil {
+		t.Fatal(err)
+	}
+	// 같은 부여를 다시 보내도 한 행이다 (ON CONFLICT 가 새 유일성 이름을 쓴다).
+	if err := s.GrantPermission(ctx, "editor", ThemeContentPermission, Global, "partners"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.LoadPermissions(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.CanOnScreen(ThemeContentPermission, "partners") {
+		t.Error("부여한 화면이 열리지 않는다")
+	}
+	if p.CanOnScreen(ThemeContentPermission, "hero") || p.Can(ThemeContentPermission) {
+		t.Error("화면 하나에 준 권한이 다른 화면·전역으로 샜다")
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM role_permissions WHERE theme_screen = 'partners'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("화면 부여 %d행 (%v), want 1", n, err)
+	}
+	// 시드: operator 는 모든 테마 화면을 연다 (D15 2.5).
+	keys, err := s.q.LoadRolePermissions(ctx, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !NewPermissions(false, parseGrants(keys)).CanOnScreen(ThemeContentPermission, "anything") {
+		t.Error("operator 가 테마 화면을 열지 못한다")
 	}
 }

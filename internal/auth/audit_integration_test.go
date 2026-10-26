@@ -21,11 +21,11 @@ func TestRolePermissionsAreListedOncePerKey(t *testing.T) {
 			`INSERT INTO boards (slug, name) VALUES ($1, $1) RETURNING id`, slug).Scan(&board); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.GrantPermission(ctx, "mod_x", "post.moderate", BoardID(board)); err != nil {
+		if err := s.GrantPermission(ctx, "mod_x", "post.moderate", BoardID(board), ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.GrantPermission(ctx, "mod_x", "post.read_secret", Global); err != nil {
+	if err := s.GrantPermission(ctx, "mod_x", "post.read_secret", Global, ""); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"post.moderate", "post.read_secret"}

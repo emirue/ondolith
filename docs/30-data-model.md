@@ -199,6 +199,13 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | `terms.kind` · `terms.version` | 50 / 20 | D19 A-207이 이미 "50자"로 명시 |
 | `carts.guest_key` | 16~128 | 난수 base64. 하한이 있다 — 짧은 키는 추측된다. DB CHECK 가 16~128 이다 (이 표가 64 라고 적고 있었다) |
 
+**Phase 6 — 테마 선언 관리자 화면** ([D41](41-theme-admin.md))
+
+| 컬럼 | 상한 | 근거 |
+|---|---|---|
+| `theme_settings.screen_key` · `theme_items.screen_key` · `role_permissions.theme_screen` | 32 | 게시판 커스텀 필드 키와 같은 규칙(`^[a-z][a-z0-9_]{0,31}$`). DB CHECK 가 막는다 |
+| `theme_settings.data` · `theme_items.data` 안의 값 | 글 500 · 긴 글 5,000 · 링크 2,000 | JSONB 라 컬럼 상한 대신 칸 종류마다 저장 전에 거른다 (D41 2절 「칸 종류와 저장 검증」). 화면당 칸 30개 · 모음 200행이 한 화면의 크기를 묶는다 |
+
 > **상한 없는 `text`는 규칙 위반이다.** PostgreSQL의 `text`는 무제한이라 상한을 안 정하면
 > 폼 하나가 디스크를 채운다 — 1 vCPU / 512MB 인스턴스(NFR-101)에서는 그것으로 충분하다.
 
@@ -213,8 +220,9 @@ RESTRICT면 그 순간에도 실패한다. NO ACTION은 문장 끝까지 검사�
 | Phase 1 | `roles` · `permissions` · `role_permissions` · `user_roles` · `pages` · `settings` · `menus` · `password_reset_tokens` · `email_verification_tokens` · `social_accounts` · `user_fields` |
 | Phase 2 | `boards` · `board_fields` · `posts` · `comments` · `attachments` · `operation_logs` |
 | Phase 3 | `products` · `product_options` · `product_variants` · `categories` · `product_categories` · `product_images` · `carts` · `cart_items` · `orders` · `order_items` · `payments` · `refunds` · `refund_items` · `shipments` · `returns` · `return_items` · `webhook_events` · `terms` · `order_agreements` |
+| Phase 6 | `theme_settings` · `theme_items` |
 
-전 38개. 테이블을 더하면 **같은 커밋에서** 이 표와 D16에 함께 추가한다.
+전 40개. 테이블을 더하면 **같은 커밋에서** 이 표와 D16에 함께 추가한다.
 
 ## 마이그레이션 규칙
 
@@ -367,6 +375,7 @@ D15 4.4의 "어떤 라우트도 쓰지 않는 권한 → 경고" 검사가 매 �
 | `role_id` | uuid | NOT NULL REFERENCES `roles(id)` |
 | `permission_id` | uuid | NOT NULL REFERENCES `permissions(id)` |
 | `board_id` | uuid | NULL REFERENCES `boards(id)` ON DELETE CASCADE |
+| `theme_screen` | text | NULL, `CHECK (theme_screen ~ '^[a-z][a-z0-9_]{0,31}$')` — 테마 화면 스코프 (`00031`, [D41](41-theme-admin.md) 4절). `board_id` 와 함께 쓸 수 없다 |
 | `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
 
 ```sql
@@ -385,6 +394,14 @@ CREATE INDEX role_permissions_permission_id_idx ON role_permissions (permission_
 -- 같다.
 CREATE INDEX role_permissions_board_id_idx ON role_permissions (board_id)
   WHERE board_id IS NOT NULL;
+
+-- Phase 6 (00031): 테마 화면 스코프. 같은 이름으로 유일성을 다시 교체한다 —
+-- 부여 질의가 ON CONFLICT ON CONSTRAINT role_permissions_uniq 로 이 이름을 쓴다.
+ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_one_scope
+  CHECK (board_id IS NULL OR theme_screen IS NULL);
+ALTER TABLE role_permissions DROP CONSTRAINT role_permissions_uniq;
+ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_uniq
+  UNIQUE NULLS NOT DISTINCT (role_id, permission_id, board_id, theme_screen);
 ```
 
 > **`NULLS NOT DISTINCT`가 필요한 이유.** 기본 동작에서 NULL은 서로 같지 않으므로 평범한
@@ -1334,6 +1351,40 @@ CREATE INDEX ON order_agreements (terms_id);
 
 **약관 본문을 복사하지 않는다** — `terms` 행이 불변이고 `terms_id RESTRICT`가 삭제를 막으므로
 참조만으로 FR-619의 "나중에 재현된다"가 성립한다. 복사하면 주문 수만큼 본문이 복제된다.
+
+### Phase 6 — 테마 선언 관리자 화면 (FR-305, [D41](41-theme-admin.md))
+
+`00031_theme_content.sql`. 테마가 `admin.json` 으로 선언한 화면의 값이다. **화면마다 테이블을
+만들지 않는다** (DEC-3.9) — 화면은 테마 파일에 있고 DB 에는 화면 키와 JSONB 값만 있다.
+그래서 외래키가 없고, 테마를 바꾸거나 선언에서 화면을 빼도 행은 남는다 (D41 지배 원칙 2).
+
+**`theme_settings`** — 설정형 화면의 값 한 벌
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `screen_key` | text | NOT NULL **UNIQUE**, `CHECK (screen_key ~ '^[a-z][a-z0-9_]{0,31}$')` |
+| `data` | jsonb | NOT NULL DEFAULT `'{}'`, `CHECK (jsonb_typeof(data) = 'object')` |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+**`theme_items`** — 모음형 화면의 행
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `screen_key` | text | NOT NULL, `CHECK (screen_key ~ '^[a-z][a-z0-9_]{0,31}$')` |
+| `sort_order` | integer | NOT NULL DEFAULT 0 — 작은 수가 앞, 같으면 먼저 만든 행 |
+| `data` | jsonb | NOT NULL DEFAULT `'{}'`, `CHECK (jsonb_typeof(data) = 'object')` |
+| `created_at` / `updated_at` | timestamptz | NOT NULL DEFAULT now() |
+
+```sql
+CREATE INDEX theme_items_screen_sort_idx ON theme_items (screen_key, sort_order);
+```
+
+- `data` 의 키는 선언의 칸 키이고 값은 칸 종류마다 문자열·JSON 숫자·사진(`{"id": 미디어 id, "w", "h"}`)이다.
+  사진은 `media` 행을 가리키지만 외래키는 아니다 — `media` 는 지우는 경로가 없다
+- 화면당 200행은 저장소가 같은 `INSERT` 문에서 센다 (`MaxThemeItems`)
+- 내리면(`Down`) 두 테이블이 사라진다 — 값을 지키는 길은 백업 복원이다 (D41 「마이그레이션」)
 
 ### 돈·재고 불변식을 DB가 강제하는 목록
 

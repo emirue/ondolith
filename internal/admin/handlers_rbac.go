@@ -262,7 +262,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := d.Auth.GrantPermission(ctx, role.Key, permKey, board); err != nil {
+	if err := d.Auth.GrantPermission(ctx, role.Key, permKey, board, ""); err != nil {
 		d.serverError(w, r, err)
 		return
 	}
