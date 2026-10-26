@@ -89,6 +89,8 @@
 | FR-309 | 테마 정적 자산(CSS·JS·이미지)을 서빙한다 | 필수 | 1 | 내장 테마는 `embed.FS`에서, 디스크 테마는 파일에서. 테마 디렉터리 밖 파일에 접근할 수 없다 |
 | FR-310 | 테마의 로고·파비콘 | 선택 | 6 | 테마가 `theme.json` 의 `logo`·`favicon` 에 `static/` 아래 이미지 경로를 적으면, 그 테마가 활성인 동안 관리자 화면 머리글의 마크와 파비콘, 내장 테마의 공개 머리글 로고와 파비콘이 그것으로 바뀐다(재시작 없이 테마를 바꾸면 따라간다). 지정이 없거나 틀리면(밖을 가리킴·이미지가 아님·파일 없음) 기본 마크·아이콘을 쓰고, 활성화 때 경고한다. 로고는 `<img>` 로만 그린다 |
 | FR-311 | 테마가 관리자 화면을 선언한다 (`admin.json`) | 필수 | 6 | 테마가 `admin.json` 에 설정형·모음형 화면과 칸(글·긴 글·숫자·사진·링크·고르기)을 적고 활성화하면 관리자 사이드바에 그 화면이 나오고(A-212), 저장한 값이 공개 템플릿에 `.Theme.<화면 키>` 로 온다. 값이 없으면 선언의 기본값이다. 화면 단위 부여(A-404)가 없는 역할에는 메뉴가 없고 403 이다. 테마를 바꿨다 되돌려도 값이 남고, 선언 오류는 활성화 때 경고한다 (`TestThemeScreensReachTheMenuAndThePage`·`TestThemeScreenNeedsTheScreenScope`, [D41](41-theme-admin.md)) |
+| FR-312 | 테마 템플릿이 실패하면 잘린 페이지 대신 500 과 코어 내장 오류 화면이 나간다 | 필수 | 6 | 공개 화면과 조각 응답을 버퍼에 다 그린 뒤 보낸다. 템플릿 실행이 실패하면(없는 필드·함수 인자 형 불일치·테마가 요구하는 기능이 없는 코어) 500 이고 본문은 코어 내장 `error.html` 이며 테마가 실패 전에 쓴 조각이 없다. 로그에 템플릿 이름과 오류가 ERROR 로 남고, 정상 화면의 출력은 그대로다 (`TestThemeTemplateFailureIsA500WithTheBuiltinErrorPage`·`TestBrokenThemeTemplateServesA500NotHalfAPage`, [D17](17-theme-contract.md)) |
+| FR-313 | 부팅 때 활성 테마의 `requires` 를 검사한다 | 필수 | 6 | 활성 테마의 `requires` 가 코어보다 높은 채 재시작하면 사이트를 내리지 않고 내장 테마로 뜬다 — ERROR 한 줄, 공개 화면 200, `/healthz` 200, A-602 경고. `theme.active` 는 그대로라 코어를 올리면 그 테마로 돌아오고, 다른 테마를 켜면 경고가 걷힌다. 개발 빌드처럼 버전을 해석할 수 없으면 경고만 한다 (`TestBootServesTheBuiltinThemeWhenTheActiveOneNeedsANewerCore`·`TestBootOnlyWarnsAboutRequiresOnADevBuild`, [D17](17-theme-contract.md)) |
 
 ---
 
