@@ -34,6 +34,7 @@
 | D22 | [22-dev-standards.md](22-dev-standards.md) | **개발 규약.** 코딩·오류·로깅·동시성·SQL·테스트 전략·구현 순서 | 코드를 쓸 때 (=항상) |
 | D30 | [30-data-model.md](30-data-model.md) | 테이블 설계, 커스텀 필드(JSONB), 마이그레이션 규칙 | 스키마를 바꿀 때 |
 | D40 | [40-theme.md](40-theme.md) | 테마 로딩·오버라이드·계약, 템플릿 함수맵 | 테마/렌더링 작업 |
+| D41 | [41-theme-admin.md](41-theme-admin.md) | **테마 선언 관리자 화면.** `admin.json` 형식·저장·화면 스코프 권한·`.Theme` | 테마가 운영자에게 값을 받아야 할 때 |
 | D50 | [50-commerce.md](50-commerce.md) | 상품·주문 모델, PG 어댑터, 토스페이먼츠 연동 | Phase 3 |
 | D60 | [60-security.md](60-security.md) | 위협 모델, 방어 규칙, 취약 지점 체크리스트 | 입력·인증·업로드를 다룰 때 |
 | D70 | [70-operations.md](70-operations.md) | 배포, **업그레이드(패치) 절차**, 백업, 모니터링 | 릴리즈·운영 |
