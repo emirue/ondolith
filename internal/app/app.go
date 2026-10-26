@@ -384,6 +384,12 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	if err != nil {
 		return fail(fmt.Errorf("app: 관리자 스타일: %w", err))
 	}
+	// 테마 화면 (D41). 테마는 실행 중에 바뀌므로 요청마다 지금 로더에서 읽는다.
+	adminUI.themeScreens = func() []theme.Screen { return loader().AdminScreens() }
+	// 선언 오류는 활성화(A-202)가 보여 주지만, 이미 켜진 테마로 부팅할 때는 로그가 유일한 자리다.
+	if _, warns := theme.ReadAdmin(themeDir()); len(warns) > 0 {
+		log.Warn("테마 화면 선언 (admin.json)", "경고", strings.Join(warns, " · "))
+	}
 	// 콜백 주소는 **요청에서** 만든다 (A-206 은 표시만 한다). 설정으로 두면
 	// 관리자가 그 값을 바꿔 인가 코드를 다른 곳으로 돌릴 수 있고, 그것이
 	// D19 A-206 이 콜백 URL 을 받지 않기로 한 이유다.
@@ -437,6 +443,7 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		},
 		InstalledThemes: func() ([]string, error) { return theme.Installed(cfg.Themes()) },
 		BoardSkins:      func() []string { return loaderRef.Load().BoardSkins() },
+		ThemeScreens:    func() []theme.Screen { return loaderRef.Load().AdminScreens() },
 		SendReset: func(email, token string) {
 			mailer.SendAsync(email, "비밀번호 재설정",
 				resetMailBody(strings.TrimSuffix(cfg.SiteURL, "/")+"/password/reset/"+token))

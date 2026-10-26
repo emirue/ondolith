@@ -87,7 +87,7 @@ superuser가 없을 경우 모든 설치처가 "관리자에게 새 권한을 �
 | **함의 없음** | **상위 권한이 하위를 자동 포함하지 않는다.** `board.manage`가 `board.view`를 포함하지 않는다. 함의 규칙은 반드시 예외를 낳고 예외는 구멍이 된다 |
 | 이름 변경 | 금지. 배포된 권한 키는 영구다 ([D90](90-conventions.md) 번호 재사용 금지와 같은 이유) |
 
-### 2.2 전체 권한 (37개)
+### 2.2 전체 권한 (38개)
 
 `스코프` = 게시판 단위로 좁혀 부여할 수 있는가 (2.3절).
 
@@ -99,6 +99,7 @@ superuser가 없을 경우 모든 설치처가 "관리자에게 새 권한을 �
 | `theme.view` | 테마 목록 조회 | – | 1 | A-202 |
 | `theme.activate` | 활성 테마 교체 | – | 1 | A-202 |
 | `theme.upload` | 테마 zip 업로드 | – | 2 | A-203 |
+| `theme.edit_content` | 테마가 선언한 화면(admin.json)의 값 편집 — 테마 화면 단위로 좁혀 줄 수 있다 (2.4) | – | 6 | A-212 |
 | `menu.manage` | 메뉴 트리 편집 | – | 1 | A-204 |
 | `user.view` | 사용자 조회 | – | 1 | A-401 |
 | `user.create` | 사용자 생성 | – | 1 | A-402 |
@@ -199,6 +200,24 @@ CanOn(perm, board) = ∃ 행 (role ∈ 유효역할) ∧ (permission = perm)
   **부여 행이 없는 게시판은 관리자 외 아무도 볼 수 없다 — fail-closed가 기본값이다**
 - 게시판 삭제 시 `ON DELETE CASCADE`
 
+**테마 화면 스코프** ([D41](41-theme-admin.md) 4절). 테마가 `admin.json` 으로 선언한 화면도 같은 원칙이다 — 화면마다
+권한 키(`themeadmin.hero`)를 만들면 권한 목록이 테마 파일에 따라 늘어나 P1 을 깬다. 그래서 권한은
+`theme.edit_content` 하나이고, 부여 행의 `theme_screen` 이 범위다.
+
+```
+theme_screen IS NULL  →  모든 테마 화면
+theme_screen = 'hero' →  화면 hero 한정
+
+CanOnScreen(perm, key) = superuser ∨ 전역 부여 ∨ (theme_screen = key 인 부여)
+```
+
+- `theme_screen` 은 `theme.edit_content` 에만, `board_id` 와 함께 쓸 수 없다. 앞의 것은 CHECK 가 말할 수 없으므로
+  부여 처리기(A-404)와 시드가 `auth.ValidateScreenGrant` 하나를 지난다. 뒤의 것은 `role_permissions_one_scope` CHECK 다
+- A-404 는 **활성 테마가 선언한 화면 키만** 받는다. 없는 키에 준 부여는 아무것도 열지 않으면서 준 것으로 남는다
+- 화면 부여는 전역 질문(`Can`)에 답하지 않는다. 그래서 R4(자기가 가진 권한만 준다)는 전역 보유로 판정한다 —
+  게시판 스코프와 같다
+- 테마를 바꿔도 부여 행은 남는다. 그 화면을 다시 선언한 테마를 켜면 그대로 쓰인다
+
 ### 2.5 역할–권한 기본 매트릭스 (시드)
 
 마이그레이션이 심는 초기 구성이다. **설치처는 이 표를 자유롭게 바꿀 수 있다** (P2) —
@@ -215,6 +234,7 @@ CanOn(perm, board) = ∃ 행 (role ∈ 유효역할) ∧ (permission = perm)
 | `theme.view` | | | | ● |
 | `theme.activate` | | | | ● |
 | `theme.upload` | | | | |
+| `theme.edit_content` | | | | ● |
 | `menu.manage` | | | | ● |
 | `user.view` | | | | ● |
 | `user.create` | | | | |
@@ -270,7 +290,7 @@ FK에 `ON DELETE` 명시, FK 컬럼에 인덱스, `timestamptz`)을 따른다.
 |---|---|---|
 | `roles` | `key` UNIQUE, `name`, `is_builtin`, `is_superuser`, `is_assignable` | `is_superuser`는 **정확히 1행** — 부분 유니크 인덱스로 강제 |
 | `permissions` | `key` UNIQUE, `description`, `is_scoped` | 마이그레이션이 시딩. UI에서 추가 불가 (P1) |
-| `role_permissions` | `role_id`, `permission_id`, `board_id` NULL 허용 | `board_id`가 스코프 (2.4절) |
+| `role_permissions` | `role_id`, `permission_id`, `board_id` NULL 허용, `theme_screen` NULL 허용 | `board_id`·`theme_screen` 이 스코프 (2.4절). 둘은 함께 쓸 수 없다 |
 | `user_roles` | `user_id`, `role_id` | UNIQUE (user_id, role_id) |
 | `users` 추가 | `is_active`, `sessions_valid_from` | 5.4절 |
 
@@ -632,7 +652,7 @@ COMMIT;
 | 사용자 생성·비활성·삭제 (A-402) | 〃 |
 | 게시판 정의·필드 스키마 변경 (A-305, A-306) | 공개 화면 동작이 바뀐다 |
 | **사이트 설정·테마·메뉴·자격증명·약관·사업자 정보 변경 (A-201~A-210)** | 사이트 전체에 영향. **자격증명([D60](60-security.md) 「설정값을 어디에 두는가」 ②, 목록은 `content.IsSecretSetting`)은 변경 사실만 남기고 값은 남기지 않는다** (아래 「절대 기록하지 않음」) |
-| **공개 화면의 출력을 바꾸는 관리자 변경 (A-302 페이지 편집, A-303 발행)** | 방문자가 보는 것이 바뀐다 — 「게시판 정의 변경」과 같은 이유 |
+| **공개 화면의 출력을 바꾸는 관리자 변경 (A-302 페이지 편집, A-303 발행, A-212 테마 화면 — 값은 남기지 않는다)** | 방문자가 보는 것이 바뀐다 — 「게시판 정의 변경」과 같은 이유 |
 | 주문 상태 전이, 취소·환불 (A-506, A-507) | 돈 |
 | **반품·교환 처리 (A-511)** | 〃 돈. 수거 확인 없이 환불이 나가면 분쟁 근거가 필요하다 |
 | **결제 대사 반영 (A-508)** | 〃 돈. 근거가 PG 조회 결과임을 남긴다 |

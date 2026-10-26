@@ -542,6 +542,8 @@ input[type="file"] { padding: var(--s10) var(--s12); max-width: 100%; min-width:
 .adm-field + .adm-hint,
 .adm-field-row + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--s16); }
 .adm-card + .adm-hint { margin: calc(-1 * var(--s8)) 0 var(--gap); }
+/* 칸 옆 오류 (A-212). 안내문과 같은 자리에 붙되 흐리지 않는다 — 고칠 곳을 가리키는 글이다. */
+.adm-hint--error { color: var(--danger); opacity: 1; }
 
 /* 기간의 두 날짜와 「~」는 한 덩어리로 줄을 바꾼다 — 「~」만 혼자 한 줄에 남았다. */
 .adm-range { display: inline-flex; align-items: center; gap: var(--s6); flex-wrap: nowrap; min-width: 0; max-width: 100%; }

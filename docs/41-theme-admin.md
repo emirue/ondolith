@@ -1,9 +1,8 @@
 # D41. 테마 선언 관리자 화면
 
 > 테마가 `admin.json` 으로 관리자 화면(설정형·모음형)을 선언하면, 코어가 그 화면을 그리고 값을
-> 저장해 템플릿에 `.Theme` 로 넘긴다. 테마 작성자는 2·6절을, 코어 개발자는 전부를 읽는다.
-> 요구사항·화면 번호는 구현 첫 커밋에서 [D10](10-requirements.md) FR-3xx 대역과
-> [D11](11-screens.md) A-2xx 대역의 다음 빈 번호로 배정하고, 이 문서를 그 번호로 고친다.
+> 저장해 템플릿에 `.Theme` 로 넘긴다. 테마 작성자는 2·7절을, 코어 개발자는 전부를 읽는다.
+> 요구사항 FR-311 · 화면 A-212 · 마이그레이션 `00031_theme_content.sql` (11절).
 
 ## 지배 원칙
 
@@ -150,7 +149,7 @@ theme_items    (id uuid PK, screen_key text, sort_order integer, data jsonb, cre
 
 ## 5. 관리자 화면
 
-화면 번호 하나(A-2xx)가 아래 경로를 모두 가진다 — 메뉴(A-204)가 경로 넷을 한 번호로 갖는 것과 같다.
+화면 번호 하나(A-212)가 아래 경로를 모두 가진다 — 메뉴(A-204)가 경로 넷을 한 번호로 갖는 것과 같다.
 보안 유형은 사진을 받으므로 SC-7 이다.
 
 | 메서드 | 경로 | 하는 일 |
@@ -235,16 +234,16 @@ theme_items    (id uuid PK, screen_key text, sort_order integer, data jsonb, cre
 
 변이 확인: 스코프 판정, 선언에 없는 칸 보존, 본문 상한 순서, 기본값 대체를 하나씩 고장 내 시험이 무는지 본다.
 
-## 10. 구현 때 함께 고치는 문서
+## 10. 이 기능이 걸친 문서
 
-| 문서 | 고칠 것 |
+| 문서 | 담긴 것 |
 |---|---|
-| [D10](10-requirements.md) | FR-3xx 대역에 요구사항 한 줄 |
-| [D11](11-screens.md)·[D13](13-screens-admin.md)·[D19](19-screen-io.md) | 화면 행, 상세 절, 입력 명세 |
+| [D10](10-requirements.md) | FR-311 |
+| [D11](11-screens.md)·[D13](13-screens-admin.md)·[D19](19-screen-io.md) | A-212 화면 행, 상세 절, 입력 명세 |
 | [D15](15-access-control.md) | 2.2 권한 행, 2.4 화면 스코프, 2.5 시드, 3 스키마, 7 작업 로그 |
 | [D16](16-data-coverage.md)·[D30](30-data-model.md) | 두 테이블, 문자열 상한(3-2), 테이블 목록(3-3), `role_permissions.theme_screen` |
 | [D17](17-theme-contract.md)·[D40](40-theme.md) | 디렉터리 구조에 `admin.json`, 뷰 모델에 `.Theme`, 이 문서로 가는 링크 |
-| [D80](80-roadmap.md)·[D81](81-work-breakdown.md) | 작업 행과 Phase 표시 |
+| [D80](80-roadmap.md)·[D81](81-work-breakdown.md) | Phase 6 범위, W6-34 |
 | [D85](85-gaps.md) | GAP-33 에 테마 화면 사진 |
 | [.ai/DECISIONS.md](../.ai/DECISIONS.md) | [DEC-3.10](../.ai/DECISIONS.md) 의 적용 범위 — 코어 관리자 화면은 직접 만든다. 테마 선언 화면은 생성기 라이브러리가 아니라 이 문서의 기능이다 |
 | [CHANGELOG.md](../CHANGELOG.md) | 추가 항목, 마이그레이션과 내릴 때 값이 사라진다는 것 |

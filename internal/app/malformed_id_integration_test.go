@@ -327,6 +327,7 @@ var pathParamKind = map[string]string{
 	"returnNo": "반품·교환 번호",
 	"token":    "메일로 보낸 1회용 토큰",
 	"provider": "소셜 제공자 이름 (google·kakao…)",
+	"key":      "테마 화면 키 (admin.json 선언, D41). uuid 가 아니다 — 처리기가 선언과 대조한다",
 	"path...":  "정적 자산 경로",
 }
 

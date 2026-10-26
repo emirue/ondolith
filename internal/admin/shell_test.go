@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/emirue/ondolith/internal/theme"
 )
 
 func allowOnly(perms ...string) func(string) bool {
@@ -186,5 +188,40 @@ func TestNoScreenAppearsTwiceInTheMenu(t *testing.T) {
 			t.Errorf("경로 %s 가 메뉴에 두 번 있다 (%q, %q)", it.Path, prev, it.Title)
 		}
 		byPath[it.Path] = it.Title
+	}
+}
+
+// D41 4·5절: 테마 화면은 화면 단위 판정을 통과한 것만 메뉴에 나오고, 선언의 묶음·순서로
+// 코어 메뉴와 같은 줄에서 정렬된다. 같은 이름의 묶음은 합쳐진다.
+func TestThemeNavJoinsTheMenuByScope(t *testing.T) {
+	screens := []theme.Screen{
+		{Key: "hero", Title: "메인 배너", Group: "콘텐츠", Order: 11},
+		{Key: "partners", Title: "협력사", Group: "테마", Order: 100},
+		{Key: "secret", Title: "숨은 화면", Group: "테마", Order: 101},
+	}
+	extra := ThemeNav(screens, func(key string) bool { return key != "secret" })
+	if len(extra) != 2 || extra[0].Path != "/admin/theme/hero" || extra[0].Screen != "A-212" {
+		t.Fatalf("ThemeNav = %+v", extra)
+	}
+	groups := Nav(func(string) bool { return true }, false, extra...)
+	var content, themeGroup []string
+	for _, g := range groups {
+		for _, it := range g.Items {
+			switch g.Title {
+			case "콘텐츠":
+				content = append(content, it.Title)
+			case "테마":
+				themeGroup = append(themeGroup, it.Title)
+			}
+		}
+	}
+	if strings.Join(content, ",") != "페이지,메인 배너,게시판,글 관리,댓글 관리,첨부 관리,메뉴" {
+		t.Errorf("콘텐츠 묶음에 순서대로 끼어야 한다: %v", content)
+	}
+	if strings.Join(themeGroup, ",") != "협력사" {
+		t.Errorf("판정을 통과한 화면만: %v", themeGroup)
+	}
+	if got := CurrentGroup(groups, "/admin/theme/partners/0b6e6f43-8d6e-4a3c-9a39-0d7c3d6b1c11"); got != "/admin/theme/partners" {
+		t.Errorf("행 화면에서 강조할 메뉴 = %q", got)
 	}
 }

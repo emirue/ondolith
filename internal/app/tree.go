@@ -195,6 +195,23 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 	r.Add(Route{Screen: "A-202", Method: "POST", Pattern: "/admin/themes", Class: SC5,
 		Permission: "theme.activate", Handler: ad.ThemeActivate})
 
+	// A-212 테마 화면 (D41). 경로 다섯을 한 화면이 갖는다 — 메뉴(A-204)와 같다. 판정은
+	// 화면 단위(theme.edit_content + 화면 스코프)라 처리기가 한다. 사진을 받으므로 SC-7.
+	r.Add(Route{Screen: "A-212", Method: "GET", Pattern: "/admin/theme/{key}", Class: SC4,
+		Permission: "theme.edit_content", Handler: ad.ThemeScreen})
+	r.Add(Route{Screen: "A-212", Method: "POST", Pattern: "/admin/theme/{key}", Class: SC7,
+		Permission: "theme.edit_content", Handler: ad.ThemeScreenSave})
+	r.Add(Route{Screen: "A-212", Method: "GET", Pattern: "/admin/theme/{key}/new", Class: SC4,
+		Permission: "theme.edit_content", Handler: ad.ThemeItemForm})
+	r.Add(Route{Screen: "A-212", Method: "POST", Pattern: "/admin/theme/{key}/new", Class: SC7,
+		Permission: "theme.edit_content", Handler: ad.ThemeItemSave})
+	r.Add(Route{Screen: "A-212", Method: "GET", Pattern: "/admin/theme/{key}/{id}", Class: SC4,
+		Permission: "theme.edit_content", Handler: ad.ThemeItemForm})
+	r.Add(Route{Screen: "A-212", Method: "POST", Pattern: "/admin/theme/{key}/{id}", Class: SC7,
+		Permission: "theme.edit_content", Handler: ad.ThemeItemSave})
+	r.Add(Route{Screen: "A-212", Method: "POST", Pattern: "/admin/theme/{key}/{id}/delete", Class: SC7,
+		Permission: "theme.edit_content", Handler: ad.ThemeItemDelete})
+
 	// A-203 은 SC-7 이고 제품에서 가장 위험한 화면이다 — 업로드가 곧 임의 파일
 	// 쓰기이고 쓰인 파일이 템플릿으로 실행된다 (D60).
 	r.Add(Route{Screen: "A-203", Method: "GET", Pattern: "/admin/themes/upload", Class: SC7,

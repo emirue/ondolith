@@ -217,7 +217,32 @@ func (d *publicDeps) view(r *http.Request, title, desc string) theme.View {
 		// A broken menu (a cycle someone edited in) must not take the whole
 		// site down: the page renders with no menu and the error is logged.
 	}
+	v.Theme = d.themeData(r)
 	return v
+}
+
+// themeData is .Theme (D41 7절): what the operator entered on the active theme's
+// declared screens. 선언이 없으면 질의가 없다. 읽지 못하면 빈 맵으로 그린다 — 메뉴처럼
+// 테마 화면 값 하나 때문에 사이트 전체가 내려가지 않는다.
+func (d *publicDeps) themeData(r *http.Request) map[string]any {
+	screens := d.loader().AdminScreens()
+	if len(screens) == 0 {
+		return map[string]any{}
+	}
+	var settingKeys, collectionKeys []string
+	for _, s := range screens {
+		if s.Collection() {
+			collectionKeys = append(collectionKeys, s.Key)
+		} else {
+			settingKeys = append(settingKeys, s.Key)
+		}
+	}
+	settings, items, err := d.content.ThemeContent(r.Context(), settingKeys, collectionKeys)
+	if err != nil {
+		d.log.Error("테마 화면 값 읽기", "err", err)
+		return map[string]any{}
+	}
+	return theme.BuildThemeData(screens, settings, items)
 }
 
 func (d *publicDeps) renderPage(w http.ResponseWriter, r *http.Request, name string, code int, v theme.View) {

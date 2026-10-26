@@ -57,6 +57,7 @@ data-zoom data-label>` 자리표시다. 내장 `partials/head.html` 이 A-201 �
 ```
 themes/{이름}/
   theme.json          메타데이터 (아래)
+  admin.json          관리자 화면 선언 — 선택 (FR-311, D41)
   base.html           레이아웃 — 유일한 필수 파일
   partials/           조각
   auth/ account/ board/ comment/ shop/ order/
@@ -341,6 +342,7 @@ themes/{이름}/
 | `.Flash` | 이번 요청의 메시지 |
 | `.Meta` | 이 화면의 제목·설명·OG 이미지 (FR-511), canonical 주소 `URL`(site_url 이 없으면 빈 값 — 그때는 싣지 않는다), og:type `Type`(`website`·글은 `article`), 구조화 데이터 `JSONLD`(FR-719, 없으면 nil — `<script type="application/ld+json">{{.}}</script>` 로 그대로 싣는다. html/template 이 JSON 으로 이스케이프한다) |
 | `.Path` | 현재 경로 |
+| `.Theme` | 이 테마가 `admin.json` 으로 선언한 화면에 운영자가 넣은 값 (FR-311). `.Theme.<화면 키>` 가 설정형이면 칸 키 → 값의 맵, 모음형이면 행 목록(순서대로, 없으면 빈 목록). 선언된 칸은 전부 키가 있고 값이 없으면 선언의 기본값이다. 사진 칸은 `.URL`·`.Thumb`·`.Width`·`.Height`, 숫자는 소수부가 없으면 정수다. 선언이 없으면 빈 맵. 형식과 예는 [D41](41-theme-admin.md) 2·7절 |
 
 화면별 데이터는 `.Data` 아래 온다. 각 화면이 무엇을 넘기는지는
 [D12](12-screens-public.md)의 **데이터** 항목에 적혀 있다.

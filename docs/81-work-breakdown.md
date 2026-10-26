@@ -488,6 +488,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-31 | 홈 Organization 에 테마 로고 **(완료 — `TestSEOPartialReachesAThemeThatOverridesHead`·`TestThemeLogoAndFaviconReachAdminAndPublic`, 실제 브라우저 2026-10-26)** | W6-30 | `siteJSONLD` logo | `site_url` 이 있으면 홈 JSON-LD Organization 에 활성 테마 theme.json 의 로고가 절대 주소로 실리고(`TestSEOPartialReachesAThemeThatOverridesHead`), 없으면 싣지 않는다(`TestThemeLogoAndFaviconReachAdminAndPublic`) (FR-719, FR-310) |
 | W6-32 | 사업자 정보에 업무시간 **(완료 — `TestSiteSettingsHoldBusinessInfo`·`TestBusinessInfoRendersInCmsModeToo`·`TestMissingBusinessKeysNamesTheEmptyOnes`, 실제 브라우저·DB 2026-10-26)** | — | `business.hours` | A-201 에 업무시간 칸이 있고 저장한 값이 바닥글에 「업무시간」으로 나온다. 표시 의무가 아니라 `shop` 미입력 경고에 들지 않는다(`TestSiteSettingsHoldBusinessInfo`·`TestBusinessInfoRendersInCmsModeToo`·`TestMissingBusinessKeysNamesTheEmptyOnes`) (FR-711) |
 | W6-33 | 메일 시험 발송에 제목·내용 (A-205) **(완료 — `TestMailTestTakesASubjectAndBody`·`TestMailTestSendsOnlyToTheAdminItself`, 실제 브라우저·로컬 SMTP 수신 2026-10-26)** | — | `internal/admin/handlers.go` `MailTest`, `admin/mail.html` | 시험 발송 폼에서 제목·내용을 적어 보내면 그대로 관리자 본인에게 가고, 비우면 기본 문구다. 줄바꿈 든 제목·200자 넘는 제목·5,000자 넘는 내용은 422 이고 보내지 않으며 시간당 한도를 쓰지 않고 입력이 폼에 남는다(`TestMailTestTakesASubjectAndBody`). 받는 사람은 바꿀 수 없다(`TestMailTestSendsOnlyToTheAdminItself`) (FR-708) |
+| W6-34 | 테마가 선언하는 관리자 화면 A-212 — `admin.json` 선언·값 저장(00031)·화면 스코프 권한·관리자 화면·공개 `.Theme` | — | `internal/theme/admin.go`, `internal/content/theme_content.go`, `internal/migrations/00031_theme_content.sql`, `internal/admin/handlers_theme.go`, `internal/app/templates/admin/theme-screen.html` | 선언한 테마를 켜면 사이드바에 화면이 나오고 저장한 값이 공개 화면에 `.Theme` 으로 나오며 테마를 바꿨다 되돌려도 남는다(`TestThemeScreensReachTheMenuAndThePage`). 화면 부여가 없으면 403·메뉴 없음(`TestThemeScreenNeedsTheScreenScope`·`TestThemeNavJoinsTheMenuByScope`), 선언 밖 칸 보존(`TestThemeSettingsSaveMergesAndLogs`), 사진 본문 상한이 파싱보다 먼저(`TestThemeUploadBodyIsCappedBeforeParse`), 거부된 폼은 사진을 남기지 않는다(`TestThemeSettingsPicture`), 마이그레이션 위·아래(`TestThemeContentSchemaBites`·`TestEveryMigrationRollsBackCompletely`) (FR-311) |
 
 ## 작업 수 요약
 
@@ -498,5 +499,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 33 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **171** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 34 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **172** | **9** | — |
