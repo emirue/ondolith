@@ -257,13 +257,13 @@ func (d *publicDeps) renderPage(w http.ResponseWriter, r *http.Request, name str
 	if v.Site.SEO.NoIndex {
 		w.Header().Set("X-Robots-Tag", "noindex")
 	}
-	d.writeRendered(w, name, code, v, (*theme.Loader).Render)
+	d.writeRendered(w, r, name, code, v, (*theme.Loader).Render)
 }
 
 // renderPartial writes a screen's block with no page chrome — for htmx swaps.
 func (d *publicDeps) renderPartial(w http.ResponseWriter, r *http.Request, name string, v theme.View) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	d.writeRendered(w, name, http.StatusOK, v, (*theme.Loader).RenderPartial)
+	d.writeRendered(w, r, name, http.StatusOK, v, (*theme.Loader).RenderPartial)
 }
 
 // writeRendered draws the whole response before the status line goes out (FR-312).
@@ -272,12 +272,12 @@ func (d *publicDeps) renderPartial(w http.ResponseWriter, r *http.Request, name 
 // 없는 필드·인자 형 불일치·테마가 요구하는 기능이 없는 코어가 그렇게 된다. 관리자 화면(adminRenderer)과
 // 같은 방식이다. 실패하면 테마가 쓴 것은 버리고 500 과 **코어 내장** 오류 화면을 보낸다: 실패한
 // 테마의 error.html 도 같은 이유로 실패할 수 있다. 화면이면 문서 전체, 조각이면 조각이다.
-func (d *publicDeps) writeRendered(w http.ResponseWriter, name string, code int, v theme.View,
+func (d *publicDeps) writeRendered(w http.ResponseWriter, r *http.Request, name string, code int, v theme.View,
 	render func(*theme.Loader, io.Writer, string, any) error,
 ) {
 	var buf bytes.Buffer
 	if err := render(d.loader(), &buf, name, v); err != nil {
-		d.log.Error("템플릿 렌더링 실패", "template", name, "err", err)
+		d.log.Error("템플릿 렌더링 실패", "template", name, "path", logPath(r), "err", err)
 		buf.Reset()
 		code = http.StatusInternalServerError
 		// 실패한 화면의 메타(구조화 데이터 등)는 싣지 않는다 — 사이트·메뉴·로그인 상태만 남긴다.

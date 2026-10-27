@@ -499,6 +499,22 @@ func TestThemeListPassesInstalledThemes(t *testing.T) {
 	}
 }
 
+// FR-313: 부팅이 활성 테마 대신 내장 테마로 띄웠으면 A-202 도 그렇게 말한다 — 실제로는 그려지지
+// 않는 테마에 「사용 중」이 붙어 있었다. 까닭은 A-602 와 같은 경고로.
+func TestThemeListShowsTheBootFallback(t *testing.T) {
+	d, _ := fixture(t, &fakeCaller{perms: map[string]bool{"theme.view": true}})
+	d.ThemeFallback = func() string { return "내장 테마로 띄웠습니다" }
+	var got map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, code int, data any) {
+		got = data.(map[string]any)
+		w.WriteHeader(code)
+	}
+	d.ThemeList(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/themes", nil))
+	if got["Fallback"] != true || got["Warning"] != "내장 테마로 띄웠습니다" {
+		t.Errorf("A-202: Fallback=%v Warning=%v, want true·경고", got["Fallback"], got["Warning"])
+	}
+}
+
 // **메뉴 순서는 화면에서 정한다** (D19 A-204). 폼에 순서 칸이 없어 sort_order 가 모두 0
 // 이었고, 메뉴는 추가한 순서와 무관하게 id(UUID) 순으로 나왔다. 수정할 때마다 순서가
 // 0 으로 돌아가는 것도 같은 원인이었다.

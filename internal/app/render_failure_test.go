@@ -47,15 +47,19 @@ func TestThemeTemplateFailureIsA500WithTheBuiltinErrorPage(t *testing.T) {
 
 	for _, tc := range []struct {
 		template string
-		render   func(w http.ResponseWriter)
+		path     string // 요청 주소 — 로그에 남는다. 재설정 토큰은 가려진다 (D15 7절)
+		wantPath string
+		render   func(w http.ResponseWriter, r *http.Request)
 		page     bool
 	}{
-		{"home.html", func(w http.ResponseWriter) { d.renderPage(w, r, "home.html", http.StatusOK, v) }, true},
-		{"shop/variant.html", func(w http.ResponseWriter) { d.renderPartial(w, r, "shop/variant.html", v) }, false},
+		{"home.html", "/password/reset/sekrit-token", "/password/reset/{token}",
+			func(w http.ResponseWriter, r *http.Request) { d.renderPage(w, r, "home.html", http.StatusOK, v) }, true},
+		{"shop/variant.html", "/shop/p/7", "/shop/p/7",
+			func(w http.ResponseWriter, r *http.Request) { d.renderPartial(w, r, "shop/variant.html", v) }, false},
 	} {
 		logs.Reset()
 		rec := httptest.NewRecorder()
-		tc.render(rec)
+		tc.render(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
 		body := rec.Body.String()
 		if rec.Code != http.StatusInternalServerError {
 			t.Errorf("%s: HTTP %d, want 500", tc.template, rec.Code)
@@ -77,6 +81,10 @@ func TestThemeTemplateFailureIsA500WithTheBuiltinErrorPage(t *testing.T) {
 		if l := logs.String(); !strings.Contains(l, "level=ERROR") || !strings.Contains(l, "template="+tc.template) ||
 			!strings.Contains(l, "Nope") {
 			t.Errorf("%s: ERROR 로그에 템플릿 이름과 오류가 없다: %s", tc.template, l)
+		}
+		// 어느 주소가 깨졌는지 — 같은 템플릿을 여러 주소가 쓴다.
+		if l := logs.String(); !strings.Contains(l, "path="+tc.wantPath) || strings.Contains(l, "sekrit-token") {
+			t.Errorf("%s: ERROR 로그에 요청 주소 %s 가 없거나 토큰이 그대로다: %s", tc.template, tc.wantPath, l)
 		}
 	}
 

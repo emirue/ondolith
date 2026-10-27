@@ -177,6 +177,36 @@ func TestThemesScreenListsInstalledThemes(t *testing.T) {
 	}
 }
 
+// FR-313: 부팅이 활성 테마 대신 내장 테마로 띄웠으면 「사용 중」은 내장 테마에 붙고, 고른 테마는
+// 「선택됨」이다. 평소에는 고른 테마가 「사용 중」이다.
+func TestThemesScreenMarksTheBootFallback(t *testing.T) {
+	row := func(out, td string) string {
+		i := strings.Index(out, td)
+		if i < 0 {
+			t.Fatalf("%s 행이 없다", td)
+		}
+		end := strings.Index(out[i:], "</tr>")
+		return out[i : i+end]
+	}
+	for _, tc := range []struct {
+		fallback               bool
+		builtinUsed, futureUse bool
+	}{
+		{false, false, true},
+		{true, true, false},
+	} {
+		out := renderAdmin(t, "admin/themes.html", map[string]any{"Active": "future", "Installed": []string{"future"}, "Fallback": tc.fallback})
+		builtin, future := row(out, "<td>내장 테마</td>"), row(out, "<td>future</td>")
+		if strings.Contains(builtin, "사용 중") != tc.builtinUsed || strings.Contains(future, "사용 중") != tc.futureUse {
+			t.Errorf("Fallback=%v: 「사용 중」 내장 %v·future %v, want %v·%v", tc.fallback,
+				strings.Contains(builtin, "사용 중"), strings.Contains(future, "사용 중"), tc.builtinUsed, tc.futureUse)
+		}
+		if strings.Contains(future, "선택됨") != tc.fallback {
+			t.Errorf("Fallback=%v: future 행의 「선택됨」 = %v", tc.fallback, strings.Contains(future, "선택됨"))
+		}
+	}
+}
+
 // 메뉴 화면은 순서 칸과, 부모를 제목으로 고르는 목록을 둔다 — 부모 칸에 화면 어디에도
 // 안 보이는 UUID 를 쳐야 해서 하위 메뉴를 사실상 만들 수 없었다.
 func TestMenusScreenPicksParentsByTitle(t *testing.T) {
