@@ -1267,10 +1267,8 @@ func (d *Deps) System(w http.ResponseWriter, r *http.Request) {
 		"DBReadable": err == nil,
 	}
 	// 레이아웃의 경고 띠로 나간다 — 부팅이 활성 테마 대신 내장 테마로 띄웠다는 것 (FR-313).
-	if d.ThemeFallback != nil {
-		if msg := d.ThemeFallback(); msg != "" {
-			data["Warning"] = msg
-		}
+	if msg := d.themeFallback(); msg != "" {
+		data["Warning"] = msg
 	}
 	d.Render(w, r, "admin/system.html", http.StatusOK, data)
 }

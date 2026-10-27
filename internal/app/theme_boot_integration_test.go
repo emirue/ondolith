@@ -140,6 +140,11 @@ func TestBootServesTheBuiltinThemeWhenTheActiveOneNeedsANewerCore(t *testing.T) 
 	if !strings.Contains(sys, "adm-toast--warn") || !strings.Contains(sys, "9.0.0") || !strings.Contains(sys, "v1.2.3") {
 		t.Errorf("A-602 에 경고가 없다 (요구 버전·현재 버전)\n%s", sys)
 	}
+	// A-202 도 같다 — 고른 테마는 「선택됨」, 경고에 까닭.
+	if _, themes := mustGet(t, c, srv.URL+"/admin/themes"); !strings.Contains(themes, "adm-toast--warn") ||
+		!strings.Contains(themes, "9.0.0") || !strings.Contains(themes, "선택됨") {
+		t.Errorf("A-202 이 내장 테마로 뜬 것을 말하지 않는다\n%s", themes)
+	}
 
 	// 운영자가 다른 테마(내장)를 켜면 내장으로 띄운 까닭이 사라진다 — 경고도 걷힌다.
 	resp := post("/admin/themes", url.Values{"theme": {""}})
@@ -167,5 +172,24 @@ func TestBootOnlyWarnsAboutRequiresOnADevBuild(t *testing.T) {
 	}
 	if code, home := mustGet(t, client(), srv.URL+"/"); code != http.StatusOK || !strings.Contains(home, "future-home") {
 		t.Errorf("개발 빌드에서는 테마가 그대로 떠야 한다: HTTP %d", code)
+	}
+}
+
+// requires 가 major.minor.patch 가 아니면 비교할 수 없다 — 이미 켜진 테마는 경고만 하고 그대로 뜬다.
+// 비교할 수 없는 값 하나로 사이트의 테마를 내리지 않는다. 같은 값은 활성화(A-202)에서 거부된다.
+func TestBootOnlyWarnsAboutAMalformedRequires(t *testing.T) {
+	root := t.TempDir()
+	writeTheme(t, root, "future", map[string]string{
+		"theme.json": `{"name": "미래", "requires": "nine"}`,
+		"home.html":  `{{define "body"}}<p id="future-home">미래 테마</p>{{end}}`,
+	})
+	srv, _, logs := bootTheme(t, root, "future", "v1.2.3")
+
+	if errs, req := logLines(logs, "level=ERROR"), logLines(logs, "nine"); len(errs) != 0 || len(req) != 1 ||
+		!strings.Contains(req[0], "level=WARN") {
+		t.Errorf("깨진 requires: ERROR 없이 WARN 한 줄이어야 한다 — ERROR %q, requires %q", errs, req)
+	}
+	if code, home := mustGet(t, client(), srv.URL+"/"); code != http.StatusOK || !strings.Contains(home, "future-home") {
+		t.Errorf("깨진 requires 에서도 테마가 그대로 떠야 한다: HTTP %d", code)
 	}
 }

@@ -360,6 +360,14 @@ func (d *Deps) themeChanged(name string) {
 	}
 }
 
+// themeFallback is why boot served the built-in theme instead of the active one, or "" (FR-313).
+func (d *Deps) themeFallback() string {
+	if d.ThemeFallback == nil {
+		return ""
+	}
+	return d.ThemeFallback()
+}
+
 // ThemeList is A-202's read: the active theme and what is installed.
 //
 // 설치된 테마를 나열한다 — 디렉터리 이름을 직접 쳐야 했고, 업로드 화면(A-203)으로 가는
@@ -386,6 +394,13 @@ func (d *Deps) renderThemes(w http.ResponseWriter, r *http.Request, code int, da
 			return
 		}
 		data["Installed"] = installed
+	}
+	// 부팅이 내장 테마로 띄웠으면 고른 테마에 「사용 중」을 붙이지 않는다 — 까닭은 A-602 와 같은 경고로.
+	if msg := d.themeFallback(); msg != "" {
+		data["Fallback"] = true
+		if _, ok := data["Warning"]; !ok {
+			data["Warning"] = msg
+		}
 	}
 	d.Render(w, r, "admin/themes.html", code, data)
 }
