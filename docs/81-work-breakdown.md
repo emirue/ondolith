@@ -494,6 +494,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-37 | 512MB 서버에서 사진 처리 — 면적 평균 축소, 펼치기 전 메모리 검사 **(완료 — `TestProcessImageMemoryIsBoundedByTheTarget`·`TestShrinkAveragesTheCoveredArea`·`TestShrinkFastPathsMatchTheGenericPath`·`TestProcessImageRefusesWhatMemoryCannotHold`, 180MB 컨테이너 실측 2026-11-14)** | — | `internal/content/imageproc.go` `shrink`·`workBytes`·`availableMemory`, `internal/admin/media.go` `editorMessage` | 메모리를 180MB 로 묶은 리눅스 컨테이너에서 4000×3000·6000×4000 JPEG 와 6000×4000 PNG 가 처리된다(예전 코드는 셋 다 OOM). 사진 한 장의 할당이 원본 한 벌 + 결과 몇 벌을 넘지 않는다. 가용 메모리(+스왑)로 감당하지 못하는 사진은 펼치기 전에 거부하고 줄여 올리라고 안내한다 (FR-514, NFR-101) |
 | W6-38 | 설치 직후 결함 — 폴더가 작업 디렉터리 기준, 사이트 설정 이름 칸이 비어 저장 422 **(완료 — `TestSaveRemembersWhereItWrote`·`TestInstallProvisionsDatabase`·`TestBootCopiesTheInstalledSiteNameIntoSettings`, 실제 Chrome 2026-11-14)** | — | `internal/config/config.go` `Save`, `internal/app/app.go` 부팅의 `site.name` 옮기기 | 설치 마법사가 운영 트리에 넘긴 설정의 업로드·테마·백업 폴더가 재시작 전에도 설정 파일 옆이다. 설치 직후 「사이트 설정」의 이름 칸에 설치 때 넣은 이름이 있고, 사업자 정보만 넣어 저장해도 303 이다. 운영자가 바꾼 이름은 부팅이 덮어쓰지 않는다 (FR-106, FR-102) |
 | W6-39 | 일반 사이트 부팅의 라우트 점검 경고를 한 줄로 **(완료 — `TestBootDoesNotWarnAboutWhatCmsLeavesOut`·`TestShopOnlyIsExactlyWhatCmsLeavesOut`, 2026-11-14)** | — | `internal/app/routes.go` `CheckResult.Unrouted`·`Unused`·`shopOnly`, `internal/app/app.go` 부팅 로그 | cms 로 부팅하면 「라우트 자체 점검」 WARN 이 0줄이고(이전 58줄) 쇼핑몰 몫은 INFO 한 줄이다. shop 부팅도 WARN 0줄이다. 코어 화면·권한은 접히지 않는다 — 정말 빠지면 지금처럼 WARN 이다 (FR-710) |
+| W6-40 | 테마 활성화 경고 오탐 — 조각에 둔 띠, 테마가 부르는 조각 **(완료 — `TestContractWarningsFollowWhatTheThemeCalls`·`TestContractWarningsStayInsideTheTheme`, 2026-11-14)** | — | `internal/theme/loader.go` `contractWarnings`·`layoutText` | 코어 내장 `base.html` 을 그대로 쓴 테마와 띠를 자기 조각에 둔 테마는 경고가 없다. 테마의 템플릿이 부르는 `partials/` 조각은 「코어가 찾지 않는 이름」이 아니고, 아무도 부르지 않는 조각과 오타 난 이름은 지금처럼 경고한다. 조각 이름을 따라 테마 폴더 밖(`../`·심볼릭 링크)을 읽지 않는다 (FR-308) |
 
 ## 작업 수 요약
 
@@ -504,5 +505,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 39 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **177** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 40 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **178** | **9** | — |
