@@ -381,6 +381,7 @@ sleep 61
 node --check scripts/ui-audit.mjs || { echo "  ✗ 감사 스크립트 문법 오류"; exit 1; }
 node --check scripts/shots.mjs || { echo "  ✗ 촬영 스크립트 문법 오류"; exit 1; }
 node --check scripts/editor-ime.mjs || { echo "  ✗ 에디터 시험 스크립트 문법 오류"; exit 1; }
+node --check scripts/file-drop.mjs || { echo "  ✗ 파일 칸 시험 스크립트 문법 오류"; exit 1; }
 tojson() { python3 -c 'import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' <"$1"; }
 audit=0
 
@@ -426,6 +427,14 @@ if [ -z "${UI_SHOTS:-}" ]; then
 		ok "에디터: 한글 조합·사진 올리기·저장"
 	else
 		bad "에디터 브라우저 시험"
+	fi
+	# **관리자 파일 칸은 끌어다 놓는다** (FR-721). 실제 끌기·여러 장·거절·칸 밖·놓은 채로 올리기.
+	# 감사 뒤에 둔다 — 상품 사진이 두 장 늘어 상품 화면이 달라진다.
+	if UI_BASE="$BASE" UI_EMAIL=admin@example.com UI_PASSWORD="$ADMIN_PW" UI_PRODUCT="$PROD" \
+		node scripts/file-drop.mjs; then
+		ok "파일 칸: 끌어다 놓기·거절·칸 밖·올리기"
+	else
+		bad "파일 칸 브라우저 시험"
 	fi
 fi
 

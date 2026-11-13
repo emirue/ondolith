@@ -1095,3 +1095,44 @@ func TestAdminMenuDropsHiddenScreens(t *testing.T) {
 		}
 	}
 }
+
+// **관리자 파일 칸은 끌어다 놓을 수 있다** (FR-721). 칸이 「파일 선택」 단추만큼 좁고, 칸 밖에 놓으면 브라우저가
+// 그림을 열어 쓰던 폼이 날아갔다 (사이트 요청 2026-11-14). 파일 칸이 있는 관리자 템플릿은 전부 칸을 data-drop 으로
+// 표시하고 놓기 영역(data-drop-zone) 안에 두며 /static/js/upload.js 를 싣는다 — 새 파일 칸이 이 셋 중 하나를 빠뜨리면
+// 여기서 걸린다. 스크립트는 내장 테마에 있어야 어느 테마를 켜도 온다(정적 파일은 디스크 다음 내장).
+func TestAdminFileInputsAcceptDrops(t *testing.T) {
+	names, err := fs.Glob(adminFS, "templates/admin/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileInput := regexp.MustCompile(`<input[^>]*type="file"[^>]*>`)
+	seen := 0
+	for _, name := range names {
+		b, err := fs.ReadFile(adminFS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs := fileInput.FindAllString(string(b), -1)
+		if len(inputs) == 0 {
+			continue
+		}
+		seen += len(inputs)
+		for _, in := range inputs {
+			if !strings.Contains(in, "data-drop") {
+				t.Errorf("%s: 파일 칸에 data-drop 이 없다: %s", name, in)
+			}
+		}
+		if !strings.Contains(string(b), "data-drop-zone") {
+			t.Errorf("%s: 놓기 영역(data-drop-zone)이 없다", name)
+		}
+		if !strings.Contains(string(b), `src="/static/js/upload.js"`) {
+			t.Errorf("%s: /static/js/upload.js 를 싣지 않는다", name)
+		}
+	}
+	if seen < 3 {
+		t.Fatalf("파일 칸을 %d개밖에 못 찾았다 — 상품 이미지·테마 화면 사진·테마 업로드가 있어야 한다", seen)
+	}
+	if _, err := fs.Stat(theme.Builtin(), "static/js/upload.js"); err != nil {
+		t.Errorf("내장 테마에 static/js/upload.js 가 없다: %v", err)
+	}
+}

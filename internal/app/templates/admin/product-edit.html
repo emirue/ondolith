@@ -75,12 +75,14 @@
       <li>등록된 이미지가 없습니다. 첫 번째로 올린 이미지가 목록의 대표 이미지입니다.</li>
       {{end}}
     </ul>
-    <form method="post" action="/admin/products/{{.Product.ID}}/images" enctype="multipart/form-data" class="adm-inline">
+    {{/* 끌어다 놓기 (FR-721) — 폼 전체가 놓는 곳이다. 스크립트가 없어도 칸은 그대로 동작한다. */}}
+    <form method="post" action="/admin/products/{{.Product.ID}}/images" enctype="multipart/form-data" class="adm-inline" data-drop-zone>
       <label for="product-image">이미지 추가 (jpg·png·gif·webp)</label>
-      <input id="product-image" type="file" name="image" multiple required
+      <input id="product-image" type="file" name="image" multiple required data-drop
              accept="image/jpeg,image/png,image/gif,image/webp">
       <button class="adm-btn">올리기</button>
     </form>
+    <script src="/static/js/upload.js" defer></script>
 </div>
 
 <div class="adm-card">
