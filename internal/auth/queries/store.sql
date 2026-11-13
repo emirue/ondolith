@@ -1,9 +1,11 @@
 -- name: LoadPermissions :one
+-- R9: 모든 요청이 갖는 역할(anonymous·member)에서는 방문자 권한(visitor)만 효력이 있다 — 거기 들어간
+-- 관리 권한은 가입한 누구에게나 간다. 부여 화면이 막기 전에 들어간 것까지 여기서 버린다.
 WITH effective AS (
-    SELECT r.id, r.is_superuser
+    SELECT r.id, r.key, r.is_superuser
     FROM roles r
     WHERE r.key IN ('anonymous', 'member')
-       OR r.id IN (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id = $1)
+       OR r.id IN (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id = sqlc.arg('user_id'))
 )
 SELECT
     coalesce(bool_or(e.is_superuser), false)::bool AS superuser,
@@ -14,7 +16,8 @@ SELECT
     )::text[] AS perms
 FROM effective e
 LEFT JOIN role_permissions rp ON rp.role_id = e.id
-LEFT JOIN permissions p       ON p.id = rp.permission_id;
+LEFT JOIN permissions p       ON p.id = rp.permission_id
+    AND (e.key NOT IN ('anonymous', 'member') OR p.key = ANY(sqlc.arg('visitor')::text[]));
 
 -- name: LoadRolePermissions :one
 -- 한 역할(anonymous·member)이 가진 권한 — 사용자가 아니라 역할을 묻는다.
@@ -25,7 +28,8 @@ SELECT coalesce(
 FROM roles r
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
-WHERE r.key = $1;
+    AND (r.key NOT IN ('anonymous', 'member') OR p.key = ANY(sqlc.arg('visitor')::text[]))
+WHERE r.key = sqlc.arg('role_key');
 
 -- name: FindActiveUserByEmail :one
 SELECT id, email, display_name, is_active, sessions_valid_from,
@@ -142,6 +146,34 @@ ON CONFLICT ON CONSTRAINT role_permissions_uniq DO NOTHING;
 INSERT INTO user_roles (user_id, role_id)
 SELECT sqlc.arg('user_id')::uuid, r.id FROM roles r WHERE r.key = sqlc.arg('role_key') AND r.is_assignable
 ON CONFLICT ON CONSTRAINT user_roles_uniq DO NOTHING;
+
+-- name: RevokePermission :execrows
+-- A-404 빼기: 그 부여 한 행만. 게시판·테마 화면 범위까지 같아야 같은 부여다 (빈 값 = 범위 없음).
+DELETE FROM role_permissions rp
+USING roles r, permissions p
+WHERE rp.role_id = r.id AND rp.permission_id = p.id
+  AND r.key = sqlc.arg('role_key') AND p.key = sqlc.arg('perm_key')
+  AND rp.board_id IS NOT DISTINCT FROM NULLIF(sqlc.arg('board')::text, '')::uuid
+  AND rp.theme_screen IS NOT DISTINCT FROM NULLIF(sqlc.arg('screen')::text, '');
+
+-- name: UnassignRole :execrows
+DELETE FROM user_roles ur
+USING roles r
+WHERE ur.role_id = r.id AND ur.user_id = sqlc.arg('user_id')::uuid AND r.key = sqlc.arg('role_key');
+
+-- name: UserRoleKeys :many
+SELECT r.key FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id = sqlc.arg('user_id')::uuid
+ORDER BY r.key;
+
+-- name: RoleGrants :many
+-- A-403 이 범위까지 보여야 뺄 것을 고른다 — Roles 는 키만 모은다.
+SELECT r.key AS role_key, p.key AS perm_key,
+       coalesce(rp.board_id::text, '')::text AS board_id, coalesce(rp.theme_screen, '')::text AS theme_screen
+FROM role_permissions rp
+JOIN roles r       ON r.id = rp.role_id
+JOIN permissions p ON p.id = rp.permission_id
+ORDER BY r.key, p.key, board_id, theme_screen;
 
 -- name: BoardsWithGrants :many
 SELECT DISTINCT board_id::text AS board_id FROM role_permissions WHERE board_id IS NOT NULL;

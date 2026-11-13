@@ -63,7 +63,7 @@ func (u *User) Cutoff() DBTime { return DBTime{u.SessionsValidFrom} }
 // Nothing is cached beyond the request: a revoked role must bite on the next
 // request, not after the session expires (D15 4.3-1).
 func (s *Store) LoadPermissions(ctx context.Context, userID string) (*Permissions, error) {
-	row, err := s.q.LoadPermissions(ctx, userID)
+	row, err := s.q.LoadPermissions(ctx, authq.LoadPermissionsParams{UserID: userID, Visitor: VisitorPermissions()})
 	if err != nil {
 		return nil, err
 	}
@@ -89,9 +89,9 @@ func parseGrants(rows []string) []Grant {
 
 // LoadAnonymousPermissions is the same for a request with no user. It exists so
 // that the anonymous path is a query, not an empty set assumed in a handler —
-// an installation may grant permissions to `anonymous` (D15 2.5).
+// an installation may grant visitor permissions to `anonymous` (D15 2.5, R9).
 func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, error) {
-	keys, err := s.q.LoadRolePermissions(ctx, RoleAnonymous)
+	keys, err := s.q.LoadRolePermissions(ctx, authq.LoadRolePermissionsParams{RoleKey: RoleAnonymous, Visitor: VisitorPermissions()})
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (s *Store) LoadAnonymousPermissions(ctx context.Context) (*Permissions, err
 // role). 로그인하지 않은 방문자에게 「로그인하면 쓸 수 있다」고 말해도 되는지를 이것으로
 // 판정한다 — 운영진만 쓰는 게시판에서 그렇게 말하면 거짓이다.
 func (s *Store) LoadMemberPermissions(ctx context.Context) (*Permissions, error) {
-	keys, err := s.q.LoadRolePermissions(ctx, RoleMember)
+	keys, err := s.q.LoadRolePermissions(ctx, authq.LoadRolePermissionsParams{RoleKey: RoleMember, Visitor: VisitorPermissions()})
 	if err != nil {
 		return nil, err
 	}
@@ -436,6 +436,65 @@ func (s *Store) PermissionIsScoped(ctx context.Context, key string) (bool, error
 func (s *Store) GrantPermission(ctx context.Context, roleKey, permKey string, board BoardID, screen string) error {
 	return s.q.GrantPermission(ctx, authq.GrantPermissionParams{
 		RoleKey: roleKey, PermKey: permKey, Board: string(board), Screen: screen})
+}
+
+// RevokePermission takes one grant out of a role (A-404): 범위(게시판·테마 화면)까지 같은 그 행만.
+// n 은 지운 행 수다 — 0 이면 그런 부여가 없었다.
+func (s *Store) RevokePermission(ctx context.Context, roleKey, permKey string, board BoardID, screen string) (int64, error) {
+	return notAUUIDIsNone(s.q.RevokePermission(ctx, authq.RevokePermissionParams{
+		RoleKey: roleKey, PermKey: permKey, Board: string(board), Screen: screen}))
+}
+
+// notAUUIDIsNone reads 22P02 (uuid 가 아닌 값) as 「지운 행 없음」 — 폼에서 온 id 라 무엇이든 올 수 있고,
+// uuid 가 아닌 id 를 가진 부여·사용자는 없다. 그대로 두면 500 이다.
+func notAUUIDIsNone(n int64, err error) (int64, error) {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+		return 0, nil
+	}
+	return n, err
+}
+
+// UnassignRole takes a role away from a user (A-405). superuser 역할이면 비활성·삭제와 같은 잠금 아래서
+// 지운다 — 마지막 관리자에게서 빼면 ErrLastSuperuser 다 (D15 5.2). n 은 지운 행 수다.
+func (s *Store) UnassignRole(ctx context.Context, userID, roleKey string, superuser bool) (int64, error) {
+	arg := authq.UnassignRoleParams{UserID: userID, RoleKey: roleKey}
+	if !superuser {
+		return notAUUIDIsNone(s.q.UnassignRole(ctx, arg))
+	}
+	var n int64
+	err := s.withLastSuperuserGuard(ctx, userID, func(tx pgx.Tx) error {
+		var err error
+		n, err = s.q.WithTx(tx).UnassignRole(ctx, arg)
+		return err
+	})
+	return notAUUIDIsNone(n, err)
+}
+
+// UserRoleKeys are the roles a user was given (user_roles), by key — A-402 이 보이고 뺄 것을 고른다.
+// anonymous·member 는 암묵 역할이라 여기 없다.
+func (s *Store) UserRoleKeys(ctx context.Context, userID string) ([]string, error) {
+	return s.q.UserRoleKeys(ctx, userID)
+}
+
+// RoleGrant is one row of role_permissions as A-403 shows it.
+type RoleGrant struct {
+	Role, Permission string
+	Board            BoardID
+	Screen           string
+}
+
+// RoleGrants lists every grant with its scope.
+func (s *Store) RoleGrants(ctx context.Context) ([]RoleGrant, error) {
+	rows, err := s.q.RoleGrants(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RoleGrant, len(rows))
+	for i, r := range rows {
+		out[i] = RoleGrant{Role: r.RoleKey, Permission: r.PermKey, Board: BoardID(r.BoardID), Screen: r.ThemeScreen}
+	}
+	return out, nil
 }
 
 // AssignRole gives a user a role, ignoring a repeat.

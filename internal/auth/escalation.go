@@ -24,6 +24,8 @@ var (
 	ErrSuperuserRoleEdit = errors.New("auth: superuser 역할의 권한 구성은 편집 대상이 아니다 (R5)")
 	// R6
 	ErrSuperuserAccountOp = errors.New("auth: superuser 보유자에 대한 계정 조작은 superuser 만 한다 (R6)")
+	// R9
+	ErrEveryoneRolePermission = errors.New("auth: 모든 요청이 갖는 역할(anonymous·member)에는 방문자 권한만 준다 (R9)")
 	// D15 2.4
 	ErrScopeNotAllowed = errors.New("auth: 스코프 부여는 is_scoped 권한에만 허용된다")
 	// D41 4절
@@ -86,11 +88,43 @@ func CanAssignRole(actor Actor, targetUserID string, role Role) error {
 	return nil
 }
 
-// CanAddPermissionToRole applies R4 and R5 to editing a role's composition.
+// visitorPermissions are what the roles every request carries may hold (R9): 게시판 프리셋이
+// anonymous·member 에 주는 읽기·쓰기·댓글이 전부다(content.presetGrants). post.read_secret 은 빠진다 —
+// 남의 비밀글을 모두에게 여는 것이고, 프리셋도 주지 않는다. 프리셋이 이 밖의 것을 주면
+// app 의 시험(TestPresetsGiveEveryoneOnlyVisitorPermissions)이 잡는다.
+var visitorPermissions = map[string]bool{"post.read": true, "post.write": true, "comment.write": true}
+
+// IsVisitorPermission reports whether p may sit on a role every request carries (R9).
+func IsVisitorPermission(p string) bool { return visitorPermissions[p] }
+
+// VisitorPermissions lists them for the queries that filter on load.
+func VisitorPermissions() []string { return []string{"comment.write", "post.read", "post.write"} }
+
+// EveryoneRole reports whether key is a role every request carries: anonymous 는 모든 요청,
+// member 는 로그인한 모든 요청 (EffectiveRoles, LoadPermissions 가 이 두 키로 붙인다).
+func EveryoneRole(key string) bool { return key == RoleAnonymous || key == RoleMember }
+
+// CanAddPermissionToRole applies R4, R5 and R9 to editing a role's composition.
 func CanAddPermissionToRole(actor Actor, role Role, permission string) error {
 	// R5 before R4: the superuser role is not editable by anyone, so checking
 	// R4 first would answer "you lack that permission" to a superuser and
 	// "allowed" to nobody — the wrong reason for the right refusal.
+	if role.Superuser {
+		return ErrSuperuserRoleEdit
+	}
+	// R9 before R4: superuser 도 막는다 — 그 역할에 준 관리 권한은 가입한 누구에게나 간다.
+	if EveryoneRole(role.Key) && !IsVisitorPermission(permission) {
+		return ErrEveryoneRolePermission
+	}
+	if !actor.Perms.Can(permission) {
+		return ErrAddUnheldPermission
+	}
+	return nil
+}
+
+// CanRemovePermissionFromRole applies R5 and R4 to taking a permission out of a role. R9 does not apply:
+// 모두가 갖는 역할에 잘못 들어간 권한을 빼는 것이 이 길의 목적이다.
+func CanRemovePermissionFromRole(actor Actor, role Role, permission string) error {
 	if role.Superuser {
 		return ErrSuperuserRoleEdit
 	}

@@ -498,6 +498,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-41 | 사업자 정보에 팩스 **(완료 — `TestMissingBusinessKeysNamesTheEmptyOnes`·`TestSiteSettingsHoldBusinessInfo`·`TestBusinessInfoRendersInCmsModeToo`, 2026-11-14)** | W6-32 | `internal/commerce/terms.go` `BusinessKeys`·`BusinessLabels` | A-201 사업자 정보에 「팩스」 칸이 개인정보관리책임자와 업무시간 사이에 있고, 저장한 값이 공개 화면 바닥글에 `<dt>팩스</dt>` 로 나온다. 200자를 넘으면 422 다. 표시 의무가 아니라 `shop` 미입력 경고에 들지 않는다 (FR-711) |
 | W6-42 | 관리자 파일 칸 끌어다 놓기 **(완료 — `TestAdminFileInputsAcceptDrops`, `scripts/file-drop.mjs` 실제 Chrome 15 항목, 2026-11-14)** | — | `internal/theme/builtin/static/js/upload.js`, `admin.css` `.adm-drop`, `product-edit.html`·`theme-screen.html`·`theme-upload.html` | 상품 편집에서 영역에 사진을 실제로 끌어다 놓으면 칸에 들어가고 이름·미리보기가 보이며, 두 장을 놓은 채 올리면 상품 사진이 두 장 는다. 받을 수 없는 파일은 거절하고 앞서 고른 것이 남는다. 칸 밖에 놓아도 페이지가 바뀌지 않는다. 한 개 받는 zip 칸은 첫 파일만 받고 그림을 거절한다. 칸은 숨지 않아 눌러 고르기·키보드가 그대로다. 새 파일 칸이 표시를 빠뜨리면 `TestAdminFileInputsAcceptDrops` 가 잡는다 (FR-721) |
 | W6-43 | 파일 저장소가 S3 면 자동 백업도 그 버킷으로 · D70 S3 설정·백업 운영 안내 **(완료 — `TestSaveToTheBucketLeavesNothingLocal`·`TestSaveKeepsTheBackupLocallyWhenTheBucketRefuses`·`TestSchedulerSendsToTheBucketAndRemembersTheDay`·`TestAutoBackupGoesToTheBucketWhenStorageIsS3`·`TestBackupScreenShowsTheLastBackupAndWhereItGoes`, SeaweedFS·진짜 pg_dump 컨테이너 실측 2026-11-14)** | W6-12, W6-08 | `internal/backup/store.go` `Save`·`Remote`·`Scheduler`, `internal/app/app.go` `newBackupScheduler`, `internal/admin/backup.go`, `admin/backup.html`, D70 「백업」·「파일 저장소」 | S3 저장소 사이트의 자동 백업이 버킷의 `backups/auto-…zip` 에 오르고 서버에는 없다. 그 zip 을 내려받아 빈 DB 에 복원하면 마이그레이션 번호·표 수·행 수가 같다. 버킷이 죽은 날은 서버에 남고 작업 로그에 실패가 적힌다. 재시작한 같은 날 다시 만들지 않는다. 로컬 저장소면 지금처럼 로컬이다. A-604 가 마지막 자동 백업의 시각·위치를 보이고 이틀 넘게 없으면 경고한다 (FR-722) |
+| W6-44 | 역할·권한 빼기, 모두가 갖는 역할에는 방문자 권한만 (R9) **(완료 — `TestEveryoneRolesTakeOnlyVisitorPermissions`·`TestEveryoneRolesKeepOnlyVisitorGrantsOnLoad`·`TestRevokePermissionRemovesExactlyThatGrant`·`TestUnassignRole`·`TestGrantToEveryoneRolesIsLimitedToVisitorPermissions`·`TestRevokePermissionFromARole`·`TestRevokeRoleFromAUser`·`TestRoleScreensShowWhatIsHeld`·`TestEveryoneRoleAdminGrantDoesNotOpenTheAdminTree`·`TestPresetsGiveEveryoneOnlyVisitorPermissions`, 2026-11-14)** | W1-24 | `internal/auth/escalation.go` R9·`CanRemovePermissionFromRole`, `internal/auth/queries/store.sql`, `internal/admin/handlers_rbac.go` `RoleRevokePermission`·`RoleRevoke`, `roles.html`·`user-detail.html` | `anonymous`·`member` 에 방문자 권한 밖의 부여는 422 이고, DB 에 이미 있어도 역할 없는 회원에게 관리자 트리가 열리지 않는다(403). 역할에서 권한을, 사용자에게서 역할을 화면에서 빼면 다음 요청부터 효력이 없다 — 범위가 다른 부여는 남고, 자기 역할은 403, 마지막 관리자는 409, 없는 것은 404. A-402 가 가진 역할을, A-403 이 범위와 「효력 없음」을 보인다 (FR-723) |
 
 ## 작업 수 요약
 
@@ -508,5 +509,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 43 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **181** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 44 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **182** | **9** | — |

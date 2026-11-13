@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/emirue/ondolith/internal/auth/authq"
 	"github.com/emirue/ondolith/internal/migrations"
 )
 
@@ -168,22 +169,163 @@ func TestAnonymousPermissionsAreLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Can("page.view") {
-		t.Fatal("시드 상태의 anonymous 가 page.view 를 갖는다")
+	if p.Can("post.read") {
+		t.Fatal("시드 상태의 anonymous 가 post.read 를 갖는다")
 	}
 
+	// 방문자 권한은 반영되고, 관리 권한은 저장돼 있어도 효력이 없다 (R9, D15 2.5).
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO role_permissions (role_id, permission_id)
 		SELECT r.id, p.id FROM roles r, permissions p
-		WHERE r.key = 'anonymous' AND p.key = 'page.view'`); err != nil {
+		WHERE r.key = 'anonymous' AND p.key IN ('post.read', 'page.view')`); err != nil {
 		t.Fatal(err)
 	}
 	p2, err := s.LoadAnonymousPermissions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p2.Can("page.view") {
-		t.Error("anonymous 에 부여했는데 반영되지 않는다")
+	if !p2.Can("post.read") {
+		t.Error("anonymous 에 부여한 방문자 권한이 반영되지 않는다")
+	}
+	if p2.Can("page.view") {
+		t.Error("anonymous 에 들어간 관리 권한 page.view 가 효력을 가졌다 (R9)")
+	}
+}
+
+// **모든 요청이 갖는 역할에 들어간 관리 권한은 불러올 때 버린다** (R9). 부여 화면이 막기 전에 들어간 것, DB 를
+// 손으로 고친 것까지 — 새 판으로 올리기만 하면 효력이 없다. 역할이 하나도 없는 회원도 member 와 anonymous 를
+// 갖고 있어서, 거기 든 admin.access 가 그 회원에게 관리자 트리를 열었다.
+func TestEveryoneRolesKeepOnlyVisitorGrantsOnLoad(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO role_permissions (role_id, permission_id)
+		SELECT r.id, p.id FROM roles r, permissions p
+		WHERE (r.key = 'anonymous' AND p.key IN ('admin.access', 'post.read'))
+		   OR (r.key = 'member'    AND p.key IN ('settings.update', 'post.moderate', 'post.read_secret', 'post.write', 'comment.write'))`); err != nil {
+		t.Fatal(err)
+	}
+	plain := mkUser(t, s, "plain@example.com")
+	p, err := s.LoadPermissions(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, perm := range []string{"admin.access", "settings.update", "post.moderate", "post.read_secret"} {
+		if p.Can(perm) {
+			t.Errorf("역할 없는 회원이 %s 를 가졌다", perm)
+		}
+	}
+	for _, perm := range []string{"post.read", "post.write", "comment.write"} {
+		if !p.Can(perm) {
+			t.Errorf("역할 없는 회원의 방문자 권한 %s 가 사라졌다", perm)
+		}
+	}
+	// 부여 대상 역할의 관리 권한은 그대로다 — editor 는 시드로 admin.access 를 갖는다.
+	ed := mkUser(t, s, "editor@example.com")
+	grantRole(t, pool, ed, "editor")
+	pe, err := s.LoadPermissions(ctx, ed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pe.Can("admin.access") {
+		t.Error("editor 의 admin.access 까지 버렸다")
+	}
+}
+
+// **권한 빼기는 그 부여 한 행만 지운다** (A-404). 게시판 단위 부여와 전역 부여는 다른 행이다 — 하나를 빼도 다른
+// 하나는 남는다. 없는 부여를 빼면 0 행이고 화면이 404 로 답한다. 뺀 것은 다음 요청부터 효력이 없다.
+func TestRevokePermissionRemovesExactlyThatGrant(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	var board string
+	if err := pool.QueryRow(ctx, `INSERT INTO boards (slug, name) VALUES ('a','게시판 A') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.GrantPermission(ctx, "editor", "post.read_secret", BoardID(board), ""); err != nil {
+		t.Fatal(err)
+	}
+	ed := mkUser(t, s, "editor@example.com")
+	grantRole(t, pool, ed, "editor")
+
+	// 시드의 전역 post.read_secret 을 뺀다 — 게시판 A 행은 남는다.
+	n, err := s.RevokePermission(ctx, "editor", "post.read_secret", Global, "")
+	if err != nil || n != 1 {
+		t.Fatalf("전역 회수 = %d행, %v", n, err)
+	}
+	p, err := s.LoadPermissions(ctx, ed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Can("post.read_secret") || !p.CanOn("post.read_secret", BoardID(board)) {
+		t.Errorf("전역만 빠지고 게시판 A 는 남아야 한다: 전역 %v, A %v", p.Can("post.read_secret"), p.CanOn("post.read_secret", BoardID(board)))
+	}
+	if n, err := s.RevokePermission(ctx, "editor", "post.read_secret", Global, ""); err != nil || n != 0 {
+		t.Errorf("없는 부여 회수 = %d행, %v (0행이어야)", n, err)
+	}
+	if n, err := s.RevokePermission(ctx, "editor", "post.read_secret", BoardID(board), ""); err != nil || n != 1 {
+		t.Errorf("게시판 A 회수 = %d행, %v", n, err)
+	}
+}
+
+// **역할 빼기** (A-405). 빼면 다음 요청부터 그 권한이 없다. 마지막 관리자에게서 관리자 역할을 빼지 못한다 —
+// 비활성·삭제와 같은 잠금을 쓴다(D15 5.2). 가진 역할은 화면이 보이도록 키로 돌려준다.
+func TestUnassignRole(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	u := mkUser(t, s, "u@example.com")
+	grantRole(t, pool, u, "editor")
+	grantRole(t, pool, u, "operator")
+	if keys, err := s.UserRoleKeys(ctx, u); err != nil || strings.Join(keys, ",") != "editor,operator" {
+		t.Fatalf("가진 역할 = %v, %v", keys, err)
+	}
+	if n, err := s.UnassignRole(ctx, u, "editor", false); err != nil || n != 1 {
+		t.Fatalf("editor 회수 = %d행, %v", n, err)
+	}
+	if keys, _ := s.UserRoleKeys(ctx, u); strings.Join(keys, ",") != "operator" {
+		t.Errorf("회수 뒤 역할 = %v", keys)
+	}
+	if n, err := s.UnassignRole(ctx, u, "editor", false); err != nil || n != 0 {
+		t.Errorf("없는 역할 회수 = %d행, %v (0행이어야)", n, err)
+	}
+
+	a := mkUser(t, s, "admin@example.com")
+	grantRole(t, pool, a, "admin")
+	if _, err := s.UnassignRole(ctx, a, "admin", true); !errors.Is(err, ErrLastSuperuser) {
+		t.Fatalf("마지막 관리자의 관리자 역할을 뺐다: %v", err)
+	}
+	b := mkUser(t, s, "admin2@example.com")
+	grantRole(t, pool, b, "admin")
+	if n, err := s.UnassignRole(ctx, a, "admin", true); err != nil || n != 1 {
+		t.Errorf("관리자가 둘인데 회수 = %d행, %v", n, err)
+	}
+	if p, _ := s.LoadPermissions(ctx, a); p.Superuser {
+		t.Error("관리자 역할을 뺐는데 여전히 superuser 다")
+	}
+}
+
+// A-403 은 부여의 범위(게시판·테마 화면)까지 보여야 뺄 것을 고른다.
+func TestRoleGrantsCarryTheirScope(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	var board string
+	if err := pool.QueryRow(ctx, `INSERT INTO boards (slug, name) VALUES ('a','게시판 A') RETURNING id`).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.GrantPermission(ctx, "member", "post.write", BoardID(board), ""); err != nil {
+		t.Fatal(err)
+	}
+	grants, err := s.RoleGrants(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, g := range grants {
+		if g.Role == "member" && g.Permission == "post.write" && g.Board == BoardID(board) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("member 의 게시판 A post.write 가 없다: %+v", grants)
 	}
 }
 
@@ -606,7 +748,7 @@ func TestGrantPermissionKeepsTheThemeScreen(t *testing.T) {
 		t.Errorf("화면 부여 %d행 (%v), want 1", n, err)
 	}
 	// 시드: operator 는 모든 테마 화면을 연다 (D15 2.5).
-	keys, err := s.q.LoadRolePermissions(ctx, "operator")
+	keys, err := s.q.LoadRolePermissions(ctx, authq.LoadRolePermissionsParams{RoleKey: "operator", Visitor: VisitorPermissions()})
 	if err != nil {
 		t.Fatal(err)
 	}
