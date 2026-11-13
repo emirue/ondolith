@@ -1529,15 +1529,21 @@ func TestSiteSettingsHoldBusinessInfo(t *testing.T) {
 	ctx := context.Background()
 
 	if rec := post(d.SettingsSave, "/admin/settings", url.Values{"site.name": {"온돌"},
-		"business.name": {" 온돌리스 "}, "business.reg_no": {""}, "business.hours": {"평일 08:30 – 17:30"}}); rec.Code != http.StatusSeeOther {
+		"business.name": {" 온돌리스 "}, "business.reg_no": {""}, "business.hours": {"평일 08:30 – 17:30"},
+		"business.fax": {" 02-123-4567 "}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
-	kv, err := d.Content.Settings(ctx, "business.name", "business.reg_no", "business.hours")
+	kv, err := d.Content.Settings(ctx, "business.name", "business.reg_no", "business.hours", "business.fax")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kv["business.name"] != "온돌리스" || kv["business.reg_no"] != "" || kv["business.hours"] != "평일 08:30 – 17:30" {
+	if kv["business.name"] != "온돌리스" || kv["business.reg_no"] != "" || kv["business.hours"] != "평일 08:30 – 17:30" ||
+		kv["business.fax"] != "02-123-4567" {
 		t.Errorf("저장된 값 %q", kv)
+	}
+	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
+		"business.fax": {strings.Repeat("1", 201)}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("201자 팩스 = HTTP %d, want 422", rec.Code)
 	}
 	if rec := post(d.SettingsSave, "/admin/settings", url.Values{
 		"business.address": {strings.Repeat("가", 201)}}); rec.Code != http.StatusUnprocessableEntity {

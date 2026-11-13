@@ -309,7 +309,8 @@ func TestBusinessInfoRendersInTheFooter(t *testing.T) {
 func TestBusinessInfoRendersInCmsModeToo(t *testing.T) {
 	srv, pool := liveSite(t)
 	if _, err := pool.Exec(context.Background(), `
-		INSERT INTO settings (key, value) VALUES ('business.name','온돌리스'), ('business.hours','평일 08:30 – 17:30')
+		INSERT INTO settings (key, value) VALUES ('business.name','온돌리스'), ('business.hours','평일 08:30 – 17:30'),
+			('business.fax','02-123-4567')
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
 		t.Fatal(err)
 	}
@@ -324,6 +325,9 @@ func TestBusinessInfoRendersInCmsModeToo(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "<dt>업무시간</dt><dd>평일 08:30 – 17:30</dd>") {
 		t.Error("업무시간이 푸터에 없다")
+	}
+	if !strings.Contains(string(b), "<dt>팩스</dt><dd>02-123-4567</dd>") {
+		t.Error("팩스가 푸터에 없다")
 	}
 	if strings.Contains(string(b), "<dt>사업자등록번호</dt>") {
 		t.Error("비어 있는 항목이 그려졌다")
