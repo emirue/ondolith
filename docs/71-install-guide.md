@@ -164,6 +164,7 @@ curl -fsS http://<서버>:8080/healthz     # → ok
 | `/admin/settings/mail` | 회원 가입 인증·비밀번호 재설정 메일 |
 | `/admin/settings/payment` | **커머스를 쓴다면 필수** — PG 키가 없으면 결제가 되지 않는다 |
 | `/admin/settings/business` | `shop` 모드의 전자상거래법 표시 의무 항목 |
+| `/admin/settings/storage` | **선택** — 업로드 파일을 S3 호환 버킷에 둘 때. 기본은 서버 디스크다. 버킷·키를 먼저 준비하고, **이 저장소는 공개라** 버킷 정보를 올리지 않는다 — [D70 「파일 저장소」](70-operations.md) |
 
 ---
 
