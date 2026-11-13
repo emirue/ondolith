@@ -38,9 +38,11 @@ func TestBootDoesNotWarnAboutWhatCmsLeavesOut(t *testing.T) {
 			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, siteType); err != nil {
 			t.Fatal(err)
 		}
-		var logs strings.Builder
+		// 정리는 백업·만료 고루틴에 멈추라고만 하고 기다리지 않는다 — 그 사이에 쓰는 로그와 읽기가 겹치므로
+		// 잠그는 버퍼를 쓴다(lockedLog). strings.Builder 로 두었더니 CI 의 -race 가 잡았다.
+		logs := &lockedLog{}
 		cfg := &config.Config{DatabaseURL: dsn, SiteName: "경고", UploadDir: t.TempDir()}
-		_, cleanup, err := New(ctx, cfg, "1.0.0", slog.New(slog.NewTextHandler(&logs, nil)), nil)
+		_, cleanup, err := New(ctx, cfg, "1.0.0", slog.New(slog.NewTextHandler(logs, nil)), nil)
 		if err != nil {
 			t.Fatalf("%s 기동 실패: %v", siteType, err)
 		}
