@@ -11,7 +11,7 @@ systemd·TLS·CloudFront·WAF.
 
 | 항목 | 값 | 근거 |
 |---|---|---|
-| 플랜 | 1 vCPU / 512MB 이상 | 유휴 RSS 5 MiB 실측 ([D70 「자원」](70-operations.md)) |
+| 플랜 | 1 vCPU / 512MB 이상 | 유휴 RSS 5 MiB 실측 ([D70 「자원」](70-operations.md)). 사진을 많이 받으면 512MB 에는 스왑 1GB 를 둔다 — [D70 「사진 처리 메모리」](70-operations.md) |
 | 블루프린트 | Ubuntu LTS | 바이너리가 정적이라 배포판을 가리지 않는다 |
 | 아키텍처 | amd64 또는 arm64 | 릴리즈가 둘 다 낸다 |
 | 시간대 | `sudo timedatectl set-timezone Asia/Seoul` | **서울 리전도 기본이 `Etc/UTC` 다** (2026-10-02 `ap-northeast-2a` · `ubuntu_24_04` 실측). 관리자 기간 조회가 서버 시간대로 하루를 자른다 — 근거·확인 방법은 [D71 「시작하기 전에」](71-install-guide.md) |

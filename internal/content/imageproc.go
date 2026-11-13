@@ -11,9 +11,12 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"math"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 
-	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp" // image.Decode 가 webp 를 읽게 등록한다
 )
 
@@ -34,7 +37,70 @@ var (
 	ErrImageTooLarge = errors.New("content: 사진이 너무 큽니다")
 	// ErrImageDecode 는 확장자·내용 검사를 지났는데 그림으로 읽히지 않는 파일이다.
 	ErrImageDecode = errors.New("content: 사진을 읽을 수 없습니다")
+	// ErrImageNoMemory 는 펼치는 데 드는 메모리가 서버에 남아 있지 않은 사진이다. 펼치다 죽으면
+	// 쓰던 글이 날아가고 사이트가 502 가 된다 — 펼치기 전에 거부한다.
+	ErrImageNoMemory = errors.New("content: 서버 메모리가 부족해 사진을 처리할 수 없습니다")
 )
+
+// availableMemory is what the process can still take — Linux 의 MemAvailable + SwapFree.
+// 잴 수 없는 OS(개발 맥)에서는 ok=false 이고, 그때는 MediaMaxPixels 만 막는다. 시험이 바꿔 끼운다.
+var availableMemory = func() (int64, bool) { return meminfo("/proc/meminfo") }
+
+// meminfo reads MemAvailable and SwapFree (kB) from a /proc/meminfo-shaped file.
+// 스왑을 더하는 이유: 스왑을 둔 512MB 서버는 큰 사진도 (느리지만) 처리한다 — 거부할 일이 아니다.
+func meminfo(path string) (int64, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	var avail, swap int64
+	found := false
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		kb, err := strconv.ParseInt(f[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		switch f[0] {
+		case "MemAvailable:":
+			avail, found = kb*1024, true
+		case "SwapFree:":
+			swap = kb * 1024
+		}
+	}
+	return avail + swap, found
+}
+
+// decodeBytes is the heap one decode takes: 화소 수 × 색 형식의 화소당 바이트. JPEG(YCbCr)는
+// 4:4:4 가 최악이라 3, 16비트 PNG 는 8 이다.
+func decodeBytes(cfg image.Config) int64 {
+	per := int64(4)
+	switch cfg.ColorModel {
+	case color.YCbCrModel:
+		per = 3
+	case color.GrayModel:
+		per = 1
+	case color.Gray16Model:
+		per = 2
+	case color.NRGBA64Model, color.RGBA64Model:
+		per = 8
+	}
+	if _, ok := cfg.ColorModel.(color.Palette); ok {
+		per = 1
+	}
+	return int64(cfg.Width) * int64(cfg.Height) * per
+}
+
+// workBytes is what processing one photo takes besides its file: 펼친 원본 한 벌, 줄인 결과 RGBA
+// 세 벌(줄인 것·회전·JPEG 흰 바탕), 썸네일과 인코딩 버퍼 몫 8MB. 2026-11-14 메모리를 180MB 로 묶은
+// 리눅스 컨테이너에서 잰 정점(6000×4000 PNG 161MB)이 이 값 + 파일 + 런타임과 맞았다.
+func workBytes(cfg image.Config) int64 {
+	w, h := fitSize(cfg.Width, cfg.Height, MediaMaxEdge)
+	return decodeBytes(cfg) + 3*int64(w)*int64(h)*4 + 8<<20
+}
 
 // ProcessedImage is an uploaded picture ready to store: 본문용과 썸네일.
 type ProcessedImage struct {
@@ -64,6 +130,15 @@ func ProcessImage(data []byte, mime string) (ProcessedImage, error) {
 	}
 	decodeMu.Lock()
 	defer decodeMu.Unlock()
+
+	// 잠금 안에서 잰다 — 펼치기는 한 번에 하나라, 앞 사진이 쓴 메모리가 돌아온 뒤의 값이다.
+	// 가용분을 다 쓰면 같은 서버의 PostgreSQL 이 쓸 몫이 없다 — 5분의 1 을 남긴다.
+	if avail, ok := availableMemory(); ok {
+		if need := workBytes(cfg); need > avail/5*4 {
+			return ProcessedImage{}, fmt.Errorf("%w: %d×%d 에 %dMB, 남은 %dMB", ErrImageNoMemory,
+				cfg.Width, cfg.Height, need>>20, avail>>20)
+		}
+	}
 
 	if mime == "image/gif" {
 		first, err := gif.Decode(bytes.NewReader(data))
@@ -109,21 +184,113 @@ func ProcessImage(data []byte, mime string) (ProcessedImage, error) {
 // fit scales src down so its longer edge is at most edge. 키우지는 않는다.
 func fit(src image.Image, edge int) *image.RGBA {
 	b := src.Bounds()
-	w, h := b.Dx(), b.Dy()
-	if w > edge || h > edge {
-		if w >= h {
-			w, h = edge, max(1, h*edge/w)
-		} else {
-			w, h = max(1, w*edge/h), edge
-		}
-	}
+	w, h := fitSize(b.Dx(), b.Dy(), edge)
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	if w == b.Dx() && h == b.Dy() {
 		stddraw.Draw(dst, dst.Bounds(), src, b.Min, stddraw.Src)
 		return dst
 	}
-	draw.CatmullRom.Scale(dst, dst.Bounds(), src, b, draw.Src, nil)
+	shrink(dst, src)
 	return dst
+}
+
+// fitSize is w×h scaled down so the longer edge is at most edge.
+func fitSize(w, h, edge int) (int, int) {
+	if w > edge || h > edge {
+		if w >= h {
+			return edge, max(1, h*edge/w)
+		}
+		return max(1, w*edge/h), edge
+	}
+	return w, h
+}
+
+// shrink area-averages src into the smaller dst, one source row at a time.
+//
+// **결과 크기만큼의 메모리만 쓴다.** x/image/draw 의 커널 축소(CatmullRom)는 「결과 폭 × 원본 높이」
+// 의 [4]float64 임시 버퍼를 잡는다 — 4000×3000 휴대폰 사진 한 장에 250MB 를 할당했고, 512MB 서버가
+// 사진 저장 중에 죽었다 (2026-11-14 운영). 줄이기만 하므로 면적 평균(결과 화소 하나가 덮는 원본
+// 화소들의 넓이 가중 평균)으로 충분하다. 색은 미리 곱한 알파로 평균한다 — 그대로 평균하면 투명한
+// 가장자리가 어두워진다. dst 는 src 보다 크지 않아야 한다.
+func shrink(dst *image.RGBA, src image.Image) {
+	b := src.Bounds()
+	dw, dh := dst.Bounds().Dx(), dst.Bounds().Dy()
+	xs, ys := areaSpans(b.Dx(), dw), areaSpans(b.Dy(), dh)
+	row := make([]float64, b.Dx()*4) // 원본 한 줄, 미리 곱한 RGBA
+	acc := make([]float64, dw*4)     // 결과 한 줄을 쌓는 곳
+	for dy, sy := range ys {
+		clear(acc)
+		for i, wy := range sy.weights {
+			readRow(src, b.Min.X, b.Min.Y+sy.first+i, row)
+			for dx, sx := range xs {
+				var r, g, bl, a float64
+				for j, wx := range sx.weights {
+					k := (sx.first + j) * 4
+					r, g, bl, a = r+row[k]*wx, g+row[k+1]*wx, bl+row[k+2]*wx, a+row[k+3]*wx
+				}
+				k := dx * 4
+				acc[k], acc[k+1], acc[k+2], acc[k+3] = acc[k]+r*wy, acc[k+1]+g*wy, acc[k+2]+bl*wy, acc[k+3]+a*wy
+			}
+		}
+		out := dst.Pix[dst.PixOffset(dst.Bounds().Min.X, dst.Bounds().Min.Y+dy):]
+		for k, v := range acc {
+			out[k] = uint8(min(max(v+0.5, 0), 255))
+		}
+	}
+}
+
+// span is the input cells one output cell covers: first 부터 len(weights) 칸, 칸마다 덮는 비율.
+type span struct {
+	first   int
+	weights []float64
+}
+
+// areaSpans maps m output cells onto n ≥ m input cells. 칸마다 가중치의 합은 1 이다.
+func areaSpans(n, m int) []span {
+	out := make([]span, m)
+	scale := float64(n) / float64(m)
+	for i := range out {
+		lo, hi := float64(i)*scale, float64(i+1)*scale
+		first, last := int(lo), min(int(math.Ceil(hi)), n)
+		ws := make([]float64, last-first)
+		for j := range ws {
+			ws[j] = (min(hi, float64(first+j+1)) - max(lo, float64(first+j))) / scale
+		}
+		out[i] = span{first: first, weights: ws}
+	}
+	return out
+}
+
+// readRow fills row with one source row as premultiplied RGBA (0–255). JPEG(YCbCr)·PNG(NRGBA)·
+// RGBA 는 화소 배열을 직접 읽는다 — At() 은 화소마다 인터페이스를 거쳐 2400만 화소에서 느리다.
+func readRow(src image.Image, x0, y int, row []float64) {
+	n := len(row) / 4
+	switch s := src.(type) {
+	case *image.YCbCr:
+		for x := 0; x < n; x++ {
+			ci := s.COffset(x0+x, y)
+			r, g, b := color.YCbCrToRGB(s.Y[s.YOffset(x0+x, y)], s.Cb[ci], s.Cr[ci])
+			row[x*4], row[x*4+1], row[x*4+2], row[x*4+3] = float64(r), float64(g), float64(b), 255
+		}
+	case *image.NRGBA:
+		p := s.Pix[s.PixOffset(x0, y):]
+		for x := 0; x < n; x++ {
+			a := float64(p[x*4+3])
+			row[x*4], row[x*4+1], row[x*4+2], row[x*4+3] =
+				float64(p[x*4])*a/255, float64(p[x*4+1])*a/255, float64(p[x*4+2])*a/255, a
+		}
+	case *image.RGBA:
+		p := s.Pix[s.PixOffset(x0, y):]
+		for i := 0; i < n*4; i++ {
+			row[i] = float64(p[i])
+		}
+	default:
+		for x := 0; x < n; x++ {
+			r, g, b, a := src.At(x0+x, y).RGBA()
+			row[x*4], row[x*4+1], row[x*4+2], row[x*4+3] =
+				float64(r)/257, float64(g)/257, float64(b)/257, float64(a)/257
+		}
+	}
 }
 
 // orient applies an EXIF orientation (1–8) to the pixels.
