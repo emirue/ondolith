@@ -13,8 +13,8 @@
 | 항목 | 값 |
 |---|---|
 | 언어 | Go |
-| `go.mod` 최소 버전 | `1.27.3` |
-| 확인 시점 | 2026-10-26 |
+| `go.mod` 최소 버전 | `1.27.4` |
+| 확인 시점 | 2026-11-14 |
 
 ### 툴체인 버전은 보안 경계다
 
@@ -40,6 +40,10 @@
 
 2026-10-26 에 `go1.27.3` 으로 올렸다. Go 는 최신 두 주 버전만 지원하고(그날 1.27·1.26), 최신 안정판이 `go1.27.3`(2026-10-19)이었다 — 로컬 mise 의 Go 는 지원이 끝난 1.25.5 였다. 1.27 의 호환성 변화(gofmt 정렬, vet 의 printf·stdversion, `encoding/json` v2 구현, `compress/flate` 출력, `crypto/tls` GODEBUG 제거)는 gofmt 차이 0 과 전체 검증으로 확인했다.
 
+2026-11-14 에 `go1.27.4` 로 올렸다. `govulncheck` 가 표준 라이브러리 `net/http` 의 GO-2026-6859(MaxBytesReader 헤더 경쟁으로 HTTP/1 서버가
+죽는다)를 잡았고 1.27.4 에서 고쳐졌다. 같은 날 `golang.org/x/net` 의 GO-2026-6866·GO-2026-6860(본문 정화가 쓰는 `html` 패키지)도
+잡혀 v0.62.0 으로 올렸다 — 그 판이 요구해 `x/crypto` v0.58.0·`x/sync` v0.24.0·`x/text` v0.43.0 이 함께 올라갔다. 올린 뒤 0건이다.
+
 | 규칙 | 내용 |
 |---|---|
 | 릴리즈 전 | **`make vuln`을 반드시 돌린다.** 네트워크가 필요해 `make check`에는 넣지 않았다 |
@@ -60,10 +64,10 @@
 | `github.com/pressly/goose/v3` | `v3.27.3` | 마이그레이션 | **`fs.FS`를 직접 받는다** → `embed.FS`로 바이너리에 넣고 별도 CLI 없이 실행할 수 있다 (FR-103) |
 | `github.com/alexedwards/scs/v2` | `v2.9.0` | 서버측 세션 | OWASP 세션 패턴. 쿠키에 식별자만 두고 상태는 스토어에 둔다 (NFR-204) |
 | `github.com/alexedwards/scs/pgxstore` | `v0.0.0-20251002162104-209de6e426de` | scs의 PostgreSQL 스토어 | 같은 `pgxpool.Pool`을 공유한다. 접속 설정이 한 군데다 |
-| `golang.org/x/crypto` | `v0.54.0` | bcrypt | 비밀번호 해시 (NFR-208). 표준 라이브러리에 없다 |
+| `golang.org/x/crypto` | `v0.58.0` | bcrypt | 비밀번호 해시 (NFR-208). 표준 라이브러리에 없다 |
 | `rsc.io/qr` | `v0.2.0` | QR 인코딩 (FR-620) | **비트맵까지만 준다** — 사각형을 찍는 것은 우리 코드라 뷰박스·여백·SVG 출력을 우리가 정한다 (D50 은 서버에서 SVG 를 요구한다). API 가 `Encode`·`Black` 둘뿐이라 표면이 작고, 이미지 인코더·폰트 같은 딸린 의존성이 없다. 2026-08-06 조회: OSV 취약점 없음 |
 | `github.com/microcosm-cc/bluemonday` | `v1.0.27` | 본문 HTML 정화 (FR-513) | 허용목록 HTML 정화는 자작하지 않는다(인증·업로드 검증과 같은 이유, CLAUDE.md 규칙 6). UGC 정책에서 출발해 에디터가 쓰는 것만 더한다 ([D60](60-security.md) 「리치 텍스트 본문」). 딸린 모듈은 CSS 파서 둘(`aymerick/douceur`·`gorilla/css`). 2026-10-08 조회: OSV 4건 모두 1.0.16 이하에서 수정됨 |
-| `golang.org/x/net` | `v0.57.0` | HTML 토크나이저 — 본문 평문 추출 (FR-513) | bluemonday 가 이미 끌어오는 모듈이라 새로 들어오는 코드가 없다. 2026-10-11 `govulncheck`: 이 판의 취약점은 `v0.60.0` 에서 고쳐졌지만 우리 코드가 그 경로를 부르지 않는다(0건) |
+| `golang.org/x/net` | `v0.62.0` | HTML 토크나이저 — 본문 평문 추출 (FR-513) | bluemonday 가 이미 끌어오는 모듈이라 새로 들어오는 코드가 없다. 2026-11-14 `govulncheck`: `v0.57.0` 의 GO-2026-6866·GO-2026-6860 은 본문 정화(`content.balance`)가 부르는 경로였다 — `v0.62.0` 으로 올려 0건 |
 | `golang.org/x/image` | `v0.46.0` | 본문 사진 축소(`draw.CatmullRom`)·webp 읽기 (FR-514) | Go 팀의 준표준 모듈이다. 표준 라이브러리에 축소 보간과 webp 디코더가 없다. webp **인코더**는 여기에도 없어 webp 는 JPEG 로 다시 쓴다. 2026-10-08 조회: OSV 19건 모두 0.45.0 이하에서 수정됨 |
 | `golang.org/x/oauth2` | `v0.27.0` | **시험만** — 소셜 로그인 통합 시험이 토큰 응답을 흉내 낸다 | goth 가 이미 끌어오는 모듈이다. 시험 파일이 직접 가져다 써서 `go mod tidy` 가 직접 의존성으로 적는다 |
 | `github.com/markbates/goth` | `v1.82.0` | 소셜 로그인 OAuth2 (FR-208) | 프로바이더별 인가 흐름은 자작 금지 대상이다 (NFR-201). **`gothic` 하위 패키지는 쓰지 않는다** — gorilla/sessions 를 쓰는데 우리 세션은 scs 라 (NFR-204) 두 스토어가 한 요청에 있으면 어느 쪽이 진짜 로그인 상태인지가 코드마다 달라진다. `goth.Provider`·`goth.Session` 만 쓴다. 2026-08-07 조회: OSV 취약점 없음 |

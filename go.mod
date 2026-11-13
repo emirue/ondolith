@@ -1,6 +1,6 @@
 module github.com/emirue/ondolith
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/alexedwards/scs/pgxstore v0.0.0-20251002162104-209de6e426de
@@ -13,9 +13,9 @@ require (
 	github.com/markbates/goth v1.82.0
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/pressly/goose/v3 v3.27.3
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.58.0
 	golang.org/x/image v0.46.0
-	golang.org/x/net v0.57.0
+	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.27.0
 	rsc.io/qr v0.2.0
 )
@@ -38,6 +38,6 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )
