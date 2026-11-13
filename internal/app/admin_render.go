@@ -207,7 +207,7 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	if a.themeScreens != nil {
 		screens = a.themeScreens()
 	}
-	groups := admin.Nav(actor.Can, a.shop, admin.ThemeNav(screens, func(key string) bool {
+	groups := admin.Nav(actor.Can, a.shop, nil, admin.ThemeNav(screens, func(key string) bool {
 		return actor.CanOnScreen(auth.ThemeContentPermission, key)
 	})...)
 	view := map[string]any{

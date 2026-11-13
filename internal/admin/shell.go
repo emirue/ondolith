@@ -9,8 +9,12 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/emirue/ondolith/internal/theme"
 )
@@ -93,12 +97,23 @@ type NavGroup struct {
 // own. But a menu that advertises screens the caller cannot open is a list of
 // things to go and try, so the filter is worth having.
 //
+// hidden are the core screens A-201 hides for everyone (FR-720, ParseHiddenNav).
+// 고정 화면(navLocked)은 들어 있어도 숨지 않는다. extra 에는 적용하지 않는다 — 테마
+// 화면은 숨김 대상이 아니고, 안 쓰면 admin.json 에서 뺀다 (D41 4절).
+//
 // extra are menu entries that do not come from this list — the active theme's
 // screens (ThemeNav), already filtered by their screen scope.
-func Nav(can func(string) bool, shop bool, extra ...NavItem) []NavGroup {
+func Nav(can func(string) bool, shop bool, hidden map[string]bool, extra ...NavItem) []NavGroup {
 	byGroup := map[string][]NavItem{}
 	var order []string
-	items := append(append([]NavItem(nil), nav...), extra...)
+	items := make([]NavItem, 0, len(nav)+len(extra))
+	for _, it := range nav {
+		if hidden[it.Screen] && !navLocked[it.Screen] {
+			continue
+		}
+		items = append(items, it)
+	}
+	items = append(items, extra...)
 	// 안정 정렬 — 순서가 같으면 코어 메뉴가 먼저, 테마 화면은 선언 순서대로다.
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Order < items[j].Order })
 
@@ -119,6 +134,72 @@ func Nav(can func(string) bool, shop bool, extra ...NavItem) []NavGroup {
 		out = append(out, NavGroup{Title: g, Items: byGroup[g]})
 	}
 	return out
+}
+
+// navLocked are the screens FR-720 never hides: 대시보드, 숨김을 되돌리는 이 설정
+// 화면(A-201 — 숨기면 되돌리러 들어올 곳이 없다), 쇼핑몰의 약관(주문서의 필수 동의)과
+// 결제 설정(PG 키가 없으면 결제가 안 된다), 역할·권한.
+var navLocked = map[string]bool{"A-101": true, "A-201": true, "A-207": true, "A-209": true, "A-403": true}
+
+// HideChoices is A-201's 「관리자 메뉴」 checkboxes: the menu for this site type
+// without the locked screens. 권한과 상관없이 전부다 — 숨김은 모든 관리자에게 적용된다.
+func HideChoices(shop bool) []NavGroup {
+	var out []NavGroup
+	for _, g := range Nav(func(string) bool { return true }, shop, nil) {
+		var items []NavItem
+		for _, it := range g.Items {
+			if !navLocked[it.Screen] {
+				items = append(items, it)
+			}
+		}
+		if len(items) > 0 {
+			out = append(out, NavGroup{Title: g.Title, Items: items})
+		}
+	}
+	return out
+}
+
+// ParseHiddenNav reads `admin.hidden_menus`. 모르는 ID 는 그대로 두고 Nav 가 무시한다 —
+// 코어 업그레이드로 없어진 화면 ID 가 남아 있어도 관리자 화면이 깨지지 않는다.
+func ParseHiddenNav(v string) map[string]bool {
+	out := map[string]bool{}
+	for _, id := range strings.Split(v, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// HiddenNavValue is the `admin.hidden_menus` A-201 saves (FR-720): the checked
+// screens, sorted and comma-joined. 고정 화면이나 메뉴에 없는 ID 는 오류다.
+//
+// shop 이 아니면 폼에 커머스 선택지가 없으므로, 이전 값(prev)의 커머스 ID 를 남긴다 —
+// cms 로 저장했다가 shop 으로 돌아와도 숨긴 커머스 메뉴는 그대로 숨는다. prev 의 그 밖의
+// ID 는 폼이 다시 보낸 것만 남고, 없어진 ID 는 여기서 빠진다.
+func HiddenNavValue(submitted []string, prev string, shop bool) (string, error) {
+	known := make(map[string]NavItem, len(nav))
+	for _, it := range nav {
+		known[it.Screen] = it
+	}
+	set := map[string]bool{}
+	for _, id := range submitted {
+		if id == "" {
+			continue
+		}
+		if _, ok := known[id]; !ok || navLocked[id] {
+			return "", fmt.Errorf("admin: 숨길 수 없는 메뉴 %q", id)
+		}
+		set[id] = true
+	}
+	if !shop {
+		for id := range ParseHiddenNav(prev) {
+			if it, ok := known[id]; ok && it.Shop && !navLocked[id] {
+				set[id] = true
+			}
+		}
+	}
+	return strings.Join(slices.Sorted(maps.Keys(set)), ","), nil
 }
 
 // ThemeNav is the menu entries for the active theme's screens (D41 5절): one per
