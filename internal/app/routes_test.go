@@ -29,8 +29,8 @@ func TestCheckPassesOnAGoodRegistry(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("정상 라우트가 거부됐다: %v", err)
 	}
-	if len(res.Warnings) != 0 {
-		t.Errorf("경고가 났다: %v", res.Warnings)
+	if len(res.Unrouted)+len(res.Unused) != 0 {
+		t.Errorf("경고가 났다: %v %v", res.Unrouted, res.Unused)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestUnusedPermissionWarns(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("미사용 권한이 오류가 됐다: %v", err)
 	}
-	if len(res.Warnings) != 2 {
-		t.Errorf("경고 %d건, want 2건: %v", len(res.Warnings), res.Warnings)
+	if len(res.Unused) != 2 || len(res.Unrouted) != 0 {
+		t.Errorf("미사용 권한 %v, want 2건 (라우트 없는 화면 %v 은 0건)", res.Unused, res.Unrouted)
 	}
 }
 
@@ -251,15 +251,13 @@ func mustReq(t *testing.T, method, target string) *http.Request {
 // 있어도 게이트는 전부 초록이다 — 무엇이 남았는지 아무도 모르는 상태가 된다.
 func TestCheckWarnsAboutScreensWithNoRoute(t *testing.T) {
 	reg := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler)
-	// 권한 목록은 비운다 — 이 검사가 보는 것은 Warnings 뿐이고, 없는 권한
+	// 권한 목록은 비운다 — 이 검사가 보는 것은 Unrouted 뿐이고, 없는 권한
 	// 키는 Errors 로 간다.
 	res := reg.Check(nil, screenInventory)
 
 	warned := map[string]bool{}
-	for _, w := range res.Warnings {
-		if id, ok := strings.CutPrefix(w, "D11 에 있는데 라우트가 없는 화면: "); ok {
-			warned[id] = true
-		}
+	for _, id := range res.Unrouted {
+		warned[id] = true
 	}
 
 	routed := map[string]bool{}
@@ -349,5 +347,39 @@ func TestPgAdapterNameAndGatewayAgree(t *testing.T) {
 	// 화면이 띄우는 경고(클라이언트 키만 있음)가 의미를 잃는다.
 	if name, gw := pgAdapterFor("toss", ""); name != "toss" || gw == nil {
 		t.Error("시크릿이 비었다고 어댑터를 만들지 않았다 — 그 판단은 A-209 몫이다")
+	}
+}
+
+// cms 트리가 일부러 빼는 것은 쇼핑몰 트리에만 있는 화면·권한이다 (FR-710). 코어 화면·권한이 여기 섞이면
+// cms 부팅에서 정말 빠진 코어 화면이 요약 한 줄에 묻힌다.
+func TestShopOnlyIsExactlyWhatCmsLeavesOut(t *testing.T) {
+	cms := buildTree(nil, nil, nil, nil, nil, nil, nil, false, noopHandler)
+	shop := buildTree(nil, nil, nil, nil, nil, nil, nil, true, noopHandler)
+	left := shopOnly(cms)
+
+	inCms := map[string]bool{}
+	for _, rt := range cms.Routes() {
+		inCms[rt.Screen], inCms[rt.Permission] = true, true
+	}
+	for _, rt := range shop.Routes() {
+		for _, k := range []string{rt.Screen, rt.Permission} {
+			if k != "" && left[k] == inCms[k] {
+				t.Errorf("%s: shopOnly=%v, cms 트리에 있음=%v — 둘 중 하나여야 한다", k, left[k], inCms[k])
+			}
+		}
+	}
+	for _, want := range []string{"A-501", "A-504", "P-301", "order.view", "product.view"} {
+		if !left[want] {
+			t.Errorf("%s 는 쇼핑몰에만 있는데 shopOnly 에 없다", want)
+		}
+	}
+	for _, core := range []string{"A-201", "P-201", "settings.update", "page.view"} {
+		if left[core] {
+			t.Errorf("코어 %s 가 shopOnly 에 있다 — cms 에서 빠지면 요약에 묻힌다", core)
+		}
+	}
+	// 쇼핑몰 트리 자체는 D11 의 화면을 전부 가진다 — 그래야 shop 부팅에서 빠진 것이 정말 빠진 것이다.
+	if res := shop.Check(nil, screenInventory); len(res.Unrouted) != 0 {
+		t.Errorf("쇼핑몰 트리에 라우트가 없는 화면: %v", res.Unrouted)
 	}
 }
