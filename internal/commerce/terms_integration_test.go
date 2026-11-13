@@ -130,9 +130,16 @@ func TestMissingBusinessKeysNamesTheEmptyOnes(t *testing.T) {
 	if len(got) != 7 {
 		t.Errorf("빈 항목 %d개, want 7 (표시 의무 여덟 중 상호를 뺀 것)", len(got))
 	}
-	// 업무시간은 칸이 있지만 표시 의무가 아니다 — 비어 있어도 알리지 않는다.
+	// 업무시간·팩스는 칸이 있지만 표시 의무가 아니다 — 비어 있어도 알리지 않는다.
 	if BusinessLabels["business.hours"] != "업무시간" || strings.Contains(strings.Join(got, ","), "업무시간") {
 		t.Errorf("업무시간 칸 %q · 빈 항목 %v", BusinessLabels["business.hours"], got)
+	}
+	if BusinessLabels["business.fax"] != "팩스" || strings.Contains(strings.Join(got, ","), "팩스") {
+		t.Errorf("팩스 칸 %q · 빈 항목 %v", BusinessLabels["business.fax"], got)
+	}
+	// 폼 순서: 표시 의무 여덟, 팩스, 업무시간 (사이트 보고 2026-11-14 — 시안 바닥글에 팩스가 있었다).
+	if n := len(BusinessKeys); n != 10 || BusinessKeys[8] != "business.fax" || BusinessKeys[9] != "business.hours" {
+		t.Errorf("BusinessKeys = %v", BusinessKeys)
 	}
 	for _, name := range got {
 		if name == "상호" {

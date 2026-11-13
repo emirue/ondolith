@@ -178,10 +178,11 @@ var disclosureKeys = []string{
 	"business.privacy_on", // 개인정보관리책임자
 }
 
-// BusinessKeys are A-201's 사업자 정보 fields in form order: the eight above, then 업무시간 — 바닥글에
-// 싣지만 표시 의무가 아니라 비어 있어도 알리지 않는다.
+// BusinessKeys are A-201's 사업자 정보 fields in form order: the eight above, then 팩스와 업무시간 —
+// 바닥글에 싣지만 표시 의무가 아니라 비어 있어도 알리지 않는다. 팩스는 회사 홈페이지 시안 바닥글에
+// 있었다 (사이트 보고 2026-11-14).
 // Clip 으로 용량을 길이에 맞춘다 — 남는 용량이 있으면 누가 append 한 결과가 요청끼리 같은 배열을 쓴다.
-var BusinessKeys = slices.Clip(append(append([]string(nil), disclosureKeys...), "business.hours"))
+var BusinessKeys = slices.Clip(append(append([]string(nil), disclosureKeys...), "business.fax", "business.hours"))
 
 // BusinessLabels names them for the form and the footer.
 var BusinessLabels = map[string]string{
@@ -193,6 +194,7 @@ var BusinessLabels = map[string]string{
 	"business.phone":      "전화번호",
 	"business.email":      "이메일",
 	"business.privacy_on": "개인정보관리책임자",
+	"business.fax":        "팩스",
 	"business.hours":      "업무시간",
 }
 
