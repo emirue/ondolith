@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"html/template"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -293,5 +294,74 @@ func TestBoardSkinsListsThemeSkins(t *testing.T) {
 		"board/card-list.html": {Data: []byte("x")}, "board/card-view.html": {Data: []byte("x")}}
 	if got := New(fsys, "", false, nil).BoardSkins(); len(got) != 1 || got[0] != "card" {
 		t.Errorf("= %v, want [card]", got)
+	}
+}
+
+// **활성화 경고는 테마가 실제로 부르는 것을 따라간다** (사이트 보고 2026-11-14). 띠를 base.html 본문에서만 찾아
+// 코어 내장 base.html 을 그대로 쓴 테마도 「site-header 가 없다」를 받았고, 테마가 더해 home.html 이 부르는 조각도
+// 「코어가 찾지 않는 이름」이라 했다 — 로더는 partials/ 의 파일을 전부 조각으로 읽는데도.
+func TestContractWarningsFollowWhatTheThemeCalls(t *testing.T) {
+	const bands = `<header class="site-header"></header><footer class="site-footer"></footer>`
+
+	// 내장 base.html 을 그대로 가져다 쓴 테마 — 띠는 내장 partials/header.html·footer.html 에 있다.
+	builtinBase, err := fs.ReadFile(Builtin(), "base.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied := t.TempDir()
+	write(t, copied, "base.html", string(builtinBase))
+	if warn, err := ValidateThemeDir(copied, "1.0.0"); err != nil || warn != "" {
+		t.Errorf("내장 base.html 을 쓴 테마에 경고: warn=%q err=%v", warn, err)
+	}
+
+	// 띠를 자기 조각 두 단계 아래에 둔 테마. 부르는 조각들은 「모르는 이름」도 아니다.
+	own := t.TempDir()
+	write(t, own, "base.html", `{{template "partials/top.html" .}}{{block "content" .}}{{end}}<footer class="site-footer"></footer>`)
+	write(t, own, "partials/top.html", `<div>{{- template "partials/brand.html" . -}}</div>`)
+	write(t, own, "partials/brand.html", `<header class="site-header"></header>`)
+	if warn, err := ValidateThemeDir(own, "1.0.0"); err != nil || warn != "" {
+		t.Errorf("띠를 조각에 둔 테마에 경고: warn=%q err=%v", warn, err)
+	}
+
+	// 부르는 조각에도 띠가 없으면 지금처럼 경고한다 — 내장 header.html 을 띠 없이 덮어쓴 테마.
+	none := t.TempDir()
+	write(t, none, "base.html", `{{template "partials/header.html" .}}`)
+	write(t, none, "partials/header.html", `<header></header>`)
+	warn, err := ValidateThemeDir(none, "1.0.0")
+	if err != nil || !strings.Contains(warn, "site-header") || !strings.Contains(warn, "site-footer") {
+		t.Errorf("띠가 정말 없는데: warn=%q err=%v", warn, err)
+	}
+
+	// 테마가 더한 조각: 다른 템플릿이 부르면 아는 이름이고, 아무도 부르지 않으면 경고한다.
+	frag := t.TempDir()
+	write(t, frag, "base.html", bands)
+	write(t, frag, "home.html", `{{define "content"}}{{template "partials/home-about.html" .}}{{end}}`)
+	write(t, frag, "partials/home-about.html", `<section>about</section>`)
+	write(t, frag, "partials/orphan.html", `x`)
+	warn, err = ValidateThemeDir(frag, "1.0.0")
+	if err != nil || strings.Contains(warn, "home-about") || !strings.Contains(warn, "partials/orphan.html") {
+		t.Errorf("부르는 조각은 조용하고 아무도 안 부르는 조각만 경고해야 한다: warn=%q err=%v", warn, err)
+	}
+}
+
+// 템플릿 이름은 업로드된 테마 파일에 적힌 값이다 — 따라가도 테마 폴더 밖은 읽지 않는다.
+func TestContractWarningsStayInsideTheTheme(t *testing.T) {
+	const bands = `<header class="site-header"></header><footer class="site-footer"></footer>`
+	parent := t.TempDir()
+	write(t, parent, "outside.html", bands)
+	dir := filepath.Join(parent, "theme")
+	write(t, dir, "base.html", `{{template "../outside.html" .}}{{template "partials/link.html" .}}{{template "/etc/hosts" .}}`)
+	if err := os.MkdirAll(filepath.Join(dir, "partials"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(parent, "outside.html"), filepath.Join(dir, "partials", "link.html")); err != nil {
+		t.Fatal(err)
+	}
+	warn, err := ValidateThemeDir(dir, "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(warn, "site-header") {
+		t.Errorf("테마 밖 파일(../·심볼릭 링크)의 띠를 읽었다: %q", warn)
 	}
 }

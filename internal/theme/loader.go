@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -313,11 +314,27 @@ func ValidateThemeDir(dir, current string) (warn string, err error) {
 func contractWarnings(dir string) []string {
 	var out []string
 
+	// 템플릿 이름은 업로드된 테마 파일에 적힌 값이다 — "../" 나 바깥을 가리키는 심볼릭 링크가 올 수
+	// 있다. os.Root 로 테마 폴더 안에서만 읽는다.
+	root, rerr := os.OpenRoot(dir)
+	if rerr == nil {
+		defer root.Close()
+	}
+	readTheme := func(name string) ([]byte, bool) {
+		if rerr != nil || !strings.HasSuffix(name, ".html") {
+			return nil, false
+		}
+		b, err := root.ReadFile(name)
+		return b, err == nil
+	}
+
 	// ① base.html 이 세로축을 잴 띠를 내는가 (D17 구조 약속).
 	//
 	// 이 두 클래스는 오래 `ui-audit.mjs` 만 알고 있었다 — 도구가 전제하는
-	// 것을 계약이 약속하지 않으면 그 전제는 언제든 깨진다.
-	if b, err := os.ReadFile(filepath.Join(dir, "base.html")); err == nil {
+	// 것을 계약이 약속하지 않으면 그 전제는 언제든 깨진다. base.html 이 부르는 조각까지
+	// 본다 — 코어 내장 base.html 은 띠를 partials/header.html·footer.html 에 둔다.
+	if b, ok := readTheme("base.html"); ok {
+		b = layoutText(b, readTheme)
 		for _, want := range []string{"site-header", "site-footer"} {
 			if !bytes.Contains(b, []byte(want)) {
 				out = append(out, "base.html 에 "+want+" 가 없다 — 머리·바닥 정렬 검사가 그만큼 헛돈다 (D17 구조 약속)")
@@ -341,7 +358,10 @@ func contractWarnings(dir string) []string {
 	if len(known) == 0 {
 		return out
 	}
-	var unknown []string
+	// 테마가 더한 조각(partials/)은 로더가 전부 읽으므로, 테마의 템플릿이 부르면 아는 이름이다.
+	// 아무도 부르지 않는 조각은 정말로 아무 화면도 바꾸지 않는다 — 그것은 경고한다.
+	var files []string
+	called := map[string]bool{}
 	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
 			return nil
@@ -350,16 +370,54 @@ func contractWarnings(dir string) []string {
 		if rerr != nil {
 			return nil
 		}
-		if !known[filepath.ToSlash(rel)] {
-			unknown = append(unknown, filepath.ToSlash(rel))
+		name := filepath.ToSlash(rel)
+		files = append(files, name)
+		if b, ok := readTheme(name); ok {
+			for _, m := range templateCall.FindAllSubmatch(b, -1) {
+				called[string(m[1])] = true
+			}
 		}
 		return nil
 	})
+	var unknown []string
+	for _, name := range files {
+		if !known[name] && !(strings.HasPrefix(name, "partials/") && called[name]) {
+			unknown = append(unknown, name)
+		}
+	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
 		out = append(out, "코어가 찾지 않는 템플릿 이름이라 아무 화면도 바뀌지 않는다: "+strings.Join(unknown, ", "))
 	}
 	return out
+}
+
+// templateCall finds the names in {{template "…"}} and {{block "…"}} — 조각을 부르는 두 꼴.
+var templateCall = regexp.MustCompile(`\{\{-?\s*(?:template|block)\s+"([^"]+)"`)
+
+// layoutText is base.html followed by every template it calls, transitively. 테마에 없는
+// 조각은 내장본을 본다 — 로더가 그렇게 푼다 (디스크 먼저, 없으면 내장).
+func layoutText(base []byte, readTheme func(string) ([]byte, bool)) []byte {
+	text := slices.Clone(base)
+	seen := map[string]bool{}
+	for queue := [][]byte{base}; len(queue) > 0; queue = queue[1:] {
+		for _, m := range templateCall.FindAllSubmatch(queue[0], -1) {
+			name := string(m[1])
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			b, ok := readTheme(name)
+			if !ok {
+				b, _ = fs.ReadFile(Builtin(), name)
+			}
+			if len(b) > 0 {
+				text = append(text, b...)
+				queue = append(queue, b)
+			}
+		}
+	}
+	return text
 }
 
 // joinWarnings folds the version warning and the contract warnings into the
