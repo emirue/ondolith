@@ -254,7 +254,7 @@ func TestNavNeverHidesLockedScreens(t *testing.T) {
 func TestNavIgnoresUnknownAndThemeHiddenIDs(t *testing.T) {
 	extra := ThemeNav([]theme.Screen{{Key: "hero", Title: "메인 배너", Group: "콘텐츠", Order: 11}},
 		func(string) bool { return true })
-	got := flatten(Nav(allowAll, true, map[string]bool{"A-999": true, "A-212": true}, extra...))
+	got := flatten(Nav(allowAll, true, map[string]bool{"Z-999": true, "A-212": true}, extra...))
 	if len(got) != len(nav)+1 {
 		t.Errorf("항목 %d개, want %d개 (코어 전부 + 테마 화면 하나)", len(got), len(nav)+1)
 	}
@@ -307,11 +307,11 @@ func TestHiddenNavValue(t *testing.T) {
 		{"고정 화면 — 약관", []string{"A-207"}, "", true, "", true},
 		{"고정 화면 — 역할·권한", []string{"A-403"}, "", false, "", true},
 		{"고정 화면 — 대시보드", []string{"A-101"}, "", false, "", true},
-		{"모르는 ID", []string{"A-999"}, "", false, "", true},
+		{"모르는 ID", []string{"Z-999"}, "", false, "", true},
 		{"테마 화면은 대상이 아니다", []string{"A-212"}, "", false, "", true},
 		{"cms 저장은 숨긴 커머스를 남긴다", nil, "A-603,A-206", false, "A-603", false},
 		{"shop 저장은 폼이 전부다", nil, "A-603", true, "", false},
-		{"없어진 ID 는 버린다", []string{"A-206"}, "A-999,A-206", true, "A-206", false},
+		{"없어진 ID 는 버린다", []string{"A-206"}, "Z-999,A-206", true, "A-206", false},
 		{"cms 에서도 이전 값의 고정 화면은 남기지 않는다", nil, "A-209", false, "", false},
 	}
 	for _, tc := range tests {

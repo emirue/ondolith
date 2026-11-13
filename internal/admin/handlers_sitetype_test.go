@@ -77,7 +77,7 @@ func TestSiteSettingsSavesHiddenMenus(t *testing.T) {
 		t.Fatalf("부분 저장: HTTP %d, 값 %q (303, 그대로여야)", code, stored())
 	}
 	// 고정 화면은 422 이고 저장하지 않는다.
-	for _, id := range []string{"A-201", "A-209", "A-999"} {
+	for _, id := range []string{"A-201", "A-209", "Z-999"} {
 		if code := save(url.Values{"admin.hidden_menus": {"", id}}); code != http.StatusUnprocessableEntity || stored() != "A-206,A-601" {
 			t.Fatalf("%s: HTTP %d, 값 %q (422, 그대로여야)", id, code, stored())
 		}
