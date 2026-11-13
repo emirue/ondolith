@@ -170,5 +170,11 @@ func Save(path string, c *Config) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// 저장한 설정은 자기 위치를 안다 — Load 와 같다 (FR-106). 설치 마법사는 이 객체를 그대로 운영 트리에
+	// 넘기므로, 비어 있으면 상대 경로 폴더가 재시작 전까지 작업 디렉터리 기준으로 풀린다.
+	c.Path = path
+	return nil
 }

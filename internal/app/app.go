@@ -211,6 +211,15 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}
 		return kv
 	}
+	// **설치 마법사가 받은 사이트 이름을 DB 로 옮긴다** (FR-102). 설치는 이름을 설정 파일(site_name)에만
+	// 써서, A-201 이 DB 의 site.name 을 읽어 칸이 비었고 그대로 저장하면 422 였다 (사이트 보고 2026-11-14).
+	// DB 가 비었을 때만 옮긴다 — 운영자가 바꾼 이름은 그대로다. 설치 직후 전환도 이 조립을 거치므로 새 설치와
+	// 이미 설치된 사이트가 함께 고쳐진다.
+	if cfg.SiteName != "" && setting("site.name")["site.name"] == "" {
+		if err := contentStore.PutSettings(settingCtx, map[string]string{"site.name": cfg.SiteName}); err != nil {
+			log.Warn("사이트 이름을 설정으로 옮기지 못했다", "err", err)
+		}
+	}
 	// A-201 의 Turnstile 키 (FR-216). 둘 다 있어야 켜진다 — spamGuard.check 와 위젯이
 	// 같은 조건을 봐야 「위젯은 없는데 토큰을 요구한다」가 생기지 않는다.
 	turnstileKeys := func() (string, string) {

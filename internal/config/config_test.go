@@ -191,3 +191,30 @@ func TestBackupDirResolvesBesideTheConfigAndStaysOutOfUploads(t *testing.T) {
 		}
 	}
 }
+
+// **저장한 설정은 자기 위치를 안다.** 설치 마법사는 설정을 만들어 저장하고 그 객체를 그대로 운영 트리에
+// 넘긴다 — Path 가 비어 있으면 상대 경로 폴더가 설정 파일 옆이 아니라 프로세스 작업 디렉터리 기준으로 풀린다.
+func TestSaveRemembersWhereItWrote(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ondolith.json")
+	c := &Config{DatabaseURL: "postgres://x"}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir()) // 작업 디렉터리가 설정 폴더와 다르다 — systemd 로 띄우면 흔하다
+	if c.Path != path {
+		t.Errorf("Path = %q, want %q", c.Path, path)
+	}
+	if got, want := c.Uploads(), filepath.Join(dir, "uploads"); got != want {
+		t.Errorf("Uploads() = %q, want %q", got, want)
+	}
+
+	// 저장에 실패하면 Path 를 바꾸지 않는다 — 쓰지 못한 곳을 자기 위치라고 믿으면 안 된다.
+	bad := &Config{Path: path}
+	if err := Save(filepath.Join(dir, "없는 폴더", "ondolith.json"), bad); err == nil {
+		t.Fatal("없는 폴더에 저장했다")
+	}
+	if bad.Path != path {
+		t.Errorf("실패한 저장이 Path 를 %q 로 바꿨다", bad.Path)
+	}
+}
