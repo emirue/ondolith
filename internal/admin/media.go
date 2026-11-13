@@ -81,6 +81,9 @@ func editorMessage(err error, limits content.UploadLimits) string {
 		return fmt.Sprintf("사진이 너무 큽니다 (한 장에 %d MB 까지).", limits.MaxBytes>>20)
 	case errors.Is(err, content.ErrImageTooLarge):
 		return "사진의 화소가 너무 많습니다 (4,000만 화소까지)."
+	case errors.Is(err, content.ErrImageNoMemory):
+		// 펼치기 전에 거부했다 — 서버는 멀쩡하고, 더 작은 사진이면 된다.
+		return "서버 메모리가 부족해 이 크기의 사진을 처리할 수 없습니다. 긴 변 4000px 이하로 줄여 올리세요."
 	case errors.Is(err, content.ErrImageDecode), errors.Is(err, content.ErrUploadEmpty):
 		return "사진을 읽을 수 없습니다."
 	}

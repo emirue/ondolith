@@ -7,9 +7,11 @@ import (
 	"hash/crc32"
 	"image"
 	"image/color"
+	stddraw "image/draw"
 	"image/jpeg"
 	"image/png"
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -174,5 +176,204 @@ func TestJPEGOrientationSurvivesTruncation(t *testing.T) {
 		if got := jpegOrientation(src[:n]); got < 1 || got > 8 {
 			t.Fatalf("잘린 입력(%d바이트) = %d, want 1..8", n, got)
 		}
+	}
+}
+
+// **사진 한 장을 줄이는 데 드는 메모리는 원본 한 벌과 결과 몇 벌이다** (FR-514, NFR-101).
+//
+// x/image/draw 의 커널 축소는 「결과 폭 × 원본 높이」 의 [4]float64 임시 버퍼를 잡았다 — 4000×3000
+// 휴대폰 사진 한 장에 250MB 를 할당했고, 512MB 서버가 사진 저장 중에 죽었다 (2026-11-14 운영). 그 방식으로
+// 되돌리면 이 그림(2400×1600)에서만 1920×1600×32 ≈ 98MB 가 더 들어 아래 상한을 넘는다.
+func TestProcessImageMemoryIsBoundedByTheTarget(t *testing.T) {
+	const w, h = 2400, 1600
+	data := encodeJPEG(t, halves(w, h))
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	p, err := ProcessImage(data, "image/jpeg")
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 원본을 펼친 한 벌(YCbCr 는 화소당 3바이트 이하) + 결과 크기 RGBA 네 벌(줄인 것·회전·JPEG 바탕·여유) + 8MB.
+	limit := uint64(w*h*3 + 4*p.Width*p.Height*4 + 8<<20)
+	if got := after.TotalAlloc - before.TotalAlloc; got > limit {
+		t.Errorf("사진 한 장에 %.1fMB 를 할당했다 — 상한 %.1fMB", float64(got)/1e6, float64(limit)/1e6)
+	}
+}
+
+// 면적 평균: 결과 화소 하나는 그것이 덮는 원본 화소들의 넓이 가중 평균이다.
+func TestShrinkAveragesTheCoveredArea(t *testing.T) {
+	px := func(img *image.RGBA, x, y int) [4]uint8 {
+		i := img.PixOffset(x, y)
+		return [4]uint8(img.Pix[i : i+4])
+	}
+
+	// 단색은 그대로다.
+	solid := image.NewRGBA(image.Rect(0, 0, 7, 5))
+	for i := range solid.Pix {
+		solid.Pix[i] = []uint8{10, 200, 30, 255}[i%4]
+	}
+	got := image.NewRGBA(image.Rect(0, 0, 3, 2))
+	shrink(got, solid)
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 3; x++ {
+			if c := px(got, x, y); c != [4]uint8{10, 200, 30, 255} {
+				t.Errorf("단색 (%d,%d) = %v", x, y, c)
+			}
+		}
+	}
+
+	// 4×4 바둑판(검정·흰색)을 2×2 로 — 칸마다 2×2 블록의 평균 127.5 → 128.
+	checker := image.NewGray(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			if (x+y)%2 == 0 {
+				checker.SetGray(x, y, color.Gray{255})
+			}
+		}
+	}
+	got = image.NewRGBA(image.Rect(0, 0, 2, 2))
+	shrink(got, checker)
+	if c := px(got, 1, 1); c != [4]uint8{128, 128, 128, 255} {
+		t.Errorf("바둑판 = %v, want 128 회색", c)
+	}
+
+	// 정수배가 아닌 비율: 폭 3 → 2. 결과 0 은 원본 0 전부와 1 의 절반, 결과 1 은 1 의 절반과 2 전부를 덮는다.
+	// 값 0·90·180 → (0 + 45)/1.5 = 30, (45 + 180)/1.5 = 150.
+	ramp := image.NewGray(image.Rect(0, 0, 3, 1))
+	ramp.Pix = []uint8{0, 90, 180}
+	got = image.NewRGBA(image.Rect(0, 0, 2, 1))
+	shrink(got, ramp)
+	if a, b := px(got, 0, 0)[0], px(got, 1, 0)[0]; a != 30 || b != 150 {
+		t.Errorf("3→2 = %d, %d, want 30, 150", a, b)
+	}
+
+	// 투명도는 미리 곱한 값으로 평균한다: 불투명한 빨강과 완전 투명이 반씩이면 반투명한 빨강이지
+	// 어두운 빨강이 아니다 (RGBA 는 미리 곱한 값이라 128,0,0,128 = 펼치면 255,0,0).
+	edge := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	edge.SetNRGBA(0, 0, color.NRGBA{255, 0, 0, 255})
+	edge.SetNRGBA(1, 0, color.NRGBA{0, 0, 0, 0})
+	got = image.NewRGBA(image.Rect(0, 0, 1, 1))
+	shrink(got, edge)
+	if c := px(got, 0, 0); c != [4]uint8{128, 0, 0, 128} {
+		t.Errorf("반투명 가장자리 = %v, want [128 0 0 128]", c)
+	}
+}
+
+// opaque hides the concrete type so shrink takes its generic At() path.
+type opaque struct{ image.Image }
+
+// JPEG(YCbCr)·PNG(NRGBA)·RGBA 는 화소 배열을 직접 읽는다. 그 빠른 길이 At() 로 읽는 길과 같은
+// 결과를 내야 한다 — 다르면 사진 형식에 따라 색이 달라진다. 원점이 0 이 아닌 그림(하위 영역)도 본다.
+func TestShrinkFastPathsMatchTheGenericPath(t *testing.T) {
+	const w, h = 37, 23
+	nrgba := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			nrgba.SetNRGBA(x, y, color.NRGBA{uint8(x * 7), uint8(y * 11), uint8(x * y), uint8(128 + x*3)})
+		}
+	}
+	rgba := image.NewRGBA(nrgba.Bounds())
+	stddraw.Draw(rgba, rgba.Bounds(), nrgba, image.Point{}, stddraw.Src)
+	ycc := image.NewYCbCr(nrgba.Bounds(), image.YCbCrSubsampleRatio420)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			yy, cb, cr := color.RGBToYCbCr(uint8(x*7), uint8(y*11), uint8(x*y))
+			ycc.Y[ycc.YOffset(x, y)] = yy
+			ycc.Cb[ycc.COffset(x, y)], ycc.Cr[ycc.COffset(x, y)] = cb, cr
+		}
+	}
+	sub := nrgba.SubImage(image.Rect(5, 3, w, h)).(*image.NRGBA)
+
+	for name, src := range map[string]image.Image{"NRGBA": nrgba, "RGBA": rgba, "YCbCr": ycc, "NRGBA 하위 영역": sub} {
+		fast := image.NewRGBA(image.Rect(0, 0, 11, 7))
+		slow := image.NewRGBA(fast.Bounds())
+		shrink(fast, src)
+		shrink(slow, opaque{src})
+		for i := range fast.Pix {
+			if d := int(fast.Pix[i]) - int(slow.Pix[i]); d < -1 || d > 1 {
+				t.Errorf("%s: 바이트 %d 가 %d, 일반 경로는 %d", name, i, fast.Pix[i], slow.Pix[i])
+				break
+			}
+		}
+	}
+}
+
+// **서버 메모리가 모자라면 펼치기 전에 거부한다** — 펼치다 죽으면 쓰던 글이 날아가고 사이트가 502 다.
+func TestProcessImageRefusesWhatMemoryCannotHold(t *testing.T) {
+	data := encodeJPEG(t, halves(2400, 1600))
+	orig := availableMemory
+	t.Cleanup(func() { availableMemory = orig })
+
+	availableMemory = func() (int64, bool) { return 20 << 20, true } // 20MB 남았다
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := ProcessImage(data, "image/jpeg")
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrImageNoMemory) {
+		t.Fatalf("= %v, want ErrImageNoMemory", err)
+	}
+	if got := after.TotalAlloc - before.TotalAlloc; got > 4<<20 {
+		t.Errorf("거부하기 전에 %.1fMB 를 할당했다 — 펼친 것이다", float64(got)/1e6)
+	}
+
+	availableMemory = func() (int64, bool) { return 2 << 30, true } // 넉넉하다
+	if _, err := ProcessImage(data, "image/jpeg"); err != nil {
+		t.Errorf("넉넉한데 = %v", err)
+	}
+	availableMemory = func() (int64, bool) { return 0, false } // 잴 수 없는 OS — 화소 상한만 본다
+	if _, err := ProcessImage(data, "image/jpeg"); err != nil {
+		t.Errorf("잴 수 없는데 = %v", err)
+	}
+}
+
+// 가용 메모리는 MemAvailable + SwapFree 다 — 스왑을 둔 512MB 서버는 큰 사진도 (느리지만) 처리한다.
+func TestMeminfoCountsAvailableAndSwap(t *testing.T) {
+	dir := t.TempDir()
+	write := func(s string) string {
+		p := dir + "/meminfo"
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	got, ok := meminfo(write("MemTotal:         491520 kB\nMemFree:           20480 kB\nMemAvailable:     153600 kB\nSwapTotal:       1048576 kB\nSwapFree:        1000000 kB\n"))
+	if want := int64(153600+1000000) * 1024; !ok || got != want {
+		t.Errorf("= %d, %v, want %d", got, ok, want)
+	}
+	if _, ok := meminfo(write("MemTotal: 491520 kB\nSwapFree: 0 kB\n")); ok {
+		t.Error("MemAvailable 이 없는데 ok — 잴 수 없으면 거부하지 않아야 한다")
+	}
+	if _, ok := meminfo(dir + "/없는 파일"); ok {
+		t.Error("파일이 없는데 ok")
+	}
+}
+
+// 펼친 크기는 색 형식으로 정해진다. 16비트 PNG 는 같은 화소 수의 8비트 PNG 의 두 배다.
+func TestDecodeBytesFollowsTheColorModel(t *testing.T) {
+	const px = 1000 * 1000
+	for _, tc := range []struct {
+		model color.Model
+		per   int64
+	}{
+		{color.YCbCrModel, 3}, {color.NRGBAModel, 4}, {color.RGBAModel, 4}, {color.NRGBA64Model, 8},
+		{color.RGBA64Model, 8}, {color.GrayModel, 1}, {color.Gray16Model, 2}, {color.CMYKModel, 4},
+		{color.Palette{color.Black, color.White}, 1},
+	} {
+		if got := decodeBytes(image.Config{ColorModel: tc.model, Width: 1000, Height: 1000}); got != px*tc.per {
+			t.Errorf("%T: %d, want %d", tc.model, got, px*tc.per)
+		}
+	}
+	// 처리 전체: 펼친 원본 + 줄인 결과(6000×4000 → 1920×1280) RGBA 세 벌 + 8MB.
+	cfg := image.Config{ColorModel: color.NRGBAModel, Width: 6000, Height: 4000}
+	if got, want := workBytes(cfg), int64(6000*4000*4+3*1920*1280*4+8<<20); got != want {
+		t.Errorf("workBytes(6000×4000 PNG) = %d, want %d", got, want)
+	}
+	// 줄일 필요가 없는 작은 그림은 결과도 원본 크기다.
+	small := image.Config{ColorModel: color.NRGBAModel, Width: 800, Height: 600}
+	if got, want := workBytes(small), int64(800*600*4+3*800*600*4+8<<20); got != want {
+		t.Errorf("workBytes(800×600) = %d, want %d", got, want)
 	}
 }
