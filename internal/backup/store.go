@@ -57,6 +57,26 @@ func List(dir string) ([]File, error) {
 	return out, nil
 }
 
+// Remote is where an automatic backup goes when the site keeps its files in S3 (FR-722) — 파일 저장소(A-210)의
+// 버킷과 키를 그대로 쓴다. content.Remote 가 이것을 채운다.
+type Remote interface {
+	Put(ctx context.Context, key string, body io.ReadSeeker, size int64) error
+}
+
+// RemotePrefix is the backups' place in the bucket. 사이트 파일(YYYY/MM/…)·연결 확인(ondolith-check/)과 겹치지
+// 않는다 — 보관 기간을 정하는 버킷 수명 주기 규칙은 **이 접두사에만** 건다. 버킷 전체에 걸면 사이트 사진이 지워진다
+// (D70 「백업」).
+const RemotePrefix = "backups/"
+
+// ErrRemote means the backup could not reach the bucket and was kept locally instead.
+var ErrRemote = errors.New("backup: 버킷에 올리지 못해 이 서버에 남겼다")
+
+// Saved is where one automatic backup ended up: Where 가 "s3" 면 버킷의 RemotePrefix+Name, "local" 이면 백업 폴더.
+type Saved struct {
+	File
+	Where string
+}
+
 // rootFile closes the os.Root it was opened through together with the file.
 type rootFile struct {
 	*os.File
@@ -87,55 +107,72 @@ func Open(dir, name string) (io.ReadCloser, error) {
 	return rootFile{f, root}, nil
 }
 
-// Save makes one stored backup in dir and keeps only the newest keep (FR-715).
+// Save makes one stored backup (FR-715). remote 가 없으면 dir 에 두고 최신 keep 개만 남긴다. remote 가 있으면
+// 버킷의 RemotePrefix 에 올리고 이 서버에는 남기지 않는다(FR-722) — 올리지 못하면 만든 것을 dir 에 두고
+// ErrRemote 를 돌려준다. 그날 백업이 아예 없는 것보다 낫고, 오류라서 작업 로그에 실패로 남는다.
 //
 // 덤프와 zip 을 임시 파일(이름이 `.` 로 시작해 List 가 보지 않는다)에 다 쓴 뒤에만
 // 이름을 붙인다 — 도중에 실패하면 잘린 백업이 목록에 오르지 않고, 이전 백업도 지우지
 // 않는다. 폴더는 0700, 파일은 CreateTemp 의 0600 이다: 회원 비밀번호 해시가 든다.
 // ponytail: 프로세스가 도중에 죽으면 임시 파일이 남는다. 쌓이면 이름이 `.dump-`·`.zip-` 인 것을 지운다.
 func Save(ctx context.Context, dump func(context.Context, io.Writer) error,
-	uploads, dir string, now time.Time, keep int,
-) (File, error) {
+	uploads, dir string, now time.Time, keep int, remote Remote,
+) (Saved, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	d, err := os.CreateTemp(dir, ".dump-*")
 	if err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	defer os.Remove(d.Name())
 	defer d.Close()
 	if err := dump(ctx, d); err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	if _, err := d.Seek(0, io.SeekStart); err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	z, err := os.CreateTemp(dir, ".zip-*")
 	if err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	defer os.Remove(z.Name()) // 이름을 붙인 뒤에는 없는 파일이라 아무 일도 없다
 	if err := Write(z, d, now, uploads); err != nil {
 		z.Close()
-		return File{}, err
-	}
-	if err := z.Close(); err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	name := "auto-" + now.Format("20060102-1504") + ".zip"
+	var remoteErr error
+	if remote != nil {
+		size, err := z.Seek(0, io.SeekEnd)
+		if err == nil {
+			_, err = z.Seek(0, io.SeekStart)
+		}
+		if err == nil {
+			err = remote.Put(ctx, RemotePrefix+name, z, size)
+		}
+		if err == nil {
+			z.Close()
+			return Saved{File: File{Name: name, Size: size, Time: now}, Where: "s3"}, nil
+		}
+		remoteErr = fmt.Errorf("%w: %w", ErrRemote, err)
+	}
+	if err := z.Close(); err != nil {
+		return Saved{}, err
+	}
 	path := filepath.Join(dir, name)
 	if err := os.Rename(z.Name(), path); err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	if err := prune(dir, keep); err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return File{}, err
+		return Saved{}, err
 	}
-	return File{Name: name, Size: info.Size(), Time: info.ModTime()}, nil
+	return Saved{File: File{Name: name, Size: info.Size(), Time: info.ModTime()}, Where: "local"}, remoteErr
 }
 
 func prune(dir string, keep int) error {
@@ -159,11 +196,14 @@ const (
 )
 
 // Schedule is A-604's automatic-backup setting (FR-715): every day at Hour
-// (server local time), keeping the newest Keep.
+// (server local time), keeping the newest Keep. Last is when the last automatic
+// backup was made (FR-722) — 버킷으로 간 백업은 로컬 폴더에 흔적이 없어, 재시작한 같은 날
+// 다시 만들지 않는 근거가 이 값이다.
 type Schedule struct {
 	Enabled bool
 	Hour    int
 	Keep    int
+	Last    time.Time
 }
 
 // Scheduler runs Schedule. The app calls Tick once a minute.
@@ -172,8 +212,13 @@ type Scheduler struct {
 	Dump     func(context.Context, io.Writer) error
 	Uploads  string
 	Dir      string
+	// Remote picks the bucket for this run (FR-722): nil 이면 로컬. 오류(시크릿을 열 수 없다 등)면 그날은
+	// 로컬에 남기고 실패로 기록한다. nil 함수는 늘 로컬이다.
+	Remote func(context.Context) (Remote, error)
 	// Record reports each run — err is nil on success. 작업 로그와 서버 로그가 받는다.
 	Record func(summary string, err error)
+	// Done receives every backup that was made, 버킷이든 로컬이든 — 마지막 백업 시각으로 저장된다.
+	Done func(Saved)
 	// last is the day (YYYYMMDD) already attempted. 실패한 날도 다시 시도하지 않는다 —
 	// 그 시각 내내 매분 실패하는 pg_dump 가 로그를 덮는다.
 	last string
@@ -184,6 +229,10 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 	sch := s.Settings()
 	day := now.Format("20060102")
 	if !sch.Enabled || now.Hour() != sch.Hour || s.last == day {
+		return
+	}
+	if !sch.Last.IsZero() && sch.Last.In(now.Location()).Format("20060102") == day {
+		s.last = day
 		return
 	}
 	// 재시작한 프로세스는 last 를 모른다 — 오늘 만든 것이 이미 있으면 그날은 끝났다.
@@ -201,10 +250,27 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 	}
 	defer Mu.Unlock()
 	s.last = day
-	f, err := Save(ctx, s.Dump, s.Uploads, s.Dir, now, sch.Keep)
-	if err != nil {
+	var remote Remote
+	var pickErr error
+	if s.Remote != nil {
+		remote, pickErr = s.Remote(ctx)
+	}
+	saved, err := Save(ctx, s.Dump, s.Uploads, s.Dir, now, sch.Keep, remote)
+	if err == nil && pickErr != nil {
+		err = fmt.Errorf("%w: %w", ErrRemote, pickErr)
+	}
+	switch {
+	case saved.Name == "":
 		s.Record("자동 백업 실패", err)
 		return
+	case err != nil:
+		s.Record("자동 백업을 버킷에 올리지 못해 이 서버에 남겼다: "+saved.Name+" ("+saved.MB()+")", err)
+	case saved.Where == "s3":
+		s.Record("자동 백업 → 버킷 "+RemotePrefix+saved.Name+" ("+saved.MB()+")", nil)
+	default:
+		s.Record("자동 백업 "+saved.Name+" ("+saved.MB()+")", nil)
 	}
-	s.Record("자동 백업 "+f.Name+" ("+f.MB()+")", nil)
+	if s.Done != nil {
+		s.Done(saved)
+	}
 }

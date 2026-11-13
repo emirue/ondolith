@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // **백업은 최고 관리자가 비밀번호를 다시 넣고 받는다** (FR-713, A-604). 덤프에는 모든
@@ -170,5 +171,65 @@ func TestAutoBackupSettingsAndStoredDownloads(t *testing.T) {
 		if rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"file"}, "name": {name}}); rec.Code != http.StatusNotFound {
 			t.Errorf("%q = HTTP %d, want 404", name, rec.Code)
 		}
+	}
+}
+
+// **A-604 는 마지막 자동 백업이 언제·어디였는지 보인다** (FR-722). 백업은 조용히 실패하는 것이 가장 위험하다 —
+// 켜 두었는데 이틀 넘게 성공한 적이 없으면 경고한다. 파일 저장소가 S3 면 백업이 버킷으로 간다고 알린다.
+// 자동 백업 설정을 저장해도 마지막 백업 기록은 지워지지 않는다(폼이 쓰는 키가 아니다).
+func TestBackupScreenShowsTheLastBackupAndWhereItGoes(t *testing.T) {
+	op := &fakeCaller{perms: map[string]bool{"settings.update": true}, email: "op@example.com"}
+	d, _ := fixture(t, op)
+	ctx := context.Background()
+	d.BackupDir = t.TempDir()
+	var data map[string]any
+	d.Render = func(w http.ResponseWriter, _ *http.Request, _ string, c int, v any) {
+		w.WriteHeader(c)
+		data, _ = v.(map[string]any)
+	}
+	put := func(kv map[string]string) {
+		t.Helper()
+		if err := d.Content.PutSettings(ctx, kv); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	get(d.BackupForm, "/admin/backup")
+	if data["ToBucket"] != false || data["LastWhere"] != "" || data["Stale"] != false {
+		t.Errorf("처음 = 버킷 %v · 마지막 %q · 경고 %v", data["ToBucket"], data["LastWhere"], data["Stale"])
+	}
+
+	put(map[string]string{"storage.backend": "s3", "backup.auto": "1",
+		SettingBackupLastAt: time.Now().Add(-72 * time.Hour).Format(time.RFC3339), SettingBackupLastWhere: "s3:backups/auto-20261111-0000.zip"})
+	get(d.BackupForm, "/admin/backup")
+	if data["ToBucket"] != true || data["LastWhere"] != "버킷 backups/auto-20261111-0000.zip" {
+		t.Errorf("S3 = 버킷 %v · 마지막 %q", data["ToBucket"], data["LastWhere"])
+	}
+	if data["Stale"] != true {
+		t.Error("켜 두었는데 사흘 전이 마지막인데 경고하지 않았다")
+	}
+
+	put(map[string]string{SettingBackupLastAt: time.Now().Add(-time.Hour).Format(time.RFC3339), SettingBackupLastWhere: "local:auto-20261114-0000.zip"})
+	get(d.BackupForm, "/admin/backup")
+	if data["Stale"] != false || data["LastWhere"] != "이 서버 auto-20261114-0000.zip" {
+		t.Errorf("한 시간 전 로컬 = 경고 %v · 마지막 %q", data["Stale"], data["LastWhere"])
+	}
+
+	// 꺼 두면 오래돼도 경고하지 않는다 — 운영자가 끈 것이다.
+	put(map[string]string{"backup.auto": "", SettingBackupLastAt: time.Now().Add(-240 * time.Hour).Format(time.RFC3339)})
+	get(d.BackupForm, "/admin/backup")
+	if data["Stale"] != false {
+		t.Error("꺼 둔 자동 백업을 경고했다")
+	}
+
+	// 설정 저장은 마지막 백업 기록을 덮지 않는다.
+	su := &fakeCaller{superuser: true, reauth: true, email: "su@example.com", password: "correct horse battery"}
+	d.Caller = func(*http.Request) Caller { return su }
+	if rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"settings"}, "backup.auto": {"1"},
+		"backup.hour": {"3"}, "backup.keep": {"7"}, "password": {"correct horse battery"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("설정 저장 = HTTP %d", rec.Code)
+	}
+	if kv, _ := d.Content.Settings(ctx, SettingBackupLastWhere); kv[SettingBackupLastWhere] != "local:auto-20261114-0000.zip" {
+		t.Errorf("설정 저장이 마지막 백업 기록을 바꿨다: %q", kv[SettingBackupLastWhere])
 	}
 }
