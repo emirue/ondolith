@@ -228,6 +228,8 @@ var siteSettingKeys = append([]string{
 	// 관리자 콘솔 배색. **부팅 때 읽던 값인데 그것을 저장하는 화면이 없었다** —
 	// 다섯 방향이 스타일시트에 있는데 고를 방법이 없었다.
 	"admin.theme",
+	// 관리자 메뉴 숨김 (FR-720). 체크박스 여러 개라 SettingsSave 가 따로 읽는다 (HiddenNavValue).
+	hiddenMenusKey,
 	// 공개 폼 스팸 방지 (FR-216). 둘 다 있어야 켜진다. 비밀키는 봉인되고 다시 보이지 않는다.
 	"turnstile.site_key", "turnstile.secret_key",
 	// 기본 설명·대표 이미지·GA4 는 「검색 노출」(A-211, seoSettingKeys)에 있다.
@@ -236,6 +238,8 @@ var siteSettingKeys = append([]string{
 	// 사업자 정보 아홉 칸(표시 의무 여덟 + 업무시간)이 뒤에 붙는다 (FR-711). 쇼핑몰에서만 열리던 화면에 있었는데,
 	// 회사 홈페이지(cms)도 푸터에 싣는다.
 }, commerce.BusinessKeys...)
+
+const hiddenMenusKey = "admin.hidden_menus"
 
 // mapKeyNames are the map providers' browser keys (FR-716): 네이버 ncpKeyId, 카카오
 // JavaScript 키, 구글 API 키와 Map ID. **공개값이다** — 페이지에 실려 SDK 를 부르고, 각
@@ -344,6 +348,17 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
+	// 관리자 메뉴 숨김 (FR-720). 위 루프는 첫 값(빈 hidden input)만 읽으므로 전부 다시 읽는다.
+	// 칸이 없는 부분 POST 는 kv 에 없어 그대로 남는다.
+	if r.PostForm.Has(hiddenMenusKey) {
+		v, err := HiddenNavValue(r.PostForm[hiddenMenusKey], prev[hiddenMenusKey], prev["site.type"] == "shop")
+		if err != nil {
+			d.renderSite(w, r, http.StatusUnprocessableEntity,
+				"숨길 수 없는 메뉴입니다. 대시보드·사이트 설정·약관·결제 설정·역할·권한은 늘 보입니다.")
+			return
+		}
+		kv[hiddenMenusKey] = v
+	}
 	typeChanged := changed(kv, prev, "site.type")
 	if typeChanged {
 		// 결제 경로를 닫는 전환은 미완결 주문이 있으면 거부한다 (D13 전환
@@ -386,7 +401,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 나머지 저장도 남긴다 (D19 A-201). 바뀐 키 이름만 적는다.
 	var names []string
 	for _, k := range plain {
-		if k == "site.type" || k == "turnstile.site_key" || !changed(kv, prev, k) {
+		if k == "site.type" || k == "turnstile.site_key" || k == hiddenMenusKey || !changed(kv, prev, k) {
 			continue
 		}
 		names = append(names, k)
@@ -394,9 +409,15 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 	if len(names) > 0 {
 		d.log(r, c, "settings.update", "settings", "site", "사이트 설정 변경: "+strings.Join(names, ", "))
 	}
+	// 숨김은 소유자 화면에서도 메뉴를 감추므로 무엇을 감췄는지까지 남긴다. 화면 ID 는 비밀이 아니다.
+	if changed(kv, prev, hiddenMenusKey) {
+		d.log(r, c, "settings.update", "settings", hiddenMenusKey,
+			"관리자 메뉴 숨김: "+orNone(prev[hiddenMenusKey])+" → "+orNone(kv[hiddenMenusKey]))
+	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
-	// 조립 때 읽는 키 — 사이트 유형(라우트), 관리자 배색(렌더러), 개발 모드(템플릿 로더).
-	if !typeChanged && !changed(kv, prev, "admin.theme") && !changed(kv, prev, "site.dev_mode") {
+	// 조립 때 읽는 키 — 사이트 유형(라우트), 관리자 배색·메뉴 숨김(렌더러), 개발 모드(템플릿 로더).
+	if !typeChanged && !changed(kv, prev, "admin.theme") && !changed(kv, prev, hiddenMenusKey) &&
+		!changed(kv, prev, "site.dev_mode") {
 		return
 	}
 	// 조립 시점 키가 바뀌었다 — 운영 트리를 다시 조립해 원자 교체한다 (D20).
@@ -516,6 +537,9 @@ func (d *Deps) renderSite(w http.ResponseWriter, r *http.Request, code int, msg 
 	d.renderSettingsData(w, r, "admin/settings.html", siteSettingKeys, code, msg, "",
 		func(kv map[string]string, data map[string]any) {
 			data["BusinessKeys"], data["BusinessLabels"] = commerce.BusinessKeys, commerce.BusinessLabels
+			// 관리자 메뉴 숨김 (FR-720) — 지금 사이트 유형의 선택지와 숨긴 화면.
+			data["HideChoices"] = HideChoices(kv["site.type"] == "shop")
+			data["Hidden"] = ParseHiddenNav(kv[hiddenMenusKey])
 			if bw := businessWarning(kv); bw != "" {
 				data["Warning"] = strings.TrimSpace(data["Warning"].(string) + " " + bw)
 			}

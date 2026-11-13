@@ -379,7 +379,7 @@ func TestStocktakeValidatesItsInput(t *testing.T) {
 // 보내는 폼이라 메뉴가 없다.
 func TestNavHasOneStockEntry(t *testing.T) {
 	var titles []string
-	for _, g := range Nav(func(string) bool { return true }, true) {
+	for _, g := range Nav(func(string) bool { return true }, true, nil) {
 		for _, it := range g.Items {
 			if strings.HasPrefix(it.Path, "/admin/stock") || strings.Contains(it.Path, "/scan/") ||
 				it.Screen == "A-514" || it.Screen == "A-515" || it.Screen == "A-517" {

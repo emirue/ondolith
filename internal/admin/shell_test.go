@@ -30,7 +30,7 @@ func flatten(groups []NavGroup) []string {
 // go and try. Hiding is UX (D15 4.3) — the paths still check — but the list
 // should not be a directory of targets.
 func TestNavHidesItemsWithoutPermission(t *testing.T) {
-	got := flatten(Nav(allowOnly("admin.access", "page.view"), false))
+	got := flatten(Nav(allowOnly("admin.access", "page.view"), false, nil))
 	want := map[string]bool{"A-101": true, "A-301": true}
 
 	if len(got) != len(want) {
@@ -46,7 +46,7 @@ func TestNavHidesItemsWithoutPermission(t *testing.T) {
 func TestNavShowsEverythingToASuperuser(t *testing.T) {
 	// shop=true 여야 전부다. cms 에서는 커머스 항목이 빠지는 것이 정상이고,
 	// 그 차이를 아래 테스트가 따로 본다.
-	got := flatten(Nav(func(string) bool { return true }, true))
+	got := flatten(Nav(func(string) bool { return true }, true, nil))
 	if len(got) != len(nav) {
 		t.Errorf("항목 %d개, want %d개", len(got), len(nav))
 	}
@@ -57,8 +57,8 @@ func TestNavShowsEverythingToASuperuser(t *testing.T) {
 // 등록되지 않은 경로를 가리키는 메뉴는 404 링크이고, 그것은 권한이 없어 안
 // 열리는 링크와 똑같이 보인다 — 아무도 신고하지 않는다.
 func TestNavHidesCommerceInCmsMode(t *testing.T) {
-	cms := flatten(Nav(func(string) bool { return true }, false))
-	shop := flatten(Nav(func(string) bool { return true }, true))
+	cms := flatten(Nav(func(string) bool { return true }, false, nil))
+	shop := flatten(Nav(func(string) bool { return true }, true, nil))
 
 	if len(shop) <= len(cms) {
 		t.Fatalf("shop %d개, cms %d개 — 커머스 항목이 없다", len(shop), len(cms))
@@ -97,13 +97,13 @@ func TestNavHidesCommerceInCmsMode(t *testing.T) {
 }
 
 func TestNavIsEmptyWithoutPermissions(t *testing.T) {
-	if got := Nav(func(string) bool { return false }, false); len(got) != 0 {
+	if got := Nav(func(string) bool { return false }, false, nil); len(got) != 0 {
 		t.Errorf("권한이 없는데 %d 그룹이 나왔다", len(got))
 	}
 }
 
 func TestNavIsOrdered(t *testing.T) {
-	groups := Nav(func(string) bool { return true }, false)
+	groups := Nav(func(string) bool { return true }, false, nil)
 	last := -1
 	for _, g := range groups {
 		for _, it := range g.Items {
@@ -139,7 +139,7 @@ func TestNavPathsAreUnderTheAdminTree(t *testing.T) {
 }
 
 func TestCurrentGroupMatchesDeepestPath(t *testing.T) {
-	groups := Nav(func(string) bool { return true }, false)
+	groups := Nav(func(string) bool { return true }, false, nil)
 	tests := map[string]string{
 		// `/admin/` with the slash: A-101's pattern is `/admin/{$}`, so that is
 		// the URL the route actually serves.
@@ -203,7 +203,7 @@ func TestThemeNavJoinsTheMenuByScope(t *testing.T) {
 	if len(extra) != 2 || extra[0].Path != "/admin/theme/hero" || extra[0].Screen != "A-212" {
 		t.Fatalf("ThemeNav = %+v", extra)
 	}
-	groups := Nav(func(string) bool { return true }, false, extra...)
+	groups := Nav(func(string) bool { return true }, false, nil, extra...)
 	var content, themeGroup []string
 	for _, g := range groups {
 		for _, it := range g.Items {
@@ -223,5 +223,115 @@ func TestThemeNavJoinsTheMenuByScope(t *testing.T) {
 	}
 	if got := CurrentGroup(groups, "/admin/theme/partners/0b6e6f43-8d6e-4a3c-9a39-0d7c3d6b1c11"); got != "/admin/theme/partners" {
 		t.Errorf("행 화면에서 강조할 메뉴 = %q", got)
+	}
+}
+
+func allowAll(string) bool { return true }
+
+// FR-720: A-201 에서 숨긴 메뉴는 최고 관리자에게도 빠진다 — 권한 필터와 별개다.
+func TestNavHidesHiddenScreensEvenForSuperuser(t *testing.T) {
+	got := flatten(Nav(allowAll, true, map[string]bool{"A-206": true, "A-603": true}))
+	for _, s := range got {
+		if s == "A-206" || s == "A-603" {
+			t.Errorf("숨긴 화면이 메뉴에 나왔다: %s", s)
+		}
+	}
+	if len(got) != len(nav)-2 {
+		t.Errorf("항목 %d개, want %d개", len(got), len(nav)-2)
+	}
+}
+
+// 고정 화면은 저장값에 있어도 숨지 않는다. DB 를 손으로 고쳐도 숨김을 되돌릴 A-201 은 남는다.
+func TestNavNeverHidesLockedScreens(t *testing.T) {
+	hidden := map[string]bool{"A-101": true, "A-201": true, "A-207": true, "A-209": true, "A-403": true}
+	if got := flatten(Nav(allowAll, true, hidden)); len(got) != len(nav) {
+		t.Errorf("고정 화면이 숨었다: 항목 %d개, want %d개", len(got), len(nav))
+	}
+}
+
+// 코어 업그레이드로 없어진 화면 ID 가 저장값에 남아 있어도 메뉴는 그대로 그려진다.
+// 테마 화면(A-212)은 숨김 대상이 아니다 — 저장값에 A-212 가 있어도 테마 메뉴는 남는다.
+func TestNavIgnoresUnknownAndThemeHiddenIDs(t *testing.T) {
+	extra := ThemeNav([]theme.Screen{{Key: "hero", Title: "메인 배너", Group: "콘텐츠", Order: 11}},
+		func(string) bool { return true })
+	got := flatten(Nav(allowAll, true, map[string]bool{"Z-999": true, "A-212": true}, extra...))
+	if len(got) != len(nav)+1 {
+		t.Errorf("항목 %d개, want %d개 (코어 전부 + 테마 화면 하나)", len(got), len(nav)+1)
+	}
+}
+
+// 폼의 선택지에는 고정 화면이 없다. 커머스 메뉴는 shop 일 때만 나온다.
+func TestHideChoicesNeverOfferLockedScreens(t *testing.T) {
+	locked := map[string]bool{"A-101": true, "A-201": true, "A-207": true, "A-209": true, "A-403": true}
+	for _, shop := range []bool{false, true} {
+		got := flatten(HideChoices(shop))
+		hasCommerce := false
+		for _, id := range got {
+			if locked[id] {
+				t.Errorf("shop=%v: 고정 화면 %s 가 선택지에 있다", shop, id)
+			}
+			if id == "A-603" {
+				hasCommerce = true
+			}
+		}
+		if hasCommerce != shop {
+			t.Errorf("shop=%v: 커머스 메뉴(A-603) 선택지 = %v", shop, hasCommerce)
+		}
+		lockedHere := 0
+		for _, id := range flatten(Nav(allowAll, shop, nil)) {
+			if locked[id] {
+				lockedHere++
+			}
+		}
+		if want := len(flatten(Nav(allowAll, shop, nil))) - lockedHere; len(got) != want {
+			t.Errorf("shop=%v: 선택지 %d개, want %d개", shop, len(got), want)
+		}
+	}
+}
+
+func TestHiddenNavValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		submitted []string
+		prev      string
+		shop      bool
+		want      string
+		wantErr   bool
+	}{
+		{"정렬해 쉼표로 잇는다", []string{"A-603", "A-206"}, "", true, "A-206,A-603", false},
+		{"빈 값(폼의 hidden input)은 건너뛴다", []string{"", "A-206"}, "", false, "A-206", false},
+		{"모두 해제", []string{""}, "A-206", false, "", false},
+		{"같은 ID 두 번", []string{"A-206", "A-206"}, "", false, "A-206", false},
+		{"고정 화면 — 사이트 설정", []string{"A-201"}, "", false, "", true},
+		{"고정 화면 — 결제 설정", []string{"A-209"}, "", true, "", true},
+		{"고정 화면 — 약관", []string{"A-207"}, "", true, "", true},
+		{"고정 화면 — 역할·권한", []string{"A-403"}, "", false, "", true},
+		{"고정 화면 — 대시보드", []string{"A-101"}, "", false, "", true},
+		{"모르는 ID", []string{"Z-999"}, "", false, "", true},
+		{"테마 화면은 대상이 아니다", []string{"A-212"}, "", false, "", true},
+		{"cms 저장은 숨긴 커머스를 남긴다", nil, "A-603,A-206", false, "A-603", false},
+		{"shop 저장은 폼이 전부다", nil, "A-603", true, "", false},
+		{"없어진 ID 는 버린다", []string{"A-206"}, "Z-999,A-206", true, "A-206", false},
+		{"cms 에서도 이전 값의 고정 화면은 남기지 않는다", nil, "A-209", false, "", false},
+	}
+	for _, tc := range tests {
+		got, err := HiddenNavValue(tc.submitted, tc.prev, tc.shop)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("%s: err = %v, wantErr %v", tc.name, err, tc.wantErr)
+			continue
+		}
+		if !tc.wantErr && got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestParseHiddenNav(t *testing.T) {
+	got := ParseHiddenNav(" A-206, ,A-603")
+	if len(got) != 2 || !got["A-206"] || !got["A-603"] {
+		t.Errorf("ParseHiddenNav = %v", got)
+	}
+	if len(ParseHiddenNav("")) != 0 {
+		t.Error("빈 값이 항목을 만들었다")
 	}
 }

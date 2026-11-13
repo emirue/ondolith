@@ -49,6 +49,9 @@ type adminRenderer struct {
 	// themeScreens is the active theme's admin.json screens (D41) — 메뉴에 화면 단위 판정을
 	// 통과한 것만 붙인다. nil 이면 테마 화면이 없다.
 	themeScreens func() []theme.Screen
+	// hiddenNav are the core screens A-201 hides for everyone (FR-720). 조립 때 읽고, 바뀌면
+	// A-201 이 트리를 다시 조립한다 — 관리자 배색과 같은 길이다.
+	hiddenNav map[string]bool
 	// theme selects one of the handoff's five directions (1a~1e). Empty means
 	// defaultAdminTheme.
 	theme string
@@ -207,7 +210,7 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	if a.themeScreens != nil {
 		screens = a.themeScreens()
 	}
-	groups := admin.Nav(actor.Can, a.shop, admin.ThemeNav(screens, func(key string) bool {
+	groups := admin.Nav(actor.Can, a.shop, a.hiddenNav, admin.ThemeNav(screens, func(key string) bool {
 		return actor.CanOnScreen(auth.ThemeContentPermission, key)
 	})...)
 	view := map[string]any{

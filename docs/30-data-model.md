@@ -494,6 +494,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `analytics.ga4_id` | text (`G-…`) | A-211 | 6 |
 | `seo.google_verification` · `seo.naver_verification` · `seo.bing_verification` · `seo.noindex` · `seo.robots_extra` | text — 공개값 / bool — 빈 값이 「노출」 / text — robots 지시어·주석 줄 (FR-718) | A-211 | 6 |
 | `admin.theme` | 빈 값(기본 배색) \| `1a`~`1e` | A-201 | 6 |
+| `admin.hidden_menus` | 빈 값(모두 보임) \| 숨긴 화면 ID 를 정렬해 쉼표로 이은 것 (FR-720) | A-201 | 6 |
 | `theme.active` | text — 테마 폴더 이름 | A-202 | 1 |
 | `map.naver_key` · `map.kakao_key` · `map.google_key` · `map.google_map_id` | text — 공개값 (FR-716) | A-201 | 6 |
 | `backup.auto` · `backup.hour` · `backup.keep` | bool / int 0~23 (기본 0) / int 1~30 (기본 7) | A-604 | 6 |

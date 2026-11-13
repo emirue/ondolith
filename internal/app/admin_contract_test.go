@@ -4,6 +4,8 @@ import (
 	"html/template"
 	"io/fs"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"reflect"
@@ -13,6 +15,7 @@ import (
 	"testing"
 	"text/template/parse"
 
+	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/theme"
 )
@@ -1063,6 +1066,32 @@ func TestFontStackStartsWithTheSystemFont(t *testing.T) {
 		}
 		if !strings.HasPrefix(string(m[1]), "system-ui") {
 			t.Errorf("%s: 글꼴 목록이 %q 로 시작한다 — 싣지 않은 글꼴이 첫째면 PC 마다 다르게 보인다", name, m[1])
+		}
+	}
+}
+
+// **A-201 에서 숨긴 메뉴는 사이드바에서 빠진다 — 최고 관리자에게도** (FR-720). 렌더러가 조립 때 받은
+// 값을 Nav 에 넘기지 않으면 저장은 되는데 메뉴는 그대로인 상태가 된다.
+func TestAdminMenuDropsHiddenScreens(t *testing.T) {
+	r, err := newAdminRenderer(func() string { return "s" }, nil, "", true, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.hiddenNav = map[string]bool{"A-206": true, "A-603": true}
+	req := httptest.NewRequest(http.MethodGet, "/admin/x", nil)
+	req = req.WithContext(withActorValue(req.Context(), &Actor{Perms: auth.NewPermissions(true, nil)}))
+	rec := httptest.NewRecorder()
+	r.Render(rec, req, "admin/refusal.html", http.StatusOK, map[string]any{})
+	body := rec.Body.String()
+	for _, hidden := range []string{`href="/admin/settings/social"`, `href="/admin/webhooks"`} {
+		if strings.Contains(body, hidden) {
+			t.Errorf("숨긴 메뉴 %s 가 그려졌다", hidden)
+		}
+	}
+	// 메뉴 자체는 그려졌다 — 숨기지 않은 이웃 항목과 고정 화면이 있다.
+	for _, shown := range []string{`href="/admin/settings/storage"`, `href="/admin/settings"`, `href="/admin/orders"`} {
+		if !strings.Contains(body, shown) {
+			t.Errorf("메뉴에 %s 가 없다", shown)
 		}
 	}
 }
