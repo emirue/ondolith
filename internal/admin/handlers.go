@@ -1048,7 +1048,13 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
-	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u, "Roles": roles})
+	// 지금 가진 역할 — 「역할 부여」 선택 칸만 있어 무엇을 갖고 있는지, 무엇을 뺄지 알 수 없었다 (A-405).
+	held, err := d.Auth.UserRoleKeys(r.Context(), u.ID)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u, "Roles": roles, "Held": held})
 }
 
 // guardAccountOp is the shared front door for the A-402 account actions —

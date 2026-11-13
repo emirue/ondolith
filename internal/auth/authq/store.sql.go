@@ -303,10 +303,10 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 
 const loadPermissions = `-- name: LoadPermissions :one
 WITH effective AS (
-    SELECT r.id, r.is_superuser
+    SELECT r.id, r.key, r.is_superuser
     FROM roles r
     WHERE r.key IN ('anonymous', 'member')
-       OR r.id IN (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id = $1)
+       OR r.id IN (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id = $2)
 )
 SELECT
     coalesce(bool_or(e.is_superuser), false)::bool AS superuser,
@@ -318,15 +318,23 @@ SELECT
 FROM effective e
 LEFT JOIN role_permissions rp ON rp.role_id = e.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
+    AND (e.key NOT IN ('anonymous', 'member') OR p.key = ANY($1::text[]))
 `
+
+type LoadPermissionsParams struct {
+	Visitor []string
+	UserID  string
+}
 
 type LoadPermissionsRow struct {
 	Superuser bool
 	Perms     []string
 }
 
-func (q *Queries) LoadPermissions(ctx context.Context, userID string) (LoadPermissionsRow, error) {
-	row := q.db.QueryRow(ctx, loadPermissions, userID)
+// R9: 모든 요청이 갖는 역할(anonymous·member)에서는 방문자 권한(visitor)만 효력이 있다 — 거기 들어간
+// 관리 권한은 가입한 누구에게나 간다. 부여 화면이 막기 전에 들어간 것까지 여기서 버린다.
+func (q *Queries) LoadPermissions(ctx context.Context, arg LoadPermissionsParams) (LoadPermissionsRow, error) {
+	row := q.db.QueryRow(ctx, loadPermissions, arg.Visitor, arg.UserID)
 	var i LoadPermissionsRow
 	err := row.Scan(&i.Superuser, &i.Perms)
 	return i, err
@@ -340,12 +348,18 @@ SELECT coalesce(
 FROM roles r
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
 LEFT JOIN permissions p       ON p.id = rp.permission_id
-WHERE r.key = $1
+    AND (r.key NOT IN ('anonymous', 'member') OR p.key = ANY($1::text[]))
+WHERE r.key = $2
 `
 
+type LoadRolePermissionsParams struct {
+	Visitor []string
+	RoleKey string
+}
+
 // 한 역할(anonymous·member)이 가진 권한 — 사용자가 아니라 역할을 묻는다.
-func (q *Queries) LoadRolePermissions(ctx context.Context, key string) ([]string, error) {
-	row := q.db.QueryRow(ctx, loadRolePermissions, key)
+func (q *Queries) LoadRolePermissions(ctx context.Context, arg LoadRolePermissionsParams) ([]string, error) {
+	row := q.db.QueryRow(ctx, loadRolePermissions, arg.Visitor, arg.RoleKey)
 	var perms []string
 	err := row.Scan(&perms)
 	return perms, err
@@ -400,6 +414,36 @@ func (q *Queries) RevokeCredentials(ctx context.Context, id string) error {
 	return err
 }
 
+const revokePermission = `-- name: RevokePermission :execrows
+DELETE FROM role_permissions rp
+USING roles r, permissions p
+WHERE rp.role_id = r.id AND rp.permission_id = p.id
+  AND r.key = $1 AND p.key = $2
+  AND rp.board_id IS NOT DISTINCT FROM NULLIF($3::text, '')::uuid
+  AND rp.theme_screen IS NOT DISTINCT FROM NULLIF($4::text, '')
+`
+
+type RevokePermissionParams struct {
+	RoleKey string
+	PermKey string
+	Board   string
+	Screen  string
+}
+
+// A-404 빼기: 그 부여 한 행만. 게시판·테마 화면 범위까지 같아야 같은 부여다 (빈 값 = 범위 없음).
+func (q *Queries) RevokePermission(ctx context.Context, arg RevokePermissionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokePermission,
+		arg.RoleKey,
+		arg.PermKey,
+		arg.Board,
+		arg.Screen,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const roleByKey = `-- name: RoleByKey :one
 SELECT r.key, r.is_superuser,
        coalesce(array_agg(DISTINCT p.key) FILTER (WHERE p.key IS NOT NULL), '{}')::text[] AS permissions
@@ -421,6 +465,48 @@ func (q *Queries) RoleByKey(ctx context.Context, key string) (RoleByKeyRow, erro
 	var i RoleByKeyRow
 	err := row.Scan(&i.Key, &i.IsSuperuser, &i.Permissions)
 	return i, err
+}
+
+const roleGrants = `-- name: RoleGrants :many
+SELECT r.key AS role_key, p.key AS perm_key,
+       coalesce(rp.board_id::text, '')::text AS board_id, coalesce(rp.theme_screen, '')::text AS theme_screen
+FROM role_permissions rp
+JOIN roles r       ON r.id = rp.role_id
+JOIN permissions p ON p.id = rp.permission_id
+ORDER BY r.key, p.key, board_id, theme_screen
+`
+
+type RoleGrantsRow struct {
+	RoleKey     string
+	PermKey     string
+	BoardID     string
+	ThemeScreen string
+}
+
+// A-403 이 범위까지 보여야 뺄 것을 고른다 — Roles 는 키만 모은다.
+func (q *Queries) RoleGrants(ctx context.Context) ([]RoleGrantsRow, error) {
+	rows, err := q.db.Query(ctx, roleGrants)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RoleGrantsRow{}
+	for rows.Next() {
+		var i RoleGrantsRow
+		if err := rows.Scan(
+			&i.RoleKey,
+			&i.PermKey,
+			&i.BoardID,
+			&i.ThemeScreen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const roles = `-- name: Roles :many
@@ -469,6 +555,25 @@ func (q *Queries) Roles(ctx context.Context) ([]RolesRow, error) {
 	return items, nil
 }
 
+const unassignRole = `-- name: UnassignRole :execrows
+DELETE FROM user_roles ur
+USING roles r
+WHERE ur.role_id = r.id AND ur.user_id = $1::uuid AND r.key = $2
+`
+
+type UnassignRoleParams struct {
+	UserID  string
+	RoleKey string
+}
+
+func (q *Queries) UnassignRole(ctx context.Context, arg UnassignRoleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unassignRole, arg.UserID, arg.RoleKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateProfile = `-- name: UpdateProfile :execrows
 UPDATE users SET display_name = $2, custom_fields = $3, updated_at = now()
 WHERE id = $1
@@ -486,4 +591,30 @@ func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (i
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const userRoleKeys = `-- name: UserRoleKeys :many
+SELECT r.key FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id = $1::uuid
+ORDER BY r.key
+`
+
+func (q *Queries) UserRoleKeys(ctx context.Context, userID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, userRoleKeys, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		items = append(items, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

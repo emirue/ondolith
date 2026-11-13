@@ -201,3 +201,46 @@ func TestValidateScreenGrant(t *testing.T) {
 		})
 	}
 }
+
+// **R9: 모든 요청이 갖는 역할(anonymous·member)에는 방문자 권한만 준다.** 그 역할에 준 관리 권한은
+// 가입한 누구에게나(member) 또는 아무에게나(anonymous) 간다 — 한 번의 잘못된 부여가 사이트를 연다.
+// 방문자 권한은 게시판 프리셋이 그 역할에 주는 것(읽기·쓰기·댓글)이다. 다른 역할은 R9 과 상관없다.
+func TestEveryoneRolesTakeOnlyVisitorPermissions(t *testing.T) {
+	su := actorWith("u1", true)
+	for _, role := range []string{"anonymous", "member"} {
+		r := Role{Key: role}
+		for _, p := range []string{"admin.access", "settings.update", "post.moderate", "comment.moderate", "post.read_secret", "role.manage"} {
+			if err := CanAddPermissionToRole(su, r, p); !errors.Is(err, ErrEveryoneRolePermission) {
+				t.Errorf("%s 에 %s = %v, want ErrEveryoneRolePermission", role, p, err)
+			}
+		}
+		for _, p := range []string{"post.read", "post.write", "comment.write"} {
+			if err := CanAddPermissionToRole(su, r, p); err != nil {
+				t.Errorf("%s 에 방문자 권한 %s 가 거부됐다: %v", role, p, err)
+			}
+		}
+	}
+	// 부여 대상 역할은 R9 과 상관없다 — editor·operator 에 admin.access 를 주는 것이 정상 운영이다.
+	for _, role := range []string{"editor", "operator", "custom"} {
+		if err := CanAddPermissionToRole(su, Role{Key: role}, "admin.access"); err != nil {
+			t.Errorf("%s 에 admin.access 가 거부됐다: %v", role, err)
+		}
+	}
+	if !EveryoneRole("anonymous") || !EveryoneRole("member") || EveryoneRole("editor") {
+		t.Error("EveryoneRole 이 anonymous·member 만 골라야 한다")
+	}
+}
+
+// 권한 빼기는 R5(superuser 역할은 편집 대상이 아니다)와 R4(자기가 갖지 않은 권한은 손대지 않는다)를 따른다.
+// R9 은 빼기를 막지 않는다 — 잘못 들어간 것을 빼는 것이 이 기능의 목적이다.
+func TestRemovingAPermissionFollowsR4AndR5(t *testing.T) {
+	if err := CanRemovePermissionFromRole(actorWith("u1", true), Role{Key: "admin", Superuser: true}, "page.view"); !errors.Is(err, ErrSuperuserRoleEdit) {
+		t.Errorf("superuser 역할에서 뺐다: %v", err)
+	}
+	if err := CanRemovePermissionFromRole(actorWith("u1", false, "role.manage"), Role{Key: "editor"}, "page.view"); !errors.Is(err, ErrAddUnheldPermission) {
+		t.Errorf("갖지 않은 권한을 뺐다: %v", err)
+	}
+	if err := CanRemovePermissionFromRole(actorWith("u1", true), Role{Key: "anonymous"}, "admin.access"); err != nil {
+		t.Errorf("anonymous 에 잘못 들어간 admin.access 를 빼지 못한다: %v", err)
+	}
+}

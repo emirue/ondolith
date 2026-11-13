@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -217,6 +218,16 @@ func TestNoRouteAnswers500ToAMalformedFormID(t *testing.T) {
 			t.Fatalf("%s: %v", path, err)
 		}
 		resp.Body.Close()
+		// 관리자 트리는 IP 당 1분에 60번이다 (D15 4.3-2). 라우트가 늘어 한 창에 다 못 보내면 창이 지나길 기다려
+		// 그 라우트를 다시 보낸다 — 429 를 검사했다고 세면 그 뒤의 라우트는 아무것도 보지 않은 것이다
+		// (scripts/crawl.sh 와 같은 처리).
+		if resp.StatusCode == http.StatusTooManyRequests {
+			time.Sleep(61 * time.Second)
+			if resp, err = c.PostForm(srv.URL+path, form); err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			resp.Body.Close()
+		}
 		checkAnswer(t, rt.Method, rt.Pattern, resp.StatusCode)
 	}
 	if checked < 40 {
@@ -230,6 +241,13 @@ func TestNoRouteAnswers500ToAMalformedFormID(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests { // 위와 같은 요청 상한 — 창이 지나면 세션이 살아 있는지 본다
+		time.Sleep(61 * time.Second)
+		if resp, err = c.Get(srv.URL + "/admin/categories"); err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("훑고 나니 /admin/categories = HTTP %d — 도중에 세션이 끊겼다. "+
 			"그 뒤의 라우트는 검사되지 않았다", resp.StatusCode)

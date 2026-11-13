@@ -290,6 +290,11 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "role.manage", Handler: ad.RoleGrantPermission})
 	r.Add(Route{Screen: "A-405", Method: "POST", Pattern: "/admin/users/roles", Class: SC5,
 		Permission: "role.assign", Handler: ad.RoleAssign})
+	// 빼기 (R9 이후) — 부여와 같은 권한·화면이다. 잘못 준 권한·역할을 DB 를 고치지 않고 되돌린다.
+	r.Add(Route{Screen: "A-404", Method: "POST", Pattern: "/admin/roles/permissions/revoke", Class: SC5,
+		Permission: "role.manage", Handler: ad.RoleRevokePermission})
+	r.Add(Route{Screen: "A-405", Method: "POST", Pattern: "/admin/users/roles/revoke", Class: SC5,
+		Permission: "role.assign", Handler: ad.RoleRevoke})
 
 	r.Add(Route{Screen: "A-304", Method: "GET", Pattern: "/admin/boards", Class: SC4,
 		Permission: "board.view", Handler: ad.BoardList})

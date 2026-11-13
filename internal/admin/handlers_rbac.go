@@ -195,9 +195,55 @@ func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, cod
 		d.serverError(w, r, err)
 		return
 	}
+	// 부여 하나하나와 그 범위 — 뺄 것을 고르려면 범위까지 보여야 한다. 모든 요청이 갖는 역할에 든 관리 권한은
+	// 불러올 때 버려지므로(R9) 「효력 없음」으로 보인다. 켜진 것처럼 두면 운영자는 아직 열려 있다고 믿는다.
+	all, err := d.Auth.RoleGrants(ctx)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	boardName := map[string]string{}
+	for _, b := range boards {
+		boardName[b.ID] = b.Name
+	}
+	screenTitle := map[string]string{}
+	for _, sc := range d.themeScreens() {
+		screenTitle[sc.Key] = sc.Title
+	}
+	grants := map[string][]GrantView{}
+	var revokable []GrantView
+	for _, g := range all {
+		v := GrantView{Role: g.Role, Permission: g.Permission,
+			Inert: auth.EveryoneRole(g.Role) && !auth.IsVisitorPermission(g.Permission),
+			Value: g.Role + "|" + g.Permission + "|" + string(g.Board) + "|" + g.Screen}
+		switch {
+		case g.Board != auth.Global:
+			v.Scope = "게시판 " + orID(boardName[string(g.Board)], string(g.Board))
+		case g.Screen != "":
+			v.Scope = "테마 화면 " + orID(screenTitle[g.Screen], g.Screen)
+		}
+		grants[g.Role] = append(grants[g.Role], v)
+		revokable = append(revokable, v)
+	}
 	d.Render(w, r, "admin/roles.html", code, map[string]any{
 		"Roles": roles, "Permissions": perms, "Boards": boards, "ThemeScreens": d.themeScreens(),
+		"Grants": grants, "Revokable": revokable,
 		"NeedsReauth": c.NeedsReauth(), "Error": msg})
+}
+
+// GrantView is one grant as A-403 lists it. Value 는 빼기 폼이 보내는 「역할|권한|게시판|테마 화면」이다.
+type GrantView struct {
+	Role, Permission, Scope, Value string
+	// Inert 는 모든 요청이 갖는 역할에 든 관리 권한이다 — 불러올 때 버려져 효력이 없다 (R9).
+	Inert bool
+}
+
+// orID shows a name, or the raw id when the board or screen is gone.
+func orID(name, id string) string {
+	if name == "" {
+		return id
+	}
+	return name
 }
 
 // RoleGrantPermission is A-404. R4 and R5 are enforced HERE, on the server —
@@ -245,8 +291,14 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	}
 	actor := auth.Actor{UserID: c.UserID(), Perms: actorPerms}
 	if err := auth.CanAddPermissionToRole(actor, role, permKey); err != nil {
-		// R4·R5 위반은 권한 상승 시도다 — 남긴다 (D19 A-404).
+		// R4·R5·R9 위반은 권한 상승 시도다 — 남긴다 (D19 A-404).
 		d.log(r, c, "role.manage", "role", role.Key, "권한 부여 거부 ("+permKey+") — "+err.Error())
+		// R9 은 실수로 누르기 쉬운 자리라 이유를 말한다. R4·R5 는 지금처럼 403 이다.
+		if errors.Is(err, auth.ErrEveryoneRolePermission) {
+			d.renderRoles(w, r, c, http.StatusUnprocessableEntity,
+				"익명·회원 역할은 모든 방문자·회원이 갖습니다 — 게시판 읽기·쓰기·댓글 권한만 줄 수 있습니다.")
+			return
+		}
 		d.forbid(w, r)
 		return
 	}
@@ -284,6 +336,121 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 	}
 	d.log(r, c, "role.manage", "role", role.Key, summary)
 	http.Redirect(w, r, "/admin/roles", http.StatusSeeOther)
+}
+
+// RoleRevokePermission is A-404's other half: take one grant out of a role. R5 and R4 apply
+// (auth.CanRemovePermissionFromRole) — R9 does not: 모두가 갖는 역할에 잘못 들어간 권한을 빼는 것이 이 길이다.
+// grant 는 A-403 의 선택지 값 「역할|권한|게시판|테마 화면」이다 — 있는 부여만 고르게 한다.
+func (d *Deps) RoleRevokePermission(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "role.manage")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
+		return
+	}
+	if !reauthOK(c, r) {
+		d.renderRoles(w, r, c, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		return
+	}
+	parts := strings.Split(r.PostFormValue("grant"), "|")
+	if len(parts) != 4 || parts[0] == "" || parts[1] == "" {
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
+		return
+	}
+	roleKey, permKey, board, screen := parts[0], parts[1], auth.BoardID(parts[2]), parts[3]
+	ctx := r.Context()
+	role, err := d.Auth.RoleByKey(ctx, roleKey)
+	if errors.Is(err, auth.ErrNoRole) {
+		d.refuse(w, r, http.StatusNotFound, "역할을 찾을 수 없습니다.")
+		return
+	}
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	actorPerms, err := d.Auth.LoadPermissions(ctx, c.UserID())
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	if err := auth.CanRemovePermissionFromRole(auth.Actor{UserID: c.UserID(), Perms: actorPerms}, role, permKey); err != nil {
+		d.log(r, c, "role.manage", "role", role.Key, "권한 회수 거부 ("+permKey+") — "+err.Error())
+		d.forbid(w, r)
+		return
+	}
+	n, err := d.Auth.RevokePermission(ctx, role.Key, permKey, board, screen)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	if n == 0 {
+		d.refuse(w, r, http.StatusNotFound, "그런 부여가 없습니다. 이미 빠졌을 수 있습니다.")
+		return
+	}
+	summary := "권한 회수: " + permKey
+	if board != auth.Global {
+		summary += " (게시판 " + string(board) + ")"
+	} else if screen != "" {
+		summary += " (테마 화면 " + screen + ")"
+	}
+	d.log(r, c, "role.manage", "role", role.Key, summary)
+	http.Redirect(w, r, "/admin/roles", http.StatusSeeOther)
+}
+
+// RoleRevoke is A-405's other half: take a role away from a user. R1·R2·R3 apply exactly as to giving it
+// (auth.CanAssignRole — 「부여·회수」). 최고 관리자 역할이면 비활성·삭제와 같은 잠금 아래서 지워 마지막
+// 관리자에게서는 빼지 못한다 (D15 5.2).
+func (d *Deps) RoleRevoke(w http.ResponseWriter, r *http.Request) {
+	c, ok := d.require(w, r, "role.assign")
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.refuse(w, r, http.StatusBadRequest, "잘못된 요청입니다.")
+		return
+	}
+	if !reauthOK(c, r) {
+		d.renderRoles(w, r, c, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		return
+	}
+	ctx := r.Context()
+	targetUser := r.PostFormValue("user_id")
+	role, err := d.Auth.RoleByKey(ctx, r.PostFormValue("role"))
+	if errors.Is(err, auth.ErrNoRole) {
+		d.refuse(w, r, http.StatusNotFound, "역할을 찾을 수 없습니다.")
+		return
+	}
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	actorPerms, err := d.Auth.LoadPermissions(ctx, c.UserID())
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	if err := auth.CanAssignRole(auth.Actor{UserID: c.UserID(), Perms: actorPerms}, targetUser, role); err != nil {
+		d.log(r, c, "role.assign", "user", targetUser, "역할 회수 거부 ("+role.Key+") — "+err.Error())
+		d.forbid(w, r)
+		return
+	}
+	n, err := d.Auth.UnassignRole(ctx, targetUser, role.Key, role.Superuser)
+	if errors.Is(err, auth.ErrLastSuperuser) {
+		d.refuse(w, r, http.StatusConflict, "마지막 관리자의 관리자 역할은 뺄 수 없습니다.")
+		return
+	}
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	if n == 0 {
+		d.refuse(w, r, http.StatusNotFound, "그 사용자는 이 역할을 갖고 있지 않습니다.")
+		return
+	}
+	d.log(r, c, "role.assign", "user", targetUser, "역할 회수: "+role.Key)
+	http.Redirect(w, r, "/admin/users/"+targetUser, http.StatusSeeOther)
 }
 
 // RoleAssign is A-405. R1, R2 and R3 all apply.
