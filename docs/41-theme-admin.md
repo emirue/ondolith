@@ -144,7 +144,7 @@ theme_items    (id uuid PK, screen_key text, sort_order integer, data jsonb, cre
 | 유일성 | `UNIQUE NULLS NOT DISTINCT (role_id, permission_id, board_id, theme_screen)` |
 | 시드 | 최고 관리자(`admin`)는 원래 전부 통과한다. `operator` 에 전역 부여. `editor` 는 부여하지 않는다 — 운영자가 A-403 에서 화면 단위로 준다 |
 | 부여 화면 | A-403 의 권한 부여 폼(A-404)에 「테마 화면」 선택을 더한다(빈 값 = 모든 화면). 선택지는 활성 테마가 선언한 화면이다. 서버는 활성 테마가 선언한 키만 받는다 |
-| 메뉴 | 판정을 통과한 화면만 사이드바에 나온다. 숨김은 UX 이고 모든 경로가 스스로 판정한다 (D15 P3) |
+| 메뉴 | 판정을 통과한 화면만 사이드바에 나온다. 숨김은 UX 이고 모든 경로가 스스로 판정한다 (D15 P3). A-201 의 관리자 메뉴 숨김(FR-720)은 테마 화면을 대상으로 하지 않는다 — 쓰지 않는 화면은 `admin.json` 에서 뺀다 |
 | 테마를 바꾸면 | 부여 행은 남는다. 다시 그 화면을 선언한 테마를 켜면 그대로 쓰인다 |
 
 ## 5. 관리자 화면
