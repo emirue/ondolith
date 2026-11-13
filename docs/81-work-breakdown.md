@@ -492,6 +492,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-35 | 템플릿 실패를 500 과 내장 오류 화면으로 · 부팅 때 테마 requires 검사 **(완료 — `TestThemeTemplateFailureIsA500WithTheBuiltinErrorPage`·`TestBootServesTheBuiltinThemeWhenTheActiveOneNeedsANewerCore`, 2026-10-27)** | W6-34 | `internal/app/handler_public.go` `writeRendered`, `internal/app/app.go` 부팅 테마 검사, A-602 경고 | 공개 화면·조각 응답이 실패하면 500 과 코어 내장 오류 화면이고 테마 조각·오류 원문이 없으며 ERROR 로그에 템플릿 이름이 남는다. 정상 화면은 바이트까지 같다(`TestThemeTemplateFailureIsA500WithTheBuiltinErrorPage`·`TestBrokenThemeTemplateServesA500NotHalfAPage`). `requires` 가 코어보다 높은 테마를 켠 채 재시작하면 ERROR 한 줄·내장 테마 200·`/healthz` 200·A-602 경고이고 다른 테마를 켜면 경고가 걷힌다(`TestBootServesTheBuiltinThemeWhenTheActiveOneNeedsANewerCore`). 개발 빌드는 경고만(`TestBootOnlyWarnsAboutRequiresOnADevBuild`) (FR-312, FR-313) |
 | W6-36 | 관리자 메뉴 숨김 (A-201) — 고정 화면 다섯, `cms` 저장 때 숨긴 커머스 항목 보존 **(완료 — `TestNavHidesHiddenScreensEvenForSuperuser`·`TestHiddenNavValue`·`TestSiteSettingsSavesHiddenMenus`·`TestAdminMenuDropsHiddenScreens`, 실제 Chrome 19 항목·`make ui` 24 통과 2026-11-14)** | — | `internal/admin/shell.go` `Nav`·`HideChoices`·`HiddenNavValue`, `internal/admin/handlers.go` `SettingsSave`, `admin/settings.html`, `internal/app/admin_render.go` | A-201 에서 고른 코어 메뉴가 최고 관리자의 메뉴에서도 빠지고 해제하면 돌아온다. 고정 화면 다섯(A-101·A-201·A-207·A-209·A-403)은 선택지에 없고 보내면 422 다. `cms` 로 저장해도 숨긴 커머스 항목이 남는다. 작업 로그에 이전 → 새 값이 남는다. 숨긴 화면도 주소로는 열린다 |
 | W6-37 | 512MB 서버에서 사진 처리 — 면적 평균 축소, 펼치기 전 메모리 검사 **(완료 — `TestProcessImageMemoryIsBoundedByTheTarget`·`TestShrinkAveragesTheCoveredArea`·`TestShrinkFastPathsMatchTheGenericPath`·`TestProcessImageRefusesWhatMemoryCannotHold`, 180MB 컨테이너 실측 2026-11-14)** | — | `internal/content/imageproc.go` `shrink`·`workBytes`·`availableMemory`, `internal/admin/media.go` `editorMessage` | 메모리를 180MB 로 묶은 리눅스 컨테이너에서 4000×3000·6000×4000 JPEG 와 6000×4000 PNG 가 처리된다(예전 코드는 셋 다 OOM). 사진 한 장의 할당이 원본 한 벌 + 결과 몇 벌을 넘지 않는다. 가용 메모리(+스왑)로 감당하지 못하는 사진은 펼치기 전에 거부하고 줄여 올리라고 안내한다 (FR-514, NFR-101) |
+| W6-38 | 설치 직후 결함 — 폴더가 작업 디렉터리 기준, 사이트 설정 이름 칸이 비어 저장 422 **(완료 — `TestSaveRemembersWhereItWrote`·`TestInstallProvisionsDatabase`·`TestBootCopiesTheInstalledSiteNameIntoSettings`, 실제 Chrome 2026-11-14)** | — | `internal/config/config.go` `Save`, `internal/app/app.go` 부팅의 `site.name` 옮기기 | 설치 마법사가 운영 트리에 넘긴 설정의 업로드·테마·백업 폴더가 재시작 전에도 설정 파일 옆이다. 설치 직후 「사이트 설정」의 이름 칸에 설치 때 넣은 이름이 있고, 사업자 정보만 넣어 저장해도 303 이다. 운영자가 바꾼 이름은 부팅이 덮어쓰지 않는다 (FR-106, FR-102) |
 
 ## 작업 수 요약
 
@@ -502,5 +503,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 37 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **175** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 38 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **176** | **9** | — |

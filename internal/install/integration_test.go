@@ -277,6 +277,14 @@ func TestInstallProvisionsDatabase(t *testing.T) {
 	if w.installed.DatabaseURL != cfg.DatabaseURL {
 		t.Error("운영 트리에 넘어간 설정이 저장된 설정과 다르다")
 	}
+	// 재시작 전에도 업로드·테마·백업 폴더가 설정 파일 옆이다. 넘어간 설정이 자기 위치(Path)를 몰라
+	// 프로세스 작업 디렉터리 기준으로 풀렸다 — 재시작하면 Load 가 채워 증상이 사라졌다 (사이트 보고 2026-11-14).
+	dir := filepath.Dir(w.configPath)
+	for name, got := range map[string]string{"uploads": w.installed.Uploads(), "themes": w.installed.Themes(), "backups": w.installed.Backups()} {
+		if want := filepath.Join(dir, name); got != want {
+			t.Errorf("설치 직후 %s 폴더 = %q, want %q (설정 파일 옆)", name, got, want)
+		}
+	}
 }
 
 // FR-108: pointing the wizard at a database that already holds an account must
