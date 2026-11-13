@@ -120,6 +120,22 @@
       {{end}}
     </fieldset>
 
+    {{/* 관리자 메뉴 숨김 (FR-720). 빈 hidden input 이 앞에 있어야 「모두 해제」도 칸이 폼에 남는다 —
+         칸이 없는 저장은 값을 건드리지 않는다. 선택지는 서버가 준다(HideChoices): 고정 화면은 없고,
+         커머스 메뉴는 쇼핑몰일 때만 있다. */}}
+    <fieldset>
+      <legend>관리자 메뉴 숨김</legend>
+      <span class="adm-hint">체크한 메뉴는 모든 관리자의 메뉴에서 빠집니다. 숨겨도 주소로는 열리고 권한 검사는 그대로입니다. 대시보드·사이트 설정·약관·결제 설정·역할·권한은 숨길 수 없습니다.</span>
+      <input type="hidden" name="admin.hidden_menus" value="">
+      {{$h := .Hidden}}
+      {{range .HideChoices}}{{$g := .Title}}{{range .Items}}
+      <label>
+        <input type="checkbox" name="admin.hidden_menus" value="{{.Screen}}" {{if index $h .Screen}}checked{{end}}>
+        <span>{{if $g}}{{$g}} · {{end}}{{.Title}}</span>
+      </label>
+      {{end}}{{end}}
+    </fieldset>
+
     {{/* 사이트 유형 전환은 파괴적 작업이다 (D15 SC-5 4항) — 유형이 바뀔 때만 본다. */}}
     {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">
