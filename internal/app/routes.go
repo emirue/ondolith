@@ -150,8 +150,10 @@ type CheckResult struct {
 	// wrong state is worse than one that refuses to start, because the wrong
 	// state is discovered by a visitor.
 	Errors []string
-	// Warnings are printed and tolerated.
-	Warnings []string
+	// Unrouted are D11 screens no route serves, and Unused are permissions no
+	// route uses. Printed and tolerated — 부팅이 경고로 찍는다. cms 가 일부러 빼는
+	// 쇼핑몰 몫은 부팅이 shopOnly 로 걸러 한 줄로 접는다 (FR-710).
+	Unrouted, Unused []string
 }
 
 func (c CheckResult) Err() error {
@@ -249,9 +251,7 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 		}
 	}
 	sort.Strings(missing)
-	for _, id := range missing {
-		res.Warnings = append(res.Warnings, "D11 에 있는데 라우트가 없는 화면: "+id)
-	}
+	res.Unrouted = missing
 
 	// 2b (warning). A permission no route uses is dead: it still appears in the
 	// role editor, so an operator grants it and nothing happens.
@@ -266,9 +266,7 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 		}
 	}
 	sort.Strings(dead)
-	for _, p := range dead {
-		res.Warnings = append(res.Warnings, "어떤 라우트도 쓰지 않는 권한: "+p)
-	}
+	res.Unused = dead
 
 	return res
 }
@@ -289,4 +287,24 @@ func classAgrees(rt Route, want SecurityClass) bool {
 	// GET 은 아무것도 업로드하지 않는다 (D15 4.4).
 	return rt.Class == SC4 && (want == SC5 || want == SC6 || want == SC7) &&
 		isSafeMethod(rt.Method)
+}
+
+// shopOnly is what a cms tree leaves out on purpose (FR-710): 쇼핑몰 트리에만 있는
+// 화면과 권한. 빈 의존성으로 조립해 라우트 표만 읽는다 — 핸들러는 불리지 않는다
+// (시험이 트리를 같은 방식으로 훑는다).
+func shopOnly(cms *Registry) map[string]bool {
+	have := map[string]bool{}
+	for _, rt := range cms.Routes() {
+		have[rt.Screen], have[rt.Permission] = true, true
+	}
+	out := map[string]bool{}
+	shop := buildTree(nil, nil, nil, nil, nil, nil, nil, true, func(http.ResponseWriter, *http.Request) {})
+	for _, rt := range shop.Routes() {
+		for _, k := range []string{rt.Screen, rt.Permission} {
+			if k != "" && !have[k] {
+				out[k] = true
+			}
+		}
+	}
+	return out
 }

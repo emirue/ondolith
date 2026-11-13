@@ -585,8 +585,29 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	}
 
 	res := registry.Check(perms, screenInventory)
-	for _, w := range res.Warnings {
-		log.Warn("라우트 자체 점검", "경고", w)
+	// cms 가 일부러 등록하지 않은 쇼핑몰 화면·권한은 경고가 아니다 (FR-710). 한 줄씩 찍었더니 부팅마다
+	// 58줄이 나와 진짜 경고가 묻혔다 (사이트 보고 2026-11-14) — 그 몫은 INFO 한 줄로 접는다.
+	var leftOut map[string]bool
+	if !shopMode {
+		leftOut = shopOnly(registry)
+	}
+	folded := 0
+	for _, id := range res.Unrouted {
+		if leftOut[id] {
+			folded++
+			continue
+		}
+		log.Warn("라우트 자체 점검", "경고", "D11 에 있는데 라우트가 없는 화면: "+id)
+	}
+	for _, p := range res.Unused {
+		if leftOut[p] {
+			folded++
+			continue
+		}
+		log.Warn("라우트 자체 점검", "경고", "어떤 라우트도 쓰지 않는 권한: "+p)
+	}
+	if folded > 0 {
+		log.Info("라우트 자체 점검: 쇼핑몰이 아니라 등록하지 않은 화면·권한", "개수", folded)
 	}
 	if err := res.Err(); err != nil {
 		return fail(err)
