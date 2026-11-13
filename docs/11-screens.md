@@ -192,7 +192,7 @@
 |---|---|---|---|---|---|---|---|
 | A-201 | 사이트 설정 | `/admin/settings` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-306, FR-511, FR-703, FR-710, FR-716, FR-217, FR-711, FR-720 |
 | A-202 | 테마 목록·활성화 | `/admin/themes` | GET, POST | 권한:theme.activate | 있음 | SC-5 | FR-302, FR-303, FR-308, FR-313 |
-| A-203 | 테마 업로드 | `/admin/themes/upload` | GET, POST | 권한:theme.upload | 있음 | SC-7 | FR-307, NFR-206 |
+| A-203 | 테마 업로드 | `/admin/themes/upload` | GET, POST | 권한:theme.upload | 있음 | SC-7 | FR-307, NFR-206, FR-721 |
 | A-204 | 메뉴 관리 | `/admin/menus` | GET, POST | 권한:menu.manage | 있음 | SC-5 | FR-405 |
 | A-205 | 메일 발송 설정 | `/admin/settings/mail` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-708 |
 | A-206 | 소셜 로그인 설정 | `/admin/settings/social` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-709 |
@@ -200,7 +200,7 @@
 | A-209 | 결제 설정 | `/admin/settings/payment` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-605, FR-607 |
 | A-210 | 파일 저장소 설정 | `/admin/settings/storage` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-717 |
 | A-211 | 검색 노출 | `/admin/settings/seo` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-718, FR-511, FR-714 |
-| A-212 | 테마 화면 | `/admin/theme/{key}` | GET, POST | 권한:theme.edit_content | 있음 | SC-7 | FR-311 |
+| A-212 | 테마 화면 | `/admin/theme/{key}` | GET, POST | 권한:theme.edit_content | 있음 | SC-7 | FR-311, FR-721 |
 
 ### A-3xx 콘텐츠 관리
 
@@ -233,7 +233,7 @@
 | ID | 화면 | 경로 | 메서드 | 접근 | 상태변경 | 유형 | 관련 FR |
 |---|---|---|---|---|---|---|---|
 | A-501 | 상품 목록 | `/admin/products` | GET | 권한:product.view | 없음 | SC-4 | FR-601, FR-706 |
-| A-502 | 상품 편집 | `/admin/products/{id}` | GET, POST | 권한:product.manage | 있음 | SC-7 | FR-601, NFR-206 |
+| A-502 | 상품 편집 | `/admin/products/{id}` | GET, POST | 권한:product.manage | 있음 | SC-7 | FR-601, NFR-206, FR-721 |
 | A-503 | 옵션·재고 편집기 | `/admin/products/{id}/variants` | GET, POST | 권한:product.manage | 있음 | SC-5 | FR-602, FR-627 |
 | A-504 | 주문 목록 | `/admin/orders` | GET | 권한:order.view | 없음 | SC-4 | FR-508, FR-604, FR-706, FR-712 |
 | A-505 | 주문 상세 | `/admin/orders/{no}` | GET | 권한:order.view | 없음 | SC-4 | FR-604, FR-612 |

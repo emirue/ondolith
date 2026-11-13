@@ -13,10 +13,10 @@
 {{define "theme-fields"}}
 {{range .}}
 {{if eq .Field.Type "image"}}
-<div class="adm-field">
+<div class="adm-field" data-drop-zone>
   <span>{{.Field.Label}}{{if .Field.Required}} *{{end}}</span>
   {{if .Image.URL}}<ul class="adm-thumbs"><li><img src="{{.Image.Thumb}}" alt="{{.Field.Label}}" width="96" height="96" loading="lazy"></li></ul>{{end}}
-  <input type="file" name="{{.Field.Key}}" accept="image/jpeg,image/png,image/gif,image/webp" aria-label="{{.Field.Label}} 사진 바꾸기">
+  <input type="file" name="{{.Field.Key}}" accept="image/jpeg,image/png,image/gif,image/webp" aria-label="{{.Field.Label}} 사진 바꾸기" data-drop>
   {{if and .Image.URL (not .Field.Required)}}<label class="adm-field adm-field--check"><input type="checkbox" name="{{.Field.Key}}:clear" value="1"> <span>사진 빼기</span></label>{{end}}
   {{if .Field.Help}}<span class="adm-hint">{{.Field.Help}}</span>{{end}}
   {{if .Error}}<span class="adm-hint adm-hint--error" role="alert">{{.Error}}</span>{{end}}
@@ -89,6 +89,8 @@
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>
   </form>
+  {{/* 사진 칸 끌어다 놓기 (FR-721). 사진 칸이 없는 화면에서는 스크립트가 할 일 없이 끝난다. */}}
+  {{if .Multipart}}<script src="/static/js/upload.js" defer></script>{{end}}
 </div>
 {{if and (eq .Mode "item") .ItemID}}
 <div class="adm-card">

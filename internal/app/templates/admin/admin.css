@@ -757,6 +757,23 @@ address { font-style: normal; }
 .adm-inline { display: flex; gap: var(--s8); align-items: center; flex-wrap: wrap; }
 .adm-inline > label { flex: 1 0 100%; margin: 0; }
 
+/* 파일 칸 끌어다 놓기 (FR-721, js/upload.js). 스크립트가 붙인 클래스라 스크립트가 없으면 아무 모양도 바뀌지
+   않는다. 놓는 곳은 칸 둘레 전체 — 「파일 선택」 단추만큼 좁던 것을 넓힌다. 색은 배색 변수만 쓴다(다크 포함). */
+.adm-drop {
+  border: 2px dashed var(--line);
+  border-radius: var(--bar-radius);
+  padding: var(--s12);
+  transition: border-color .15s, background-color .15s;
+}
+.adm-drop--over { border-color: var(--accent); background: var(--nav-active-bg); }
+.adm-drop--refused { border-color: var(--danger); }
+.adm-drop-hint { flex: 1 0 100%; font-size: 13px; opacity: var(--o-meta); }
+.adm-drop-note { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: var(--s8); font-size: 13px; overflow-wrap: anywhere; }
+.adm-drop-note:empty { display: none; }
+.adm-drop--refused .adm-drop-note { color: var(--danger); }
+.adm-drop-file { display: inline-flex; align-items: center; gap: var(--s6); min-width: 0; }
+.adm-drop-file img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--bar-radius); flex: none; }
+
 /* 상품 이미지 (A-502). **원본을 그대로 쓴다** — 썸네일을 만들지 않으므로 크기는
    여기서 정한다. width/height 속성이 자리를 먼저 잡아 그림이 늦게 와도 밀리지 않는다. */
 .adm-thumbs {

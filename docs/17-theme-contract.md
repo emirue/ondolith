@@ -40,6 +40,10 @@ DELETE 를 보낼 수 없어서 장바구니(`/cart/items/…`)의 수량 변경
 (내장 테마가 본보기다 — 사용자 테마에 그 파일이 없으면 내장 것이 나간다). 셋 중 하나라도 빠지면 그 테마는
 **평문 칸으로 동작한다** — 깨지지 않는다.
 
+**관리자 화면도 내장 자산 `js/upload.js` 를 쓴다** (FR-721 — 파일 칸 끌어다 놓기). 정적 파일은 테마 먼저, 없으면 내장이라
+**테마에 같은 이름(`static/js/upload.js`)을 두면 관리자 화면이 그것을 싣는다.** 그 이름은 테마가 쓰지 않는다. 덮어써도
+파일 칸은 눌러 고르기로 그대로 동작한다 — 스크립트는 덧붙임이다.
+
 **지도 블록(FR-716).** 본문의 지도는 `<img src="/static/img/map.svg" data-map="kakao|naver|google" data-lat data-lng
 data-zoom data-label>` 자리표시다. 내장 `partials/head.html` 이 A-201 의 지도 키가 있을 때 `js/maps.js` 를 키와 함께
 싣고(`<script … data-naver data-kakao data-google data-google-map-id>`), 그 스크립트가 블록을 그 지도사 SDK 의 지도로
