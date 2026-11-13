@@ -498,6 +498,7 @@ CREATE INDEX user_roles_role_id_idx ON user_roles (role_id);
 | `theme.active` | text — 테마 폴더 이름 | A-202 | 1 |
 | `map.naver_key` · `map.kakao_key` · `map.google_key` · `map.google_map_id` | text — 공개값 (FR-716) | A-201 | 6 |
 | `backup.auto` · `backup.hour` · `backup.keep` | bool / int 0~23 (기본 0) / int 1~30 (기본 7) | A-604 | 6 |
+| `backup.last_at` · `backup.last_where` | RFC 3339 시각 / `s3:backups/…zip` \| `local:…zip` — 마지막 자동 백업 (FR-722). 스케줄러가 쓰고 A-604 가 읽는다. 폼이 쓰는 키가 아니다 | 스케줄러 → A-604 | 6 |
 | `mail.smtp_host` · `smtp_port` · `smtp_user` · `smtp_password` · `tls_mode` · `from_address` · `from_name` | text / int / text / **자격증명** / `none`\|`starttls`\|`tls` / text / text | A-205 | 1 |
 | `social.{provider}.client_id` · `.client_secret` · `.enabled` | text / **자격증명** / bool | A-206 | 1 |
 | `business.*` | text | A-201 | 3 |

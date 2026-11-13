@@ -7,13 +7,22 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/backup"
+	"github.com/emirue/ondolith/internal/content"
 )
 
 // backupKeys are A-604's automatic-backup settings (FR-715).
 var backupKeys = []string{"backup.auto", "backup.hour", "backup.keep"}
+
+// The last automatic backup (FR-722) — 스케줄러가 쓰고 A-604 가 보인다. 폼이 쓰는 키가 아니다(backupKeys 에
+// 없다): 설정 저장이 이 값을 덮지 않는다. where 는 "s3:backups/…zip" 이나 "local:…zip".
+const (
+	SettingBackupLastAt    = "backup.last_at"
+	SettingBackupLastWhere = "backup.last_where"
+)
 
 // BackupForm is A-604 GET (FR-713, FR-715).
 func (d *Deps) BackupForm(w http.ResponseWriter, r *http.Request) {
@@ -42,10 +51,29 @@ func (d *Deps) renderBackup(w http.ResponseWriter, r *http.Request, code int, ms
 	if err != nil && d.Logger != nil {
 		d.Logger.Error("백업 목록", "err", err)
 	}
+	// 마지막 자동 백업과 행선지 (FR-722). 상태 키는 폼(backupKeys)과 따로 읽는다.
+	st, err := d.Content.Settings(r.Context(), SettingBackupLastAt, SettingBackupLastWhere, content.SettingStorageBackend)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	last, _ := time.Parse(time.RFC3339, st[SettingBackupLastAt])
+	where := st[SettingBackupLastWhere]
+	if rest, ok := strings.CutPrefix(where, "s3:"); ok {
+		where = "버킷 " + rest
+	} else if rest, ok := strings.CutPrefix(where, "local:"); ok {
+		where = "이 서버 " + rest
+	}
 	d.Render(w, r, "admin/backup.html", code, map[string]any{
 		"Settings": kv, "Files": files, "Error": msg,
 		// 시각은 서버 시계로 돈다. Lightsail 은 보통 UTC 다 — 어느 시계인지 화면에 적는다.
-		"Zone": time.Now().Format("MST -07:00"),
+		"Zone":      time.Now().Format("MST -07:00"),
+		"ToBucket":  st[content.SettingStorageBackend] == "s3",
+		"Last":      last,
+		"LastWhere": where,
+		// 백업은 조용히 실패하는 것이 가장 위험하다 — 켜 두었는데 이틀 넘게 만든 적이 없으면 알린다.
+		// 한 번도 없으면 알리지 않는다: 켠 첫날은 아직 시각이 오지 않았을 수 있다.
+		"Stale": kv["backup.auto"] != "" && !last.IsZero() && time.Since(last) > 48*time.Hour,
 	})
 }
 

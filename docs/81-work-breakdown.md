@@ -497,6 +497,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-40 | 테마 활성화 경고 오탐 — 조각에 둔 띠, 테마가 부르는 조각 **(완료 — `TestContractWarningsFollowWhatTheThemeCalls`·`TestContractWarningsStayInsideTheTheme`, 2026-11-14)** | — | `internal/theme/loader.go` `contractWarnings`·`layoutText` | 코어 내장 `base.html` 을 그대로 쓴 테마와 띠를 자기 조각에 둔 테마는 경고가 없다. 테마의 템플릿이 부르는 `partials/` 조각은 「코어가 찾지 않는 이름」이 아니고, 아무도 부르지 않는 조각과 오타 난 이름은 지금처럼 경고한다. 조각 이름을 따라 테마 폴더 밖(`../`·심볼릭 링크)을 읽지 않는다 (FR-308) |
 | W6-41 | 사업자 정보에 팩스 **(완료 — `TestMissingBusinessKeysNamesTheEmptyOnes`·`TestSiteSettingsHoldBusinessInfo`·`TestBusinessInfoRendersInCmsModeToo`, 2026-11-14)** | W6-32 | `internal/commerce/terms.go` `BusinessKeys`·`BusinessLabels` | A-201 사업자 정보에 「팩스」 칸이 개인정보관리책임자와 업무시간 사이에 있고, 저장한 값이 공개 화면 바닥글에 `<dt>팩스</dt>` 로 나온다. 200자를 넘으면 422 다. 표시 의무가 아니라 `shop` 미입력 경고에 들지 않는다 (FR-711) |
 | W6-42 | 관리자 파일 칸 끌어다 놓기 **(완료 — `TestAdminFileInputsAcceptDrops`, `scripts/file-drop.mjs` 실제 Chrome 15 항목, 2026-11-14)** | — | `internal/theme/builtin/static/js/upload.js`, `admin.css` `.adm-drop`, `product-edit.html`·`theme-screen.html`·`theme-upload.html` | 상품 편집에서 영역에 사진을 실제로 끌어다 놓으면 칸에 들어가고 이름·미리보기가 보이며, 두 장을 놓은 채 올리면 상품 사진이 두 장 는다. 받을 수 없는 파일은 거절하고 앞서 고른 것이 남는다. 칸 밖에 놓아도 페이지가 바뀌지 않는다. 한 개 받는 zip 칸은 첫 파일만 받고 그림을 거절한다. 칸은 숨지 않아 눌러 고르기·키보드가 그대로다. 새 파일 칸이 표시를 빠뜨리면 `TestAdminFileInputsAcceptDrops` 가 잡는다 (FR-721) |
+| W6-43 | 파일 저장소가 S3 면 자동 백업도 그 버킷으로 · D70 S3 설정·백업 운영 안내 **(완료 — `TestSaveToTheBucketLeavesNothingLocal`·`TestSaveKeepsTheBackupLocallyWhenTheBucketRefuses`·`TestSchedulerSendsToTheBucketAndRemembersTheDay`·`TestAutoBackupGoesToTheBucketWhenStorageIsS3`·`TestBackupScreenShowsTheLastBackupAndWhereItGoes`, SeaweedFS·진짜 pg_dump 컨테이너 실측 2026-11-14)** | W6-12, W6-08 | `internal/backup/store.go` `Save`·`Remote`·`Scheduler`, `internal/app/app.go` `newBackupScheduler`, `internal/admin/backup.go`, `admin/backup.html`, D70 「백업」·「파일 저장소」 | S3 저장소 사이트의 자동 백업이 버킷의 `backups/auto-…zip` 에 오르고 서버에는 없다. 그 zip 을 내려받아 빈 DB 에 복원하면 마이그레이션 번호·표 수·행 수가 같다. 버킷이 죽은 날은 서버에 남고 작업 로그에 실패가 적힌다. 재시작한 같은 날 다시 만들지 않는다. 로컬 저장소면 지금처럼 로컬이다. A-604 가 마지막 자동 백업의 시각·위치를 보이고 이틀 넘게 없으면 경고한다 (FR-722) |
 
 ## 작업 수 요약
 
@@ -507,5 +508,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 42 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **180** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 43 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **181** | **9** | — |

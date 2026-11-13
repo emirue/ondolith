@@ -438,7 +438,9 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 
 	// 업로드가 사는 곳 (FR-717). 기본은 upload_dir 이고, A-210 이 S3 를 고르면 버킷이다.
 	// 첨부·본문 사진·상품 이미지·A-210 옮기기가 이 하나를 쓴다.
-	files := content.NewFiles(cfg.Uploads(), (&storageRemote{settings: contentStore.SettingsForForm}).resolve)
+	// 자동 백업도 같은 버킷을 쓴다 (FR-722) — 클라이언트를 하나로 나눠 쓴다.
+	storage := &storageRemote{settings: contentStore.SettingsForForm}
+	files := content.NewFiles(cfg.Uploads(), storage.resolve)
 
 	ad := &admin.Deps{
 		Content: contentStore,
@@ -686,27 +688,9 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		}()
 	}
 
-	// 자동 백업 (FR-715). 1분마다 A-604 의 설정을 보고, 정한 시각이면 백업 폴더에 하나
-	// 만들고 오래된 것을 지운다. 하루 한 번, 수동 백업과 겹치면 양보한다(backup.Scheduler).
-	sched := &backup.Scheduler{
-		Settings: func() backup.Schedule {
-			return backupSchedule(setting("backup.auto", "backup.hour", "backup.keep"))
-		},
-		Dump: backup.Dump(cfg.DatabaseURL), Uploads: cfg.Uploads(), Dir: cfg.Backups(),
-		Record: func(summary string, err error) {
-			if err != nil {
-				log.Error("자동 백업 실패", "err", err)
-				summary += " — " + truncate(err.Error(), 300)
-			} else {
-				log.Info(summary)
-			}
-			// 사람이 아니라 서버가 한 일이다 — 주체는 system.
-			if err := contentStore.OpLog().Record(settingCtx, content.Entry{ActorEmail: "system",
-				Action: "backup.auto", TargetType: "system", TargetID: "backup", Summary: summary}); err != nil {
-				log.Error("작업 로그 기록 실패", "action", "backup.auto", "err", err)
-			}
-		},
-	}
+	// 자동 백업 (FR-715). 1분마다 A-604 의 설정을 보고, 정한 시각이면 하나 만든다. 하루 한 번,
+	// 수동 백업과 겹치면 양보한다(backup.Scheduler). 파일 저장소가 S3 면 버킷으로 간다 (FR-722).
+	sched := newBackupScheduler(settingCtx, cfg, contentStore, storage, backup.Dump(cfg.DatabaseURL), log)
 	stopBackup := make(chan struct{})
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -779,8 +763,60 @@ func themePath(cfg *config.Config, name string) string {
 // backupSchedule reads A-604's settings (FR-715). 고른 적이 없으면 꺼짐과 backup 의 기본
 // 시각·보관 개수다 — A-604 화면이 보이는 값과 같다.
 func backupSchedule(kv map[string]string) backup.Schedule {
+	last, _ := time.Parse(time.RFC3339, kv[admin.SettingBackupLastAt])
 	return backup.Schedule{Enabled: kv["backup.auto"] != "",
-		Hour: atoiOr(kv["backup.hour"], backup.DefaultHour), Keep: atoiOr(kv["backup.keep"], backup.DefaultKeep)}
+		Hour: atoiOr(kv["backup.hour"], backup.DefaultHour), Keep: atoiOr(kv["backup.keep"], backup.DefaultKeep),
+		Last: last}
+}
+
+// newBackupScheduler wires FR-715's scheduler to the settings, the operation log and — when A-210 keeps files
+// in S3 — the same bucket (FR-722). 떼어 둔 이유: 시험이 Tick 을 직접 부른다. dump 는 pg_dump 다.
+func newBackupScheduler(ctx context.Context, cfg *config.Config, store *content.Store, storage *storageRemote,
+	dump func(context.Context, io.Writer) error, log *slog.Logger,
+) *backup.Scheduler {
+	return &backup.Scheduler{
+		Settings: func() backup.Schedule {
+			kv, err := store.Settings(ctx, "backup.auto", "backup.hour", "backup.keep", admin.SettingBackupLastAt)
+			if err != nil {
+				log.Error("설정 조회", "err", err)
+			}
+			return backupSchedule(kv)
+		},
+		Dump: dump, Uploads: cfg.Uploads(), Dir: cfg.Backups(),
+		// 파일 저장소를 S3 로 쓰는 동안만 버킷이다. 시크릿을 열 수 없으면 오류 — 그날은 로컬에 남기고 실패로 적는다.
+		Remote: func(ctx context.Context) (backup.Remote, error) {
+			r, write, err := storage.resolve(ctx)
+			if err != nil || !write {
+				return nil, err
+			}
+			return r, nil
+		},
+		Record: func(summary string, err error) {
+			if err != nil {
+				log.Error("자동 백업 실패", "summary", summary, "err", err)
+				summary += " — " + truncate(err.Error(), 300)
+			} else {
+				log.Info(summary)
+			}
+			// 사람이 아니라 서버가 한 일이다 — 주체는 system.
+			if err := store.OpLog().Record(ctx, content.Entry{ActorEmail: "system",
+				Action: "backup.auto", TargetType: "system", TargetID: "backup", Summary: summary}); err != nil {
+				log.Error("작업 로그 기록 실패", "action", "backup.auto", "err", err)
+			}
+		},
+		// 마지막 자동 백업 — A-604 가 보이고(조용한 실패를 사람이 알아챈다), 재시작한 같은 날 다시 만들지 않는다.
+		Done: func(s backup.Saved) {
+			where := "local:" + s.Name
+			if s.Where == "s3" {
+				where = "s3:" + backup.RemotePrefix + s.Name
+			}
+			if err := store.PutSettings(ctx, map[string]string{
+				admin.SettingBackupLastAt: s.Time.Format(time.RFC3339), admin.SettingBackupLastWhere: where,
+			}); err != nil {
+				log.Error("마지막 자동 백업 기록", "err", err)
+			}
+		},
+	}
 }
 
 // mailFailureEntry is the operation-log row for a mail that never went out, or
