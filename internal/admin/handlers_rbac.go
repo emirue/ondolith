@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -336,7 +337,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		summary += " (테마 화면 " + screen + ")"
 	}
 	d.log(r, c, "role.manage", "role", role.Key, summary)
-	d.done(w, r, c, "/admin/roles", "역할 "+role.Key+" 에 권한을 줬습니다 — "+permKey)
+	d.done(w, r, c, "/admin/roles", "역할 "+role.Key+" 에 권한을 줬습니다 — "+permKey+d.grantScope(ctx, board, screen))
 }
 
 // RoleRevokePermission is A-404's other half: take one grant out of a role. R5 and R4 apply
@@ -397,7 +398,7 @@ func (d *Deps) RoleRevokePermission(w http.ResponseWriter, r *http.Request) {
 		summary += " (테마 화면 " + screen + ")"
 	}
 	d.log(r, c, "role.manage", "role", role.Key, summary)
-	d.done(w, r, c, "/admin/roles", "역할 "+role.Key+" 에서 권한을 뺐습니다 — "+permKey)
+	d.done(w, r, c, "/admin/roles", "역할 "+role.Key+" 에서 권한을 뺐습니다 — "+permKey+d.grantScope(ctx, board, screen))
 }
 
 // RoleRevoke is A-405's other half: take a role away from a user. R1·R2·R3 apply exactly as to giving it
@@ -745,4 +746,23 @@ func readerAt(f multipart.File, size int64) (io.ReaderAt, int64, error) {
 		return nil, 0, err
 	}
 	return bytes.NewReader(buf.Bytes()), n, nil
+}
+
+// grantScope 는 부여·회수 알림에 붙는 범위다 (FR-724). 없으면 게시판 하나·테마 화면 하나에 준 권한을
+// 전역으로 주고 뺀 것처럼 읽힌다. 이름을 못 찾으면 범위가 있다는 것만 말한다 — 알림 때문에 처리를
+// 실패시키지 않는다.
+func (d *Deps) grantScope(ctx context.Context, board auth.BoardID, screen string) string {
+	if board != auth.Global {
+		if b, err := d.Content.BoardByID(ctx, string(board)); err == nil {
+			return " (게시판 " + b.Name + ")"
+		}
+		return " (게시판 하나)"
+	}
+	if screen != "" {
+		if s, ok := d.findThemeScreen(screen); ok {
+			return " (테마 화면 " + s.Title + ")"
+		}
+		return " (테마 화면 " + screen + ")"
+	}
+	return ""
 }

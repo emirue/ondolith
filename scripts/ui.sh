@@ -382,6 +382,7 @@ node --check scripts/ui-audit.mjs || { echo "  ✗ 감사 스크립트 문법 �
 node --check scripts/shots.mjs || { echo "  ✗ 촬영 스크립트 문법 오류"; exit 1; }
 node --check scripts/editor-ime.mjs || { echo "  ✗ 에디터 시험 스크립트 문법 오류"; exit 1; }
 node --check scripts/file-drop.mjs || { echo "  ✗ 파일 칸 시험 스크립트 문법 오류"; exit 1; }
+node --check scripts/admin-notice.mjs || { echo "  ✗ 알림·확인 창 시험 스크립트 문법 오류"; exit 1; }
 tojson() { python3 -c 'import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' <"$1"; }
 audit=0
 
@@ -435,6 +436,18 @@ if [ -z "${UI_SHOTS:-}" ]; then
 		ok "파일 칸: 끌어다 놓기·거절·칸 밖·올리기"
 	else
 		bad "파일 칸 브라우저 시험"
+	fi
+	# **저장하면 알리고, 되돌릴 수 없는 것은 묻는다** (FR-724·FR-725). 진짜 마우스로 눌러 알림이 보이고
+	# 새로 고침하면 사라지는지, 확인 창을 취소하면 아무것도 바뀌지 않는지 본다. 마지막에 둔다 — 회원을
+	# 비활성화했다 되돌리고, 자동 백업 설정을 바꾼다. 시드 주문은 「배송완료」라 관리자가 옮길 다음 상태가
+	# 없으므로, 감사가 끝난 지금 「결제완료」로 되돌려 「변경」의 확인 창을 본다(취소만 하므로 그대로 남는다).
+	sql "update orders set status='결제완료' where order_no='$ORDER_NO'" >/dev/null
+	if UI_BASE="$BASE" UI_EMAIL=admin@example.com UI_PASSWORD="$ADMIN_PW" UI_ORDER="$ORDER_NO" \
+		UI_MEMBER="$(sql "select id from users where email='member@example.com'")" \
+		node scripts/admin-notice.mjs; then
+		ok "알림·확인 창: 저장 알림·새로 고침·휴대폰 폭·확인 창 취소와 확인"
+	else
+		bad "알림·확인 창 브라우저 시험"
 	fi
 fi
 

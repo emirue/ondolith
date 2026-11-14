@@ -41,7 +41,7 @@
     <select id="to" name="to" required>
       {{range .Next}}<option value="{{.}}">{{.}}</option>{{end}}
     </select>
-    <button type="submit" class="adm-btn adm-btn--primary">변경</button>
+    <button type="submit" onclick="return confirm('주문 상태를 「' + this.form.elements.to.value + '」(으)로 바꿀까요? 구매자 화면에도 바로 반영됩니다.')" class="adm-btn adm-btn--primary">변경</button>
   </form>
   {{else}}
   <p>더 이상 옮길 수 있는 상태가 없습니다.</p>

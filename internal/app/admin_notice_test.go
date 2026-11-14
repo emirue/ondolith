@@ -35,10 +35,15 @@ func noticeClient(t *testing.T) (*httptest.Server, *http.Client) {
 	ui.sm = sm
 	mux := http.NewServeMux()
 	mux.HandleFunc("/save", func(w http.ResponseWriter, r *http.Request) {
-		adminCaller{ctx: r.Context(), sm: sm}.Notify(noticeLine)
+		// ?to= 는 처리기가 돌아가겠다고 한 곳이다. 브라우저는 늘 /screen 으로 간다.
+		to := "/screen?page=2"
+		if t := r.URL.Query().Get("to"); t != "" {
+			to = t
+		}
+		adminCaller{ctx: r.Context(), sm: sm}.Notify(to, noticeLine)
 		http.Redirect(w, r, "/screen", http.StatusSeeOther)
 	})
-	mux.HandleFunc("/screen", func(w http.ResponseWriter, r *http.Request) {
+	screen := func(w http.ResponseWriter, r *http.Request) {
 		code := http.StatusOK
 		if c := r.URL.Query().Get("code"); c != "" {
 			code, _ = strconv.Atoi(c)
@@ -49,7 +54,9 @@ func noticeClient(t *testing.T) (*httptest.Server, *http.Client) {
 		}
 		// 레이아웃의 알림 자리만 본다 — 내용이 비어도 그려지는 화면이면 된다.
 		ui.Render(w, r, "admin/refusal.html", code, data)
-	})
+	}
+	mux.HandleFunc("/screen", screen)
+	mux.HandleFunc("/other", screen)
 	srv := httptest.NewServer(sm.LoadAndSave(mux))
 	t.Cleanup(srv.Close)
 	jar, err := cookiejar.New(nil)
@@ -140,5 +147,22 @@ func TestAdminNoticeYieldsToTheScreensOwnNotice(t *testing.T) {
 	}
 	if _, next := noticeFetch(t, c, http.MethodGet, srv.URL+"/screen"); strings.Contains(next, noticeLine) {
 		t.Error("버려야 할 알림이 다음 화면에 떴다")
+	}
+}
+
+// **알림은 처리기가 돌아가겠다고 한 화면에서만 보인다.** 돌아간 화면이 403 으로 그려지면(자기 역할에서
+// role.view 를 뺀 운영자) 알림은 꺼내지지 않은 채 세션에 남았다가, 나중에 여는 엉뚱한 화면에 뜬다.
+// 다른 화면이 먼저 꺼내면 버린다. 쿼리(?page=)는 가리지 않는다 — 같은 화면의 다른 쪽이다.
+func TestAdminNoticeIsOnlyForTheScreenItReturnsTo(t *testing.T) {
+	srv, c := noticeClient(t)
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	noticeFetch(t, c, http.MethodPost, srv.URL+"/save?to="+url.QueryEscape("/screen"))
+	c.CheckRedirect = nil
+
+	if _, body := noticeFetch(t, c, http.MethodGet, srv.URL+"/other"); strings.Contains(body, noticeLine) {
+		t.Error("돌아갈 화면이 아닌 /other 에 알림이 떴다")
+	}
+	if _, body := noticeFetch(t, c, http.MethodGet, srv.URL+"/screen"); strings.Contains(body, noticeLine) {
+		t.Error("다른 화면이 꺼낸 알림이 남아 있다가 떴다 — 버려야 한다")
 	}
 }

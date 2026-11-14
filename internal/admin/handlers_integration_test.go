@@ -60,7 +60,7 @@ func (f *fakeCaller) CanOnScreen(p, screen string) bool {
 }
 
 // Notify 는 운영의 adminCaller 가 세션에 싣는 알림을 모은다 (FR-724).
-func (f *fakeCaller) Notify(msg string) { f.notices = append(f.notices, msg) }
+func (f *fakeCaller) Notify(_, msg string) { f.notices = append(f.notices, msg) }
 
 // takeNotice 는 방금 성공한 처리기가 돌아갈 화면에 실은 알림이다 (FR-724). 마지막 것을
 // 주고 비운다 — 앞선 저장이 실은 알림이 남아 있으면 그것과 달라서 걸린다.
@@ -1088,7 +1088,7 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
-	wantNotice(t, d, "비밀번호 재설정 메일을 보냈습니다 — 그 사용자의 로그인은 모두 끊겼습니다.")
+	wantNotice(t, d, "그 사용자의 로그인을 모두 끊었습니다 — 비밀번호 재설정 메일을 보내는 중입니다.")
 
 	// The hash is cleared, not replaced: nothing the administrator could know.
 	var hash string

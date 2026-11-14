@@ -77,7 +77,7 @@
     <input type="hidden" name="action" value="migrate">
     {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">
-      <button class="adm-btn" {{if ne $b "s3"}}disabled{{end}}>버킷으로 옮기기</button>
+      <button onclick="return confirm('서버의 파일을 버킷으로 보내고 서버의 사본을 지울까요?')" class="adm-btn" {{if ne $b "s3"}}disabled{{end}}>버킷으로 옮기기</button>
     </div>
   </form>
   <p class="adm-hint">

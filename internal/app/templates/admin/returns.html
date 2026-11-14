@@ -36,7 +36,7 @@
       <input name="password" type="password" required autocomplete="current-password">
     </label>
     {{end}}
-    <button type="submit">환불 확정</button>
+    <button type="submit" onclick="return confirm('반품 환불을 확정할까요? 결제사로 바로 보내 돈이 나갑니다.')" >환불 확정</button>
   </form>
 
   {{/* 교환은 환불로 끝나지 않는다. 수거한 교환 건을 재발송으로 넘기는 동작이
@@ -54,7 +54,7 @@
       <input name="password" type="password" required autocomplete="current-password">
     </label>
     {{end}}{{end}}
-    <button type="submit">교환 완료</button>
+    <button type="submit" onclick="return confirm('교환을 완료로 처리할까요? 되돌릴 수 없습니다.')" >교환 완료</button>
   </form>
   {{end}}
 
@@ -62,7 +62,7 @@
     <input type="hidden" name="return_no" value="{{.ReturnNo}}">
     <input type="hidden" name="action" value="reject">
     <label>거부 사유 <input name="reason" maxlength="500"></label>
-    <button type="submit">거부</button>
+    <button type="submit" onclick="return confirm('이 반품·교환 요청을 거부할까요?')" >거부</button>
   </form>
 </section>
 {{else}}

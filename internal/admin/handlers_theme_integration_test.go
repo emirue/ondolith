@@ -360,15 +360,15 @@ func TestGrantPermissionWithAThemeScreen(t *testing.T) {
 		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`, me); err != nil {
 		t.Fatal(err)
 	}
-	d.Caller = func(*http.Request) Caller {
-		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
-	}
+	op := &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
+	d.Caller = func(*http.Request) Caller { return op }
 	grant := func(v url.Values) int {
 		return post(d.RoleGrantPermission, "/admin/roles/permissions", v).Code
 	}
 	if code := grant(url.Values{"role": {"editor"}, "permission": {auth.ThemeContentPermission}, "theme_screen": {"partners"}}); code != http.StatusSeeOther {
 		t.Fatalf("화면 부여 = HTTP %d", code)
 	}
+	wantNotice(t, d, "역할 editor 에 권한을 줬습니다 — "+auth.ThemeContentPermission+" (테마 화면 협력사)")
 	var n int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM role_permissions WHERE theme_screen = 'partners'`).Scan(&n)
 	if n != 1 {

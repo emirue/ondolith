@@ -410,9 +410,8 @@ func TestScopedGrantIsStoredScoped(t *testing.T) {
 		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='mod_x'`, target); err != nil {
 		t.Fatal(err)
 	}
-	d.Caller = func(*http.Request) Caller {
-		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me}
-	}
+	op := &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me}
+	d.Caller = func(*http.Request) Caller { return op }
 
 	rec := post(d.RoleGrantPermission, "/admin/roles/permissions", url.Values{
 		"role": {"mod_x"}, "permission": {"post.moderate"}, "board_id": {board},
@@ -420,6 +419,8 @@ func TestScopedGrantIsStoredScoped(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
 	}
+	// 범위가 알림에도 있어야 한다 — 없으면 전역 권한을 준 것처럼 읽힌다.
+	wantNotice(t, d, "역할 mod_x 에 권한을 줬습니다 — post.moderate (게시판 X)")
 	p, err := d.Auth.LoadPermissions(ctx, target)
 	if err != nil {
 		t.Fatal(err)

@@ -32,15 +32,17 @@
         <input type="number" name="backup.hour" min="0" max="23" value="{{index .Settings "backup.hour"}}">
       </label>
       <label class="adm-field">
-        <span>보관 개수 (1~30)</span>
+        {{/* 버킷으로 가면 이 칸은 버킷에 못 올린 날 서버에 남긴 것에만 걸린다 — 버킷의 백업은 앱이 지우지 않는다 (FR-722). */}}
+        <span>{{if .ToBucket}}서버에 남길 개수 (1~30){{else}}보관 개수 (1~30){{end}}</span>
         <input type="number" name="backup.keep" min="1" max="30" value="{{index .Settings "backup.keep"}}">
       </label>
     </div>
     {{/* FR-722. 파일 저장소가 S3 면 백업도 그 버킷의 backups/ 로 간다 — 서버를 잃어도 남는다. */}}
     {{if .ToBucket}}
     <p class="adm-hint">파일 저장소가 S3 라 자동 백업은 그 버킷의 <code>backups/</code> 에 올라가고 이 서버에는 남지 않습니다 —
-      서버를 잃어도 백업이 남습니다. 보관 개수는 이 서버에 남긴 백업에만 적용되고, 버킷의 백업은 버킷의 수명 주기 규칙으로
-      기간을 정합니다(<code>backups/</code> 접두사에만). 버킷에 올리지 못한 날은 이 서버에 남기고 작업 로그에 적습니다.</p>
+      서버를 잃어도 백업이 남습니다. <strong>버킷의 백업은 앱이 지우지 않습니다.</strong> 버킷에 수명 주기 규칙을 걸지 않으면
+      모두 쌓이고, 걸면 그 날수가 보관 기간입니다(<code>backups/</code> 접두사에만). 「서버에 남길 개수」는 버킷에 올리지 못해
+      이 서버에 남긴 백업에만 적용되고, 그런 날은 작업 로그에 적습니다.</p>
     {{else}}
     <p class="adm-hint">백업 하나가 DB 와 업로드 폴더 전체라 보관 개수만큼 디스크를 씁니다. 백업은 이 서버의 디스크에 있으므로,
       서버가 망가지면 함께 사라집니다 — 서버 스냅샷(Lightsail 자동 스냅샷)도 켜 두세요. 파일 저장소를 S3 로 쓰면 자동 백업도

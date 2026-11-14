@@ -43,9 +43,9 @@ type Caller interface {
 	// 읽는 곳이 없으면, 15분이 지난 운영자는 로그아웃했다 들어오기 전에는
 	// 환불을 영원히 할 수 없다.
 	ConfirmReauth(password string) bool
-	// Notify 는 돌아갈 화면에 한 번 보일 성공 알림을 싣는다 (FR-724). 처리기는 직접 부르지
-	// 않고 d.done 을 거친다.
-	Notify(msg string)
+	// Notify 는 돌아갈 화면(to)에 한 번 보일 성공 알림을 싣는다 (FR-724). 처리기는 직접
+	// 부르지 않고 d.done 을 거친다.
+	Notify(to, msg string)
 }
 
 // reauthOK is the one shape every destructive handler uses: 창이 살아 있거나,
@@ -1235,7 +1235,8 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	// 작업 로그가 자격증명으로 보고 가리므로(content.Redacted) 낱말을 피한다.
 	d.log(r, c, "user.reset_password", "user", target,
 		"재설정 강제 (세션 종료·로그인 수단 회수·소셜 연결 "+strconv.FormatInt(unlinked, 10)+"개 해제·재설정 메일 발송)")
-	d.done(w, r, c, "/admin/users", "비밀번호 재설정 메일을 보냈습니다 — 그 사용자의 로그인은 모두 끊겼습니다.")
+	// 메일은 뒤에서 보낸다(SendReset) — 「보냈습니다」라고 하면 확인하지 않은 것을 확인한 것처럼 말한다.
+	d.done(w, r, c, "/admin/users", "그 사용자의 로그인을 모두 끊었습니다 — 비밀번호 재설정 메일을 보내는 중입니다.")
 }
 
 // UserCreate needs user.create, which is again its own permission (D19).
@@ -1343,7 +1344,7 @@ func (d *Deps) log(r *http.Request, c Caller, action, targetType, targetID, summ
 // 적는다 — 「저장했습니다」만으로는 여러 칸 중 무엇이 들어갔는지 모른다. **비밀번호·키·토큰은
 // 넣지 않는다** — 세션은 DB 에 저장된다.
 func (d *Deps) done(w http.ResponseWriter, r *http.Request, c Caller, to, notice string) {
-	c.Notify(notice)
+	c.Notify(to, notice)
 	http.Redirect(w, r, to, http.StatusSeeOther)
 }
 
