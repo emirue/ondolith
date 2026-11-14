@@ -52,7 +52,9 @@
 {{/* reauth-field 는 파괴적 동작 폼이 함께 보내는 비밀번호 칸이다 (D15 5.3-1,
      D19 C7). 별도 재인증 화면을 두지 않기로 했으므로 **칸이 폼 안에 있어야
      한다** — 없으면 15분이 지난 운영자는 그 동작을 영원히 못 한다. 창이 아직
-     살아 있으면 서버가 값을 읽지 않는다. */}}
+     살아 있으면 서버가 값을 읽지 않으므로 칸을 그리지 않고, 그릴 때는 필수다
+     (FR-726). 그릴지(.NeedsReauth)는 렌더러가 정하므로 부르는 쪽은 언제나 루트($)를
+     넘긴다 — range·with 안의 `.` 에는 그 값이 없어 칸이 사라진다. */}}
 {{/* board-picker 는 글·댓글·첨부 관리(A-307~309)의 게시판 고르기다. 주소를 직접 치게 했고,
      댓글 관리에는 고르는 칸조차 없었다. 데이터 {Boards, BoardSlug}. */}}
 {{define "adm-nav"}}
@@ -75,13 +77,13 @@
 </select>
 {{end}}
 
-{{define "reauth-field"}}
+{{define "reauth-field"}}{{if .NeedsReauth}}
 <label class="adm-field">
-  <span>비밀번호 재확인</span>
-  <input name="password" type="password" autocomplete="current-password"
-         aria-label="비밀번호 재확인" placeholder="마지막 확인 후 15분이 지났다면 입력하세요">
+  <span>관리자 비밀번호 재확인</span>
+  <input name="password" type="password" required autocomplete="current-password">
+  <span class="adm-hint">중요한 작업이라 비밀번호를 한 번 더 확인합니다. 확인하면 15분 동안 다시 묻지 않습니다.</span>
 </label>
-{{end}}
+{{end}}{{end}}
 
 {{/* period-fields 는 기간 조회 칸이다 (D19 0.6, FR-712): 시작일·종료일과 빠른 버튼.
      **빠른 버튼은 서버가 날짜를 계산해 둔 GET 링크다** — 누르면 바로 조회되고 JS 가

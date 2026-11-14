@@ -16,10 +16,7 @@
 <form method="post" class="adm-form">
   <input type="hidden" name="action" value="cancel">
   <p>배송 전 주문입니다. 전체 취소하면 남은 {{money .Remaining}}(배송비 포함)을 돌려주고 주문을 「취소」로 닫습니다.</p>
-  {{if .NeedsReauth}}
-  <input name="password" type="password" required autocomplete="current-password"
-         aria-label="비밀번호 확인" placeholder="비밀번호 확인">
-  {{end}}
+  {{template "reauth-field" $}}
   <button type="submit" onclick="return confirm('주문을 전체 취소하고 남은 금액을 돌려줄까요? 결제사로 바로 보내며 되돌릴 수 없습니다.')" class="adm-btn adm-btn--danger">전체 취소</button>
 </form>
 {{end}}
@@ -48,10 +45,7 @@
           <form method="post" class="adm-form">
             <input type="hidden" name="action" value="execute">
             <input type="hidden" name="refund_id" value="{{.ID}}">
-            {{if $.NeedsReauth}}
-            <input name="password" type="password" required autocomplete="current-password"
-                   aria-label="비밀번호 확인" placeholder="비밀번호 확인">
-            {{end}}
+            {{template "reauth-field" $}}
             <button type="submit" onclick="return confirm('이 환불을 결제사로 보낼까요? 돈이 나갑니다.')" >{{if eq .Status "승인"}}다시 보내기{{else}}실행{{end}}</button>
           </form>
           {{end}}
@@ -103,10 +97,7 @@
   <input id="reason" name="reason" maxlength="500">
   {{/* D15 5.3-1: 최근 15분 내 확인이 있으면 이 필드가 없다. 매 클릭마다
        물으면 관리자가 비밀번호를 브라우저에 저장하게 되어 역효과다. */}}
-  {{if .NeedsReauth}}
-  <label for="password">비밀번호 확인</label>
-  <input id="password" name="password" type="password" required autocomplete="current-password">
-  {{end}}
+  {{template "reauth-field" $}}
   <button type="submit" onclick="return confirm('고른 품목을 환불할까요? 결제사로 바로 보내 돈이 나갑니다.')" >환불 접수</button>
 </form>
 </div>

@@ -230,7 +230,7 @@ func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, cod
 	d.Render(w, r, "admin/roles.html", code, map[string]any{
 		"Roles": roles, "Permissions": perms, "Boards": boards, "ThemeScreens": d.themeScreens(),
 		"Grants": grants, "Revokable": revokable,
-		"NeedsReauth": c.NeedsReauth(), "Error": msg})
+		"Error": msg})
 }
 
 // GrantView is one grant as A-403 lists it. Value 는 빼기 폼이 보내는 「역할|권한|게시판|테마 화면」이다.
@@ -414,7 +414,7 @@ func (d *Deps) RoleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !reauthOK(c, r) {
-		d.renderRoles(w, r, c, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		d.reauthRefused(w, r, c)
 		return
 	}
 	ctx := r.Context()
@@ -467,7 +467,7 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 	}
 	// 최고 위험 화면이다 — 재인증 (D15 5.3-1).
 	if !reauthOK(c, r) {
-		d.renderRoles(w, r, c, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		d.reauthRefused(w, r, c)
 		return
 	}
 	ctx := r.Context()
@@ -668,7 +668,9 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 
 	// D15 5.3-1: uploading executable-ish content is the last step of a takeover.
 	if !reauthOK(c, r) {
-		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		// 업로드 화면을 칸과 함께 다시 그린다. 파일은 다시 고른다 — 원 요청을 보관하지 않는다 (D15 5.3-1).
+		d.Render(w, r, "admin/theme-upload.html", http.StatusForbidden,
+			map[string]any{"Error": "비밀번호를 다시 입력하세요. 테마 파일도 다시 골라 주세요."})
 		return
 	}
 	if d.InstallTheme == nil {
@@ -765,4 +767,14 @@ func (d *Deps) grantScope(ctx context.Context, board auth.BoardID, screen string
 		return " (테마 화면 " + screen + ")"
 	}
 	return ""
+}
+
+// reauthRefused 는 재확인을 받지 못한 역할 부여·빼기(A-405)가 온 화면을 다시 그린다 (D15 5.3-1 「403 + 그 화면의 폼
+// 재표시」). 사용자 상세의 폼은 user_id 를 싣고, 역할 화면의 부여 폼은 이메일을 싣는다.
+func (d *Deps) reauthRefused(w http.ResponseWriter, r *http.Request, c Caller) {
+	if id := r.PostFormValue("user_id"); content.IsUUID(id) {
+		d.renderUserDetail(w, r, id, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		return
+	}
+	d.renderRoles(w, r, c, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 }

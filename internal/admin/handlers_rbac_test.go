@@ -453,15 +453,24 @@ func TestRoleChangesAreReauthedAndLogged(t *testing.T) {
 	grant := url.Values{"role": {"operator"}, "permission": {"page.view"}}
 	assign := url.Values{"user_id": {target}, "role": {"operator"}}
 
-	for name, call := range map[string]func() *httptest.ResponseRecorder{
-		"A-404": func() *httptest.ResponseRecorder {
+	// 403 과 함께 **온 화면**을 다시 그린다 (D15 5.3-1) — 사용자 상세의 부여 폼은 user_id 를, 역할 화면의 부여 폼은
+	// 이메일을 싣는다. 사용자 상세에서 눌렀는데 역할 화면이 나오면 운영자는 어디서 다시 넣어야 하는지 모른다.
+	byEmail := url.Values{"email": {"t@example.com"}, "role": {"operator"}}
+	for name, tc := range map[string]struct {
+		call   func() *httptest.ResponseRecorder
+		screen string
+	}{
+		"A-404": {func() *httptest.ResponseRecorder {
 			return post(d.RoleGrantPermission, "/admin/roles/permissions", grant)
-		},
-		"A-405": func() *httptest.ResponseRecorder { return post(d.RoleAssign, "/admin/users/roles", assign) },
+		}, "admin/roles.html"},
+		"A-405 사용자 상세에서": {func() *httptest.ResponseRecorder { return post(d.RoleAssign, "/admin/users/roles", assign) },
+			"admin/user-detail.html"},
+		"A-405 역할 화면에서": {func() *httptest.ResponseRecorder { return post(d.RoleAssign, "/admin/users/roles", byEmail) },
+			"admin/roles.html"},
 	} {
-		rec := call()
-		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "admin/roles.html") {
-			t.Errorf("%s 재인증 없이 = HTTP %d (%q), want 403 과 폼 재표시", name, rec.Code, rec.Body.String())
+		rec := tc.call()
+		if rec.Code != http.StatusForbidden || !strings.HasPrefix(rec.Body.String(), tc.screen) {
+			t.Errorf("%s 재인증 없이 = HTTP %d (%q), want 403 과 %s 재표시", name, rec.Code, rec.Body.String(), tc.screen)
 		}
 	}
 	if perms, _ := d.Auth.LoadPermissions(ctx, target); perms.Can("admin.access") {

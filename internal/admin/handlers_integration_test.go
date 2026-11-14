@@ -1992,15 +1992,13 @@ func TestMailTestSendsOnlyToTheAdminItself(t *testing.T) {
 		t.Errorf("여섯 번째 = HTTP %d·발송 %d회, want 429·5회", rec.Code, len(sentTo))
 	}
 
-	// 재인증 창이 지난 superuser 는 비밀번호를 다시 넣어야 보낸다 (저장과 같은 문).
-	stale := &fakeCaller{superuser: true, reauth: true, email: "late@example.com", password: "correct horse battery"}
+	// **재인증 창이 지난 superuser 도 비밀번호 없이 보낸다** (FR-726, D15 5.3-1) — 저장된 설정으로 본인 주소에만,
+	// 시간당 5번이다. 예전에는 저장과 같이 물었다. 한도는 계정마다라 이 관리자는 처음이다.
+	stale := &fakeCaller{superuser: true, reauth: true, email: "late@example.com"}
 	d.Caller = func(*http.Request) Caller { return stale }
 	before := len(sentTo)
-	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusForbidden || len(sentTo) != before {
-		t.Errorf("재인증 없이 = HTTP %d·발송 %d회, want 403·0회", rec.Code, len(sentTo)-before)
-	}
-	if rec := post(d.MailTest, "/admin/settings/mail/test", url.Values{"password": {"correct horse battery"}}); rec.Code != http.StatusOK || len(sentTo) != before+1 {
-		t.Errorf("재인증 뒤 = HTTP %d·발송 %d회, want 200·1회 — 위 단언이 「늘 거부」였다", rec.Code, len(sentTo)-before)
+	if rec := post(d.MailTest, "/admin/settings/mail/test", nil); rec.Code != http.StatusOK || len(sentTo) != before+1 || sentTo[before] != "late@example.com" {
+		t.Errorf("재인증 창이 닫힌 superuser = HTTP %d·발송 %d회, want 200·본인에게 1회", rec.Code, len(sentTo)-before)
 	}
 
 	// 저장과 같은 문: superuser 만 (D15 5.1 R7).

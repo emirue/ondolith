@@ -7,7 +7,7 @@
      이 게시판을 가리키는 메뉴도 지워집니다(그 밑의 하위 메뉴는 한 단계 올라갑니다).
      되돌릴 수 없습니다. 글을 남기려면 게시판을 지우지 말고 권한을 거두세요.</p>
   <form method="post" action="/admin/boards/{{.Board.ID}}/delete" class="adm-form">
-    {{template "reauth-field" .}}
+    {{template "reauth-field" $}}
     <label class="adm-field adm-field--check">
       <input type="checkbox" name="confirm" value="1" required>
       <span>글 {{.Posts}}건과 댓글·첨부를 모두 지우는 것을 확인했습니다</span>

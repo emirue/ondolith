@@ -227,6 +227,8 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 		"CSS":        a.css,
 		"AdminTheme": a.theme,
 		"UserName":   actorName(actor),
+		// 비밀번호 재확인 칸을 그릴지 (FR-726). 화면이 넘기지 않아도 공용 칸(reauth-field)이 이것을 본다.
+		"NeedsReauth": a.needsReauth(r, actor),
 	}
 	// The screen's own payload is merged in, never nested: the templates were
 	// written against the map the handlers already build.
@@ -260,6 +262,21 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	if _, err := w.Write(buf.Bytes()); err != nil {
 		a.log.Error("관리자 응답 쓰기", "screen", name, "err", err)
 	}
+}
+
+// needsReauth 는 비밀번호 재확인 칸을 그릴지다 (FR-726, D15 5.3-1).
+//
+// 요청이 들어올 때의 Actor 가 아니라 **세션을 다시 읽는다.** 같은 요청에서 방금 비밀번호를 확인했으면(ConfirmReauth 가
+// 세션에 찍는다) 422 로 다시 그린 폼이 또 묻지 않는다 — 넣은 비밀번호가 맞았는데 다시 넣으라는 화면이 된다.
+func (a *adminRenderer) needsReauth(r *http.Request, actor *Actor) bool {
+	if actor == nil || a.sm == nil {
+		return NeedsReauth(actor, time.Now())
+	}
+	fresh := *actor
+	if t := getTime(a.sm, r.Context(), sessReauth); t.After(fresh.ReauthAt) {
+		fresh.ReauthAt = t
+	}
+	return NeedsReauth(&fresh, time.Now())
 }
 
 // actorName is what the header greets. Only the display name — the header is

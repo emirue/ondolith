@@ -147,8 +147,10 @@ func TestMailScreenOffersATestSendToTheAdminOnly(t *testing.T) {
 	}
 	form := body[i:]
 	form = form[:strings.Index(form, "</form>")]
-	if !strings.Contains(form, `name="password"`) {
-		t.Error("시험 발송 폼에 비밀번호 재확인 칸이 없다 — 재인증 창이 지나면 늘 거부된다")
+	// 시험 발송은 재확인을 받지 않는다 (FR-726, D15 5.3-1) — 저장된 설정으로 본인 주소에만 보낸다. 서버가 묻지
+	// 않는데 칸이 있으면 운영자는 넣어야 하는지 모른다. 재인증 창이 닫힌 화면(렌더러 기본값)으로 그린 것이다.
+	if strings.Contains(form, `name="password"`) {
+		t.Error("시험 발송 폼에 비밀번호 칸이 있다 — 서버는 묻지 않는다")
 	}
 	if strings.Contains(form, `name="to"`) || strings.Contains(form, `type="email"`) {
 		t.Error("시험 발송 폼이 받는 주소를 받는다 — 임의 주소로 쏘는 중계가 된다 (D13)")

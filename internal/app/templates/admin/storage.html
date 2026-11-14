@@ -55,7 +55,7 @@
     </label>
 
     {{/* 저장소를 바꾸는 사람은 그 뒤의 모든 파일을 받는다 — 최고 관리자 + 재확인 (D15 R8). */}}
-    {{template "reauth-field" .}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn" name="action" value="verify">연결 확인</button>
       <button class="adm-btn adm-btn--primary">저장</button>
@@ -75,7 +75,7 @@
       보낸 뒤 서버의 사본을 지웁니다. 한 번에 40초씩 옮기고, 남으면 남은 개수를 알려 드립니다. 방금 올라온 파일은 1분 뒤에 옮깁니다.
     </p>
     <input type="hidden" name="action" value="migrate">
-    {{template "reauth-field" .}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button onclick="return confirm('서버의 파일을 버킷으로 보내고 서버의 사본을 지울까요?')" class="adm-btn" {{if ne $b "s3"}}disabled{{end}}>버킷으로 옮기기</button>
     </div>

@@ -22,6 +22,11 @@ func (d *Deps) BoardList(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "board.view"); !ok {
 		return
 	}
+	d.renderBoards(w, r, http.StatusOK, "")
+}
+
+// renderBoards draws A-304 with msg on top — 재확인을 받지 못한 게시판 삭제가 이 화면을 다시 그린다 (D15 5.3-1).
+func (d *Deps) renderBoards(w http.ResponseWriter, r *http.Request, code int, msg string) {
 	ctx := r.Context()
 	boards, err := d.Content.Boards(ctx)
 	if err != nil {
@@ -41,8 +46,8 @@ func (d *Deps) BoardList(w http.ResponseWriter, r *http.Request) {
 	for _, b := range boards {
 		rows = append(rows, row{Board: b, Unreachable: !granted[b.ID]})
 	}
-	d.Render(w, r, "admin/boards.html", http.StatusOK, map[string]any{
-		"Boards": rows, "Presets": content.Presets(),
+	d.Render(w, r, "admin/boards.html", code, map[string]any{
+		"Boards": rows, "Presets": content.Presets(), "Error": msg,
 	})
 }
 
@@ -155,12 +160,17 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !reauthOK(c, r) {
-		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
-		return
-	}
 	id := r.PathValue("id")
 	force := r.PostFormValue("confirm") != ""
+	if !reauthOK(c, r) {
+		// 거절 화면이 아니라 온 화면을 칸과 함께 다시 그린다 (D15 5.3-1). 글이 있어 확인 단계에서 왔으면 그 화면이다.
+		if force {
+			d.renderBoardDelete(w, r, id, http.StatusForbidden, map[string]any{"Error": "비밀번호를 다시 입력하세요."})
+		} else {
+			d.renderBoards(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		}
+		return
+	}
 	// 첨부 실물까지 지운다 — 글 삭제와 같다. 게시판은 갔고 파일 일부가 남았으면 경고만.
 	err := d.Attachments.DeleteBoard(r.Context(), id, force)
 	if errors.Is(err, content.ErrFilesLeft) {
@@ -170,15 +180,7 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, content.ErrBoardInUse):
 		// 확인 화면이다. 몇 건이 함께 지워지는지 보이고, 확인을 받아야 지운다.
-		ctx := r.Context()
-		b, berr := d.Content.BoardByID(ctx, id)
-		n, nerr := d.Content.BoardPostCount(ctx, id)
-		if berr != nil || nerr != nil {
-			d.serverError(w, r, errors.Join(berr, nerr))
-			return
-		}
-		d.Render(w, r, "admin/board-delete.html", http.StatusConflict,
-			map[string]any{"Board": b, "Posts": n, "Warning": msgBoardInUse})
+		d.renderBoardDelete(w, r, id, http.StatusConflict, map[string]any{"Warning": msgBoardInUse})
 	case errors.Is(err, content.ErrNotFound):
 		d.refuse(w, r, http.StatusNotFound, "게시판을 찾을 수 없습니다.")
 	case err != nil:
@@ -187,6 +189,26 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 		d.log(r, c, "board.manage", "board", id, "게시판 삭제")
 		d.done(w, r, c, "/admin/boards", "게시판을 삭제했습니다.")
 	}
+}
+
+// renderBoardDelete draws the A-305 confirmation step for id — 함께 지워질 글 수와 extra(경고·오류)를 싣는다.
+func (d *Deps) renderBoardDelete(w http.ResponseWriter, r *http.Request, id string, code int, extra map[string]any) {
+	ctx := r.Context()
+	b, berr := d.Content.BoardByID(ctx, id)
+	if errors.Is(berr, content.ErrNotFound) {
+		d.refuse(w, r, http.StatusNotFound, "게시판을 찾을 수 없습니다.")
+		return
+	}
+	n, nerr := d.Content.BoardPostCount(ctx, id)
+	if berr != nil || nerr != nil {
+		d.serverError(w, r, errors.Join(berr, nerr))
+		return
+	}
+	data := map[string]any{"Board": b, "Posts": n}
+	for k, v := range extra {
+		data[k] = v
+	}
+	d.Render(w, r, "admin/board-delete.html", code, data)
 }
 
 // ---- A-306 커스텀 필드 스키마 ---------------------------------------------------
