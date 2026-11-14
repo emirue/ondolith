@@ -83,9 +83,10 @@ func (d *Deps) renderBackup(w http.ResponseWriter, r *http.Request, code int, ms
 //   - settings 자동 백업을 켜고 끄고 시각·보관 개수를 정한다 (FR-715)
 //   - file 저장된 자동 백업 하나를 내려받는다 (FR-715)
 //
-// **셋 다 최고 관리자 + 비밀번호 재확인이다.** 덤프에는 모든 회원의 비밀번호 해시와 봉인된
-// 자격증명이 있다 — 사이트를 통째로 들고 나가는 단추이고, 저장된 파일도 같은 내용이다.
-// 자동 백업을 끄는 것도 같은 사람만 한다. 셋 다 작업 로그에 남는다.
+// **셋 다 최고 관리자다. 내려받기 둘은 비밀번호 재확인도 받는다.** 덤프에는 모든 회원의 비밀번호 해시와
+// 봉인된 자격증명이 있다 — 사이트를 통째로 들고 나가는 단추이고, 저장된 파일도 같은 내용이다. 자동 백업 설정은
+// 데이터를 내보내지 않아 묻지 않는다 (FR-726, D15 5.3-1) — 이름으로 그것 하나만 빼고, 모르는 동작은 묻는다.
+// 셋 다 작업 로그에 남는다.
 func (d *Deps) BackupDownload(w http.ResponseWriter, r *http.Request) {
 	c, ok := d.require(w, r, "settings.update")
 	if !ok {
@@ -95,14 +96,15 @@ func (d *Deps) BackupDownload(w http.ResponseWriter, r *http.Request) {
 		d.renderBackup(w, r, http.StatusForbidden, "백업은 최고 관리자만 다룰 수 있습니다.")
 		return
 	}
+	if r.PostFormValue("action") == "settings" {
+		d.saveBackupSettings(w, r, c)
+		return
+	}
 	if !reauthOK(c, r) {
 		d.renderBackup(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return
 	}
 	switch r.PostFormValue("action") {
-	case "settings":
-		d.saveBackupSettings(w, r, c)
-		return
 	case "file":
 		d.sendStoredBackup(w, r, c)
 		return

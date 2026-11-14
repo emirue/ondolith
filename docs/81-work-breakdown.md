@@ -501,6 +501,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-44 | 역할·권한 빼기, 모두가 갖는 역할에는 방문자 권한만 (R9) **(완료 — `TestEveryoneRolesTakeOnlyVisitorPermissions`·`TestEveryoneRolesKeepOnlyVisitorGrantsOnLoad`·`TestRevokePermissionRemovesExactlyThatGrant`·`TestUnassignRole`·`TestGrantToEveryoneRolesIsLimitedToVisitorPermissions`·`TestRevokePermissionFromARole`·`TestRevokeRoleFromAUser`·`TestRoleScreensShowWhatIsHeld`·`TestEveryoneRoleAdminGrantDoesNotOpenTheAdminTree`·`TestPresetsGiveEveryoneOnlyVisitorPermissions`, 2026-11-14)** | W1-24 | `internal/auth/escalation.go` R9·`CanRemovePermissionFromRole`, `internal/auth/queries/store.sql`, `internal/admin/handlers_rbac.go` `RoleRevokePermission`·`RoleRevoke`, `roles.html`·`user-detail.html` | `anonymous`·`member` 에 방문자 권한 밖의 부여는 422 이고, DB 에 이미 있어도 역할 없는 회원에게 관리자 트리가 열리지 않는다(403). 역할에서 권한을, 사용자에게서 역할을 화면에서 빼면 다음 요청부터 효력이 없다 — 범위가 다른 부여는 남고, 자기 역할은 403, 마지막 관리자는 409, 없는 것은 404. A-402 가 가진 역할을, A-403 이 범위와 「효력 없음」을 보인다 (FR-723) |
 | W6-45 | 관리자 저장 성공 알림 **(완료 — `TestAdminNoticeShowsOnceAfterTheRedirect`·`TestAdminNoticeIsKeptPastScreensThatAreNotTheReturn`·`TestAdminNoticeYieldsToTheScreensOwnNotice`·`TestAdminChangesReturnThroughDone`, 처리기 시험 50곳의 `wantNotice`, `scripts/e2e.sh` FR-724 다섯 화면, 2026-11-14)** | — | `internal/admin/handlers.go` `done`, `internal/app/admin_render.go` `Render`, `admin/layout.html`, 관리자 POST 처리기 전부 | 상태를 바꾸는 관리자 POST 가 성공해 303 으로 돌아간 화면에 무엇이 됐는지 한 줄이 `role="status"` 로 보이고, 새로 고침하면 사라진다. 422 로 다시 그린 화면은 알림을 쓰지 않아 고쳐 저장한 뒤의 화면에 그대로 간다. 성공 경로가 알림 없이 리다이렉트하면 시험이 잡는다 (FR-724) |
 | W6-46 | 관리자 파괴적 동작 확인 창 **(완료 — `TestAdminDestructiveButtonsAsk`, `scripts/admin-notice.mjs` 실제 Chrome 에서 확인 창 취소·확인과 저장 알림·새로 고침·휴대폰 폭, 2026-11-14)** | W6-45 | 관리자 템플릿의 파괴적 폼 단추, `internal/app/admin_contract_test.go` | 지우기·빼기·비활성화·재설정 강제·상태 변경·취소·환불·거부·확정·교환 완료·결제 반영·버킷으로 옮기기 단추를 누르면 확인 창이 뜨고, 취소하면 아무것도 바뀌지 않으며, 확인하면 처리되고 저장 알림이 뜬다. 새 파괴적 폼이 확인 창을 빠뜨리면 시험이 잡는다 (FR-725) |
+| W6-47 | 관리자 비밀번호 재확인 통일 **(완료 — `TestReauthIsAskedExactlyWhereD15Says`·`TestRoutineSavesDoNotAskForThePassword`·`TestGeneralSiteSaveLeavesTheTypeAlone`·`TestReauthFieldOnlyWhereTheServerAsks`·`TestReauthFieldShowsOnlyWhenTheWindowIsClosed`, Codex 검토(Orca), 2026-11-14)** | W6-46 | `internal/app/templates/admin/layout.html` `reauth-field`, `internal/app/admin_render.go`, 재확인 대상 템플릿, `internal/admin/backup.go`·`internal/admin/handlers.go`·`internal/admin/handlers_board.go`·`internal/admin/handlers_rbac.go`, D15 5.3-1 | D15 5.3-1 표의 동작만 재확인하고, 칸은 15분 안에 확인하지 않았을 때만 필수로 한 가지 모양으로 보인다. 자동 백업 설정 저장·메일 시험 발송은 비밀번호 없이 된다. 받지 못하면 403 과 그 화면이 칸과 함께 다시 그려진다. 사이트 유형 전환은 폼이 따로다. 처리기나 폼이 표와 어긋나면 시험이 잡는다 (FR-726) |
 
 ## 작업 수 요약
 
@@ -511,5 +512,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 46 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **184** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 47 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **185** | **9** | — |

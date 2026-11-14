@@ -9,16 +9,6 @@
 
     <div class="adm-field-row">
       <label class="adm-field">
-        <span>사이트 유형</span>
-        <select name="site.type">
-          <option value="cms"{{if eq (index .Settings "site.type") "cms"}} selected{{end}}>cms — 콘텐츠</option>
-          <option value="shop"{{if eq (index .Settings "site.type") "shop"}} selected{{end}}>shop — 커머스</option>
-        </select>
-        {{/* 커머스 라우트는 **조립 시점에** 등록된다 (FR-710). 저장이 성공하면
-             운영 트리를 다시 조립해 원자 교체하므로 재시작은 없다 (D20). */}}
-        <span class="adm-hint">저장하면 상품·주문 화면이 바로 나타나거나 사라집니다. shop → cms 는 완결되지 않은 주문이 없을 때만 됩니다.</span>
-      </label>
-      <label class="adm-field">
         <span>이메일 인증 요구</span>
         <select name="auth.email_verification_required">
           <option value="">아니오</option>
@@ -136,10 +126,30 @@
       {{end}}{{end}}
     </fieldset>
 
-    {{/* 사이트 유형 전환은 파괴적 작업이다 (D15 SC-5 4항) — 유형이 바뀔 때만 본다. */}}
-    {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">저장</button>
+    </div>
+  </form>
+</div>
+
+{{/* 사이트 유형 (FR-710). 전환은 결제 경로를 열고 닫는 파괴적 작업이라(D15 SC-5 4항) 일반 설정과 폼을 나눈다 — 일반
+     저장에는 비밀번호 칸이 뜨지 않고 이 폼만 묻는다 (FR-726). 칸이 없는 저장은 유형을 건드리지 않는다(SettingsSave 는
+     폼에 있는 칸만 쓴다). 커머스 라우트는 **조립 시점에** 등록된다 — 저장이 성공하면 운영 트리를 다시 조립해 원자
+     교체하므로 재시작은 없다 (D20). 고른 값이 지금과 같으면 묻지 않는다. */}}
+<div class="adm-card">
+  <h2>사이트 유형</h2>
+  <form method="post" action="/admin/settings">
+    <label class="adm-field">
+      <span>사이트 유형</span>
+      <select name="site.type">
+        <option value="cms"{{if eq (index .Settings "site.type") "cms"}} selected{{end}}>cms — 콘텐츠</option>
+        <option value="shop"{{if eq (index .Settings "site.type") "shop"}} selected{{end}}>shop — 커머스</option>
+      </select>
+      <span class="adm-hint">바꾸면 상품·주문 화면이 바로 나타나거나 사라집니다. shop → cms 는 완결되지 않은 주문이 없을 때만 됩니다.</span>
+    </label>
+    {{template "reauth-field" $}}
+    <div class="adm-actions adm-actions--end">
+      <button onclick="return this.form.elements['site.type'].value === {{index .Settings "site.type"}} || confirm('사이트 유형을 바꿀까요? 상품·주문 메뉴가 나타나거나 사라집니다.')" class="adm-btn">유형 바꾸기</button>
     </div>
   </form>
 </div>

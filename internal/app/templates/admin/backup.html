@@ -10,7 +10,7 @@
     <code>uploads/</code> 는 업로드 폴더에 그대로 풉니다.</p>
   <form method="post" action="/admin/backup">
     {{/* 최고 관리자만, 비밀번호를 다시 넣고 받는다. 받은 사실은 작업 로그에 남는다. */}}
-    {{template "reauth-field" .}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">백업 내려받기</button>
     </div>
@@ -51,7 +51,6 @@
     <p class="adm-hint">마지막 자동 백업: {{if .Last.IsZero}}아직 없습니다{{else}}{{.Last.Format "2006-01-02 15:04"}} · {{.LastWhere}}{{end}}</p>
     {{if .Stale}}<p class="adm-hint adm-hint--error" role="alert">자동 백업을 켜 두었는데 이틀 넘게 만든 백업이 없습니다. 작업 로그에서
       「자동 백업」 실패를 확인하세요.</p>{{end}}
-    {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>
@@ -75,7 +74,7 @@
         </tbody>
       </table>
     </div>
-    {{template "reauth-field" .}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn">선택한 백업 내려받기</button>
     </div>

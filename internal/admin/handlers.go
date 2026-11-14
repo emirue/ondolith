@@ -644,11 +644,8 @@ func (d *Deps) MailTest(w http.ResponseWriter, r *http.Request) {
 			"메일(SMTP) 설정은 최고 관리자만 바꿀 수 있습니다.")
 		return
 	}
-	if !reauthOK(c, r) {
-		d.renderSettings(w, r, "admin/mail.html", mailSettingKeys, http.StatusForbidden,
-			"비밀번호를 다시 입력하세요.")
-		return
-	}
+	// 재확인은 받지 않는다 (FR-726, D15 5.3-1) — 저장된 설정으로 이 관리자 본인 주소에만, 시간당 5번 보낸다.
+	// 입력받는 호스트가 없어 A-210 연결 확인처럼 저장된 비밀을 남의 서버로 보낼 길이 없다.
 	if d.SendMailTest == nil {
 		d.refuse(w, r, http.StatusNotFound, "시험 발송을 쓸 수 없습니다.")
 		return
@@ -1046,9 +1043,28 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 	if _, ok := d.require(w, r, "user.update"); !ok {
 		return
 	}
-	u, err := d.Auth.FindUserByID(r.Context(), r.PathValue("id"))
+	d.renderUserDetail(w, r, r.PathValue("id"), http.StatusOK, "")
+}
+
+// renderUserDetail draws A-402 for id, with msg on top. 재확인을 받지 못한 계정 조작·역할 부여와 빼기가 이 화면을
+// 다시 그린다 (D15 5.3-1 「403 + 그 화면의 폼 재표시」).
+func (d *Deps) renderUserDetail(w http.ResponseWriter, r *http.Request, id string, code int, msg string) {
+	// 다시 그릴 사용자가 없으면 이유만 말한다 — 재확인 실패면 그 403 을 그대로, 화면을 열려던 것이면 404 다.
+	// uuid 가 아닌 id 는 없는 사용자다 (uuid 컬럼과 비교하면 22P02 로 500 이 된다).
+	missing := func() {
+		if code == http.StatusOK {
+			d.refuse(w, r, http.StatusNotFound, "사용자를 찾을 수 없습니다.")
+			return
+		}
+		d.refuse(w, r, code, msg)
+	}
+	if !content.IsUUID(id) {
+		missing()
+		return
+	}
+	u, err := d.Auth.FindUserByID(r.Context(), id)
 	if errors.Is(err, auth.ErrNoUser) {
-		d.refuse(w, r, http.StatusNotFound, "사용자를 찾을 수 없습니다.")
+		missing()
 		return
 	}
 	if err != nil {
@@ -1068,7 +1084,7 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 		return
 	}
-	d.Render(w, r, "admin/user-detail.html", http.StatusOK, map[string]any{"User": u, "Roles": roles, "Held": held})
+	d.Render(w, r, "admin/user-detail.html", code, map[string]any{"User": u, "Roles": roles, "Held": held, "Error": msg})
 }
 
 // guardAccountOp is the shared front door for the A-402 account actions —
@@ -1080,7 +1096,9 @@ func (d *Deps) UserDetail(w http.ResponseWriter, r *http.Request) {
 // is what keeps a later fourth action from getting two of the three.
 func (d *Deps) guardAccountOp(w http.ResponseWriter, r *http.Request, c Caller, target string) bool {
 	if !reauthOK(c, r) {
-		d.refuse(w, r, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
+		// 거절 화면이 아니라 그 화면을 칸과 함께 다시 그린다 (D15 5.3-1) — 거절 화면에서 뒤로 가면 칸이 없던
+		// 화면이 나와 같은 403 이 되풀이된다.
+		d.renderUserDetail(w, r, target, http.StatusForbidden, "비밀번호를 다시 입력하세요.")
 		return false
 	}
 	if auth.SameID(target, c.UserID()) {

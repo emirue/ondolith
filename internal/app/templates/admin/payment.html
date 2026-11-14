@@ -28,7 +28,7 @@
              placeholder="{{if index .SecretSaved "pg.secret_key"}}변경하지 않으려면 비워 두세요{{else}}미설정{{end}}">
     </label>
     {{/* 자격증명 교체는 이후 모든 결제의 수취인을 바꾼다. */}}
-    {{template "reauth-field" .}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>

@@ -38,7 +38,7 @@
         <select name="theme_screen"><option value="">(모든 테마 화면)</option>{{range .ThemeScreens}}<option value="{{.Key}}">{{.Title}}</option>{{end}}</select></label>{{end}}
     </div>
     {{/* 권한 상승의 최종 단계라 재확인을 거친다 (D15 5.3-1). 15분 안에 확인했으면 칸이 없다. */}}
-    {{if .NeedsReauth}}{{template "reauth-field" .}}{{end}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">부여</button>
     </div>
@@ -54,7 +54,7 @@
       <label class="adm-field"><span>뺄 부여</span>
         <select name="grant" required><option value="">선택하세요</option>{{range .Revokable}}<option value="{{.Value}}">{{.Role}} · {{.Permission}}{{if .Scope}} ({{.Scope}}){{end}}{{if .Inert}} — 효력 없음{{end}}</option>{{end}}</select></label>
     </div>
-    {{if .NeedsReauth}}{{template "reauth-field" .}}{{end}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button onclick="return confirm('이 권한을 역할에서 뺄까요? 다음 요청부터 효력이 없습니다.')" class="adm-btn">빼기</button>
     </div>
@@ -73,7 +73,7 @@
       <label class="adm-field"><span>역할</span>
         <select name="role" required><option value="">선택하세요</option>{{range .Roles}}{{if .Assignable}}<option value="{{.Key}}">{{.Key}}</option>{{end}}{{end}}</select></label>
     </div>
-    {{if .NeedsReauth}}{{template "reauth-field" .}}{{end}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">부여</button>
     </div>

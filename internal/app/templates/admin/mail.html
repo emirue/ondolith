@@ -50,7 +50,7 @@
 
     {{/* 계정 복구 메일이 이 경로로 나간다. 그래서 저장은 최고 관리자만, 재확인을
          거쳐 한다 (D15 5.1 R7·5.3-1). */}}
-    {{template "reauth-field" .}}
+    {{template "reauth-field" $}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn adm-btn--primary">저장</button>
     </div>
@@ -77,7 +77,6 @@
       <textarea name="body" rows="5" maxlength="5000" placeholder="관리자 화면에서 보낸 메일 설정 시험입니다. 이 메일을 받으셨다면 SMTP 설정이 맞습니다.">{{.TestBody}}</textarea>
       <span class="adm-hint">비워 두면 위의 기본 제목·내용으로 보냅니다. 받는 사람은 바꿀 수 없습니다(로그인한 관리자 본인).</span>
     </label>
-    {{template "reauth-field" .}}
     <div class="adm-actions adm-actions--end">
       <button class="adm-btn">시험 메일 보내기</button>
     </div>

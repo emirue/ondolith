@@ -191,3 +191,44 @@ func TestSiteTypeSwitchToCMSRefusedWhileOrdersAreOpen(t *testing.T) {
 		t.Fatalf("주문 완결 뒤 HTTP %d, 재조립 %d회 (303, 1회여야)", rec.Code, calls)
 	}
 }
+
+// **사이트 유형은 일반 설정과 폼이 따로다** (FR-726). 일반 저장은 유형 칸 없이 오고, 그래도 쇼핑몰은 쇼핑몰이며 숨긴
+// 커머스 메뉴도 남는다. 재인증 창이 닫혀 있어도 일반 저장은 비밀번호를 묻지 않는다 — 묻는 것은 유형을 바꿀 때뿐이다.
+// 칸이 없는 저장을 「cms 로 바꾸기」로 읽으면 일반 저장 한 번에 상품·주문 화면이 사라진다.
+func TestGeneralSiteSaveLeavesTheTypeAlone(t *testing.T) {
+	op := &fakeCaller{perms: map[string]bool{"settings.update": true}, reauth: true}
+	d, _ := fixture(t, op)
+	ctx := context.Background()
+	calls := 0
+	d.Rebuild = func() error { calls++; return nil }
+	if err := d.Content.PutSettings(ctx, map[string]string{"site.type": "shop", "admin.hidden_menus": "A-501"}); err != nil {
+		t.Fatal(err)
+	}
+	stored := func() map[string]string {
+		kv, err := d.Content.Settings(ctx, "site.type", "admin.hidden_menus", "site.name")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kv
+	}
+
+	// A-201 의 일반 폼이 보내는 것 — 유형 칸이 없다.
+	general := url.Values{"site.name": {"새 이름"}, "admin.hidden_menus": {"", "A-501", "A-206"}}
+	if code := post(d.SettingsSave, "/admin/settings", general).Code; code != http.StatusSeeOther {
+		t.Fatalf("재인증 창이 닫힌 일반 저장 = HTTP %d, want 303 (비밀번호를 묻지 않는다)", code)
+	}
+	if kv := stored(); kv["site.type"] != "shop" || kv["admin.hidden_menus"] != "A-206,A-501" || kv["site.name"] != "새 이름" {
+		t.Errorf("일반 저장 뒤 = %v, want 유형 shop·숨김 A-206,A-501·이름 저장", kv)
+	}
+	// 「사이트 유형」 카드가 보내는 것 — 유형을 바꾸면 그때 묻는다.
+	if code := post(d.SettingsSave, "/admin/settings", url.Values{"site.type": {"cms"}}).Code; code != http.StatusForbidden {
+		t.Errorf("재인증 없이 유형 전환 = HTTP %d, want 403", code)
+	}
+	if kv := stored(); kv["site.type"] != "shop" {
+		t.Errorf("거부한 전환이 저장됐다: %v", kv)
+	}
+	// 같은 유형을 다시 보내는 것은 바꾸는 것이 아니다.
+	if code := post(d.SettingsSave, "/admin/settings", url.Values{"site.type": {"shop"}}).Code; code != http.StatusSeeOther {
+		t.Errorf("같은 유형 = HTTP %d, want 303", code)
+	}
+}

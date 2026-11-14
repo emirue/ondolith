@@ -23,12 +23,12 @@
          회원도 여기서 「활성화」로 돌아온다. */}}
     {{if .IsActive}}
     <form method="post" action="/admin/users/{{.ID}}/deactivate">
-      {{template "reauth-field" .}}
+      {{template "reauth-field" $}}
       <button onclick="return confirm('이 사용자를 비활성화할까요? 로그인할 수 없게 됩니다.')" class="adm-btn">비활성화</button>
     </form>
     {{else}}
     <form method="post" action="/admin/users/{{.ID}}/activate">
-      {{template "reauth-field" .}}
+      {{template "reauth-field" $}}
       <button class="adm-btn adm-btn--primary">활성화</button>
     </form>
     {{end}}
@@ -39,7 +39,7 @@
       <input type="hidden" name="user_id" value="{{.ID}}">
       <label class="adm-field"><span>역할 빼기</span>
         <select name="role" required><option value="">선택하세요</option>{{range $.Held}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
-      {{template "reauth-field" .}}
+      {{template "reauth-field" $}}
       <button onclick="return confirm('이 사용자에게서 역할을 뺄까요?')" class="adm-btn">역할 빼기</button>
     </form>
     {{end}}
@@ -48,15 +48,15 @@
       <input type="hidden" name="user_id" value="{{.ID}}">
       <label class="adm-field"><span>역할 부여</span>
         <select name="role" required><option value="">선택하세요</option>{{range $.Roles}}{{if .Assignable}}<option value="{{.Key}}">{{.Key}}</option>{{end}}{{end}}</select></label>
-      {{template "reauth-field" .}}
+      {{template "reauth-field" $}}
       <button class="adm-btn">역할 부여</button>
     </form>
     <form method="post" action="/admin/users/{{.ID}}/reset-password">
-      {{template "reauth-field" .}}
+      {{template "reauth-field" $}}
       <button onclick="return confirm('이 사용자의 로그인을 모두 끊고 비밀번호 재설정 메일을 보낼까요?')" class="adm-btn">비밀번호 재설정 강제</button>
     </form>
     <form method="post" action="/admin/users/{{.ID}}/delete">
-      {{template "reauth-field" .}}
+      {{template "reauth-field" $}}
       <button onclick="return confirm('이 사용자를 삭제할까요? 되돌릴 수 없습니다. 기록이 남아 있으면 비활성화하세요.')" class="adm-btn adm-btn--danger">삭제</button>
     </form>
   </div>

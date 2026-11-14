@@ -124,17 +124,12 @@ func TestAutoBackupSettingsAndStoredDownloads(t *testing.T) {
 	if rec := post(d.BackupDownload, "/admin/backup", on); rec.Code != http.StatusForbidden || saved()["backup.auto"] != "" {
 		t.Fatalf("운영자의 자동 백업 설정 = HTTP %d, want 403", rec.Code)
 	}
+	// **설정 저장은 재인증 창이 닫혀 있어도 비밀번호 없이 된다** (FR-726, D15 5.3-1) — 데이터를 내보내지 않는다.
+	// 예전에는 여기서도 물어 운영자가 비밀번호 칸에 막혔다. 최고 관리자 제한은 위에서 그대로 본다.
 	su := &fakeCaller{superuser: true, reauth: true, email: "su@example.com", password: "correct horse battery"}
 	d.Caller = func(*http.Request) Caller { return su }
-	if rec := post(d.BackupDownload, "/admin/backup", on); rec.Code != http.StatusForbidden {
-		t.Fatalf("재인증 없이 = HTTP %d, want 403", rec.Code)
-	}
-	withPW := url.Values{"password": {"correct horse battery"}}
-	for k, v := range on {
-		withPW[k] = v
-	}
-	if rec := post(d.BackupDownload, "/admin/backup", withPW); rec.Code != http.StatusSeeOther {
-		t.Fatalf("설정 저장 = HTTP %d (%s)", rec.Code, rec.Body.String())
+	if rec := post(d.BackupDownload, "/admin/backup", on); rec.Code != http.StatusSeeOther {
+		t.Fatalf("재인증 없이 설정 저장 = HTTP %d (%s), want 303", rec.Code, rec.Body.String())
 	}
 	if kv := saved(); kv["backup.auto"] != "1" || kv["backup.hour"] != "3" || kv["backup.keep"] != "7" {
 		t.Errorf("저장된 설정 = %v", kv)
@@ -161,7 +156,12 @@ func TestAutoBackupSettingsAndStoredDownloads(t *testing.T) {
 		t.Errorf("끌 수 없다: %v", kv)
 	}
 
-	rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"file"}, "name": {"auto-20261001-0300.zip"}})
+	// 내려받기는 그대로 묻는다 — 설정 저장이 묻지 않게 됐다고 화면째 빠진 것이 아니다.
+	if rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"file"}, "name": {"auto-20261001-0300.zip"}}); rec.Code != http.StatusForbidden {
+		t.Fatalf("재인증 없이 저장된 백업 받기 = HTTP %d, want 403", rec.Code)
+	}
+	rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"file"}, "name": {"auto-20261001-0300.zip"},
+		"password": {"correct horse battery"}})
 	if rec.Code != http.StatusOK || rec.Body.String() != "저장된 zip" ||
 		!strings.Contains(rec.Header().Get("Content-Disposition"), `attachment; filename="auto-20261001-0300.zip"`) {
 		t.Fatalf("저장된 백업 받기 = HTTP %d %q %q", rec.Code, rec.Header().Get("Content-Disposition"), rec.Body.String())

@@ -468,10 +468,7 @@ func (d *Deps) renderRefund(w http.ResponseWriter, r *http.Request, c Caller,
 		"Approved": approved, "Refunded": refunded, "Remaining": approved - refunded, "CloseTo": closeTo,
 		// 「전체 취소」는 배송 전이고 order.cancel 이 있을 때만 그린다. 판정은 POST 가 다시 한다.
 		"CanCancel": commerce.CanTransition(order.Status, commerce.StatusCancelled, "A-507") == nil && c.Can("order.cancel"),
-		// D15 5.3-1: 최근 15분 내 확인이 있으면 비밀번호 필드를 그리지 않는다.
-		// 매 클릭마다 물으면 관리자가 비밀번호를 브라우저에 저장하게 된다.
-		"NeedsReauth": c.NeedsReauth(),
-		"Error":       msg,
+		"Error":     msg,
 	})
 }
 
@@ -782,9 +779,7 @@ func (d *Deps) renderReturns(w http.ResponseWriter, r *http.Request, c Caller,
 	}
 	d.Render(w, r, "admin/returns.html", code, map[string]any{
 		"Order": order, "Returns": returns,
-		// 돈이 나가는 단계(환불 확정)에만 재인증이 걸린다 (D15 5.3-1).
-		"NeedsReauth": c.NeedsReauth(),
-		"Error":       msg,
+		"Error": msg,
 	})
 }
 

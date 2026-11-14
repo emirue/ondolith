@@ -277,6 +277,7 @@
 | FR-305 | "테마에 비즈니스 로직을 넣을 수 없다"는 **금지 규칙**이다. 실현하는 화면이 아니라 모든 화면이 지켜야 할 제약이다 |
 | FR-724 | 저장 성공 알림은 상태를 바꾸는 **모든 관리자 화면**이 지키는 공통 동작이다 ([D19](19-screen-io.md) C11). 화면 몇 개에 적으면 나머지는 빠진 것처럼 읽힌다 — 처리기 전부는 `TestAdminChangesReturnThroughDone` 이 본다 |
 | FR-725 | 확인 창은 파괴적 단추가 있는 **모든 관리자 화면**이 지키는 공통 동작이다 ([D19](19-screen-io.md) C12). 단추 전부는 `TestAdminDestructiveButtonsAsk` 가 본다 |
+| FR-726 | 비밀번호 재확인은 대상 동작이 있는 **모든 관리자 화면**이 지키는 공통 규칙이다 ([D15](15-access-control.md) 5.3-1). 처리기 전부는 `TestReauthIsAskedExactlyWhereD15Says`, 폼 전부는 `TestReauthFieldOnlyWhereTheServerAsks` 가 본다 |
 
 `NFR-###`는 이 검사 대상이 아니다. 비기능 요구사항은 특정 화면이 아니라 시스템 전체에
 걸리는 것이 정상이다.
