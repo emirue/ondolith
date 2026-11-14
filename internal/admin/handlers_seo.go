@@ -182,5 +182,5 @@ func (d *Deps) SEOSave(w http.ResponseWriter, r *http.Request) {
 	if len(names) > 0 {
 		d.log(r, c, "settings.update", "settings", "seo", "검색 노출 설정 변경: "+strings.Join(names, ", "))
 	}
-	http.Redirect(w, r, "/admin/settings/seo", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/settings/seo", "검색 노출 설정을 저장했습니다.")
 }

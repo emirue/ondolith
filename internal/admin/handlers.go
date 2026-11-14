@@ -43,6 +43,9 @@ type Caller interface {
 	// 읽는 곳이 없으면, 15분이 지난 운영자는 로그아웃했다 들어오기 전에는
 	// 환불을 영원히 할 수 없다.
 	ConfirmReauth(password string) bool
+	// Notify 는 돌아갈 화면에 한 번 보일 성공 알림을 싣는다 (FR-724). 처리기는 직접 부르지
+	// 않고 d.done 을 거친다.
+	Notify(msg string)
 }
 
 // reauthOK is the one shape every destructive handler uses: 창이 살아 있거나,
@@ -414,7 +417,7 @@ func (d *Deps) SettingsSave(w http.ResponseWriter, r *http.Request) {
 		d.log(r, c, "settings.update", "settings", hiddenMenusKey,
 			"관리자 메뉴 숨김: "+orNone(prev[hiddenMenusKey])+" → "+orNone(kv[hiddenMenusKey]))
 	}
-	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/settings", "사이트 설정을 저장했습니다.")
 	// 조립 때 읽는 키 — 사이트 유형(라우트), 관리자 배색·메뉴 숨김(렌더러), 개발 모드(템플릿 로더).
 	if !typeChanged && !changed(kv, prev, "admin.theme") && !changed(kv, prev, hiddenMenusKey) &&
 		!changed(kv, prev, "site.dev_mode") {
@@ -620,7 +623,7 @@ func (d *Deps) MailSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// 값은 남기지 않는다 — 비밀번호가 섞여 있고 로그는 지워지지 않는다 (D15 7절).
 	d.log(r, c, "settings.update", "settings", "mail", "메일(SMTP) 설정 변경")
-	http.Redirect(w, r, "/admin/settings/mail", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/settings/mail", "메일 설정을 저장했습니다.")
 }
 
 // MailTest is A-205's test send (D13, D19 A-205). It answers with the result
@@ -891,7 +894,8 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	if isCreate(r.PathValue("id")) {
 		perm = "page.create"
 	}
-	if _, ok := d.require(w, r, perm); !ok {
+	c, ok := d.require(w, r, perm)
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -934,13 +938,18 @@ func (d *Deps) PageSave(w http.ResponseWriter, r *http.Request) {
 	if d.fail(w, r, err) {
 		return
 	}
-	http.Redirect(w, r, "/admin/pages", http.StatusSeeOther)
+	notice := "페이지를 저장했습니다."
+	if isCreate(r.PathValue("id")) {
+		notice = "페이지를 만들었습니다."
+	}
+	d.done(w, r, c, "/admin/pages", notice)
 }
 
 // PagePublish is A-303. It requires page.publish specifically — reaching A-302
 // is not enough, because the two permissions exist to be separable.
 func (d *Deps) PagePublish(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "page.publish"); !ok {
+	c, ok := d.require(w, r, "page.publish")
+	if !ok {
 		return
 	}
 	to := content.PageStatus(r.PostFormValue("status"))
@@ -952,18 +961,23 @@ func (d *Deps) PagePublish(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, r, err)
 		return
 	}
-	http.Redirect(w, r, "/admin/pages", http.StatusSeeOther)
+	notice := "페이지를 게시했습니다."
+	if to != content.StatusPublished {
+		notice = "페이지를 게시 중단했습니다 — 초안으로 돌렸습니다."
+	}
+	d.done(w, r, c, "/admin/pages", notice)
 }
 
 // PageDelete is its own permission too.
 func (d *Deps) PageDelete(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "page.delete"); !ok {
+	c, ok := d.require(w, r, "page.delete")
+	if !ok {
 		return
 	}
 	if err := d.Content.DeletePage(r.Context(), r.PathValue("id")); d.fail(w, r, err) {
 		return
 	}
-	http.Redirect(w, r, "/admin/pages", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/pages", "페이지를 삭제했습니다.")
 }
 
 // ---- A-402 사용자 -------------------------------------------------------------
@@ -1110,7 +1124,7 @@ func (d *Deps) UserDeactivate(w http.ResponseWriter, r *http.Request) {
 	// D15 7절·D19 A-402: 사용자 생성·비활성·삭제·재설정은 작업 로그에 남긴다.
 	d.log(r, c, "user.update", "user", target, "사용자 비활성화")
 	// 상세로 돌아간다 — 바뀐 상태가 거기 보인다. 목록으로 보내면 무엇이 됐는지 모른다.
-	http.Redirect(w, r, "/admin/users/"+target, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/users/"+target, "사용자를 비활성화했습니다 — 로그인할 수 없습니다.")
 }
 
 // UserActivate brings a deactivated account back (A-402). 비활성화(관리자) ·
@@ -1131,7 +1145,7 @@ func (d *Deps) UserActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "user.update", "user", target, "사용자 활성화")
-	http.Redirect(w, r, "/admin/users/"+target, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/users/"+target, "사용자를 활성화했습니다.")
 }
 
 // UserDelete needs user.delete — reaching A-402 with user.update is not enough,
@@ -1159,7 +1173,7 @@ func (d *Deps) UserDelete(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 	default:
 		d.log(r, c, "user.delete", "user", target, "사용자 삭제")
-		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/users", "사용자를 삭제했습니다.")
 	}
 }
 
@@ -1221,7 +1235,7 @@ func (d *Deps) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	// 작업 로그가 자격증명으로 보고 가리므로(content.Redacted) 낱말을 피한다.
 	d.log(r, c, "user.reset_password", "user", target,
 		"재설정 강제 (세션 종료·로그인 수단 회수·소셜 연결 "+strconv.FormatInt(unlinked, 10)+"개 해제·재설정 메일 발송)")
-	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/users", "비밀번호 재설정 메일을 보냈습니다 — 그 사용자의 로그인은 모두 끊겼습니다.")
 }
 
 // UserCreate needs user.create, which is again its own permission (D19).
@@ -1277,7 +1291,7 @@ func (d *Deps) UserCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "user.create", "user", id, "사용자 생성: "+email)
-	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/users", "사용자 계정을 만들었습니다.")
 }
 
 // ---- A-602 시스템 정보 --------------------------------------------------------
@@ -1321,6 +1335,16 @@ func (d *Deps) log(r *http.Request, c Caller, action, targetType, targetID, summ
 	if err != nil && d.Logger != nil {
 		d.Logger.Error("작업 로그 기록 실패", "action", action, "target", targetID, "err", err)
 	}
+}
+
+// done ends a change that worked: one line for the screen it returns to, then 303 (FR-724, D19 C11).
+//
+// 알림은 세션에 실려 돌아간 화면에서 한 번 보이고, 새로 고침하면 사라진다. 무엇이 됐는지를
+// 적는다 — 「저장했습니다」만으로는 여러 칸 중 무엇이 들어갔는지 모른다. **비밀번호·키·토큰은
+// 넣지 않는다** — 세션은 DB 에 저장된다.
+func (d *Deps) done(w http.ResponseWriter, r *http.Request, c Caller, to, notice string) {
+	c.Notify(notice)
+	http.Redirect(w, r, to, http.StatusSeeOther)
 }
 
 // ---- A-601 작업 로그 -----------------------------------------------------------
@@ -1432,7 +1456,7 @@ func (d *Deps) UserFieldSave(w http.ResponseWriter, r *http.Request) {
 		// 값은 남는다 (D14 3절 규칙 4) — 운영자가 곧 궁금해할 것이므로 적어 둔다.
 		d.log(r, c, "user.update", "user_field", key,
 			"회원 항목 '"+key+"' 정의 삭제 (회원이 적은 값은 보존)")
-		http.Redirect(w, r, "/admin/user-fields", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/user-fields", "회원 항목을 삭제했습니다 — "+key+" (회원이 적은 값은 남아 있습니다)")
 		return
 	}
 
@@ -1456,5 +1480,5 @@ func (d *Deps) UserFieldSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "user.update", "user_field", f.Key, "회원 항목 '"+f.Key+"' 저장")
-	http.Redirect(w, r, "/admin/user-fields", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/user-fields", "회원 항목을 저장했습니다 — "+f.Key)
 }

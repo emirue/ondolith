@@ -61,6 +61,22 @@ body() {
 	curl -s -b "$JAR" -c "$JAR" -X "$m" "$BASE$p" "$@"
 }
 
+# saved <case> <path> <문구> — 방금 저장한 관리자 POST 의 알림이 돌아간 화면에 한 번
+# 보이고, 새로 고침하면 없다 (FR-724, D19 C11). curl 은 303 을 따라가지 않으므로 여기서
+# 돌아간 화면을 연다 — 브라우저가 하는 그 GET 이다.
+saved() {
+	if body GET "$2" | grep -qF "role=\"status\">$3"; then
+		ok "$1 — 돌아간 화면에 알림"
+	else
+		bad "$1 — 돌아간 화면에 「$3」 알림이 없다"
+	fi
+	if body GET "$2" | grep -qF "$3"; then
+		bad "$1 — 새로 고침했는데 알림이 다시 떴다"
+	else
+		ok "$1 — 새로 고침하면 없다"
+	fi
+}
+
 # sql <query> — 데이터베이스를 직접 본다. 응답만으로는 "썼다" 를 확인할 수 없다.
 sql() { docker exec "$CID" psql -U ondolith -d "$DB" -tAc "$1" 2>/dev/null | tr -d '\r'; }
 
@@ -186,6 +202,7 @@ echo "4단계 — 콘텐츠"
 want "T4.1 페이지 생성" 303 "$(code POST /admin/pages/new \
 	--data-urlencode "slug=about" --data-urlencode "title=회사 소개" \
 	--data-urlencode "body=본문")"
+saved "FR-724 페이지 생성" /admin/pages "페이지를 만들었습니다."
 PAGE=$(sql "select id from pages where slug='about'")
 want "T4.1 페이지 발행" 303 "$(code POST "/admin/pages/$PAGE/publish" \
 	--data-urlencode "status=published")"
@@ -195,7 +212,15 @@ want "T4.2 게시판 생성" 303 "$(code POST /admin/boards/new \
 	--data-urlencode "name=공지사항" --data-urlencode "slug=notice" \
 	--data-urlencode "per_page=20" --data-urlencode "allow_comments=1" \
 	--data-urlencode "preset=공개")"
+saved "FR-724 게시판 생성" /admin/boards "게시판을 만들었습니다 — notice"
 want "T4.2 게시판이 열린다" 200 "$(code GET /board/notice)"
+
+# 운영자가 저장이 됐는지 몰라 17초에 네 번 누른 화면이다 (FR-724).
+want "FR-724 자동 백업 설정 저장" 303 "$(code POST /admin/backup \
+	--data-urlencode "action=settings" --data-urlencode "backup.auto=1" \
+	--data-urlencode "backup.hour=4" --data-urlencode "backup.keep=7" \
+	--data-urlencode "password=$ADMIN_PW")"
+saved "FR-724 자동 백업 설정" /admin/backup "자동 백업 설정을 저장했습니다 — 켜짐 · 매일 4시 · 7개 보관"
 
 want "T4.3 글쓰기" 303 "$(code POST /board/notice/write \
 	--data-urlencode "title=첫 공지" --data-urlencode "body=본문입니다")"
@@ -243,6 +268,8 @@ want "T5.1 사이트 유형을 커머스로" 303 "$(code POST /admin/settings \
 	--data-urlencode "site.name=E2E" --data-urlencode "site.type=shop" \
 	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
 want "T5.1 설정이 저장됐다" shop "$(sql "select value from settings where key='site.type'")"
+# 저장이 트리를 다시 조립해도(D20) 알림은 세션에 있어 새 트리의 화면이 꺼낸다.
+saved "FR-724 사이트 설정" /admin/settings "사이트 설정을 저장했습니다."
 # **저장이 곧 반영이다** (D20 모듈 게이팅 — 운영 트리를 다시 조립해 원자 교체).
 # 예전 판은 「재시작 전에는 404」를 기대했다. 그 기대가 남아 있는 동안 이
 # 시나리오는 계속 실패하고 있었다 — CI 가 e2e 를 돌리지 않아 아무도 못 봤다.
@@ -352,6 +379,7 @@ body GET /cart | grep -q "378,000원" &&
 want "T5.6 PG 설정" 303 "$(code POST /admin/settings/payment \
 	--data-urlencode "pg.provider=toss" --data-urlencode "pg.client_key=test_ck" \
 	--data-urlencode "pg.secret_key=test_sk")"
+saved "FR-724 결제 설정" /admin/settings/payment "결제 설정을 저장했습니다."
 want "T6.4 주문서가 열린다" 200 "$(code GET /checkout)"
 
 want "T6.4 주문 생성" 303 "$(code POST /checkout \

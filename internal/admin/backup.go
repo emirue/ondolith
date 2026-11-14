@@ -177,9 +177,9 @@ func (d *Deps) saveBackupSettings(w http.ResponseWriter, r *http.Request, c Call
 		d.serverError(w, r, err)
 		return
 	}
-	d.log(r, c, "backup.settings", "system", "backup",
-		"자동 백업 "+state+" · 매일 "+strconv.Itoa(hour)+"시 · "+strconv.Itoa(keep)+"개 보관")
-	http.Redirect(w, r, "/admin/backup", http.StatusSeeOther)
+	setting := state + " · 매일 " + strconv.Itoa(hour) + "시 · " + strconv.Itoa(keep) + "개 보관"
+	d.log(r, c, "backup.settings", "system", "backup", "자동 백업 "+setting)
+	d.done(w, r, c, "/admin/backup", "자동 백업 설정을 저장했습니다 — "+setting)
 }
 
 // sendStoredBackup is A-604's action=file: one stored automatic backup (FR-715).

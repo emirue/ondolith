@@ -118,7 +118,7 @@ func (d *Deps) OrderTransition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.log(r, c, "order.transition", "order", orderNo, "주문 상태를 "+string(to)+" 로 변경")
-	http.Redirect(w, r, "/admin/orders/"+orderNo, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/orders/"+orderNo, "주문 상태를 바꿨습니다 — "+string(to))
 }
 
 // ShippingForm is A-510 GET.
@@ -178,7 +178,7 @@ func (d *Deps) ShippingSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.log(r, c, "order.shipment", "order", orderNo, "송장 "+carrier+" "+tracking+" 기록")
-	http.Redirect(w, r, "/admin/orders/"+orderNo, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/orders/"+orderNo, "송장을 저장했습니다 — "+carrier+" "+tracking)
 }
 
 // ProductList is A-501.
@@ -277,7 +277,7 @@ func (d *Deps) CategoryCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "category.create", "category", cat.Slug, "카테고리 생성")
-	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/categories", "카테고리를 만들었습니다 — "+cat.Name)
 }
 
 // CategoryUpdate is A-509 POST /admin/categories/{id} — 이름·순서를 고친다.
@@ -317,7 +317,7 @@ func (d *Deps) CategoryUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "category.update", "category", id, "카테고리 이름·순서 변경: "+name)
-	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/categories", "카테고리를 저장했습니다 — "+name)
 }
 
 // CategoryDelete is A-509 POST /admin/categories/{id}/delete.
@@ -342,7 +342,7 @@ func (d *Deps) CategoryDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "category.delete", "category", id, "카테고리 삭제")
-	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/categories", "카테고리를 삭제했습니다.")
 }
 
 // CategoryReparent is A-509 POST.
@@ -374,7 +374,7 @@ func (d *Deps) CategoryReparent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "category.reparent", "category", id, "상위 카테고리 변경")
-	http.Redirect(w, r, "/admin/categories", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/categories", "상위 카테고리를 바꿨습니다.")
 }
 
 // adminMaxPage 는 관리자 목록의 쪽 번호 상한이다. 공개 목록(100쪽)과 달리 오래된
@@ -532,7 +532,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		if refundID == "" {
 			// 돌려줄 돈이 남지 않았다(이미 전액이 접수됐다). 취소만 남는다.
 			d.log(r, c, "order.refund", "order", order.OrderNo, "주문 전체 취소 — 돌려줄 남은 금액 없음")
-			http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+			d.done(w, r, c, "/admin/orders/"+order.OrderNo+"/refund", "주문을 취소했습니다 — 돌려줄 남은 금액은 없습니다.")
 			return
 		}
 		amount := 0
@@ -570,7 +570,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.log(r, c, "order.refund", "order", order.OrderNo, "환불이 끝난 주문 종료 — 주문 "+string(to))
-		http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/orders/"+order.OrderNo+"/refund", "주문을 닫았습니다 — "+string(to))
 		return
 	case "reject":
 		target, ok := d.refundInOrder(w, r, order)
@@ -595,7 +595,7 @@ func (d *Deps) RefundSave(w http.ResponseWriter, r *http.Request) {
 		}
 		d.log(r, c, "order.refund", "order", order.OrderNo,
 			"환불 "+itoa(target.Amount)+"원 요청 거부 — 한도 해제, 환불 건 "+target.ID)
-		http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/orders/"+order.OrderNo+"/refund", "환불 요청 "+itoa(target.Amount)+"원을 거부했습니다.")
 		return
 	case "execute":
 		target, ok := d.refundInOrder(w, r, order)
@@ -720,7 +720,7 @@ func (d *Deps) finishRefund(w http.ResponseWriter, r *http.Request, c Caller,
 			"결제사 처리에 실패했습니다. 잠시 후 확인하세요.")
 		return
 	}
-	http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/refund", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/orders/"+order.OrderNo+"/refund", "환불 "+itoa(amount)+"원을 처리했습니다.")
 }
 
 // refundSent 는 PG 로 보낸 환불(ExecuteRefund·RetryRefund)의 결과를 남긴다 — A-507 과 A-511(교환 차액·
@@ -807,6 +807,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 	}
 	returnNo := r.PostFormValue("return_no")
 	action := r.PostFormValue("action")
+	var notice string
 
 	switch action {
 	case "pickup":
@@ -817,12 +818,14 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 			r.PostFormValue("fault"), "A-511")
 		if err == nil {
 			d.log(r, c, "return.pickup", "return", returnNo, "수거 확인")
+			notice = "수거를 확인했습니다."
 		}
 	case "reject":
 		err = d.Commerce.RejectReturn(r.Context(), order.OrderNo, returnNo,
 			r.PostFormValue("reason"), "A-511")
 		if err == nil {
 			d.log(r, c, "return.reject", "return", returnNo, "반품·교환 거부")
+			notice = "반품·교환 요청을 거부했습니다."
 		}
 	case "exchange":
 		// 교환 완료 (재발송). 차액이 양수면 여기서 끝나지 않고 차액결제대기로 가고, 받는 것은
@@ -851,6 +854,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil {
 			d.log(r, c, "return.exchange", "return", returnNo, "교환 "+string(to))
+			notice = "교환을 처리했습니다 — " + string(to)
 		}
 		if err == nil && refundID != "" {
 			// 차액 환불을 PG 로 보낸다 (환불 확정과 같은 순서). 주문은 교환발송이라 닫을 것이 없다.
@@ -886,6 +890,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				d.log(r, c, "return.settle", "return", returnNo,
 					"반품 환불 "+itoa(amount)+"원 접수")
+				notice = "반품 환불 " + itoa(amount) + "원을 확정했습니다."
 				// 정산이 만든 환불 건을 PG 로 보낸다 (A-507 과 같은 순서). 교환 차액으로 이미 다 돌려준
 				// 품목이면 환불 건이 없다(refundID ""). 주문은 같은 tx 에서 이미 옮겼다.
 				if refundID != "" {
@@ -906,7 +911,7 @@ func (d *Deps) ReturnAction(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case err == nil:
-		http.Redirect(w, r, "/admin/orders/"+order.OrderNo+"/returns", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/orders/"+order.OrderNo+"/returns", notice)
 	case errors.Is(err, commerce.ErrNotFound):
 		http.NotFound(w, r)
 	case errors.Is(err, commerce.ErrPickupRequired):

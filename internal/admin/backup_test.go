@@ -229,6 +229,7 @@ func TestBackupScreenShowsTheLastBackupAndWhereItGoes(t *testing.T) {
 		"backup.hour": {"3"}, "backup.keep": {"7"}, "password": {"correct horse battery"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("설정 저장 = HTTP %d", rec.Code)
 	}
+	wantNotice(t, d, "자동 백업 설정을 저장했습니다 — 켜짐 · 매일 3시 · 7개 보관")
 	if kv, _ := d.Content.Settings(ctx, SettingBackupLastWhere); kv[SettingBackupLastWhere] != "local:auto-20261114-0000.zip" {
 		t.Errorf("설정 저장이 마지막 백업 기록을 바꿨다: %q", kv[SettingBackupLastWhere])
 	}

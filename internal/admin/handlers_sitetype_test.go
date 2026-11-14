@@ -68,6 +68,7 @@ func TestSiteSettingsSavesHiddenMenus(t *testing.T) {
 	if code := save(url.Values{"admin.hidden_menus": {"", "A-601", "A-206"}}); code != http.StatusSeeOther || stored() != "A-206,A-601" {
 		t.Fatalf("저장: HTTP %d, 값 %q (303, \"A-206,A-601\" 이어야)", code, stored())
 	}
+	wantNotice(t, d, "사이트 설정을 저장했습니다.")
 	// 운영자가 소유자 화면에서 메뉴를 감출 수 있으므로 값까지 남긴다.
 	if !logged("관리자 메뉴 숨김: (없음) → A-206,A-601") {
 		t.Error("숨김 변경이 이전 → 새 값으로 작업 로그에 남지 않았다")

@@ -45,7 +45,8 @@ func (d *Deps) menuError(w http.ResponseWriter, r *http.Request, msg string) {
 // cannot see a cycle (D30 3절), and the row being inserted is legal on its own.
 // Building the tree with the new row in it is the only way to find out.
 func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "menu.manage"); !ok {
+	c, ok := d.require(w, r, "menu.manage")
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -62,7 +63,6 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 		d.menuError(w, r, "메뉴 제목은 1~50자입니다.")
 		return
 	}
-	var ok bool
 	if item.Sort, ok = menuSort(r); !ok {
 		d.menuError(w, r, "순서는 정수로 입력하세요.")
 		return
@@ -75,7 +75,7 @@ func (d *Deps) MenuCreate(w http.ResponseWriter, r *http.Request) {
 		d.menuError(w, r, "저장하지 못했습니다.")
 		return
 	}
-	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/menus", "메뉴를 추가했습니다 — "+item.Title)
 }
 
 // menuSort reads A-204's 순서. 비면 0 이다. 이 칸이 없던 때 sort_order 는 모두 0 이었고
@@ -98,7 +98,8 @@ func menuSort(r *http.Request) (int, bool) {
 // BEFORE the row is written — writing first would leave a menu that cannot be
 // rendered, and the screen that fixes it sits behind that menu.
 func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "menu.manage"); !ok {
+	c, ok := d.require(w, r, "menu.manage")
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -117,7 +118,6 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		d.menuError(w, r, "메뉴 제목은 1~50자입니다.")
 		return
 	}
-	var ok bool
 	if item.Sort, ok = menuSort(r); !ok {
 		d.menuError(w, r, "순서는 정수로 입력하세요.")
 		return
@@ -150,18 +150,19 @@ func (d *Deps) MenuUpdate(w http.ResponseWriter, r *http.Request) {
 		d.menuError(w, r, "저장하지 못했습니다.")
 		return
 	}
-	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/menus", "메뉴를 저장했습니다 — "+item.Title)
 }
 
 func (d *Deps) MenuDelete(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "menu.manage"); !ok {
+	c, ok := d.require(w, r, "menu.manage")
+	if !ok {
 		return
 	}
 	// 없는 메뉴를 지우려 한 것은 404 다 — `d.fail` 이 그 판정을 갖고 있다.
 	if err := d.Content.DeleteMenuItem(r.Context(), r.PathValue("id")); d.fail(w, r, err) {
 		return
 	}
-	http.Redirect(w, r, "/admin/menus", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/menus", "메뉴를 삭제했습니다.")
 }
 
 // ---- A-403 / A-404 / A-405 역할·권한 ------------------------------------------
@@ -335,7 +336,7 @@ func (d *Deps) RoleGrantPermission(w http.ResponseWriter, r *http.Request) {
 		summary += " (테마 화면 " + screen + ")"
 	}
 	d.log(r, c, "role.manage", "role", role.Key, summary)
-	http.Redirect(w, r, "/admin/roles", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/roles", "역할 "+role.Key+" 에 권한을 줬습니다 — "+permKey)
 }
 
 // RoleRevokePermission is A-404's other half: take one grant out of a role. R5 and R4 apply
@@ -396,7 +397,7 @@ func (d *Deps) RoleRevokePermission(w http.ResponseWriter, r *http.Request) {
 		summary += " (테마 화면 " + screen + ")"
 	}
 	d.log(r, c, "role.manage", "role", role.Key, summary)
-	http.Redirect(w, r, "/admin/roles", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/roles", "역할 "+role.Key+" 에서 권한을 뺐습니다 — "+permKey)
 }
 
 // RoleRevoke is A-405's other half: take a role away from a user. R1·R2·R3 apply exactly as to giving it
@@ -450,7 +451,7 @@ func (d *Deps) RoleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "role.assign", "user", targetUser, "역할 회수: "+role.Key)
-	http.Redirect(w, r, "/admin/users/"+targetUser, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/users/"+targetUser, "사용자에게서 역할을 뺐습니다 — "+role.Key)
 }
 
 // RoleAssign is A-405. R1, R2 and R3 all apply.
@@ -515,7 +516,7 @@ func (d *Deps) RoleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "role.assign", "user", targetUser, "역할 부여: "+role.Key)
-	http.Redirect(w, r, "/admin/users/"+targetUser, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/users/"+targetUser, "사용자에게 역할을 줬습니다 — "+role.Key)
 }
 
 // ---- A-202 테마 -------------------------------------------------------------
@@ -578,7 +579,8 @@ func (d *Deps) renderThemes(w http.ResponseWriter, r *http.Request, code int, da
 // every page unrenderable, and the screen that would switch back is one of
 // those pages (D17).
 func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
-	if _, ok := d.require(w, r, "theme.activate"); !ok {
+	c, ok := d.require(w, r, "theme.activate")
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -593,7 +595,7 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.themeChanged("")
-		http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/themes", "기본 테마로 바꿨습니다.")
 		return
 	}
 	if d.ValidateTheme == nil {
@@ -622,10 +624,11 @@ func (d *Deps) ThemeActivate(w http.ResponseWriter, r *http.Request) {
 		// D17: a dev build skips the version floor. The operator is told,
 		// because the alternative is a theme that misbehaves for no visible
 		// reason on the machine where it was least expected to.
-		d.renderThemes(w, r, http.StatusOK, map[string]any{"Warning": warn, "Active": name})
+		d.renderThemes(w, r, http.StatusOK, map[string]any{"Warning": warn, "Active": name,
+			"Notice": "테마를 켰습니다 — " + name})
 		return
 	}
-	http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/themes", "테마를 켰습니다 — "+name)
 }
 
 // ---- A-203 테마 업로드 ---------------------------------------------------------
@@ -716,7 +719,7 @@ func (d *Deps) ThemeUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	// D15 7절: 테마 변경은 사이트 전체에 영향을 준다.
 	d.log(r, c, "theme.upload", "theme", name, "테마 '"+name+"' 업로드")
-	http.Redirect(w, r, "/admin/themes", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/themes", "테마를 설치했습니다 — "+name+". 켜야 사이트에 적용됩니다.")
 }
 
 const (

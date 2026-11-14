@@ -138,6 +138,7 @@ func TestStorageLocalSaveSkipsTheCheck(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "파일 저장소 설정을 저장했습니다 — 저장 위치 로컬")
 	if len(*checked) != 0 {
 		t.Fatalf("로컬 저장이 버킷을 확인했다: %v", *checked)
 	}
@@ -345,6 +346,7 @@ func TestDeletesGoOnWhenTheBucketRefusesToDelete(t *testing.T) {
 		url.Values{"post_id": {postID}, "action": {"delete"}}); rec.Code != http.StatusSeeOther && rec.Code != http.StatusOK {
 		t.Fatalf("글 삭제 = HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "글을 삭제했습니다.")
 	if got := lastLog(t, pool); !strings.Contains(got, "글 삭제") {
 		t.Errorf("작업 로그 %q", got)
 	}
@@ -352,6 +354,7 @@ func TestDeletesGoOnWhenTheBucketRefusesToDelete(t *testing.T) {
 		map[string]string{"id": productID}, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("상품 삭제 = HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "상품을 삭제했습니다.")
 	if got := lastLog(t, pool); !strings.Contains(got, "상품 삭제") {
 		t.Errorf("작업 로그 %q", got)
 	}
@@ -484,6 +487,7 @@ func TestAttachmentDeleteTellsALeftoverFileFromAFailure(t *testing.T) {
 	if code := del(left.ID); code != http.StatusSeeOther || rows(left.ID) != 0 {
 		t.Errorf("버킷 거부 = HTTP %d, 남은 행 %d — want 303·0", code, rows(left.ID))
 	}
+	wantNotice(t, d, "첨부를 삭제했습니다 — left.png")
 	if got := lastLog(t, pool); !strings.Contains(got, "left.png") {
 		t.Errorf("작업 로그 %q", got)
 	}
@@ -550,6 +554,7 @@ func TestBoardDeleteRemovesAttachmentFiles(t *testing.T) {
 	if code := del(gone); code != http.StatusSeeOther || boards(gone) != 0 {
 		t.Fatalf("강제 삭제 = HTTP %d, 남은 게시판 %d", code, boards(gone))
 	}
+	wantNotice(t, d, "게시판을 삭제했습니다.")
 	if n := len(bucket.Keys()); n != 4 {
 		t.Errorf("버킷 객체 %d 개, want 4 — 지운 게시판의 첨부 6개가 지워지고 나머지 둘의 4개가 남아야 한다", n)
 	}

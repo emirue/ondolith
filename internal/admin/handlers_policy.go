@@ -110,7 +110,7 @@ func (d *Deps) PolicySave(w http.ResponseWriter, r *http.Request) {
 	}
 	// D15 7절: 정책 변경은 이후 모든 반품의 환불액을 가른다.
 	d.log(r, c, "settings.update", "settings", "commerce.policy", "커머스 정책 변경")
-	http.Redirect(w, r, "/admin/commerce/policy", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/commerce/policy", "커머스 정책을 저장했습니다.")
 }
 
 // renderPolicy draws the form. 거부했을 때는 **보낸 값을 그대로 되돌려준다** —

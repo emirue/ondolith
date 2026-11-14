@@ -184,6 +184,7 @@ func TestVariantSaveStoresABarcodeAndRefusesADuplicate(t *testing.T) {
 	if code, body := save(p1, v1, "  8801234567890 "); code != http.StatusSeeOther {
 		t.Fatalf("바코드 저장 = HTTP %d (%s)", code, body)
 	}
+	wantNotice(t, d, "옵션·재고를 저장했습니다.")
 	found, err := d.Commerce.FindVariants(ctx, commerce.VariantQuery{Q: "8801234567890"})
 	if err != nil {
 		t.Fatal(err)

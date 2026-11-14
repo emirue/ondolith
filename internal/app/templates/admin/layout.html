@@ -42,7 +42,7 @@
     </div>
     {{if .Error}}<p class="adm-toast adm-toast--error" role="alert">{{.Error}}</p>{{end}}
     {{if .Warning}}<p class="adm-toast adm-toast--warn">{{.Warning}}</p>{{end}}
-    {{if .Notice}}<p class="adm-toast">{{.Notice}}</p>{{end}}
+    {{if .Notice}}<p class="adm-toast" role="status">{{.Notice}}</p>{{end}}
     {{template "content" .}}
   </main>
 </div>

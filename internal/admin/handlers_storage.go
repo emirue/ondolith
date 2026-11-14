@@ -135,7 +135,7 @@ func (d *Deps) StorageSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.log(r, c, "settings.update", "settings", "storage", summary)
-	http.Redirect(w, r, "/admin/settings/storage", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/settings/storage", "파일 저장소 설정을 저장했습니다 — 저장 위치 "+backendName(kv[content.SettingStorageBackend]))
 }
 
 // storageCheck runs 연결 확인 and draws its failure. It reports whether the

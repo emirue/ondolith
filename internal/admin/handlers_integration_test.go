@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,8 @@ type fakeCaller struct {
 	// password 는 재인증에서 통과하는 값이다. 비어 있으면 어떤 입력도 통과하지
 	// 못한다 — 재인증을 만족시킬 수 없는 계정이다.
 	password string
+	// notices 는 Notify 로 실린 저장 성공 알림이다 (FR-724).
+	notices []string
 }
 
 func (f *fakeCaller) Can(p string) bool { return f.superuser || f.perms[p] }
@@ -55,6 +58,40 @@ func (f *fakeCaller) CanOnScreen(p, screen string) bool {
 	}
 	return p == auth.ThemeContentPermission && f.screens[screen]
 }
+
+// Notify 는 운영의 adminCaller 가 세션에 싣는 알림을 모은다 (FR-724).
+func (f *fakeCaller) Notify(msg string) { f.notices = append(f.notices, msg) }
+
+// takeNotice 는 방금 성공한 처리기가 돌아갈 화면에 실은 알림이다 (FR-724). 마지막 것을
+// 주고 비운다 — 앞선 저장이 실은 알림이 남아 있으면 그것과 달라서 걸린다.
+func takeNotice(t *testing.T, d *Deps) string {
+	t.Helper()
+	f, ok := d.Caller(httptest.NewRequest(http.MethodGet, "/admin/", nil)).(*fakeCaller)
+	if !ok {
+		t.Fatal("호출자가 fakeCaller 가 아니다")
+	}
+	defer func() { f.notices = nil }()
+	if len(f.notices) == 0 {
+		return ""
+	}
+	return f.notices[len(f.notices)-1]
+}
+
+func wantNotice(t *testing.T, d *Deps, want string) {
+	t.Helper()
+	if got := takeNotice(t, d); got != want {
+		t.Errorf("알림 = %q, want %q", got, want)
+	}
+}
+
+// wantNoticeLike 는 금액·상태처럼 시험 데이터가 정하는 부분이 있는 알림을 본다.
+func wantNoticeLike(t *testing.T, d *Deps, pattern string) {
+	t.Helper()
+	if got := takeNotice(t, d); !regexp.MustCompile(pattern).MatchString(got) {
+		t.Errorf("알림 = %q, want %s", got, pattern)
+	}
+}
+
 func (f *fakeCaller) Email() string     { return f.email }
 func (f *fakeCaller) UserID() string    { return f.id }
 func (f *fakeCaller) IsSuperuser() bool { return f.superuser }
@@ -283,6 +320,7 @@ func TestAnalyticsIDMustLookLikeGA4(t *testing.T) {
 	if rec := post(d.SEOSave, "/admin/settings/seo", url.Values{"analytics.ga4_id": {" g-psw1my7hb4 "}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("맞는 ID = HTTP %d", rec.Code)
 	}
+	wantNotice(t, d, "검색 노출 설정을 저장했습니다.")
 	if got := saved(); got != "G-PSW1MY7HB4" {
 		t.Errorf("저장된 ID = %q, want G-PSW1MY7HB4", got)
 	}
@@ -659,6 +697,7 @@ func TestPublishNeedsItsOwnPermission(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Errorf("page.update 로 저장이 안 된다: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "페이지를 저장했습니다.")
 }
 
 // D15 5.3-1: destructive, so the password is re-confirmed. An open session is
@@ -1036,9 +1075,8 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.Caller = func(*http.Request) Caller {
-		return &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
-	}
+	op := &fakeCaller{perms: map[string]bool{"user.reset_password": true}, id: me, superuser: true}
+	d.Caller = func(*http.Request) Caller { return op }
 	var sent []string
 	d.SendReset = func(email, token string) { sent = append(sent, email+"|"+token) }
 
@@ -1050,6 +1088,7 @@ func TestForcedResetEndsSessionsAndNeverSetsAPassword(t *testing.T) {
 	if rec := postID(d.UserResetPassword, target, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("재설정 강제 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "비밀번호 재설정 메일을 보냈습니다 — 그 사용자의 로그인은 모두 끊겼습니다.")
 
 	// The hash is cleared, not replaced: nothing the administrator could know.
 	var hash string
@@ -1187,6 +1226,7 @@ func TestUserCreateValidatesAndAssignsNoRole(t *testing.T) {
 	}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("생성 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "사용자 계정을 만들었습니다.")
 	var email, hash string
 	if err := pool.QueryRow(ctx,
 		`SELECT email, password_hash FROM users WHERE display_name = '새 사용자'`).Scan(&email, &hash); err != nil {
@@ -1402,6 +1442,7 @@ func TestThemeUploadRefusesToOverwriteTheActiveTheme(t *testing.T) {
 	if rec := postThemeZip(t, d, "spare"); rec.Code != http.StatusSeeOther {
 		t.Errorf("비활성 테마 재업로드 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "테마를 설치했습니다 — spare. 켜야 사이트에 적용됩니다.")
 	if len(installed) != 1 || installed[0] != "spare" {
 		t.Errorf("설치된 것 %v, want [spare]", installed)
 	}
@@ -1619,6 +1660,7 @@ func TestTermsRefusesEditingAPublishedVersion(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("새 버전 추가 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "약관 새 버전을 추가했습니다 — 시행일부터 적용됩니다.")
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM terms`).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -1664,6 +1706,7 @@ func TestPaymentSecretIsNeverRedisplayed(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "결제 설정을 저장했습니다.")
 
 	// 실제로 저장됐다.
 	kv, err := d.Content.Settings(ctx, "pg.secret_key", "pg.client_key", "pg.provider")
@@ -1820,6 +1863,7 @@ func TestMailSettingsAreSuperuserOnlyReauthedAndLogged(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("재인증 뒤 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "메일 설정을 저장했습니다.")
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_logs
 		WHERE action = 'settings.update' AND target_id = 'mail'`).Scan(&n); err != nil {
@@ -2140,6 +2184,7 @@ func TestSocialCannotBeEnabledWithoutCredentials(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("키와 함께 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "구글 로그인 설정을 저장했습니다.")
 	kv, err := d.Content.Settings(ctx, auth.SocialSettingKey("google", "enabled"))
 	if err != nil {
 		t.Fatal(err)
@@ -2369,10 +2414,12 @@ func TestDeactivatedAccountCanBeReactivated(t *testing.T) {
 		return u.IsActive
 	}
 	run(d.UserDeactivate, "deactivate")
+	wantNotice(t, d, "사용자를 비활성화했습니다 — 로그인할 수 없습니다.")
 	if active() {
 		t.Fatal("비활성화가 반영되지 않았다")
 	}
 	run(d.UserActivate, "activate")
+	wantNotice(t, d, "사용자를 활성화했습니다.")
 	if !active() {
 		t.Error("다시 활성화되지 않았다")
 	}
@@ -2420,6 +2467,7 @@ func TestAccountOperationsAreLogged(t *testing.T) {
 			t.Fatalf("계정 조작 = HTTP %d (%s)", rec.Code, rec.Body.String())
 		}
 	}
+	wantNotice(t, d, "사용자를 삭제했습니다.")
 	rows, err := pool.Query(ctx, `SELECT summary FROM operation_logs WHERE target_type = 'user' ORDER BY created_at, id`)
 	if err != nil {
 		t.Fatal(err)
