@@ -35,6 +35,7 @@ func TestCategoryCreateMakesOneThePublicScreenCanOpen(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("생성 = HTTP %d, want 303 (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "카테고리를 만들었습니다 — 매트")
 
 	// 공개 화면이 읽는 것과 **같은 함수**로 확인한다. INSERT 를 직접 세면
 	// P-302 가 실제로 열리는지는 여전히 모른다.
@@ -209,6 +210,7 @@ func TestCategoryDeleteIsRefusedWhileSomethingPointsAtIt(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("빈 카테고리 삭제 = HTTP %d, want 303 — 위 단언들이 헛돌았다", rec.Code)
 	}
+	wantNotice(t, d, "카테고리를 삭제했습니다.")
 	if _, err := d.Commerce.CategoryBySlug(ctx, "empty"); err == nil {
 		t.Error("삭제됐다는데 행이 남아 있다")
 	}

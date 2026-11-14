@@ -109,7 +109,7 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.log(r, c, "product.manage", "product", id, "상품 '"+p.Name+"' 생성")
-		http.Redirect(w, r, "/admin/products/"+id, http.StatusSeeOther)
+		d.done(w, r, c, "/admin/products/"+id, "상품을 만들었습니다 — "+p.Name)
 		return
 	}
 
@@ -128,7 +128,7 @@ func (d *Deps) ProductSave(w http.ResponseWriter, r *http.Request) {
 	default:
 		// D15 7절: 가격은 P-406 금액 계산의 입력이다.
 		d.log(r, c, "product.manage", "product", p.ID, "상품 '"+p.Name+"' 수정")
-		http.Redirect(w, r, "/admin/products/"+p.ID, http.StatusSeeOther)
+		d.done(w, r, c, "/admin/products/"+p.ID, "상품을 저장했습니다 — "+p.Name)
 	}
 }
 
@@ -167,7 +167,7 @@ func (d *Deps) ProductDelete(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 	default:
 		d.log(r, c, "product.manage", "product", id, "상품 삭제")
-		http.Redirect(w, r, "/admin/products", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/products", "상품을 삭제했습니다.")
 	}
 }
 
@@ -289,7 +289,7 @@ func (d *Deps) ProductImageUpload(w http.ResponseWriter, r *http.Request) {
 		d.renderProduct(w, r, nil, http.StatusUnprocessableEntity, "파일을 고르세요.")
 	default:
 		d.log(r, c, "product.manage", "product", id, "상품 이미지 "+strconv.Itoa(saved)+"장 추가")
-		http.Redirect(w, r, "/admin/products/"+id, http.StatusSeeOther)
+		d.done(w, r, c, "/admin/products/"+id, "상품 사진 "+strconv.Itoa(saved)+"장을 올렸습니다.")
 	}
 }
 
@@ -317,7 +317,7 @@ func (d *Deps) ProductImageDelete(w http.ResponseWriter, r *http.Request) {
 		d.Logger.Warn("상품 이미지 파일 삭제 실패", "product", productID, "err", err)
 	}
 	d.log(r, c, "product.manage", "product", productID, "상품 이미지 삭제")
-	http.Redirect(w, r, "/admin/products/"+productID, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/products/"+productID, "상품 사진을 삭제했습니다.")
 }
 
 // VariantForm is A-503 GET.
@@ -412,7 +412,7 @@ func (d *Deps) VariantSave(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 	default:
 		d.log(r, c, "product.manage", "product", productID, "옵션·재고 수정")
-		http.Redirect(w, r, "/admin/products/"+productID+"/variants", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/products/"+productID+"/variants", "옵션·재고를 저장했습니다.")
 	}
 }
 
@@ -496,6 +496,6 @@ func (d *Deps) OptionsSave(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 	default:
 		d.log(r, c, "product.manage", "product", productID, "옵션 저장·조합 생성")
-		http.Redirect(w, r, "/admin/products/"+productID+"/variants", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/products/"+productID+"/variants", "옵션을 저장하고 조합을 만들었습니다.")
 	}
 }

@@ -20,14 +20,14 @@
   <input name="password" type="password" required autocomplete="current-password"
          aria-label="비밀번호 확인" placeholder="비밀번호 확인">
   {{end}}
-  <button type="submit" class="adm-btn adm-btn--danger">전체 취소</button>
+  <button type="submit" onclick="return confirm('주문을 전체 취소하고 남은 금액을 돌려줄까요? 결제사로 바로 보내며 되돌릴 수 없습니다.')" class="adm-btn adm-btn--danger">전체 취소</button>
 </form>
 {{end}}
 {{if .CloseTo}}
 <form method="post" class="adm-form">
   <input type="hidden" name="action" value="close">
   <p>환불이 끝났는데 주문이 열려 있습니다. 닫으면 주문이 「{{.CloseTo}}」가 됩니다.</p>
-  <button type="submit">주문 종료</button>
+  <button type="submit" onclick="return confirm('이 주문을 닫을까요?')" >주문 종료</button>
 </form>
 {{end}}
 </div>
@@ -52,7 +52,7 @@
             <input name="password" type="password" required autocomplete="current-password"
                    aria-label="비밀번호 확인" placeholder="비밀번호 확인">
             {{end}}
-            <button type="submit">{{if eq .Status "승인"}}다시 보내기{{else}}실행{{end}}</button>
+            <button type="submit" onclick="return confirm('이 환불을 결제사로 보낼까요? 돈이 나갑니다.')" >{{if eq .Status "승인"}}다시 보내기{{else}}실행{{end}}</button>
           </form>
           {{end}}
           {{if eq .Status "요청"}}
@@ -61,7 +61,7 @@
             <input type="hidden" name="refund_id" value="{{.ID}}">
             <input name="reason" maxlength="500" required aria-label="거부 사유" placeholder="거부 사유">
             {{/* 「실행」(돈이 나감)과 같은 주 버튼이면 둘이 구별되지 않는다. */}}
-            <button type="submit" class="adm-btn adm-btn--danger">거부</button>
+            <button type="submit" onclick="return confirm('이 환불 요청을 거부할까요? 구매자가 거부 사유를 보게 됩니다.')" class="adm-btn adm-btn--danger">거부</button>
           </form>
           {{end}}
           </td></tr>
@@ -107,7 +107,7 @@
   <label for="password">비밀번호 확인</label>
   <input id="password" name="password" type="password" required autocomplete="current-password">
   {{end}}
-  <button type="submit">환불 접수</button>
+  <button type="submit" onclick="return confirm('고른 품목을 환불할까요? 결제사로 바로 보내 돈이 나갑니다.')" >환불 접수</button>
 </form>
 </div>
 {{end}}

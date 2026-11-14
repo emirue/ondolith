@@ -7,6 +7,8 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +57,8 @@ type adminRenderer struct {
 	// theme selects one of the handoff's five directions (1a~1e). Empty means
 	// defaultAdminTheme.
 	theme string
+	// sm 은 처리기가 실은 저장 성공 알림을 꺼낸다 (FR-724). nil 이면 꺼내지 않는다(시험).
+	sm *scs.SessionManager
 
 	mu    sync.RWMutex
 	cache map[string]*template.Template
@@ -231,6 +235,17 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 			view[k] = v
 		}
 	}
+	// 직전 저장의 알림 (FR-724). **303 뒤 GET 이 그리는 화면(200)에서만 꺼낸다** — 422 로 다시
+	// 그린 폼이나 거절 화면이 먹으면, 고쳐 저장하고 돌아간 화면에는 없다. 처리기가 돌아가겠다고 한
+	// 화면이 아니거나 화면이 제 알림을 그리면 실린 것은 버린다 — 남기면 엉뚱한 다음 화면에 뜬다.
+	if a.sm != nil && r.Method == http.MethodGet && code == http.StatusOK {
+		if n := a.sm.PopString(r.Context(), sessAdminNotice); n != "" {
+			path, msg, _ := strings.Cut(n, "\n")
+			if own, _ := view["Notice"].(string); own == "" && path == r.URL.Path {
+				view["Notice"] = msg
+			}
+		}
+	}
 
 	// Rendered whole before the status line goes out: writing the code first
 	// would leave a template error as a 200 with half a page.
@@ -293,6 +308,24 @@ func (c adminCaller) IsSuperuser() bool {
 	return c.a != nil && c.a.Perms != nil && c.a.Perms.Superuser
 }
 func (c adminCaller) NeedsReauth() bool { return NeedsReauth(c.a, c.now()) }
+
+// sessAdminNotice 는 성공한 관리자 POST 가 돌아갈 화면에 남기는 한 줄이다 (FR-724, D19 C11).
+// 주소(쿼리)에 실으면 새로 고침할 때마다 다시 뜨고, 쿠키에 그대로 두면 남이 심은 문구가
+// 관리자 화면에 뜰 수 있다. 서버 쪽 세션에 두고 Render 가 한 번 꺼낸다.
+const sessAdminNotice = "admin_notice"
+
+// 돌아갈 화면의 경로를 함께 싣는다 — 그 화면이 200 으로 그려지지 않으면(403 등) 알림이 세션에 남았다가
+// 나중의 엉뚱한 화면에 뜬다. 경로는 줄바꿈을 담을 수 없으므로 첫 줄이 경로다.
+func (c adminCaller) Notify(to, msg string) {
+	if c.sm == nil || msg == "" {
+		return
+	}
+	path := to
+	if u, err := url.Parse(to); err == nil {
+		path = u.Path
+	}
+	c.sm.Put(c.ctx, sessAdminNotice, path+"\n"+msg)
+}
 
 // ConfirmReauth verifies the password typed into the destructive screen's own
 // form and re-stamps the window (D15 5.3-1).

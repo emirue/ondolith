@@ -34,7 +34,7 @@
             <input type="hidden" name="payment_id" value="{{.PaymentID}}">
             <input type="hidden" name="from" value="{{$.From}}">
             <input type="hidden" name="to" value="{{$.To}}">
-            <button type="submit">PG 결과로 반영</button>
+            <button type="submit" onclick="return confirm('결제사가 알려 준 결과로 이 결제를 반영할까요? 주문 상태가 바뀝니다.')" >PG 결과로 반영</button>
           </form>
           {{end}}
           </td>

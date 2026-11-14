@@ -100,6 +100,7 @@ func TestPageSaveStoresSanitizedEditorHTML(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "페이지를 만들었습니다.")
 	var body, html string
 	if err := pool.QueryRow(context.Background(),
 		`SELECT body, body_html FROM pages WHERE slug = 'location'`).Scan(&body, &html); err != nil {

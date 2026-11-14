@@ -1136,3 +1136,72 @@ func TestAdminFileInputsAcceptDrops(t *testing.T) {
 		t.Errorf("내장 테마에 static/js/upload.js 가 없다: %v", err)
 	}
 }
+
+// **되돌릴 수 없는 관리자 동작은 누르면 묻는다** (FR-725, D19 C12).
+//
+// 지우기 단추는 전부 묻는데, 역할에서 권한 빼기·계정 비활성화·비밀번호 재설정 강제·환불 접수처럼 돈·권한·계정에
+// 닿는 단추는 한 번 누르면 바로 처리됐다. 무엇이 그런 폼인지는 폼이 보내는 것으로 가른다 — 주소의 마지막 마디,
+// 숨은 동작 값, 환불 요청 키, 결제 id. 그런 폼의 단추와 빨간(danger) 단추는 전부 confirm 을 부른다. 새 파괴적
+// 폼이 묻지 않으면 여기서 걸린다. 묻는 것은 실수를 막을 뿐이다 — 권한·재인증은 서버가 다시 본다.
+//
+// 재고 조사 반영(A-515)은 묻지 않는다. 스캐너로 연달아 찍는 화면이고, 다시 조사하면 되돌아간다.
+func TestAdminDestructiveButtonsAsk(t *testing.T) {
+	names, err := fs.Glob(adminFS, "templates/admin/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := regexp.MustCompile(`(?s)<form\b[^>]*>.*?</form>`)
+	button := regexp.MustCompile(`<button\b[^>]*>`)
+	destructive := []*regexp.Regexp{
+		regexp.MustCompile(`^<form\b[^>]*action="[^"]*/(delete|revoke|deactivate|reset-password|transition)"`),
+		regexp.MustCompile(`name="action" value="(delete|cancel|close|execute|reject|settle|exchange|migrate)"`),
+		regexp.MustCompile(`name="delete"`),      // A-306·A-406 필드 정의 삭제
+		regexp.MustCompile(`name="request_key"`), // A-507 환불 접수 — 돈이 나간다
+		regexp.MustCompile(`name="payment_id"`),  // A-508 결제 결과 반영 — 주문 상태가 바뀐다
+		// A-308·A-309 의 POST 는 지우기 하나뿐이다 — 댓글·첨부 id 만 보낸다.
+		regexp.MustCompile(`^<form\b[^>]*method="post"[^>]*action="/admin/(comments|attachments)"`),
+	}
+	formID := regexp.MustCompile(`^<form\b[^>]*\bid="([^"]+)"`)
+	// **return 까지 있어야 묻는 것이다.** confirm 의 답을 돌려주지 않으면 취소해도 폼이 나간다.
+	asks := func(btn string) bool { return strings.Contains(btn, `onclick="return confirm(`) }
+	asked := 0
+	for _, name := range names {
+		b, err := fs.ReadFile(adminFS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := string(b)
+		byID := map[string]bool{} // 폼 id → 파괴적인가. 폼 밖의 form= 단추가 따른다.
+		for _, f := range form.FindAllString(src, -1) {
+			danger := false
+			for _, re := range destructive {
+				danger = danger || re.MatchString(f)
+			}
+			if m := formID.FindStringSubmatch(f); m != nil {
+				byID[m[1]] = danger
+			}
+			for _, btn := range button.FindAllString(f, -1) {
+				if strings.Contains(btn, `type="button"`) {
+					continue
+				}
+				if (danger || strings.Contains(btn, "adm-btn--danger")) && !asks(btn) {
+					t.Errorf("%s: 되돌릴 수 없는 동작인데 묻지 않는다: %s", name, btn)
+				}
+				if asks(btn) {
+					asked++
+				}
+			}
+		}
+		// 폼 밖에서 form= 으로 폼을 고르는 단추는 그 폼의 판정을 따른다 (A-204 메뉴 삭제).
+		for _, m := range regexp.MustCompile(`<button\b[^>]*\bform="([^"]*)"[^>]*>`).FindAllStringSubmatch(src, -1) {
+			btn := m[0]
+			if (byID[m[1]] || strings.Contains(btn, "adm-btn--danger")) && !asks(btn) {
+				t.Errorf("%s: 되돌릴 수 없는 동작인데 묻지 않는다: %s", name, btn)
+			}
+		}
+	}
+	// 지우기 단추만 열다섯이다. 이보다 적게 찾았다면 검사가 폼을 못 읽고 있다.
+	if asked < 15 {
+		t.Fatalf("확인 창 단추를 %d개밖에 못 찾았다", asked)
+	}
+}

@@ -156,6 +156,14 @@ func (d *Deps) backupError(w http.ResponseWriter, r *http.Request, err error, ms
 
 // saveBackupSettings is A-604's action=settings (FR-715).
 func (d *Deps) saveBackupSettings(w http.ResponseWriter, r *http.Request, c Caller) {
+	// 저장소가 S3 면 백업은 버킷으로 가고 앱은 그것을 지우지 않는다 (FR-722). 개수는 버킷에 못 올린 날
+	// 서버에 남긴 것에만 걸리므로, 문구가 「N개 보관」이라고 하면 버킷도 N개만 남는 것처럼 읽힌다.
+	st, err := d.Content.Settings(r.Context(), content.SettingStorageBackend)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
+	toBucket := st[content.SettingStorageBackend] == "s3"
 	hour, err := strconv.Atoi(r.PostFormValue("backup.hour"))
 	if err != nil || hour < 0 || hour > 23 {
 		d.renderBackup(w, r, http.StatusUnprocessableEntity, "자동 백업 시각은 0~23시 중 하나입니다.")
@@ -164,7 +172,11 @@ func (d *Deps) saveBackupSettings(w http.ResponseWriter, r *http.Request, c Call
 	// 상한은 디스크다 — 백업 하나가 DB 와 업로드 폴더 전체다.
 	keep, err := strconv.Atoi(r.PostFormValue("backup.keep"))
 	if err != nil || keep < 1 || keep > 30 {
-		d.renderBackup(w, r, http.StatusUnprocessableEntity, "보관 개수는 1~30개입니다.")
+		msg := "보관 개수는 1~30개입니다."
+		if toBucket {
+			msg = "서버에 남길 개수는 1~30개입니다."
+		}
+		d.renderBackup(w, r, http.StatusUnprocessableEntity, msg)
 		return
 	}
 	auto, state := "", "꺼짐"
@@ -177,9 +189,12 @@ func (d *Deps) saveBackupSettings(w http.ResponseWriter, r *http.Request, c Call
 		d.serverError(w, r, err)
 		return
 	}
-	d.log(r, c, "backup.settings", "system", "backup",
-		"자동 백업 "+state+" · 매일 "+strconv.Itoa(hour)+"시 · "+strconv.Itoa(keep)+"개 보관")
-	http.Redirect(w, r, "/admin/backup", http.StatusSeeOther)
+	setting := state + " · 매일 " + strconv.Itoa(hour) + "시 · " + strconv.Itoa(keep) + "개 보관"
+	if toBucket {
+		setting = state + " · 매일 " + strconv.Itoa(hour) + "시 · 버킷에 보관(앱이 지우지 않음) · 서버에 남길 개수 " + strconv.Itoa(keep)
+	}
+	d.log(r, c, "backup.settings", "system", "backup", "자동 백업 "+setting)
+	d.done(w, r, c, "/admin/backup", "자동 백업 설정을 저장했습니다 — "+setting)
 }
 
 // sendStoredBackup is A-604's action=file: one stored automatic backup (FR-715).

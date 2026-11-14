@@ -417,6 +417,8 @@ aws s3api put-bucket-lifecycle-configuration --bucket <bucket-name> --lifecycle-
 
 - **현재 버전을 지우는 규칙(`Expiration.Days`)은 `backups/` 에만 건다.** 버킷 전체에 걸면 사이트의 첨부·본문 사진·상품
   이미지(`YYYY/MM/<uuid>`)가 그 날수 뒤에 지워진다. 앱은 버킷의 백업을 지우지 않으므로 이 규칙이 보관 기간이다
+- **백업을 지우지 않고 모두 남기려면 첫째 규칙(`backups-expire`)을 빼고 둘째만 건다.** 앱이 지우지 않으므로 그것으로 끝이다.
+  쌓인 만큼 저장 요금이 는다 — 버킷의 `backups/` 크기를 가끔 본다
 - 둘째 규칙(이전 버전 만료·만료된 삭제 마커 정리)은 버킷 전체에 건다 — 연결 확인이 남긴 것도 이것이 치운다.
   `NoncurrentDays` 는 지운 파일·백업을 되살릴 수 있는 기간이다. 털린 것을 알아챌 만큼 길게 둔다
 - AWS 는 한 규칙에 `Days` 와 `ExpiredObjectDeleteMarker` 를 함께 두지 못하게 한다 — 그래서 규칙이 둘이다

@@ -66,6 +66,10 @@ func (d *Deps) ReconcileResolve(w http.ResponseWriter, r *http.Request) {
 			summary = "PG 승인 반영 — 주문 " + string(to2)
 		}
 		d.log(r, c, "payment.reconcile", "payment", id, summary)
+		notice := "결제사 결과를 반영했습니다 — 결제 실패로 기록했습니다."
+		if to2 != "" {
+			notice = "결제사 결과를 반영했습니다 — 주문 " + string(to2)
+		}
 		back := url.Values{}
 		if from != "" || to != "" {
 			back.Set("from", from)
@@ -75,7 +79,7 @@ func (d *Deps) ReconcileResolve(w http.ResponseWriter, r *http.Request) {
 		if len(back) > 0 {
 			target += "?" + back.Encode()
 		}
-		http.Redirect(w, r, target, http.StatusSeeOther)
+		d.done(w, r, c, target, notice)
 	case errors.Is(err, commerce.ErrNotFound):
 		http.NotFound(w, r)
 	case errors.Is(err, commerce.ErrNothingToResolve):

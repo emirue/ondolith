@@ -140,6 +140,7 @@ func TestThemeSettingsSaveMergesAndLogs(t *testing.T) {
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/theme/hero" {
 		t.Fatalf("저장 = HTTP %d → %q (%s)", rec.Code, rec.Header().Get("Location"), rec.Body.String())
 	}
+	wantNotice(t, d, "저장했습니다 — 메인 배너")
 	got, _ := d.Content.ThemeSettings(ctx, "hero")
 	if got["headline"] != "새 제목" || got["count"] != 7.0 || got["tone"] != "어둡게" || got["gone"] != "옛 값" {
 		t.Errorf("저장값 = %#v", got)
@@ -259,6 +260,7 @@ func TestThemeItemsAddEditOrderDelete(t *testing.T) {
 		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/theme/partners" {
 			t.Fatalf("행 추가 = HTTP %d → %q (%s)", rec.Code, rec.Header().Get("Location"), rec.Body.String())
 		}
+		wantNotice(t, d, "항목을 추가했습니다 — 협력사")
 	}
 	add("가", "2")
 	add("나", "1")
@@ -284,6 +286,7 @@ func TestThemeItemsAddEditOrderDelete(t *testing.T) {
 	if rec := themeReq(d.ThemeItemSave, "POST", "/admin/theme/partners/"+id, b, ct, "key", "partners", "id", id); rec.Code != http.StatusSeeOther {
 		t.Fatalf("행 수정 = HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "항목을 저장했습니다 — 협력사")
 	items, _ = d.Content.ThemeItems(ctx, "partners")
 	if items[0].Data["name"] != "다" {
 		t.Errorf("수정한 행이 앞으로 와야 한다: %+v", items)
@@ -301,6 +304,7 @@ func TestThemeItemsAddEditOrderDelete(t *testing.T) {
 	if rec := themeReq(d.ThemeItemDelete, "POST", "/admin/theme/partners/"+id+"/delete", nil, "", "key", "partners", "id", id); rec.Code != http.StatusSeeOther {
 		t.Errorf("행 삭제 = HTTP %d", rec.Code)
 	}
+	wantNotice(t, d, "항목을 삭제했습니다 — 협력사")
 	if items, _ = d.Content.ThemeItems(ctx, "partners"); len(items) != 1 {
 		t.Errorf("지운 뒤 %d행", len(items))
 	}
@@ -356,15 +360,15 @@ func TestGrantPermissionWithAThemeScreen(t *testing.T) {
 		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`, me); err != nil {
 		t.Fatal(err)
 	}
-	d.Caller = func(*http.Request) Caller {
-		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
-	}
+	op := &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me, superuser: true}
+	d.Caller = func(*http.Request) Caller { return op }
 	grant := func(v url.Values) int {
 		return post(d.RoleGrantPermission, "/admin/roles/permissions", v).Code
 	}
 	if code := grant(url.Values{"role": {"editor"}, "permission": {auth.ThemeContentPermission}, "theme_screen": {"partners"}}); code != http.StatusSeeOther {
 		t.Fatalf("화면 부여 = HTTP %d", code)
 	}
+	wantNotice(t, d, "역할 editor 에 권한을 줬습니다 — "+auth.ThemeContentPermission+" (테마 화면 협력사)")
 	var n int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM role_permissions WHERE theme_screen = 'partners'`).Scan(&n)
 	if n != 1 {

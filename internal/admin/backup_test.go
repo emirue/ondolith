@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/emirue/ondolith/internal/content"
 )
 
 // **백업은 최고 관리자가 비밀번호를 다시 넣고 받는다** (FR-713, A-604). 덤프에는 모든
@@ -222,14 +224,32 @@ func TestBackupScreenShowsTheLastBackupAndWhereItGoes(t *testing.T) {
 		t.Error("꺼 둔 자동 백업을 경고했다")
 	}
 
-	// 설정 저장은 마지막 백업 기록을 덮지 않는다.
+	// 설정 저장은 마지막 백업 기록을 덮지 않는다. 로컬 저장소면 개수가 곧 보관 개수다.
+	put(map[string]string{"storage.backend": ""})
 	su := &fakeCaller{superuser: true, reauth: true, email: "su@example.com", password: "correct horse battery"}
 	d.Caller = func(*http.Request) Caller { return su }
 	if rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"settings"}, "backup.auto": {"1"},
 		"backup.hour": {"3"}, "backup.keep": {"7"}, "password": {"correct horse battery"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("설정 저장 = HTTP %d", rec.Code)
 	}
+	wantNotice(t, d, "자동 백업 설정을 저장했습니다 — 켜짐 · 매일 3시 · 7개 보관")
 	if kv, _ := d.Content.Settings(ctx, SettingBackupLastWhere); kv[SettingBackupLastWhere] != "local:auto-20261114-0000.zip" {
 		t.Errorf("설정 저장이 마지막 백업 기록을 바꿨다: %q", kv[SettingBackupLastWhere])
+	}
+
+	// **S3 면 알림이 「7개 보관」이라고 하지 않는다** (FR-722). 버킷의 백업은 앱이 지우지 않고, 그 개수는
+	// 버킷에 못 올린 날 서버에 남긴 것에만 걸린다 — 「7개 보관」은 버킷도 일곱 개만 남는 것처럼 읽힌다.
+	if err := d.Content.PutSettings(ctx, map[string]string{content.SettingStorageBackend: "s3"}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"settings"}, "backup.auto": {"1"},
+		"backup.hour": {"3"}, "backup.keep": {"7"}, "password": {"correct horse battery"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("S3 설정 저장 = HTTP %d", rec.Code)
+	}
+	wantNotice(t, d, "자동 백업 설정을 저장했습니다 — 켜짐 · 매일 3시 · 버킷에 보관(앱이 지우지 않음) · 서버에 남길 개수 7")
+	if rec := post(d.BackupDownload, "/admin/backup", url.Values{"action": {"settings"}, "backup.auto": {"1"},
+		"backup.hour": {"3"}, "backup.keep": {"0"}, "password": {"correct horse battery"}}); rec.Code != http.StatusUnprocessableEntity ||
+		data["Error"] != "서버에 남길 개수는 1~30개입니다." {
+		t.Errorf("S3 에서 개수 0 = HTTP %d (%v), want 422 「서버에 남길 개수는 1~30개입니다.」", rec.Code, data["Error"])
 	}
 }

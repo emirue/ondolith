@@ -165,7 +165,7 @@ func (d *Deps) ThemeScreenSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "theme.edit_content", "theme_screen", s.Key, s.Title+" 저장")
-	http.Redirect(w, r, "/admin/theme/"+s.Key, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/theme/"+s.Key, "저장했습니다 — "+s.Title)
 }
 
 // ThemeItemForm is A-212's GET for a collection row: `/new` or `/{id}`.
@@ -243,6 +243,7 @@ func (d *Deps) ThemeItemSave(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	notice := "항목을 저장했습니다 — " + s.Title
 	if creating {
 		id, err := d.Content.CreateThemeItem(ctx, s.Key, item.SortOrder, out)
 		if errors.Is(err, content.ErrThemeItemLimit) {
@@ -255,13 +256,14 @@ func (d *Deps) ThemeItemSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.log(r, c, "theme.edit_content", "theme_item", id, s.Title+" 항목 추가")
+		notice = "항목을 추가했습니다 — " + s.Title
 	} else {
 		if err := d.Content.UpdateThemeItem(ctx, s.Key, item.ID, item.SortOrder, out); d.fail(w, r, err) {
 			return
 		}
 		d.log(r, c, "theme.edit_content", "theme_item", item.ID, s.Title+" 항목 수정")
 	}
-	http.Redirect(w, r, "/admin/theme/"+s.Key, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/theme/"+s.Key, notice)
 }
 
 // ThemeItemDelete is A-212's POST `/{id}/delete`. 사진 파일은 남는다 (D41 1절).
@@ -275,7 +277,7 @@ func (d *Deps) ThemeItemDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "theme.edit_content", "theme_item", id, s.Title+" 항목 삭제")
-	http.Redirect(w, r, "/admin/theme/"+s.Key, http.StatusSeeOther)
+	d.done(w, r, c, "/admin/theme/"+s.Key, "항목을 삭제했습니다 — "+s.Title)
 }
 
 // removeUploads deletes the multipart temp files. 처리기가 받는 r 은 미들웨어가 WithContext 로

@@ -22,9 +22,8 @@ func superuserActor(t *testing.T, d *Deps, pool *pgxpool.Pool) string {
 	if _, err := pool.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='admin'`, me); err != nil {
 		t.Fatal(err)
 	}
-	d.Caller = func(*http.Request) Caller {
-		return &fakeCaller{perms: map[string]bool{"role.manage": true, "role.assign": true, "user.update": true}, id: me, superuser: true}
-	}
+	op := &fakeCaller{perms: map[string]bool{"role.manage": true, "role.assign": true, "user.update": true}, id: me, superuser: true}
+	d.Caller = func(*http.Request) Caller { return op }
 	return me
 }
 
@@ -66,6 +65,7 @@ func TestGrantToEveryoneRolesIsLimitedToVisitorPermissions(t *testing.T) {
 	if rec := post(d.RoleGrantPermission, "/admin/roles/permissions", url.Values{"role": {"operator"}, "permission": {"page.view"}}); rec.Code != http.StatusSeeOther || grantCount(t, pool, "operator", "page.view") != 1 {
 		t.Errorf("operator 에 page.view = HTTP %d — 부여 대상 역할은 R9 과 상관없다", rec.Code)
 	}
+	wantNotice(t, d, "역할 operator 에 권한을 줬습니다 — page.view")
 }
 
 // **역할에서 권한 빼기 (A-404).** 고른 부여 한 행만 지우고, 다음 요청부터 효력이 없다. 없는 부여는 404,
@@ -88,6 +88,7 @@ func TestRevokePermissionFromARole(t *testing.T) {
 	if code := revoke("editor|page.view||"); code != http.StatusSeeOther {
 		t.Fatalf("editor 의 page.view 빼기 = HTTP %d", code)
 	}
+	wantNotice(t, d, "역할 editor 에서 권한을 뺐습니다 — page.view")
 	if p, _ := d.Auth.LoadPermissions(ctx, ed); p.Can("page.view") {
 		t.Error("뺐는데 다음 요청에도 page.view 가 있다")
 	}
@@ -139,6 +140,7 @@ func TestRevokeRoleFromAUser(t *testing.T) {
 	if code := revoke(u, "editor"); code != http.StatusSeeOther {
 		t.Fatalf("editor 빼기 = HTTP %d", code)
 	}
+	wantNotice(t, d, "사용자에게서 역할을 뺐습니다 — editor")
 	if keys, _ := d.Auth.UserRoleKeys(ctx, u); strings.Join(keys, ",") != "operator" {
 		t.Errorf("뺀 뒤 역할 = %v", keys)
 	}

@@ -57,6 +57,7 @@ func TestProductSaveRefusesPricesTheColumnCannotHold(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Errorf("상한값 = HTTP %d (%q), want 303", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "상품을 저장했습니다 — 티셔츠")
 }
 
 // A-503: 가격 차액·재고 증감도 같은 컬럼 폭이고, SKU 는 64자다. SKU 가 길면

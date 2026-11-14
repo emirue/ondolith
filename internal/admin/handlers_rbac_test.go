@@ -137,9 +137,8 @@ func TestRoleAssignmentIsImmediate(t *testing.T) {
 		me); err != nil {
 		t.Fatal(err)
 	}
-	d.Caller = func(*http.Request) Caller {
-		return &fakeCaller{perms: map[string]bool{"role.assign": true}, id: me, superuser: true}
-	}
+	op := &fakeCaller{perms: map[string]bool{"role.assign": true}, id: me, superuser: true}
+	d.Caller = func(*http.Request) Caller { return op }
 
 	before, err := d.Auth.LoadPermissions(ctx, target)
 	if err != nil {
@@ -153,6 +152,7 @@ func TestRoleAssignmentIsImmediate(t *testing.T) {
 	}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("부여 실패: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "사용자에게 역할을 줬습니다 — operator")
 	after, err := d.Auth.LoadPermissions(ctx, target)
 	if err != nil {
 		t.Fatal(err)
@@ -296,6 +296,7 @@ func TestReParentingUnderOwnDescendantIsRefusedBeforeWriting(t *testing.T) {
 	if rec := update(child, grand); rec.Code != http.StatusSeeOther {
 		t.Errorf("정상적인 재부모 지정이 거부됐다: HTTP %d (%s)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "메뉴를 저장했습니다 — 수정됨")
 }
 
 func TestMenuRejectsEmptyTitle(t *testing.T) {
@@ -336,6 +337,7 @@ func TestThemeActivationRefusesAnInvalidTheme(t *testing.T) {
 		"theme": {"good"}}); rec.Code != http.StatusSeeOther {
 		t.Errorf("정상 테마가 거부됐다: HTTP %d", rec.Code)
 	}
+	wantNotice(t, d, "테마를 켰습니다 — good")
 	kv, err := d.Content.Settings(context.Background(), "theme.active")
 	if err != nil {
 		t.Fatal(err)
@@ -355,6 +357,7 @@ func TestSwitchingBackToBuiltinAlwaysWorks(t *testing.T) {
 		"theme": {""}}); rec.Code != http.StatusSeeOther {
 		t.Errorf("내장 테마로 되돌리기가 막혔다: HTTP %d", rec.Code)
 	}
+	wantNotice(t, d, "기본 테마로 바꿨습니다.")
 }
 
 func TestRbacHandlersCheckTheirOwnPermission(t *testing.T) {
@@ -407,9 +410,8 @@ func TestScopedGrantIsStoredScoped(t *testing.T) {
 		`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key='mod_x'`, target); err != nil {
 		t.Fatal(err)
 	}
-	d.Caller = func(*http.Request) Caller {
-		return &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me}
-	}
+	op := &fakeCaller{perms: map[string]bool{"role.manage": true}, id: me}
+	d.Caller = func(*http.Request) Caller { return op }
 
 	rec := post(d.RoleGrantPermission, "/admin/roles/permissions", url.Values{
 		"role": {"mod_x"}, "permission": {"post.moderate"}, "board_id": {board},
@@ -417,6 +419,8 @@ func TestScopedGrantIsStoredScoped(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
 	}
+	// 범위가 알림에도 있어야 한다 — 없으면 전역 권한을 준 것처럼 읽힌다.
+	wantNotice(t, d, "역할 mod_x 에 권한을 줬습니다 — post.moderate (게시판 X)")
 	p, err := d.Auth.LoadPermissions(ctx, target)
 	if err != nil {
 		t.Fatal(err)
@@ -526,6 +530,7 @@ func TestMenuOrderIsSetFromTheScreen(t *testing.T) {
 			"title": {m.title}, "url": {"/"}, "sort_order": {m.sort}}); rec.Code != http.StatusSeeOther {
 			t.Fatalf("%s 추가 = HTTP %d", m.title, rec.Code)
 		}
+		wantNotice(t, d, "메뉴를 추가했습니다 — "+m.title)
 	}
 	titles := func() string {
 		items, err := d.Content.MenuItems(ctx)
@@ -644,6 +649,7 @@ func TestCategoryNameAndOrderCanBeEdited(t *testing.T) {
 	if code := edit(url.Values{"name": {"매트"}, "sort_order": {"3"}}); code != http.StatusSeeOther {
 		t.Fatalf("고치기 = HTTP %d", code)
 	}
+	wantNotice(t, d, "카테고리를 저장했습니다 — 매트")
 	cats, err := d.Commerce.Categories(ctx)
 	if err != nil {
 		t.Fatal(err)

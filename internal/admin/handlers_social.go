@@ -94,7 +94,7 @@ func (d *Deps) SocialSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// D15 7절: 프로바이더 키 변경은 작업 로그 대상이다. **secret 값은 넣지 않는다.**
 	d.log(r, c, "settings.update", "settings", "social."+provider,
 		"소셜 로그인 설정 변경: "+provider)
-	http.Redirect(w, r, "/admin/settings/social", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/settings/social", auth.SocialProviders[provider]+" 로그인 설정을 저장했습니다.")
 }
 
 func (d *Deps) renderSocial(w http.ResponseWriter, r *http.Request, code int, msg string) {

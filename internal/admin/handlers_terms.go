@@ -68,7 +68,7 @@ func (d *Deps) TermsAdd(w http.ResponseWriter, r *http.Request) {
 		d.renderTerms(w, r, http.StatusUnprocessableEntity, d.refusal(r, termsMessage(err), err))
 	default:
 		d.log(r, c, "settings.update", "terms", t.Kind+" "+t.Version, "약관 버전 추가")
-		http.Redirect(w, r, "/admin/terms", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/terms", "약관 새 버전을 추가했습니다 — 시행일부터 적용됩니다.")
 	}
 }
 
@@ -210,7 +210,7 @@ func (d *Deps) PaymentSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// D15 7절: 자격증명 변경은 분쟁의 근거가 된다. **값은 남기지 않는다.**
 	d.log(r, c, "settings.update", "settings", "payment", "결제 설정 변경")
-	http.Redirect(w, r, "/admin/settings/payment", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/settings/payment", "결제 설정을 저장했습니다.")
 }
 
 func (d *Deps) renderPayment(w http.ResponseWriter, r *http.Request, code int, msg string) {

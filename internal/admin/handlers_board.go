@@ -118,7 +118,7 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 		}
 		// D15 7절: 게시판 정의 변경은 공개 화면 동작을 바꾼다.
 		d.log(r, c, "board.manage", "board", newID, "게시판 '"+b.Slug+"' 생성 (프리셋 "+r.PostFormValue("preset")+")")
-		http.Redirect(w, r, "/admin/boards", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/boards", "게시판을 만들었습니다 — "+b.Slug)
 		return
 	}
 
@@ -128,7 +128,7 @@ func (d *Deps) BoardSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "board.manage", "board", id, "게시판 설정 변경")
-	http.Redirect(w, r, "/admin/boards", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/boards", "게시판 설정을 저장했습니다.")
 }
 
 func (d *Deps) boardFormError(w http.ResponseWriter, r *http.Request, b content.Board, msg string, code int) {
@@ -185,7 +185,7 @@ func (d *Deps) BoardDelete(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, r, err)
 	default:
 		d.log(r, c, "board.manage", "board", id, "게시판 삭제")
-		http.Redirect(w, r, "/admin/boards", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/boards", "게시판을 삭제했습니다.")
 	}
 }
 
@@ -250,7 +250,7 @@ func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {
 		// operator is about to wonder.
 		d.log(r, c, "board.manage", "board_field", boardID,
 			"필드 '"+key+"' 정의 삭제 (기존 글의 값은 보존)")
-		http.Redirect(w, r, "/admin/boards/"+boardID+"/fields", http.StatusSeeOther)
+		d.done(w, r, c, "/admin/boards/"+boardID+"/fields", "필드를 삭제했습니다 — "+key+" (기존 글의 값은 남아 있습니다)")
 		return
 	}
 
@@ -286,7 +286,7 @@ func (d *Deps) BoardFieldSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "board.manage", "board_field", boardID, "필드 '"+f.Key+"' 저장")
-	http.Redirect(w, r, "/admin/boards/"+boardID+"/fields", http.StatusSeeOther)
+	d.done(w, r, c, "/admin/boards/"+boardID+"/fields", "필드를 저장했습니다 — "+f.Key)
 }
 
 // splitOptions turns a newline-separated textarea into the option list. Blank
@@ -337,6 +337,7 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var notice string
 	switch r.PostFormValue("action") {
 	case "delete":
 		// 첨부 실물까지 지운다 (OPEN-40). 행만 지우면 파일이 남는데,
@@ -350,6 +351,7 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 		}
 		// D15 7절: 남의 글 삭제는 분쟁의 근거가 된다.
 		d.log(r, c, "post.moderate", "post", postID, "게시판 '"+b.Slug+"' 의 글 삭제")
+		notice = "글을 삭제했습니다."
 	case "pin", "unpin", "hide", "show":
 		act := r.PostFormValue("action")
 		status := "published"
@@ -361,12 +363,21 @@ func (d *Deps) PostModerate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.log(r, c, "post.moderate", "post", postID, "게시판 '"+b.Slug+"' 의 글 "+act)
+		notice = postFlagNotice[act]
 	default:
 		d.refuse(w, r, http.StatusUnprocessableEntity, "알 수 없는 동작입니다.")
 		return
 	}
 	// 조작한 그 쪽으로 돌아간다 — 2쪽에서 숨김을 풀 때마다 1쪽으로 튕기면 쪽 넘김이 무의미하다.
-	http.Redirect(w, r, ListURL("/admin/posts", url.Values{"board": {b.Slug}}, pageOf(r)), http.StatusSeeOther)
+	d.done(w, r, c, ListURL("/admin/posts", url.Values{"board": {b.Slug}}, pageOf(r)), notice)
+}
+
+// postFlagNotice 는 글 고정·숨김의 알림이다 (FR-724).
+var postFlagNotice = map[string]string{
+	"pin":   "글을 맨 위에 고정했습니다.",
+	"unpin": "글 고정을 풀었습니다.",
+	"hide":  "글을 숨겼습니다 — 공개 화면에 보이지 않습니다.",
+	"show":  "글을 다시 공개했습니다.",
 }
 
 // CommentModerate is A-308, with comment.moderate on the comment's board.
@@ -409,7 +420,7 @@ func (d *Deps) CommentModerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.log(r, c, "comment.moderate", "comment", commentID, "게시판 '"+b.Slug+"' 의 댓글 삭제")
-	http.Redirect(w, r, ListURL("/admin/comments", url.Values{"board": {b.Slug}}, pageOf(r)), http.StatusSeeOther)
+	d.done(w, r, c, ListURL("/admin/comments", url.Values{"board": {b.Slug}}, pageOf(r)), "댓글을 삭제했습니다.")
 }
 
 // renderModeration draws A-307~309 with the board list for the picker — 게시판
@@ -617,5 +628,5 @@ func (d *Deps) AttachmentDelete(w http.ResponseWriter, r *http.Request) {
 	// D15 7절: 남의 첨부 삭제도 분쟁의 근거다.
 	d.log(r, c, "post.moderate", "attachment", id,
 		"게시판 '"+b.Slug+"' 의 첨부 '"+at.OriginalName+"' 삭제")
-	http.Redirect(w, r, ListURL("/admin/attachments", url.Values{"board": {b.Slug}}, pageOf(r)), http.StatusSeeOther)
+	d.done(w, r, c, ListURL("/admin/attachments", url.Values{"board": {b.Slug}}, pageOf(r)), "첨부를 삭제했습니다 — "+at.OriginalName)
 }

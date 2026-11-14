@@ -56,7 +56,7 @@
     </div>
     {{if .NeedsReauth}}{{template "reauth-field" .}}{{end}}
     <div class="adm-actions adm-actions--end">
-      <button class="adm-btn">빼기</button>
+      <button onclick="return confirm('이 권한을 역할에서 뺄까요? 다음 요청부터 효력이 없습니다.')" class="adm-btn">빼기</button>
     </div>
   </form>
   {{else}}

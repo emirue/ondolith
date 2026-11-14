@@ -421,6 +421,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	adminUI.themeScreens = func() []theme.Screen { return loader().AdminScreens() }
 	// 관리자 메뉴 숨김 (FR-720). 조립 때 한 번 읽는다 — 바꾸면 A-201 이 다시 조립한다.
 	adminUI.hiddenNav = admin.ParseHiddenNav(setting("admin.hidden_menus")["admin.hidden_menus"])
+	// 저장 성공 알림 (FR-724) — 처리기가 adminCaller.Notify 로 실은 것을 돌아간 화면이 꺼낸다.
+	adminUI.sm = sessions
 	// 선언 오류는 활성화(A-202)가 보여 주지만, 이미 켜진 테마로 부팅할 때는 로그가 유일한 자리다.
 	if _, warns := theme.ReadAdmin(bootDir); len(warns) > 0 {
 		log.Warn("테마 화면 선언 (admin.json)", "경고", strings.Join(warns, " · "))

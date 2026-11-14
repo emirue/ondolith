@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
@@ -478,8 +479,9 @@ func TestRefundRejectLooksDifferentFromExecute(t *testing.T) {
 		"Order":      &commerce.OrderDetail{OrderNo: "N1"},
 		"Refunds":    []commerce.Refund{{ID: "r1", Status: "요청", Amount: 1000}},
 		"RequestKey": "k", "NeedsReauth": false, "Approved": 1000, "Refunded": 0, "Remaining": 1000})
-	if !strings.Contains(out, `<button type="submit" class="adm-btn adm-btn--danger">거부</button>`) {
-		t.Error("「거부」가 「실행」과 같은 주 버튼이다")
+	// 확인 창(FR-725)이 속성 사이에 끼므로 순서는 보지 않는다 — 빨간 단추이고 묻는지를 본다.
+	if !regexp.MustCompile(`<button type="submit" onclick="return confirm\([^"]*\)" class="adm-btn adm-btn--danger">거부</button>`).MatchString(out) {
+		t.Error("「거부」가 「실행」과 같은 주 버튼이거나 묻지 않는다")
 	}
 }
 
@@ -655,5 +657,29 @@ func TestCheaperExchangeFormAsksForThePassword(t *testing.T) {
 	exchange = out[strings.Index(out, `value="exchange"`):]
 	if exchange = exchange[:strings.Index(exchange, "</form>")]; strings.Contains(exchange, `name="password"`) {
 		t.Error("차액 없는 교환에 비밀번호 칸이 있다 — 돈이 나가지 않는다")
+	}
+}
+
+// **S3 로 가는 백업은 앱이 지우지 않는다고 A-604 가 먼저 말한다** (FR-722).
+//
+// 「보관 개수 (1~30)」 칸이 버킷으로 갈 때도 똑같이 보여, 운영자가 버킷의 백업도 그 개수만 남는 줄 알고
+// 「지우지 않는 옵션」을 찾았다. 버킷의 백업은 처음부터 지우지 않는다 — 칸은 버킷에 못 올린 날 서버에
+// 남긴 것에만 걸린다. 로컬 저장소면 그 칸이 곧 보관 개수다.
+func TestBackupScreenSaysBucketBackupsAreKept(t *testing.T) {
+	data := func(toBucket bool) map[string]any {
+		return map[string]any{"Settings": map[string]string{"backup.keep": "7"}, "Zone": "KST +09:00",
+			"ToBucket": toBucket, "Last": time.Time{}, "LastWhere": ""}
+	}
+	s3 := renderAdmin(t, "admin/backup.html", data(true))
+	for _, want := range []string{"<span>서버에 남길 개수 (1~30)</span>", "버킷의 백업은 앱이 지우지 않습니다"} {
+		if !strings.Contains(s3, want) {
+			t.Errorf("S3 일 때 %q 가 없다", want)
+		}
+	}
+	if strings.Contains(s3, "<span>보관 개수 (1~30)</span>") {
+		t.Error("S3 인데 칸 이름이 「보관 개수」다 — 버킷의 백업도 그만큼만 남는 것처럼 읽힌다")
+	}
+	if local := renderAdmin(t, "admin/backup.html", data(false)); !strings.Contains(local, "<span>보관 개수 (1~30)</span>") {
+		t.Error("로컬 저장소인데 「보관 개수」 칸이 없다")
 	}
 }

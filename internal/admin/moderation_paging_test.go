@@ -115,4 +115,5 @@ func TestModerationActionReturnsToItsPage(t *testing.T) {
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/posts?board=mod&page=2" {
 		t.Errorf("= HTTP %d → %q, want 303 → /admin/posts?board=mod&page=2", rec.Code, rec.Header().Get("Location"))
 	}
+	wantNotice(t, d, "글을 숨겼습니다 — 공개 화면에 보이지 않습니다.")
 }

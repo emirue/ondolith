@@ -377,6 +377,7 @@ func TestAdminTransitionIsCheckedByTheServer(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("정상 전이 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "주문 상태를 바꿨습니다 — 배송준비")
 	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusPreparing)
 
 	// 배송완료로 옮기면 delivered_at 이 남는다 — A-512 의 반품 기간·자동
@@ -610,6 +611,7 @@ func TestAdminReturnActionsAreLogged(t *testing.T) {
 			"reason": {"확인 불가"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("거부 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "반품·교환 요청을 거부했습니다.")
 
 	for _, form := range []url.Values{
 		{"return_no": {returnNo}, "action": {"pickup"}, "fault": {"판매자"}},
@@ -620,6 +622,7 @@ func TestAdminReturnActionsAreLogged(t *testing.T) {
 			t.Fatalf("%v = HTTP %d (%q)", form["action"], rec.Code, rec.Body.String())
 		}
 	}
+	wantNoticeLike(t, d, `^반품 환불 \d+원을 확정했습니다\.$`)
 
 	rows, err := pool.Query(context.Background(),
 		`SELECT action FROM operation_logs ORDER BY created_at`)
@@ -949,6 +952,7 @@ func TestAdminPickupIgnoresShippingFeeFromForm(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("수거 확인 = HTTP %d, want 303 (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "수거를 확인했습니다.")
 
 	var fee int
 	var policy string
@@ -1051,6 +1055,7 @@ func TestAdminCanCompleteAnExchange(t *testing.T) {
 			t.Fatalf("%s = HTTP %d, want 303 (%q)", action, rec.Code, rec.Body.String())
 		}
 	}
+	wantNoticeLike(t, d, `^교환을 처리했습니다 — `)
 
 	var status string
 	if err := pool.QueryRow(ctx,
@@ -1158,6 +1163,7 @@ func TestPolicySavesShippingPolicy(t *testing.T) {
 	if rec := postAdmin(t, d.PolicySave, "/admin/commerce/policy", nil, form("3000", "50000")); rec.Code != http.StatusSeeOther {
 		t.Fatalf("정상 저장 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNotice(t, d, "커머스 정책을 저장했습니다.")
 	kv, err := d.Content.Settings(context.Background(), "shipping.flat_fee", "shipping.free_threshold")
 	if err != nil {
 		t.Fatal(err)
@@ -1789,6 +1795,7 @@ func TestAdminRefundIsExecutedAtThePG(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
 	}
+	wantNoticeLike(t, d, `^환불 \d+원을 처리했습니다\.$`)
 	var status string
 	if err := pool.QueryRow(context.Background(), `SELECT status FROM refunds`).Scan(&status); err != nil {
 		t.Fatal(err)
@@ -1878,6 +1885,7 @@ func TestAdminExecutesOrRejectsAPendingRefund(t *testing.T) {
 		url.Values{"action": {"execute"}, "refund_id": {run}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("실행 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNoticeLike(t, d, `^환불 \d+원을 처리했습니다\.$`)
 	if got := refundRowStatus(t, pool, run); got != "완료" || gw.cancels != 1 {
 		t.Errorf("실행 뒤 상태 %s · PG 취소 %d회, want 완료·1", got, gw.cancels)
 	}
@@ -1887,6 +1895,7 @@ func TestAdminExecutesOrRejectsAPendingRefund(t *testing.T) {
 		url.Values{"action": {"reject"}, "refund_id": {drop}, "reason": {"사용 흔적"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("거부 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNoticeLike(t, d, `^환불 요청 \d+원을 거부했습니다\.$`)
 	if got := refundRowStatus(t, pool, drop); got != "거부" || gw.cancels != 1 {
 		t.Errorf("거부 뒤 상태 %s · PG 취소 %d회, want 거부·1", got, gw.cancels)
 	}
@@ -2034,6 +2043,7 @@ func TestReconcileResolveReflectsThePGAnswer(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("반영 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNoticeLike(t, d, `^결제사 결과를 반영했습니다 — `)
 	if loc := rec.Header().Get("Location"); loc != "/admin/reconcile?from=2026-10-01&to=2026-10-07" {
 		t.Errorf("돌아갈 곳 %q — 보던 기간으로 돌아가야 한다", loc)
 	}
@@ -2388,6 +2398,7 @@ func TestCloseActionClosesARefundedOrder(t *testing.T) {
 	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"close"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("주문 종료 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNoticeLike(t, d, `^주문을 닫았습니다 — `)
 	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusCancelled)
 	var summary string
 	if err := pool.QueryRow(ctx, `SELECT summary FROM operation_logs ORDER BY created_at DESC LIMIT 1`).Scan(&summary); err != nil {
@@ -2435,6 +2446,7 @@ func TestAdminFullCancelReturnsTheRestAndCancels(t *testing.T) {
 	if rec := postAdmin(t, d.RefundSave, path, pv, url.Values{"action": {"cancel"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("전체 취소 = HTTP %d (%q)", rec.Code, rec.Body.String())
 	}
+	wantNoticeLike(t, d, `^환불 \d+원을 처리했습니다\.$`)
 	assertAdminOrderStatus(t, pool, order.OrderNo, commerce.StatusCancelled)
 	approved, refunded, err := d.Commerce.RefundedTotal(ctx, order.OrderNo)
 	if err != nil || approved != total || refunded != total {
