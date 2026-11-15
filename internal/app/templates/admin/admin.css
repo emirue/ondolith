@@ -597,6 +597,8 @@ button,
 .adm-btn--sm { height: var(--h-aux); padding: 0 var(--s12); font-size: 13px; }
 
 .adm-btn[disabled] { opacity: var(--disabled); cursor: default; }
+/* 보낸 뒤 응답을 기다리는 단추 (FR-727). disabled 가 아니다 — 그 단추의 값이 폼 데이터에서 빠진다. */
+.adm-btn[aria-disabled="true"] { opacity: var(--disabled); cursor: progress; }
 
 .adm-actions { display: flex; gap: var(--s8); flex-wrap: wrap; align-items: center; }
 .adm-actions form { display: inline-flex; gap: var(--s8); align-items: center; flex-wrap: wrap; }

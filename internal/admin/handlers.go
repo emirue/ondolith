@@ -138,6 +138,8 @@ type Deps struct {
 	UploadDir string
 	// BackupDir holds the automatic backups A-604 lists and hands out (FR-715).
 	BackupDir string
+	// SecureCookies is config.SecureCookies — A-604 가 내려받기 시작을 알리는 쿠키도 세션 쿠키와 같은 Secure 를 단다 (FR-727).
+	SecureCookies bool
 	// Files is where uploads live (FR-717) — A-210 「옮기기」가 쓴다.
 	Files *content.Files
 	// CheckStorage is A-210's 연결 확인 against the given settings: a probe

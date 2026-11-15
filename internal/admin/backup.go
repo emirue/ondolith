@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -138,6 +139,7 @@ func (d *Deps) BackupDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.log(r, c, "backup.download", "system", "backup", "백업 내려받기 (DB 덤프 + 업로드 파일)")
+	d.tellDownloadStarted(w, r)
 	now := time.Now()
 	h := w.Header()
 	h.Set("Content-Type", "application/zip")
@@ -210,6 +212,7 @@ func (d *Deps) sendStoredBackup(w http.ResponseWriter, r *http.Request, c Caller
 	}
 	defer f.Close()
 	d.log(r, c, "backup.download", "system", "backup", "저장된 백업 내려받기 "+name)
+	d.tellDownloadStarted(w, r)
 	h := w.Header()
 	h.Set("Content-Type", "application/zip")
 	h.Set("Content-Disposition", `attachment; filename="`+name+`"`)
@@ -217,4 +220,22 @@ func (d *Deps) sendStoredBackup(w http.ResponseWriter, r *http.Request, c Caller
 	if _, err := io.Copy(w, f); err != nil && d.Logger != nil {
 		d.Logger.Error("저장된 백업 보내기 중단", "err", err)
 	}
+}
+
+// downloadTokenRe is the shape admin.js makes: 16 random bytes in hex.
+var downloadTokenRe = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// tellDownloadStarted hands the page's download_token back as a cookie just
+// before the file goes out (FR-727).
+//
+// 내려받기 응답은 화면을 넘기지 않아, 두 번 누르기를 막으려고 잠근 단추를 언제 풀지 화면이 알 수 없다. 덤프가 끝나야
+// 여기에 오므로 쿠키가 보이면 파일이 오기 시작한 것이다. 화면의 스크립트가 읽어야 해 HttpOnly 가 아니고, 비밀도 아니다
+// — 화면이 만든 난수를 그대로 돌려줄 뿐이다. 오류 화면에는 싣지 않는다: 그때는 화면이 넘어가 단추가 저절로 풀린다.
+func (d *Deps) tellDownloadStarted(w http.ResponseWriter, r *http.Request) {
+	t := r.PostFormValue("download_token")
+	if !downloadTokenRe.MatchString(t) {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: "ondolith_download", Value: t, Path: "/admin", MaxAge: 60,
+		Secure: d.SecureCookies, SameSite: http.SameSiteStrictMode})
 }

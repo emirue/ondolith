@@ -344,6 +344,58 @@ func TestMigrateStopsAtTheDeadline(t *testing.T) {
 	}
 }
 
+// **옮기기는 여러 파일을 함께 보낸다** (FR-717). 하나씩 보내면 버킷까지의 왕복이 그대로 쌓여, 한 번 누를 때
+// (migrateBudget) 옮기는 수가 그 왕복에 묶인다. 버킷이 0.5초씩 답하지 않게 붙잡고 그동안 겹친 수를 잰다 — 정확히
+// migrateWorkers 개다. 하나씩 보내면 1, 제한이 없으면 하나 더 들어와 기다림이 바로 풀린다.
+func TestMigrateSendsSeveralAtOnce(t *testing.T) {
+	root, rem := t.TempDir(), newMemRemote()
+	ctx := context.Background()
+	local := LocalFiles(root)
+	var rels []string
+	for i := range migrateWorkers + 1 {
+		rel := fmt.Sprintf("media/2026/10/%08d-1111-4111-8111-111111111111", i)
+		if err := local.Write(ctx, rel, []byte(rel)); err != nil {
+			t.Fatal(err)
+		}
+		rels = append(rels, rel)
+	}
+	age(t, root, rels...)
+	var (
+		mu             sync.Mutex
+		inflight, peak int
+		once           sync.Once
+	)
+	full := make(chan struct{})
+	rem.onPut = func(string) {
+		mu.Lock()
+		inflight++
+		peak = max(peak, inflight)
+		if inflight > migrateWorkers {
+			once.Do(func() { close(full) })
+		}
+		mu.Unlock()
+		select {
+		case <-full:
+		case <-time.After(500 * time.Millisecond):
+		}
+		mu.Lock()
+		inflight--
+		mu.Unlock()
+	}
+	res, err := NewFiles(root, remoteOf(rem, true)).Migrate(ctx, time.Now().Add(time.Minute))
+	if err != nil || res != (MigrateResult{Moved: len(rels)}) {
+		t.Fatalf("Migrate = %+v, %v", res, err)
+	}
+	if peak != migrateWorkers {
+		t.Errorf("한꺼번에 보낸 수 %d, want %d", peak, migrateWorkers)
+	}
+	for _, rel := range rels {
+		if localExists(t, root, rel) {
+			t.Errorf("%s stayed local after Migrate", rel)
+		}
+	}
+}
+
 func TestMigrateFailureKeepsTheLocalFile(t *testing.T) {
 	root, rem := t.TempDir(), newMemRemote()
 	ctx := context.Background()
@@ -455,21 +507,26 @@ func TestMigrateLeavesFilesBeingWritten(t *testing.T) {
 func TestMigrateSkipsFilesThatVanished(t *testing.T) {
 	root, rem := t.TempDir(), newMemRemote()
 	ctx := context.Background()
-	a := "2026/10/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	// **함께 보내도 b 가 사라진 뒤에 시작하게 한다.** 앞의 파일들이 보내는 자리(migrateWorkers)를 다 채우고, 그중
+	// 하나가 끝나야 b 의 자리가 난다 — 끝나는 것은 모두 b 를 지운 뒤다.
+	var first []string
+	for i := range migrateWorkers {
+		first = append(first, fmt.Sprintf("2026/10/a%07d-aaaa-4aaa-8aaa-aaaaaaaaaaaa", i))
+	}
 	b := "2026/10/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-	for _, rel := range []string{a, b} {
+	for _, rel := range append(first, b) {
 		if err := LocalFiles(root).Write(ctx, rel, []byte(rel)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	age(t, root, a, b)
+	age(t, root, append(first, b)...)
 	rem.onPut = func(key string) {
-		if key == a {
+		if key != b {
 			_ = os.Remove(filepath.Join(root, filepath.FromSlash(b)))
 		}
 	}
 	res, err := NewFiles(root, remoteOf(rem, true)).Migrate(ctx, time.Now().Add(time.Minute))
-	if err != nil || res != (MigrateResult{Moved: 1}) {
+	if err != nil || res != (MigrateResult{Moved: len(first)}) {
 		t.Fatalf("Migrate = %+v, %v — a vanished file is not a failure", res, err)
 	}
 }

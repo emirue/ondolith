@@ -188,6 +188,9 @@ want "피킹할 품목이 남았다" 1 "$(sql "select count(*) from order_items 
 # 첨부는 lib-seed 의 글쓰기가, 댓글은 위에서, 글은 그 글이 채운다. 관리 화면이
 # 그것을 실제로 집어내는지는 `make ui` 가 빈 표로 알려준다.
 want "첨부가 있다" 1 "$(sql "select count(*) from attachments")"
+# **저장된 자동 백업이 있어야 A-604 의 표를 재고, 그것을 내려받아 본다** (FR-715·FR-727). 백업 폴더는 설정 파일
+# 옆 backups/ 다. 내용은 zip 이 아니어도 된다 — 화면은 이름과 크기만 보고, 내려받기는 그대로 보낸다.
+mkdir -p "$WORK/backups" && printf 'ui stored backup' >"$WORK/backups/auto-20261114-0400.zip"
 want "댓글이 있다" 1 "$(sql "select count(*) from comments")"
 want "댓글이 공지 게시판의 글에 달렸다" 1 "$(sql "select count(*) from comments c join posts p on p.id=c.post_id join boards b on b.id=p.board_id where b.slug='notice'")"
 
@@ -383,6 +386,7 @@ node --check scripts/shots.mjs || { echo "  ✗ 촬영 스크립트 문법 오�
 node --check scripts/editor-ime.mjs || { echo "  ✗ 에디터 시험 스크립트 문법 오류"; exit 1; }
 node --check scripts/file-drop.mjs || { echo "  ✗ 파일 칸 시험 스크립트 문법 오류"; exit 1; }
 node --check scripts/admin-notice.mjs || { echo "  ✗ 알림·확인 창 시험 스크립트 문법 오류"; exit 1; }
+node --check scripts/admin-busy.mjs || { echo "  ✗ 두 번 누르기 시험 스크립트 문법 오류"; exit 1; }
 tojson() { python3 -c 'import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' <"$1"; }
 audit=0
 
@@ -448,6 +452,16 @@ if [ -z "${UI_SHOTS:-}" ]; then
 		ok "알림·확인 창: 저장 알림·새로 고침·휴대폰 폭·확인 창 취소와 확인"
 	else
 		bad "알림·확인 창 브라우저 시험"
+	fi
+	# **기다리는 동안 두 번 눌러도 한 번만 간다** (FR-727). 요청을 붙잡아 느린 서버를 만들고 두 번 누른다. 내려받기는
+	# 파일이 오기 시작하면 단추가 살아나는지, 뒤로 가기로 돌아온 화면이 잠겨 있지 않은지 본다. 자동 백업 설정을 바꾸고
+	# 회원을 비활성화했다 되돌린다.
+	if UI_BASE="$BASE" UI_EMAIL=admin@example.com UI_PASSWORD="$ADMIN_PW" \
+		UI_MEMBER="$(sql "select id from users where email='member@example.com'")" \
+		node scripts/admin-busy.mjs; then
+		ok "두 번 누르기: 저장·내려받기·뒤로 가기·확인 창 취소"
+	else
+		bad "두 번 누르기 브라우저 시험"
 	fi
 fi
 

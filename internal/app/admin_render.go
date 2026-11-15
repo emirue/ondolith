@@ -19,7 +19,7 @@ import (
 	"github.com/emirue/ondolith/internal/theme"
 )
 
-//go:embed templates/admin/*.html templates/admin/admin.css templates/admin/logo.svg
+//go:embed templates/admin/*.html templates/admin/admin.css templates/admin/admin.js templates/admin/logo.svg
 var adminFS embed.FS
 
 // adminRenderer draws the administrator screens.
@@ -41,6 +41,8 @@ type adminRenderer struct {
 	// that only authenticated administrators ever fetch; one <style> block is
 	// smaller than that whole apparatus.
 	css template.CSS
+	// js is admin.js — 두 번 누르기 방지(FR-727). CSS 와 같은 이유로 인라인이다.
+	js template.JS
 	// logo 는 마크의 SVG 원본이다. CSS 와 같은 취급을 받는다 — 우리 파일이고,
 	// 인라인이라 요청이 늘지 않으며, currentColor 를 쓰므로 헤더가 밝든 어둡든
 	// 파일 한 벌로 끝난다.
@@ -84,6 +86,10 @@ func newAdminRenderer(site func() string, brand func() theme.Brand, adminTheme s
 	if err != nil {
 		return nil, err
 	}
+	script, err := adminFS.ReadFile("templates/admin/admin.js")
+	if err != nil {
+		return nil, err
+	}
 	// The stylesheet is ours, from the embedded FS — not user input. It is
 	// marked CSS so html/template inlines it instead of escaping every brace.
 	return &adminRenderer{
@@ -91,6 +97,8 @@ func newAdminRenderer(site func() string, brand func() theme.Brand, adminTheme s
 		site: site,
 		log:  log,
 		css:  template.CSS(b),
+		// 임베드된 우리 스크립트다 — template.JS 가 아니면 html/template 이 문자열 하나로 이스케이프한다.
+		js: template.JS(script),
 		// 임베드된 우리 파일이지 사용자 입력이 아니다 — template.HTML 이
 		// 아니면 html/template 이 SVG 를 통째로 이스케이프해 글자로 그린다.
 		logo:  template.HTML(mark),
@@ -225,6 +233,7 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 		"Nav":        groups,
 		"Current":    admin.CurrentGroup(groups, r.URL.Path),
 		"CSS":        a.css,
+		"JS":         a.js,
 		"AdminTheme": a.theme,
 		"UserName":   actorName(actor),
 		// 비밀번호 재확인 칸을 그릴지 (FR-726). 화면이 넘기지 않아도 공용 칸(reauth-field)이 이것을 본다.

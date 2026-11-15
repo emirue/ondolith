@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -236,12 +237,16 @@ type MigrateResult struct {
 // 업로드 한 건은 서버 시한(ReadTimeout 30초) 안에 끝난다.
 const migrateSettle = time.Minute
 
+// migrateWorkers is how many files Migrate sends at once. 하나씩 보내면 버킷까지의 왕복이 그대로 쌓여, 한 번
+// 누를 때(migrateBudget) 옮기는 수가 그 왕복에 묶인다. 더 늘리면 작은 서버의 업로드 대역과 파일 핸들을 다툰다.
+const migrateWorkers = 4
+
 // Migrate moves local uploads into the bucket until the deadline (A-210).
 //
 // 폴더는 os.Root 로 걷는다 — 폴더 밖을 가리키는 링크를 따라 서버의 다른 파일을 버킷에
 // 올리지 않는다(백업과 같은 기준, D60). 업로드 모양인 일반 파일만 보낸다. 올린 뒤에야
-// 로컬 사본을 지우므로, 실패한 파일은 로컬에 그대로 남아 계속 보인다.
-// 시한이 지나면 남은 개수만 센다 — 한 요청이 WriteTimeout(D60)을 넘지 않게.
+// 로컬 사본을 지우므로, 실패한 파일은 로컬에 그대로 남아 계속 보인다. 한꺼번에 migrateWorkers 개까지 보낸다.
+// 시한이 지나면 새 파일을 시작하지 않고 남은 개수만 센다 — 한 요청이 WriteTimeout(D60)을 넘지 않게.
 func (f *Files) Migrate(ctx context.Context, until time.Time) (MigrateResult, error) {
 	var res MigrateResult
 	rem, write, err := f.resolve(ctx)
@@ -256,18 +261,27 @@ func (f *Files) Migrate(ctx context.Context, until time.Time) (MigrateResult, er
 		return res, err
 	}
 	defer rt.Close()
-	var firstErr error
-	keep := func(err error) {
-		if firstErr == nil {
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	// tally 는 결과 하나를 센다. 걷기와 보내는 고루틴이 함께 부르므로 잠근다 — 첫 오류는 먼저 끝난 것이다.
+	tally := func(n *int, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		*n++
+		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
+	late := func() bool { return ctx.Err() != nil || !time.Now().Before(until) }
+	slots := make(chan struct{}, migrateWorkers)
 	walkErr := fs.WalkDir(rt.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() && p != "." {
 				// 읽지 못한 폴더는 세고 건너뛴다 — 나머지는 계속 옮긴다.
-				res.Unreadable++
-				keep(fmt.Errorf("%s: %w", p, err))
+				tally(&res.Unreadable, fmt.Errorf("%s: %w", p, err))
 				return fs.SkipDir
 			}
 			return err
@@ -280,26 +294,36 @@ func (f *Files) Migrate(ctx context.Context, until time.Time) (MigrateResult, er
 			return nil // 걷는 사이 사라졌다
 		}
 		if err != nil {
-			res.Failed++
-			keep(fmt.Errorf("%s: %w", p, err))
+			tally(&res.Failed, fmt.Errorf("%s: %w", p, err))
 			return nil
 		}
-		if ctx.Err() != nil || !time.Now().Before(until) || time.Since(info.ModTime()) < migrateSettle {
-			res.Left++
+		if late() || time.Since(info.ModTime()) < migrateSettle {
+			tally(&res.Left, nil)
 			return nil
 		}
-		err = push(ctx, rt, rem, p)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			// 걷는 사이 지워졌거나 업로드가 직접 올리고 지웠다 — 실패가 아니다.
-		case err != nil:
-			res.Failed++
-			keep(fmt.Errorf("%s: %w", p, err))
-		default:
-			res.Moved++
+		// 자리가 날 때까지 기다린다. 그 사이 시한이 지났으면 시작하지 않는다.
+		slots <- struct{}{}
+		if late() {
+			<-slots
+			tally(&res.Left, nil)
+			return nil
 		}
+		wg.Add(1)
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			switch err := push(ctx, rt, rem, p); {
+			case errors.Is(err, fs.ErrNotExist):
+				// 걷는 사이 지워졌거나 업로드가 직접 올리고 지웠다 — 실패가 아니다.
+			case err != nil:
+				tally(&res.Failed, fmt.Errorf("%s: %w", p, err))
+			default:
+				tally(&res.Moved, nil)
+			}
+		}()
 		return nil
 	})
+	// 보내는 중인 것이 끝나야 결과가 맞고, rt 를 닫을 수 있다.
+	wg.Wait()
 	return res, errors.Join(walkErr, firstErr)
 }
 
