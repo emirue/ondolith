@@ -27,7 +27,7 @@ func notesExtension() siteext.Extension {
 			"CREATE TABLE site_notes (id bigserial PRIMARY KEY, body text NOT NULL, app text NOT NULL);\n" +
 			"-- +goose Down\nDROP TABLE site_notes;\n")}},
 		API: []siteext.Route{
-			{Method: "GET", Path: "/v1/notes", Handler: func(w http.ResponseWriter, r *http.Request) {
+			{Method: "GET", Path: "/v1/notes", Auth: siteext.AuthApp, Handler: func(w http.ResponseWriter, r *http.Request) {
 				c, _ := siteext.CallerFrom(r.Context())
 				rows, err := c.DB.QueryContext(r.Context(), `SELECT body FROM site_notes ORDER BY id`)
 				if err != nil {
@@ -43,7 +43,7 @@ func notesExtension() siteext.Extension {
 				}
 				siteext.WriteJSON(w, http.StatusOK, map[string]any{"notes": notes})
 			}},
-			{Method: "POST", Path: "/v1/notes", Handler: func(w http.ResponseWriter, r *http.Request) {
+			{Method: "POST", Path: "/v1/notes", Auth: siteext.AuthApp, Handler: func(w http.ResponseWriter, r *http.Request) {
 				c, _ := siteext.CallerFrom(r.Context())
 				var in struct{ Body string }
 				if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Body == "" {

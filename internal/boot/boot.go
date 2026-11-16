@@ -143,6 +143,14 @@ type Options struct {
 // Run parses the flags, boots the install or operating tree and serves until
 // SIGINT/SIGTERM.
 func Run(opts Options) error {
+	// 사이트 확장이 틀렸으면 아무것도 띄우지 않는다 — 설치 화면이 뜬 뒤에 드러나면 사이트 주인은 이미 배포한 뒤다
+	// (D42 4절 5). 둘 다 DB 없이 볼 수 있는 검사라 플래그보다 먼저 한다.
+	if err := siteext.CheckMigrations(opts.Ext.Migrations); err != nil {
+		return err
+	}
+	if err := opts.Ext.Validate(); err != nil {
+		return err
+	}
 	v := currentVersions(opts.Version)
 	var (
 		addr        = flag.String("addr", ":8080", "listen address")
@@ -159,15 +167,6 @@ func Run(opts Options) error {
 		// (scripts/verify-release.sh 가 이 값을 대조한다).
 		fmt.Println(v.Line(runtime.GOOS, runtime.GOARCH))
 		return nil
-	}
-
-	// 사이트 확장이 틀렸으면 설치 화면도 띄우지 않는다 — 설치가 끝난 뒤에야 드러나면 사이트 주인은 이미 배포한 뒤다
-	// (D42 4절 5). 둘 다 DB 없이 볼 수 있는 검사다.
-	if err := opts.Ext.Validate(); err != nil {
-		return err
-	}
-	if err := siteext.CheckMigrations(opts.Ext.Migrations); err != nil {
-		return err
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))

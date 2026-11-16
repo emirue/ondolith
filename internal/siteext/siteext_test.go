@@ -13,11 +13,12 @@ func ok(http.ResponseWriter, *http.Request) {}
 // 없고, 겹치는 패턴은 http.ServeMux 가 부팅 중 패닉으로 알린다 — 무엇이 틀렸는지 한 번에 모아 말한다.
 func TestValidateRefusesBadRoutes(t *testing.T) {
 	good := []Route{
-		{Method: "GET", Path: "/v1/notes", Handler: ok},
-		{Method: "POST", Path: "/v1/notes", Handler: ok},
-		{Method: "GET", Path: "/v1/notes/{id}", Handler: ok},
-		{Method: "DELETE", Path: "/v1/files/{rest...}", Handler: ok},
-		{Method: "PATCH", Path: "/v1/me.json", Handler: ok},
+		{Method: "GET", Path: "/v1/notes", Auth: AuthApp, Handler: ok},
+		{Method: "POST", Path: "/v1/notes", Auth: AuthApp, Handler: ok},
+		{Method: "GET", Path: "/v1/notes/{id}", Auth: AuthApp, Handler: ok},
+		{Method: "DELETE", Path: "/v1/files/{rest...}", Auth: AuthApp, Handler: ok},
+		{Method: "PATCH", Path: "/v1/me.json", Auth: AuthApp, Handler: ok},
+		{Method: "GET", Path: "/authors", Auth: AuthApp, Handler: ok}, // auth 로 시작해도 마디가 다르면 사이트 것
 	}
 	if err := (Extension{API: good}).Validate(); err != nil {
 		t.Fatalf("맞는 라우트를 거부했다: %v", err)
@@ -27,18 +28,25 @@ func TestValidateRefusesBadRoutes(t *testing.T) {
 		route Route
 		want  string
 	}{
-		{"빈 경로", Route{Method: "GET", Path: "", Handler: ok}, "경로"},
-		{"/ 로 시작하지 않음", Route{Method: "GET", Path: "v1/x", Handler: ok}, "경로"},
-		{"상위 폴더", Route{Method: "GET", Path: "/v1/../admin", Handler: ok}, "경로"},
-		{"빈 마디", Route{Method: "GET", Path: "/v1//x", Handler: ok}, "경로"},
-		{"공백", Route{Method: "GET", Path: "/v1/a b", Handler: ok}, "경로"},
-		{"질의 문자열", Route{Method: "GET", Path: "/v1/x?y=1", Handler: ok}, "경로"},
-		{"끝 표시", Route{Method: "GET", Path: "/v1/{$}", Handler: ok}, "경로"},
-		{"모르는 메서드", Route{Method: "TRACE", Path: "/v1/x", Handler: ok}, "메서드"},
-		{"소문자 메서드", Route{Method: "get", Path: "/v1/x", Handler: ok}, "메서드"},
-		{"처리기 없음", Route{Method: "GET", Path: "/v1/x"}, "처리기"},
-		{"같은 것 두 번", Route{Method: "GET", Path: "/v1/notes", Handler: ok}, "겹친다"},
-		{"패턴이 겹침", Route{Method: "GET", Path: "/v1/notes/{other}", Handler: ok}, "겹친다"},
+		{"빈 경로", Route{Method: "GET", Path: "", Auth: AuthApp, Handler: ok}, "경로"},
+		{"/ 로 시작하지 않음", Route{Method: "GET", Path: "v1/x", Auth: AuthApp, Handler: ok}, "경로"},
+		{"상위 폴더", Route{Method: "GET", Path: "/v1/../admin", Auth: AuthApp, Handler: ok}, "경로"},
+		{"빈 마디", Route{Method: "GET", Path: "/v1//x", Auth: AuthApp, Handler: ok}, "경로"},
+		{"공백", Route{Method: "GET", Path: "/v1/a b", Auth: AuthApp, Handler: ok}, "경로"},
+		{"질의 문자열", Route{Method: "GET", Path: "/v1/x?y=1", Auth: AuthApp, Handler: ok}, "경로"},
+		{"끝 표시", Route{Method: "GET", Path: "/v1/{$}", Auth: AuthApp, Handler: ok}, "경로"},
+		{"모르는 메서드", Route{Method: "TRACE", Path: "/v1/x", Auth: AuthApp, Handler: ok}, "메서드"},
+		{"소문자 메서드", Route{Method: "get", Path: "/v1/x", Auth: AuthApp, Handler: ok}, "메서드"},
+		{"처리기 없음", Route{Method: "GET", Path: "/v1/x", Auth: AuthApp}, "처리기"},
+		// 인증 방식을 정하지 않으면 거부한다 — 빈 값이 「키만」이면 사람 데이터 라우트에 site.Person 을 빠뜨린 것이
+		// 조용히 열린다(키는 비밀이 아니다). 닫힌 쪽이 기본값이다.
+		{"인증 방식 없음", Route{Method: "GET", Path: "/v1/x", Handler: ok}, "인증"},
+		{"모르는 인증 방식", Route{Method: "GET", Path: "/v1/x", Auth: Auth(99), Handler: ok}, "인증"},
+		// 첫 마디 auth 는 코어의 문자 인증 로그인 몫이다 (D42 8절). 지금 막지 않으면 코어를 올리는 순간 겹친다.
+		{"코어 몫 주소", Route{Method: "POST", Path: "/auth/code", Auth: AuthApp, Handler: ok}, "코어"},
+		{"코어 몫 주소 자체", Route{Method: "GET", Path: "/auth", Auth: AuthApp, Handler: ok}, "코어"},
+		{"같은 것 두 번", Route{Method: "GET", Path: "/v1/notes", Auth: AuthApp, Handler: ok}, "겹친다"},
+		{"패턴이 겹침", Route{Method: "GET", Path: "/v1/notes/{other}", Auth: AuthApp, Handler: ok}, "겹친다"},
 	} {
 		err := (Extension{API: append(append([]Route{}, good...), tc.route)}).Validate()
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -58,6 +66,12 @@ func TestCheckMigrationsWantsSitePrefixedTables(t *testing.T) {
 	}
 	if err := CheckMigrations(good); err != nil {
 		t.Fatalf("맞는 마이그레이션을 거부했다: %v", err)
+	}
+	// embed.FS 를 fs.Sub 하지 않고 넘기면 파일이 migrations/ 아래에 있어 루트에는 .sql 이 없다. 그대로 두면 검사는
+	// 0개를 보고 통과하고, 설치를 마친 뒤에야 goose 가 「마이그레이션 없음」으로 운영 전환을 멈춘다 (D42 4절 5).
+	nested := fstest.MapFS{"migrations/00001_workers.sql": {Data: []byte("-- +goose Up\nCREATE TABLE site_w (id int);\n")}}
+	if err := CheckMigrations(nested); err == nil || !strings.Contains(err.Error(), "fs.Sub") {
+		t.Errorf("루트에 .sql 이 없는 마이그레이션: %v, want fs.Sub 를 짚는 거부", err)
 	}
 	for _, sql := range []string{
 		"CREATE TABLE workers (id int);",

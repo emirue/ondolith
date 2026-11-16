@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"testing/fstest"
 
@@ -15,9 +16,24 @@ import (
 func TestExtensionCarriesEverythingToTheCore(t *testing.T) {
 	h := func(http.ResponseWriter, *http.Request) {}
 	mig := fstest.MapFS{"00001_a.sql": {Data: []byte("-- +goose Up\n")}}
-	got := Extension{Migrations: mig, API: []Route{{Method: "GET", Path: "/v1/a", Handler: h}, {Method: "POST", Path: "/v1/b", Handler: h}}}.internal()
-	if got.Migrations == nil || len(got.API) != 2 || got.API[1].Method != "POST" || got.API[1].Path != "/v1/b" || got.API[0].Handler == nil {
+	got := Extension{Migrations: mig, API: []Route{{Method: "GET", Path: "/v1/a", Auth: App, Handler: h}, {Method: "POST", Path: "/v1/b", Auth: App, Handler: h}}}.internal()
+	if got.Migrations == nil || len(got.API) != 2 || got.API[1].Method != "POST" || got.API[1].Path != "/v1/b" ||
+		got.API[0].Handler == nil || got.API[0].Auth != siteext.AuthApp {
 		t.Fatalf("internal() = %+v", got)
+	}
+	// 손으로 본 칸 밖의 칸이 생기면 여기서 걸린다 — 공개 타입에 칸을 더하고 옮기기를 빠뜨리면 사이트가 등록한 것이
+	// 조용히 사라진다. 양쪽 칸 수가 같아야 하고, 다르면 위 단언과 internal()·From 을 함께 고친다.
+	for _, pair := range [][2]any{{Extension{}, siteext.Extension{}}, {Route{}, siteext.Route{}}, {Context{}, siteext.Caller{}}} {
+		if a, b := reflect.TypeOf(pair[0]), reflect.TypeOf(pair[1]); a.NumField() != b.NumField() {
+			t.Errorf("%s 의 칸 %d개, %s 의 칸 %d개 — 옮기기를 함께 고친다", a, a.NumField(), b, b.NumField())
+		}
+	}
+}
+
+// 공개 상수와 코어 쪽 값이 같다 — 다르면 site.App 이 부팅 검사에서 「인증 방식 없음」으로 거부된다.
+func TestAuthValuesMatchTheCore(t *testing.T) {
+	if siteext.Auth(App) != siteext.AuthApp {
+		t.Errorf("site.App = %d, siteext.AuthApp = %d", App, siteext.AuthApp)
 	}
 }
 

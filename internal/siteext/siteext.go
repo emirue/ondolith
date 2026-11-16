@@ -27,8 +27,23 @@ type Extension struct {
 type Route struct {
 	Method  string
 	Path    string
+	Auth    Auth
 	Handler http.HandlerFunc
 }
+
+// Auth is what a route requires besides the switch (D42 5절).
+//
+// **빈 값은 없다 — 부팅 검사가 거부한다.** 빈 값이 「키만」이면, 사람마다 다른 데이터를 내는 라우트에 사람 인증을
+// 빠뜨린 것이 조용히 열린다. 키는 비밀이 아니므로(D42 지배 원칙 5) 열린 쪽이 기본값이 되면 안 된다.
+type Auth uint8
+
+const (
+	// AuthApp is the app key alone: 「어느 앱인지」. 사람을 가리지 않는 기능에만 쓴다.
+	AuthApp Auth = 1
+)
+
+// reservedSeg is the first path segment the core keeps for itself — 문자 인증 로그인 (D42 8절).
+const reservedSeg = "auth"
 
 var methods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
 
@@ -80,6 +95,14 @@ func (e Extension) Validate() error {
 			errs = append(errs, where+": 처리기가 없다")
 			bad = true
 		}
+		if r.Auth != AuthApp {
+			errs = append(errs, where+": 인증 방식을 정하지 않았다 — site.App(앱 키)을 적는다. 빈 값은 받지 않는다")
+			bad = true
+		}
+		if first, _, _ := strings.Cut(strings.TrimPrefix(r.Path, "/"), "/"); first == reservedSeg {
+			errs = append(errs, where+": "+APIPrefix+"/"+reservedSeg+"/ 는 코어의 문자 인증 로그인 몫이다")
+			bad = true
+		}
 		if !bad {
 			if err := register(mux, r.Method+" "+APIPrefix+r.Path); err != nil {
 				errs = append(errs, where+": 다른 라우트와 겹친다 — "+err.Error())
@@ -123,6 +146,11 @@ func CheckMigrations(fsys fs.FS) error {
 	files, err := fs.Glob(fsys, "*.sql")
 	if err != nil {
 		return err
+	}
+	if len(files) == 0 {
+		// embed.FS 를 그대로 넘기면 파일이 migrations/ 아래에 있다. 여기서 막지 않으면 설치를 마친 뒤에야 goose 가
+		// 「마이그레이션 없음」으로 운영 전환을 멈춘다.
+		return fmt.Errorf("사이트 마이그레이션의 맨 위에 .sql 파일이 없다 — embed.FS 를 fs.Sub(…, \"migrations\") 로 넘겼는지 본다")
 	}
 	var errs []string
 	for _, f := range files {

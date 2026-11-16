@@ -48,6 +48,17 @@ func TestCustomAPIScreen(t *testing.T) {
 	if rec := post(d.APIToggle, "/admin/settings/api", url.Values{"on": {"1"}}); rec.Code != http.StatusForbidden || enabled() != "" {
 		t.Fatalf("운영자의 켜기 = HTTP %d, 설정 %q", rec.Code, enabled())
 	}
+	// 발급·폐기도 최고 관리자만이다 — 재확인보다 먼저 거부한다(운영자에게는 비밀번호 칸이 의미가 없다).
+	op.password = "op pass"
+	if rec := post(d.APIKeyIssue, "/admin/settings/api/keys", url.Values{"name": {"x"}, "password": {"op pass"}}); rec.Code != http.StatusForbidden {
+		t.Fatalf("운영자의 발급 = HTTP %d, want 403", rec.Code)
+	}
+	if rec := post(d.APIKeyRevoke, "/admin/settings/api/keys/revoke", url.Values{"id": {"00000000-0000-4000-8000-000000000000"}, "password": {"op pass"}}); rec.Code != http.StatusForbidden {
+		t.Fatalf("운영자의 폐기 = HTTP %d, want 403", rec.Code)
+	}
+	if list, _ := d.APIKeys.List(ctx); len(list) != 0 {
+		t.Fatalf("운영자가 키를 만들었다: %+v", list)
+	}
 
 	su := &fakeCaller{superuser: true, reauth: true, email: "su@example.com", password: "correct horse battery"}
 	d.Caller = func(*http.Request) Caller { return su }

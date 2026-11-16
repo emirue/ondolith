@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	// siteAPIPerMinute is the per-key request ceiling (D42 5절). 앱 하나가 다른 앱과 사이트를 굶기지 않게.
+	// siteAPIPerMinute is the ceiling per (app key, client IP) (D42 5절). **키 하나에 걸지 않는다** — 키는 비밀이
+	// 아니라서(앱을 풀면 나온다) 키 전체에 걸면 키를 꺼낸 한 사람이 그 앱의 모든 사용자를 429 로 막는다.
 	siteAPIPerMinute = 120
-	// siteAPIPerIP bounds key lookups per client IP — 틀린 키로 두드려도 DB 조회가 끝없이 늘지 않게. 키별 상한은
-	// 맞는 키에만 걸리므로 그 앞에 둔다. 한 현장의 휴대폰들이 통신사 NAT 하나로 나와도 넉넉하다.
+	// siteAPIPerIP bounds every request per client IP, before anything reads the DB — 「켜짐」 확인도 DB 를 읽는다.
+	// 틀린 키로 두드리거나 꺼진 문을 두드려도 DB 조회가 끝없이 늘지 않는다. 한 현장의 휴대폰들이 통신사 NAT 하나로
+	// 나와도 넉넉하다.
 	siteAPIPerIP = 600
 	// siteAPIMaxBody bounds a request body. 앱이 보내는 것은 JSON 이다 — 파일은 이 길로 받지 않는다.
 	siteAPIMaxBody = 1 << 20
@@ -51,6 +53,11 @@ func (s *siteAPI) handler() http.Handler {
 // gate runs D42 5절's checks in order; next == nil is an unregistered address.
 func (s *siteAPI) gate(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r)
+		if !s.limiter.Allow("siteapi-ip:"+ip, auth.Limit{Burst: siteAPIPerIP, Window: time.Minute}) {
+			tooMany(w)
+			return
+		}
 		on, err := s.enabled(r.Context())
 		if err != nil {
 			s.fail(w, err)
@@ -60,12 +67,8 @@ func (s *siteAPI) gate(next http.HandlerFunc) http.Handler {
 			siteext.WriteError(w, http.StatusNotFound, "없는 주소입니다.")
 			return
 		}
-		if !s.limiter.Allow("siteapi-ip:"+clientIP(r), auth.Limit{Burst: siteAPIPerIP, Window: time.Minute}) {
-			tooMany(w)
-			return
-		}
-		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || raw == "" {
+		raw, ok := bearer(r)
+		if !ok {
 			siteext.WriteError(w, http.StatusUnauthorized, "앱 키가 필요합니다.")
 			return
 		}
@@ -78,7 +81,7 @@ func (s *siteAPI) gate(next http.HandlerFunc) http.Handler {
 			siteext.WriteError(w, http.StatusUnauthorized, "앱 키가 맞지 않습니다.")
 			return
 		}
-		if !s.limiter.Allow("siteapi:"+key.ID, auth.Limit{Burst: siteAPIPerMinute, Window: time.Minute}) {
+		if !s.limiter.Allow("siteapi:"+key.ID+"|"+ip, auth.Limit{Burst: siteAPIPerMinute, Window: time.Minute}) {
 			tooMany(w)
 			return
 		}
@@ -107,6 +110,13 @@ func (s *siteAPI) gate(next http.HandlerFunc) http.Handler {
 		}()
 		next(rw, r.WithContext(ctx))
 	})
+}
+
+// bearer reads "Authorization: Bearer <key>". 인증 방식 이름은 대소문자를 가리지 않는다 (RFC 9110 11.1).
+func bearer(r *http.Request) (string, bool) {
+	scheme, raw, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	raw = strings.TrimSpace(raw)
+	return raw, ok && strings.EqualFold(scheme, "Bearer") && raw != ""
 }
 
 func tooMany(w http.ResponseWriter) {

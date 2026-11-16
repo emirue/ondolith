@@ -26,8 +26,8 @@ func main() {
 	site.Main(site.Extension{
 		Migrations: migrations,
 		API: []site.Route{
-			{Method: "POST", Path: "/v1/checkins", Handler: checkIn},
-			{Method: "GET", Path: "/v1/checkins", Handler: listCheckins},
+			{Method: "POST", Path: "/v1/checkins", Auth: site.App, Handler: checkIn},
+			{Method: "GET", Path: "/v1/checkins", Auth: site.App, Handler: listCheckins},
 		},
 	})
 }

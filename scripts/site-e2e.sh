@@ -42,9 +42,28 @@ CID=$(docker ps --filter "publish=$PGPORT" -q)
 [ -n "$CID" ] || { echo "테스트 DB 컨테이너가 없다 — sh scripts/testdb.sh up" >&2; exit 1; }
 docker exec "$CID" psql -U ondolith -d postgres -q -c "DROP DATABASE IF EXISTS $DB" -c "CREATE DATABASE $DB OWNER ondolith" || exit 1
 
-echo "사이트 실행 파일 한 바퀴 (examples/site)"
-go build -o "$BIN" ./examples/site || exit 1
-case "$("$BIN" -version)" in "ondolith "*) ok "-version 이 코어 버전을 말한다" ;; *) bad "-version: $("$BIN" -version)" ;; esac
+echo "사이트 실행 파일 한 바퀴 (examples/site 를 별도 모듈로)"
+# **사이트 저장소와 같은 모양으로 빌드한다.** 코어 모듈 안에서 빌드하면 internal/ 을 그대로 볼 수 있고, 빌드 정보의
+# 주 모듈이 코어라 사이트 버전 갈래가 한 번도 돌지 않는다. 별도 모듈이 replace 로 코어를 가져와 site 만 쓴다 —
+# juwon_forestry 가 할 일과 같다. go.sum 은 코어 것에서 시작해 tidy 가 맞춘다.
+MOD=$WORK/sitemod
+mkdir -p "$MOD/migrations"
+cp examples/site/main.go "$MOD/" && cp examples/site/migrations/*.sql "$MOD/migrations/" && cp go.sum "$MOD/go.sum"
+{
+	echo "module example.com/sitee2e"
+	echo
+	grep -E '^(go|toolchain) ' go.mod
+	echo
+	echo "require github.com/emirue/ondolith v0.0.0"
+	echo
+	echo "replace github.com/emirue/ondolith => $PWD"
+} >"$MOD/go.mod"
+(cd "$MOD" && go mod tidy >"$WORK/tidy.log" 2>&1 && go build -o "$BIN" .) || { cat "$WORK/tidy.log"; exit 1; }
+# replace 로 끼운 코어의 판은 거짓이라 dev 다. 사이트 모듈 경로가 따로 붙는다 (D42 12절).
+case "$("$BIN" -version)" in
+"ondolith dev "*"· 사이트 example.com/sitee2e "*) ok "밖의 모듈이 site 로 빌드되고, -version 이 코어(dev)와 사이트를 따로 말한다" ;;
+*) bad "-version: $("$BIN" -version)" ;;
+esac
 
 (cd "$WORK" && exec "$BIN" -addr "127.0.0.1:$PORT" -config ./ondolith.json >>"$WORK/log" 2>&1) &
 SRV=$!
