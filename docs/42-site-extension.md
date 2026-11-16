@@ -1,0 +1,265 @@
+# D42. 사이트 확장 — 사이트 Go 코드로 표·관리자 화면·앱 API·문자 로그인
+
+> 코어 위에 사이트를 만드는 저장소가 **자기 Go 코드**로 표를 더하고, 관리자에 화면을 더하고, 모바일 앱이 부를
+> API 를 더하게 한다. 코어는 확장 지점과 그 둘레의 안전장치(켜기/끄기·앱 키·요청 상한·문자 인증·토큰)만 맡고,
+> 사이트 기능 자체는 만들지 않는다. 사이트 저장소 작성자는 2·3·12·13절을, 코어 개발자는 전부를 읽는다.
+> 근거: [NFR-401](10-requirements.md)(훅 포인트만, 로더 없음), [DEC-0](../.ai/DECISIONS.md)·[DEC-3.6](../.ai/DECISIONS.md)(Go `plugin` 금지).
+
+**처음 쓰는 곳.** 주원산림 사이트의 인부 관리다. 관리자는 인부를 전화번호로 등록하고 출퇴근 기록·입금 내역을
+관리한다. 인부는 Flutter 앱에서 문자 인증으로 로그인해 출근·퇴근을 찍고, **자기** 일한 날과 입금 내역을 본다.
+이 문서는 그것이 사이트 저장소만으로 가능하도록 코어가 열어 줄 것을 정한다.
+
+## 지배 원칙
+
+| # | 원칙 | 근거 |
+|---|---|---|
+| 1 | **로더를 만들지 않는다. 컴파일할 때 붙인다.** 사이트 저장소가 코어를 Go 모듈로 가져와 자기 실행 파일을 빌드한다 | NFR-401 은 훅 포인트를 두고 로더는 두지 않는다. Go `plugin` 은 툴체인이 정확히 같아야 하고 언로드가 안 된다(DEC-3.6) |
+| 2 | **사이트 코드는 그 실행 파일을 만드는 사람의 코드다.** 그래서 테마와 달리 관리자 템플릿과 SQL 을 들고 올 수 있다 | [D41](41-theme-admin.md) 지배 원칙 1 이 막는 것은 **남이 만든** 테마 파일이 관리자 출처에서 도는 것이다. 사이트 코드는 운영자가 직접 빌드해 넣는다 — 신뢰 경계는 실행 파일이다 |
+| 3 | **코어 주소와 코어 표를 덮지 못한다.** 사이트 주소는 `/api/site/` 와 `/admin/site/` 아래에만, 사이트 표는 `site_` 로 시작하고 사이트 마이그레이션은 별도 버전 표로 돈다 | 코어를 올릴 때 사이트가 깨지거나, 사이트가 코어 화면을 가로채면 안 된다 |
+| 4 | **확장이 없으면 지금과 같다.** 코어 릴리즈 실행 파일(`cmd/ondolith`)은 빈 확장으로 같은 부팅 코드를 부른다 | 테마만 쓰는 사이트(커뮤니티 등)는 아무것도 바꾸지 않는다 |
+| 5 | **앱 키는 비밀이 아니다.** 앱을 풀면 꺼낼 수 있다. 「어느 앱인지」와 요청 상한에만 쓰고, 「누구인지」는 문자 인증 토큰이 말한다 | 키 하나로 사람마다 다른 데이터를 열면, 키를 꺼낸 사람이 모두의 데이터를 본다 |
+| 6 | **공개 패키지 `site` 는 약속이다.** 바꾸면 사이트 빌드가 깨지므로, 고칠 때 CHANGELOG 에 `⚠️ 파괴적 변경` 으로 적는다 | 코어의 나머지는 `internal/` 이라 사이트가 기댈 수 없다 — 기댈 수 있는 것은 이 패키지뿐이다 |
+
+## 1. 범위
+
+**하는 것**: 사이트 실행 파일 진입점, 사이트 마이그레이션, 사이트 관리자 화면·메뉴·권한, `/api/site/` 앱 API,
+관리자 「커스텀 API」 화면(켜기/끄기·앱 키), 전화번호 문자 인증 로그인과 앱 토큰, 관리자 「문자(SMS)」 설정
+(네이버 클라우드 SENS), 예제 사이트(`examples/site`).
+
+**하지 않는 것**
+
+| 하지 않는 것 | 이유 |
+|---|---|
+| 인부 관리 자체(인부·출퇴근·입금 표와 화면) | 사이트 기능이다. 주원산림 저장소가 만든다 |
+| 실행 중에 확장을 읽어 들이기(플러그인 로더·WASM) | 지배 원칙 1. 로드맵의 「플러그인 로더」 행은 그대로 보류다 |
+| 코어 사건 훅(주문 결제·글 작성에 끼어들기) | 요청에 없다. 필요해지면 이 문서에 절을 더한다 |
+| 웹 회원 계정과 앱 계정을 잇기 | 인부는 이메일이 없을 수 있다. 앱 계정은 사이트가 정한 대상(subject)이다 |
+| 브라우저에서 부르는 API(CORS) | 쓰는 곳이 모바일 앱이다. 다른 도메인의 웹 화면이 부를 때 더한다 |
+| 문자 업체 여럿을 화면에서 고르기 | SENS 하나다. 다른 업체는 사이트 코드가 보내기 함수를 바꿔 끼운다(9절) |
+| 푸시 알림 | 요청에 없다 |
+
+## 2. 사이트 저장소의 모양
+
+```
+juwon_forestry/
+  go.mod                 module …/juwon ; require github.com/emirue/ondolith <코어 태그>
+  main.go                site.Main(ext) 한 줄
+  workers/               사이트 기능 (처리기·SQL)
+  migrations/            00001_workers.sql …  (goose 형식, 표는 site_ 로 시작)
+  admin/                 관리자 화면 템플릿 (html/template, embed)
+  src/themes/juwon/      테마 — 지금과 같다
+```
+
+```go
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+//go:embed admin/*.html
+var adminPages embed.FS
+
+func main() {
+	site.Main(site.Extension{
+		Migrations:  migrations,
+		Permissions: []site.Permission{{Key: "site.workers.manage", Name: "인부 관리"}},
+		Admin: []site.AdminPage{
+			{Menu: "인부 관리", Path: "/workers", Permission: "site.workers.manage", Handler: workersPage},
+		},
+		API: []site.Route{
+			{Method: "POST", Path: "/attendance/in", Auth: site.Person, Handler: clockIn},
+			{Method: "GET", Path: "/me/payments", Auth: site.Person, Handler: myPayments},
+		},
+		Phone: site.PhoneLogin{Lookup: workerByPhone}, // 이 번호가 로그인해도 되는 사람인가
+	})
+}
+```
+
+빌드·배포는 13절. 테마는 지금처럼 따로 올린다.
+
+## 3. 공개 패키지 `github.com/emirue/ondolith/site`
+
+| 이름 | 하는 일 |
+|---|---|
+| `Main(Extension)` | 지금 `cmd/ondolith` 이 하는 일 전부(플래그·설정·설치 화면·운영 트리) + 확장. 실패하면 로그를 남기고 종료 코드 1 |
+| `Extension` | `Migrations fs.FS`, `Permissions []Permission`, `Admin []AdminPage`, `API []Route`, `Phone PhoneLogin`, `SMS Sender`(비우면 관리자 SENS 설정을 쓴다) |
+| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Auth`(`site.App` = 앱 키만, `site.Person` = 앱 키 + 문자 인증 토큰), `Handler http.HandlerFunc` |
+| `AdminPage` | `Menu`(사이드바 글자), `Path`(`/admin/site` 뒤), `Permission`(`site.` 로 시작하는 키), `Handler`. GET 과 POST 를 한 처리기가 받는다 |
+| `Permission` | `Key`(`site.` 로 시작), `Name`(역할 편집기에 보이는 이름) |
+| `PhoneLogin` | `Lookup func(ctx, phone string) (subject string, ok bool, err error)` — 정규화한 번호(숫자만)를 받아 로그인할 대상을 돌려준다. 비우면 문자 로그인을 쓰지 않는다 |
+| `From(r) Context` | 처리기 안에서: `DB`(`*pgxpool.Pool`), `App`(부른 앱 키의 이름), `Subject`(`site.Person` 일 때 로그인한 대상), `Actor`(관리자 화면일 때 관리자 id·이름), `Log`(`*slog.Logger`) |
+| `RenderAdmin(w, r, title, t *template.Template, data any)` | 사이트 템플릿을 코어 관리자 틀(머리글·사이드바·알림·`admin.js`) 안에 그린다. `t` 는 `content` 블록을 정의해야 한다 |
+| `Done(w, r, to, notice)` | 성공한 관리자 POST 의 끝. 알림을 싣고 303 ([D19](19-screen-io.md) C11) |
+| `Reauth(r) bool` | 비밀번호 재확인 창이 열려 있는지 — 돈·자격증명을 다루는 사이트 화면이 쓴다 ([D15](15-access-control.md) 5.3-1) |
+| `OpLog(r, action, target, summary)` | 작업 로그(A-601 화면)에 한 줄 |
+| `EndSessions(ctx, subject)` | 그 대상의 앱 토큰을 모두 끊는다 — 인부가 그만둘 때 |
+| `JSON(w, status, v)`, `Error(w, status, msg)` | 앱 API 응답. 오류는 언제나 `{"error": "..."}` |
+
+`From(r)` 이 돌려주는 것은 코어가 앞에서 확인을 마친 값이다. 처리기가 다시 확인할 필요가 없다.
+
+## 4. 부팅 순서
+
+1. 설정을 읽는다. 설치 전이면 설치 화면이 뜬다 — 확장은 설치가 끝난 뒤에 붙는다.
+2. 코어 마이그레이션을 올린다.
+3. **사이트 마이그레이션을 올린다.** goose 의 `WithTableName("site_goose_db_version")` 로 코어와 버전 표를 나눈다
+   (goose v3.27.3, `go doc github.com/pressly/goose/v3.WithTableName` 로 확인). 실패하면 서버가 뜨지 않는다.
+4. 사이트 권한 키를 권한 표에 넣는다(있으면 이름만 고친다). 역할 편집기에 보이고, 기본으로는 최고 관리자만 가진다.
+5. 부팅 검사. 하나라도 걸리면 서버가 뜨지 않고 무엇이 틀렸는지 로그에 남긴다.
+   - 주소·권한 키 모양(`/` 로 시작, `..`·`//` 없음, `site.` 접두사), 같은 메서드·주소 두 번
+   - 관리자 화면의 권한이 4에서 넣은 키인가
+   - `site.Person` 라우트가 있는데 `Phone.Lookup` 이 없다
+6. 라우트를 등록한다. 코어 라우트 표(registry)를 거친다 — 사이트 라우트도 D11 의 화면 하나(「사이트 확장」)에 묶여
+   부팅 검사가 본다 ([D15](15-access-control.md) 4.4).
+
+## 5. 앱 API 요청 흐름
+
+Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `X-Ondolith-Session: <토큰>`) 를 실어 보낸다.
+
+| 순서 | 코어가 보는 것 | 실패하면 |
+|---|---|---|
+| 1 | 관리자 「커스텀 API」 가 켜져 있다 | 404 |
+| 2 | 앱 키가 있고 폐기되지 않았다 (SHA-256 해시로 찾는다) | 401 |
+| 3 | 키별 요청 상한 — 분당 120회 | 429 |
+| 4 | `site.Person` 이면 토큰이 있고 만료·폐기되지 않았다 | 401 |
+| 5 | 본문 1MB 이하 | 413 |
+| 6 | 사이트 처리기. 패닉은 500 으로 막고 로그를 남긴다 | 500 |
+
+- 응답은 JSON 이다. 오류의 모양은 하나다: `{"error": "사람이 읽는 한국어 문장"}`.
+- 교차 출처 보호(`http.CrossOriginProtection`)는 `Origin`·`Sec-Fetch-Site` 가 없는 요청을 브라우저가 아닌 요청으로
+  보고 통과시킨다(`go doc net/http.CrossOriginProtection`). 앱 요청은 막히지 않고, 브라우저의 교차 출처 POST 는
+  지금처럼 막힌다.
+- 키·토큰·인증번호는 로그와 작업 로그에 남기지 않는다. 키의 이름과 마지막 사용 시각만 남긴다.
+
+## 6. 관리자 「커스텀 API」 화면
+
+최고 관리자만, 키를 만들거나 폐기할 때 비밀번호를 다시 묻는다(자격증명 — [D15](15-access-control.md) 5.3-1 표에 더한다).
+
+- **켜기/끄기**: 끄면 `/api/site/` 전체가 404 다. 문자 로그인도 함께 꺼진다.
+- **등록된 API**: 이 실행 파일에 붙은 라우트 목록(메서드·주소·인증 방식). 확장이 없는 실행 파일이면 「이 실행 파일에는
+  사이트 API 가 없습니다」라고 쓴다 — 켜도 열리는 것이 없다.
+- **앱 키**: 이름(예: `flutter-android`)을 넣고 만들면 키를 **한 번만** 보여 준다. 표에는 이름·만든 날·마지막 사용·
+  폐기 단추. 폐기는 확인 창을 띄운다([D19](19-screen-io.md) C12). 키는 32바이트 난수, 저장은 SHA-256 해시.
+
+## 7. 관리자 확장
+
+- 사이드바에 「사이트」 묶음이 생기고 `AdminPage` 가 등록 순서대로 들어간다. 메뉴는 그 권한이 있는 관리자에게만 보인다.
+- 주소는 `/admin/site/<Path>`. 관리자 트리의 문(`admin.access`)과 그 화면의 권한을 코어가 먼저 확인한다.
+- `RenderAdmin` 은 코어 `layout.html` 의 `content` 블록 자리에 사이트 템플릿을 넣는다. 그래서 저장 알림(C11)·두 번
+  누르기 방지(C13)·관리자 테마·휴대폰 폭이 그대로 따라온다. 확인 창(C12)은 사이트 템플릿이 단추에 단다 —
+  코어 템플릿과 같은 `onclick="return confirm(...)"` 이다.
+- 사이트 화면의 POST 도 교차 출처 보호를 그대로 받는다. 성공하면 `site.Done` 으로 끝낸다 — 코어의
+  `TestAdminChangesReturnThroughDone` 같은 검사는 사이트 코드에 닿지 않으므로 예제 사이트가 그 모양을 보여 준다.
+
+## 8. 전화번호 문자 인증 로그인
+
+| 단계 | 요청 | 코어가 하는 일 |
+|---|---|---|
+| 1 | `POST /api/site/login/code` `{"phone":"010…"}` (앱 키) | 번호를 숫자만 남겨 정규화한다. `Phone.Lookup` 이 허락한 번호면 6자리 인증번호를 만들어(crypto/rand) 해시로 저장하고 문자로 보낸다. **허락하지 않은 번호에도 같은 응답** — 등록 여부를 알려 주지 않는다 |
+| 2 | `POST /api/site/login/verify` `{"phone":"…","code":"123456"}` | 5분 안, 틀린 입력 5번 미만이면 확인한다. 맞으면 앱 토큰(32바이트 난수, 해시로 저장, 30일)을 돌려준다 |
+| 3 | 이후 요청 | `X-Ondolith-Session: <토큰>`. 쓸 때마다 마지막 사용 시각을 고친다 |
+| 4 | `POST /api/site/logout` | 그 토큰을 끊는다 |
+
+- **상한**: 같은 번호로 10분에 3통·하루 10통, 같은 IP 에서 시간당 20통 — 문자는 돈이고 남의 번호로 폭탄을 보낼 수
+  있다. 넘으면 429. 기존 요청 상한기(`auth.Limiter`)를 쓴다.
+- 문자 내용: `[사이트 이름] 인증번호 123456 (5분)`. SENS 의 SMS 는 EUC-KR 90바이트까지다 — 사이트 이름이 길면 줄인다.
+- 인부가 그만두면 사이트 코드가 `site.EndSessions` 를 부르고 `Lookup` 이 그 번호를 더 허락하지 않는다.
+
+## 9. 관리자 「문자(SMS)」 설정 — 네이버 클라우드 SENS
+
+메일(A-205)과 같은 모양이다. 최고 관리자만, 저장할 때 비밀번호 재확인. 시크릿 키는 봉인해 저장하고 화면에 다시
+보이지 않는다.
+
+| 칸 | 비고 |
+|---|---|
+| 액세스 키 · 시크릿 키 | 네이버 클라우드 인증키 |
+| 서비스 ID | `ncp:sms:kr:…:…` 모양 |
+| 발신번호 | SENS 콘솔에 등록한 번호만 쓸 수 있다 |
+
+- **시험 발송**: 그 관리자가 넣은 번호로 한 통, 시간당 5번. 결과(성공 또는 SENS 가 돌려준 오류)를 화면에 그린다.
+- **보내는 방법** (공식 문서 `https://api.ncloud-docs.com/docs/en/sens-sms-send`, `…/common-ncpapi`, 2026-11-16 확인):
+  `POST https://sens.apigw.ntruss.com/sms/v2/services/{serviceId}/messages`, 본문
+  `{"type":"SMS","from":발신번호,"content":내용,"messages":[{"to":번호}]}`. 머리글 `x-ncp-apigw-timestamp`(밀리초, 5분
+  넘게 어긋나면 거부), `x-ncp-iam-access-key`, `x-ncp-apigw-signature-v2` = Base64(HMAC-SHA256(시크릿 키,
+  `"POST /sms/v2/services/{serviceId}/messages\n{timestamp}\n{accessKey}"`)). 응답 `statusCode` 가 `"202"` 면 접수된
+  것이다 — 실제 도착 결과는 비동기라 이 기능은 접수까지만 본다.
+- 사이트가 `Extension.SMS` 를 주면 SENS 대신 그것을 쓴다(다른 업체·개발용 로그 발송).
+
+## 10. 코어가 더하는 표
+
+| 표 | 칸 | 비고 |
+|---|---|---|
+| `api_keys` | id, name, key_hash(unique), created_by, created_at, last_used_at, revoked_at | 6절 |
+| `app_sessions` | token_hash(PK), subject, created_at, expires_at, last_used_at | 8절. 지난 행은 하루 한 번 지운다 |
+| `app_login_codes` | phone, code_hash, expires_at, attempts | 8절. 번호당 마지막 하나만 |
+
+설정 키: `api.enabled`, `sms.sens.*`(시크릿은 봉인). 사이트 표는 사이트 마이그레이션이 만든다. 백업(A-604)은 DB 전체라
+사이트 표도 들어간다.
+
+## 11. 보안 점검
+
+| 위험 | 막는 것 |
+|---|---|
+| 사이트 주소가 코어 화면을 가로챔 | 접두사 고정 + 부팅 검사(4절 5) |
+| 앱 키 유출 | 사람 데이터는 토큰이 있어야 열린다(지배 원칙 5). 키는 폐기할 수 있다 |
+| 인증번호 맞히기 | 6자리·5분·5회, 번호·IP 상한. 해시로만 저장 |
+| 문자 폭탄·비용 | 8절 상한. 허락되지 않은 번호에는 보내지 않는다 |
+| 등록된 번호 알아내기 | 허락 여부와 관계없이 같은 응답 |
+| 토큰 탈취 | 해시로만 저장, 30일 만료, `EndSessions`. HTTPS 는 운영 설정이 맡는다([D70](70-operations.md)) |
+| 사이트 처리기 패닉·큰 본문 | 500 으로 막음, 1MB 상한 |
+| 관리자 사이트 화면의 CSRF | 코어 교차 출처 보호가 그대로 적용 |
+| 비밀이 로그에 | 키·토큰·인증번호·SENS 시크릿은 어떤 로그에도 남기지 않는다 |
+
+## 12. 버전
+
+**사이트 실행 파일에서도 코어 버전이 정확해야 한다.** 지금 코어 버전은 릴리즈 빌드가 `main.version` 에 찍는 값인데,
+사이트 실행 파일에서는 `main` 이 사이트의 것이라 그 값이 비고 `dev` 가 된다. 그러면 테마 `requires` 검사(FR-313)가
+경고만 남기고 건너뛰고(`theme.CheckRequires` 의 개발 빌드 분기), 시스템 화면(A-602)도 `dev` 를 보인다.
+
+| 무엇 | 정하는 법 |
+|---|---|
+| 코어 버전 (사이트 실행 파일) | 빌드 정보(`runtime/debug.ReadBuildInfo`)의 의존 모듈 `github.com/emirue/ondolith` 의 버전. 찍어 넣을 것이 없다 — `go.mod` 가 곧 버전이다. `replace` 로 로컬 코어를 쓰면 `dev` |
+| 코어 버전 (코어 릴리즈 실행 파일) | 지금처럼 `-X main.version` |
+| 사이트 버전 | 빌드 정보의 주 모듈 경로·버전, 없으면 VCS 커밋 앞 12자리 |
+| 보이는 곳 | `-version` 출력(`ondolith v0.8.0 · 사이트 …/juwon (커밋 abc123…) linux/amd64`), 시스템 화면, 테마 `requires` 검사 |
+
+- **결정은 순수 함수 하나**(`*debug.BuildInfo` 를 받아 코어·사이트 버전을 돌려준다)로 두고 시험한다 — `go test` 빌드에는
+  의존 버전이 기록되지 않아, 실행 파일을 거쳐서는 이 분기를 물 수 없다(지금 `formatVersion` 과 같은 이유).
+- **코어 릴리즈 번호**는 지금 규칙 그대로 CHANGELOG 분류로 정한다 — 새 기능(Added)이 있으면 부 버전, 고침·변경만이면
+  수 버전. `site` 패키지를 비호환으로 바꾸면 `⚠️ 파괴적 변경` 과 함께 부 버전을 올린다(v0 동안. v1 뒤로는 주 버전).
+- **사이트 저장소**는 `go.mod` 의 코어 버전과 `CORE_VERSION` 파일을 같게 둔다. 둘이 다르면 어느 쪽이 도는지 알 수
+  없다 — 사이트의 빌드가 둘을 비교해 다르면 멈추게 한다(사이트 저장소의 일, 예제 사이트가 그 검사를 보여 준다).
+- **앱 API 경로에 판을 넣기를 권한다**(`/api/site/v1/...`). 사람들 휴대폰에 깔린 옛 앱은 바로 바뀌지 않는다 — 경로를
+  바꿀 때 옛 경로를 옛 앱이 사라질 때까지 남긴다. 코어는 경로 모양을 강제하지 않는다.
+
+## 13. 빌드·배포
+
+- 사이트 저장소: `go mod init`, `go get github.com/emirue/ondolith@<코어 태그>`, `go build -o bin/ondolith .`. 서버에 올리는
+  것은 그 실행 파일이고, 설정 파일·테마·업로드 폴더는 지금과 같다([D70](70-operations.md) 절차 그대로).
+- 코어를 올릴 때는 `go get …@새 태그` 후 다시 빌드한다. CHANGELOG 에 `⚠️` 가 있으면 `site` 패키지 변경을 먼저 읽는다.
+- 코어 릴리즈 실행 파일은 지금처럼 나간다 — 확장이 없는 사이트는 그대로 쓴다.
+- `examples/site` 가 모든 확장 지점(표·관리자 화면·앱 API·문자 로그인)을 쓰는 작은 사이트다. `make check` 가 빌드하고,
+  통합 시험이 그 실행 파일로 「표 생성 → 관리자 화면 → 키 발급 → 문자 로그인(로그 발송) → 앱 API」 한 바퀴를 돈다.
+  공개 패키지를 바꿔 예제가 깨지면 코어 CI 가 먼저 안다.
+
+## 14. 시험
+
+단계마다 **실패하는 시험을 먼저** 쓰고, 다 만든 뒤 대상 코드를 일부러 고장내 시험이 잡는지 확인한다(CLAUDE.md
+「검증」). 돌리지 못한 것은 통과로 세지 않는다.
+
+| 층 | 무엇을 | 어떻게 |
+|---|---|---|
+| 단위 | 버전 결정(12절 — 의존 버전·`replace`·주 모듈), 주소·권한 키 검사(4절 5), 전화번호 정규화, 인증번호·토큰 만들기와 해시, 상한, 오류 JSON 모양 | `go test` — 경계값(빈 값·`..`·중복·만료 직전·5번째 시도) 포함 |
+| SENS | 서명 문자열과 값, 요청 본문·머리글, `202` 성공, 4xx·5xx·시간 초과 오류 | 서명은 공식 문서의 규칙대로 손으로 계산한 값과 비교한다. 가짜 SENS 서버(`httptest`)가 받은 요청을 검사한다 |
+| 통합 | 사이트 마이그레이션(별도 버전 표, 실패 시 부팅 중단), 권한 넣기, `api_keys`·`app_sessions`·`app_login_codes`, 관리자 화면의 권한·재확인·작업 로그 | 시험 DB(`make test-integration`) |
+| 예제 사이트 한 바퀴 | `examples/site` 실행 파일을 띄워: 설치 → 사이트 표 생성 → 관리자 사이트 화면 → 「커스텀 API」 켜기·키 발급 → 문자 인증(로그 발송에서 번호를 읽음) → `site.Person` API → 키 폐기 401·끄기 404·토큰 끊기 401 | 셸 시나리오(`make e2e` 와 같은 방식). 요청은 Flutter 앱이 보내는 것과 같은 모양(JSON·`Authorization`·`X-Ondolith-Session`, `Origin` 없음) |
+| 화면 | 사이트 관리자 화면·「커스텀 API」·「문자(SMS)」 화면의 레이아웃, 키를 한 번만 보이기, 폐기 확인 창 | `make ui`(전 화면 3폭) + 실제 Chrome 시험 |
+| 실제 SENS | 실제 문자 한 통 | 운영자 키가 있어야 한다 — 그때 운영자와 함께 시험 발송 단추로 확인하고, 결과를 기록한다. 키는 저장소에 넣지 않는다 |
+
+## 15. 구현 순서
+
+세 번에 나눠 만들고, 각각 따로 시험하고 따로 병합한다. 요구사항·화면 ID 는 각 단계에서 [D10](10-requirements.md)·
+[D11](11-screens.md) 에 더한다.
+
+| 단계 | 담는 것 | 끝났다는 것 |
+|---|---|---|
+| 1. 골격 | 3절의 `Main`·`Extension`·`Route`(`site.App` 만)·`From`·`JSON`/`Error`, 4절 부팅 순서, 5절 흐름, 6절 화면, `api_keys` 표, 12절 버전, 예제 사이트 | 예제 실행 파일에서 사이트 표가 생기고, 발급한 키로 `/api/site/…` 가 답하고, 끄면 404, 폐기한 키는 401. 의존 버전이 기록된 빌드 정보에서 코어 버전이 그 값으로 나오고 테마 `requires` 를 실제로 비교한다 |
+| 2. 관리자 확장 | `AdminPage`·`Permission`·`RenderAdmin`·`Done`·`Reauth`·`OpLog`, 7절 | 예제의 관리자 화면이 사이드바에 보이고 권한 없는 관리자에게는 막히며, 저장하면 알림이 뜬다 |
+| 3. 앱 로그인 | 8·9절, `site.Person`, `EndSessions`, 두 표 | 로그 발송으로 받은 인증번호로 토큰을 받아 `site.Person` 라우트가 대상을 알고, 상한·만료·폐기가 문다. SENS 서명은 공식 문서의 예와 같은 값을 만든다 |
