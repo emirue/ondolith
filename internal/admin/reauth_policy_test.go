@@ -22,6 +22,8 @@ import (
 // 템플릿 쪽 TestReauthFieldOnlyWhereTheServerAsks 가 본다.
 func TestReauthIsAskedExactlyWhereD15Says(t *testing.T) {
 	want := []string{
+		"APIKeyIssue",          // A-213 앱 키 발급 (켜기·끄기는 묻지 않는다)
+		"APIKeyRevoke",         // A-213 앱 키 폐기
 		"BackupDownload",       // A-604 내려받기 (설정 저장은 뺀다)
 		"BoardDelete",          // A-305
 		"MailSettingsSave",     // A-205 저장 (시험 발송은 묻지 않는다)

@@ -480,6 +480,8 @@ func NewSite(ctx context.Context, cfg *config.Config, version string, log *slog.
 		UploadDir:     cfg.Uploads(),
 		BackupDir:     cfg.Backups(),
 		SecureCookies: cfg.SecureCookies,
+		APIKeys:       apikeys.New(pool),
+		SiteAPI:       siteAPILines(ext.API),
 		OpLog:         contentStore.OpLog(),
 		Logger:        log,
 		BaseURL:       baseURL,

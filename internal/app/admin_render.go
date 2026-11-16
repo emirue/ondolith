@@ -156,6 +156,7 @@ var adminScreenTitles = map[string]string{
 	"admin/seo.html":              "검색 노출",
 	"admin/mail.html":             "메일 설정",
 	"admin/storage.html":          "파일 저장소",
+	"admin/api.html":              "커스텀 API",
 	"admin/theme-screen.html":     "테마 화면", // 처리기가 선언의 title 로 덮어쓴다 (D41 5절)
 	"admin/pages.html":            "페이지",
 	"admin/page-edit.html":        "페이지 편집",

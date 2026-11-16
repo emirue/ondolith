@@ -189,6 +189,16 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "settings.update", Handler: ad.StorageSettingsForm})
 	r.Add(Route{Screen: "A-210", Method: "POST", Pattern: "/admin/settings/storage", Class: SC5,
 		Permission: "settings.update", Handler: ad.StorageSettingsSave})
+	// A-213 커스텀 API (D42 6절). 켜기·끄기, 키 발급, 키 폐기가 따로다 — 재확인이 발급·폐기에만 걸리므로 한 POST 의
+	// action 으로 묶으면 재확인 판정이 동작 이름에 따라 갈린다 (FR-726 의 BackupDownload 예외와 같은 꼴).
+	r.Add(Route{Screen: "A-213", Method: "GET", Pattern: "/admin/settings/api", Class: SC4,
+		Permission: "settings.update", Handler: ad.APISettingsForm})
+	r.Add(Route{Screen: "A-213", Method: "POST", Pattern: "/admin/settings/api", Class: SC5,
+		Permission: "settings.update", Handler: ad.APIToggle})
+	r.Add(Route{Screen: "A-213", Method: "POST", Pattern: "/admin/settings/api/keys", Class: SC5,
+		Permission: "settings.update", Handler: ad.APIKeyIssue})
+	r.Add(Route{Screen: "A-213", Method: "POST", Pattern: "/admin/settings/api/keys/revoke", Class: SC5,
+		Permission: "settings.update", Handler: ad.APIKeyRevoke})
 
 	r.Add(Route{Screen: "A-202", Method: "GET", Pattern: "/admin/themes", Class: SC4,
 		Permission: "theme.view", Handler: ad.ThemeList})

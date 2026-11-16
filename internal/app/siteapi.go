@@ -138,3 +138,12 @@ func (w *wroteWriter) Write(b []byte) (int, error) {
 
 // Unwrap lets http.ResponseController reach the real writer (flush, deadlines).
 func (w *wroteWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// siteAPILines is A-213's list of this binary's site API, "METHOD /api/site/…".
+func siteAPILines(routes []siteext.Route) []string {
+	lines := make([]string, 0, len(routes))
+	for _, rt := range routes {
+		lines = append(lines, rt.Method+" "+siteext.APIPrefix+rt.Path)
+	}
+	return lines
+}

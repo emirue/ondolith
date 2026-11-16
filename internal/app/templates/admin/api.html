@@ -1,0 +1,94 @@
+{{define "content"}}
+{{/* A-213 커스텀 API (D42 6절). 사이트 실행 파일이 붙인 /api/site/ 를 켜고, 모바일 앱에 줄 키를 발급·폐기한다. */}}
+{{with .Issued}}
+<div class="adm-card" role="status">
+  <h2>발급한 앱 키</h2>
+  <p class="adm-hint"><strong>이 화면을 벗어나면 다시 볼 수 없습니다.</strong> 지금 앱 설정에 넣으세요. 서버는 키를 해시로만
+    남깁니다 — 잃어버리면 폐기하고 새로 발급하세요.</p>
+  <label class="adm-field">
+    <span>키</span>
+    <input type="text" value="{{.}}" readonly aria-label="발급한 앱 키" autocomplete="off" spellcheck="false">
+  </label>
+  <p class="adm-hint">앱은 요청마다 <code>Authorization: Bearer 키</code> 머리글을 붙입니다. 앱에 넣은 키는 앱을 풀면 꺼낼 수
+    있으므로 「어느 앱인지」를 가리킬 뿐 사람을 가리지 않습니다.</p>
+</div>
+{{end}}
+
+<div class="adm-card">
+  <h2>상태</h2>
+  <p class="adm-hint">{{if .Enabled}}<strong>켜짐</strong> — 발급한 앱 키로 <code>/api/site/</code> 를 부를 수 있습니다.{{else}}<strong>꺼짐</strong> — <code>/api/site/</code> 는 모두 404 입니다.{{end}}</p>
+  <form method="post" action="/admin/settings/api">
+    {{if .Enabled}}
+    <div class="adm-actions adm-actions--end">
+      <button onclick="return confirm('커스텀 API 를 끌까요? 앱의 요청이 바로 모두 404 가 됩니다.')" class="adm-btn adm-btn--danger">끄기</button>
+    </div>
+    {{else}}
+    <input type="hidden" name="on" value="1">
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn adm-btn--primary">켜기</button>
+    </div>
+    {{end}}
+  </form>
+</div>
+
+<div class="adm-card">
+  <h2>이 실행 파일의 사이트 API</h2>
+  {{if .Routes}}
+  <ul>
+    {{range .Routes}}<li><code>{{.}}</code></li>{{end}}
+  </ul>
+  {{else}}
+  <p class="adm-hint">이 실행 파일에는 사이트 API 가 없습니다 — 켜도 열리는 주소가 없습니다. 사이트 저장소가 코어를 Go 모듈로
+    가져와 빌드한 실행 파일에서 생깁니다(D42).</p>
+  {{end}}
+</div>
+
+<div class="adm-card">
+  <h2>앱 키</h2>
+  <form method="post" action="/admin/settings/api/keys">
+    <label class="adm-field">
+      <span>키 이름</span>
+      <input type="text" name="name" required maxlength="60" placeholder="예: flutter-android">
+      <span class="adm-hint">앱마다 하나씩 발급하면, 한 앱의 키가 새어도 그 키만 폐기하면 됩니다.</span>
+    </label>
+    {{template "reauth-field" $}}
+    <div class="adm-actions adm-actions--end">
+      <button class="adm-btn adm-btn--primary">발급</button>
+    </div>
+  </form>
+
+  {{if .Keys}}
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr><th>이름</th><th>만든 날</th><th>마지막 사용</th><th>상태</th></tr></thead>
+      <tbody>
+      {{range .Keys}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td class="muted">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+          <td class="muted">{{with .LastUsedAt}}{{.Format "2006-01-02 15:04"}}{{else}}쓰지 않음{{end}}</td>
+          <td>{{with .RevokedAt}}폐기 {{.Format "2006-01-02"}}{{else}}사용 중{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <form method="post" action="/admin/settings/api/keys/revoke">
+    <label class="adm-field">
+      <span>폐기할 키</span>
+      <select name="id" required>
+        <option value="">고르세요</option>
+        {{range .Keys}}{{if not .RevokedAt}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}
+      </select>
+    </label>
+    {{template "reauth-field" $}}
+    <div class="adm-actions adm-actions--end">
+      <button onclick="return confirm('이 앱 키를 폐기할까요? 그 키를 쓰는 앱의 요청이 바로 401 이 되고, 되돌릴 수 없습니다.')" class="adm-btn adm-btn--danger">폐기</button>
+    </div>
+  </form>
+  {{else}}
+  <p class="adm-hint">발급한 키가 없습니다.</p>
+  {{end}}
+</div>
+{{end}}
