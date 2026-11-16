@@ -13,8 +13,10 @@ UPDATE app_login_codes SET attempts = attempts + 1
 WHERE phone = $1 AND expires_at > now() AND attempts < sqlc.arg(max_attempts)::integer
 RETURNING code_hash;
 
--- name: DeleteCode :exec
-DELETE FROM app_login_codes WHERE phone = $1;
+-- name: DeleteCode :execrows
+-- **그 해시가 남아 있을 때만** 지운다 — 같은 번호로 동시에 맞힌 요청 중 하나만 지우고(하나만 토큰을 받는다), 그 사이
+-- 새로 받은 번호는 건드리지 않는다.
+DELETE FROM app_login_codes WHERE phone = $1 AND code_hash = $2;
 
 -- name: InsertSession :one
 -- 30일은 D42 8절이다.

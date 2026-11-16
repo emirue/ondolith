@@ -54,7 +54,8 @@ type Extension struct {
 type PhoneLogin struct {
 	// Lookup gets a normalized number (digits only: "01012345678") and returns the subject that logs in —
 	// the site's own id for that person. ok=false refuses — 응답은 허락한 번호와 같아서 앱은 등록 여부를 모른다.
-	// 그만둔 사람은 false 를 돌려주고, 이미 받은 토큰은 EndSessions 로 끊는다.
+	// 그만둔 사람은 false 를 돌려주고, 이미 받은 토큰은 EndSessions 로 끊는다. 인증번호 요청에서는 응답 뒤에 불린다 —
+	// ctx 는 요청이 끝나도 취소되지 않고 30초 시한이 있으며, site.FromContext(ctx).DB 가 들어 있다.
 	Lookup func(ctx context.Context, phone string) (subject string, ok bool, err error)
 }
 

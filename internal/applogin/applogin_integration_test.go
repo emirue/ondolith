@@ -218,3 +218,34 @@ func TestSessionsAreHashedAndEndBySubject(t *testing.T) {
 		t.Error("빈 대상으로 토큰을 만들었다")
 	}
 }
+
+// **맞는 번호로 동시에 확인해도 하나만 통한다** — 한 번만 쓰는 번호다. 맞힌 뒤 「번호로」 지우면 같은 순간의 요청
+// 둘이 모두 통과해 토큰이 둘 생기고, 그 사이 새로 받은 번호까지 지운다. 지우기는 그 해시가 남아 있을 때만 성공한다.
+func TestConcurrentRightGuessesWinOnce(t *testing.T) {
+	s, _ := store(t)
+	ctx := context.Background()
+	for round := 0; round < 5; round++ {
+		code, err := s.IssueCode(ctx, phone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		wins := 0
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if ok, _ := s.VerifyCode(ctx, phone, code); ok {
+					mu.Lock()
+					wins++
+					mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		if wins != 1 {
+			t.Fatalf("%d번째: 맞는 번호로 동시에 %d번 통했다, want 1", round+1, wins)
+		}
+	}
+}

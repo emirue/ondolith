@@ -76,7 +76,7 @@ func (s *Store) IssueCode(ctx context.Context, phone string) (string, error) {
 	return code, nil
 }
 
-// VerifyCode spends one guess on phone's code. 맞으면 그 번호를 지운다(한 번만 쓴다). 지났거나, 다섯 번을 다
+// VerifyCode spends one guess on phone's code. 맞으면 그 번호를 지운다(한 번만 쓴다 — 지운 쪽만 참이다). 지났거나, 다섯 번을 다
 // 썼거나, 요청한 적이 없으면 false 다 — 이유를 나누지 않는다.
 func (s *Store) VerifyCode(ctx context.Context, phone, code string) (bool, error) {
 	want, err := s.q.SpendAttempt(ctx, apploginq.SpendAttemptParams{Phone: phone, MaxAttempts: MaxAttempts})
@@ -89,7 +89,8 @@ func (s *Store) VerifyCode(ctx context.Context, phone, code string) (bool, error
 	if subtle.ConstantTimeCompare(want, sum(phone, code)) != 1 {
 		return false, nil
 	}
-	return true, s.q.DeleteCode(ctx, phone)
+	n, err := s.q.DeleteCode(ctx, apploginq.DeleteCodeParams{Phone: phone, CodeHash: want})
+	return n == 1, err
 }
 
 // StartSession issues an app token for subject (사이트가 정한 대상). 원문은 이 반환값뿐이다.

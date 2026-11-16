@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -27,11 +26,6 @@ var SMSSettingKeys = []string{smsAccessKey, smsSecretKey, smsServiceID, smsFrom}
 // smsTestPerHour is A-215's test send per account — 넣은 번호로 보내는 길이라 메일 시험 발송과 같은 선이다.
 var smsTestPerHour = auth.Limit{Burst: 5, Window: time.Hour}
 
-var (
-	smsServiceIDShape = regexp.MustCompile(`^[A-Za-z0-9:_-]+$`)
-	smsNumberShape    = regexp.MustCompile(`^[0-9]{3,16}$`)
-)
-
 // SMSConfigured reports whether every SENS field is filled.
 func SMSConfigured(kv map[string]string) bool {
 	for _, k := range SMSSettingKeys {
@@ -49,10 +43,10 @@ func SENSFrom(kv map[string]string) sms.SENS {
 
 // smsSettingsProblem is D19 A-215's format check; 빈 값은 받는다(설정을 지우는 저장).
 func smsSettingsProblem(kv map[string]string) string {
-	if v := kv[smsServiceID]; v != "" && !smsServiceIDShape.MatchString(v) {
+	if v := kv[smsServiceID]; v != "" && !sms.ValidServiceID(v) {
 		return "서비스 ID 는 SENS 콘솔의 값 그대로 넣으세요 (ncp:sms:kr:…:…)."
 	}
-	if v := kv[smsFrom]; v != "" && !smsNumberShape.MatchString(v) {
+	if v := kv[smsFrom]; v != "" && !sms.ValidNumber(v) {
 		return "발신번호는 숫자만 넣으세요 — SENS 콘솔에 등록한 번호입니다."
 	}
 	return ""
@@ -135,15 +129,12 @@ func (d *Deps) SMSTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.SendSMSTest(r.Context(), phone, "[문자 설정 시험] 관리자 화면에서 보낸 시험 문자입니다."); err != nil {
-		d.renderSMS(w, r, http.StatusOK, "발송에 실패했습니다: "+truncateRunes(err.Error(), 200), "")
+		reason := err.Error()
+		if len([]rune(reason)) > 200 {
+			reason = string([]rune(reason)[:200]) + "…"
+		}
+		d.renderSMS(w, r, http.StatusOK, "발송에 실패했습니다: "+reason, "")
 		return
 	}
 	d.renderSMS(w, r, http.StatusOK, "", sms.Mask(phone)+" 로 시험 문자를 보냈습니다 — SENS 가 접수했습니다. 도착은 휴대폰에서 확인하세요.")
-}
-
-func truncateRunes(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
 }

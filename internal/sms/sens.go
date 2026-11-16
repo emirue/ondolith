@@ -37,6 +37,12 @@ var (
 	digits    = regexp.MustCompile(`^[0-9]{3,16}$`)
 )
 
+// ValidServiceID reports whether id can go into the API path — A-215 가 저장 전에, Send 가 보내기 전에 본다.
+func ValidServiceID(id string) bool { return serviceID.MatchString(id) }
+
+// ValidNumber reports whether n is digits only (3~16), the shape SENS takes for from and to.
+func ValidNumber(n string) bool { return digits.MatchString(n) }
+
 // ErrNotConfigured is a SENS with a field missing.
 var ErrNotConfigured = errors.New("sms: SENS 설정이 비어 있다 — 액세스 키·시크릿 키·서비스 ID·발신번호")
 
@@ -45,10 +51,10 @@ func (s SENS) Send(ctx context.Context, to, text string) error {
 	if s.AccessKey == "" || s.SecretKey == "" || s.ServiceID == "" || s.From == "" {
 		return ErrNotConfigured
 	}
-	if !serviceID.MatchString(s.ServiceID) {
+	if !ValidServiceID(s.ServiceID) {
 		return fmt.Errorf("sms: 서비스 ID 의 모양이 아니다 (ncp:sms:kr:…:…)")
 	}
-	if !digits.MatchString(s.From) || !digits.MatchString(to) {
+	if !ValidNumber(s.From) || !ValidNumber(to) {
 		return fmt.Errorf("sms: 발신·수신 번호는 숫자만이다")
 	}
 	body, err := json.Marshal(map[string]any{"type": "SMS", "from": s.From, "content": text,

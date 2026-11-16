@@ -489,9 +489,12 @@ func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion strin
 		SiteAPI:       siteAPILines(ext),
 		SMSPhoneLogin: ext.Phone.Lookup != nil,
 		SMSCustom:     ext.SMS != nil,
-		// 시험 발송은 앱의 인증번호와 같은 길로 보낸다 — 사이트 함수가 있으면 그것이다.
+		// 시험 발송은 앱의 인증번호와 같은 길로 보낸다 — 사이트 함수가 있으면 그것이다. 사이트 함수가 받는 문맥도
+		// 같게 한다(요청과 떨어져 있고 30초 시한).
 		SendSMSTest: func(ctx context.Context, to, text string) error {
-			return smsSender(ext.SMS, contentStore.Settings)(ctx)(ctx, to, text)
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), smsSendTimeout)
+			defer cancel()
+			return smsSender(ext.SMS, contentStore.Settings)(ctx, to, text)
 		},
 		OpLog:       contentStore.OpLog(),
 		Logger:      log,
@@ -621,7 +624,7 @@ func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion strin
 		phone:    ext.Phone,
 		login:    loginStore,
 		siteName: siteName,
-		sender:   smsSender(ext.SMS, contentStore.Settings),
+		send:     smsSender(ext.SMS, contentStore.Settings),
 		sendFailed: func(phone string, err error) {
 			log.Error("인증번호 문자 발송 실패", "to", sms.Mask(phone), "err", err)
 			e, ok := smsFailureEntry(phone, err)
@@ -960,22 +963,20 @@ func smsFailureEntry(phone string, err error) (content.Entry, bool) {
 		Summary: "인증번호 문자를 보내지 못했습니다 — " + truncate(err.Error(), 300)}, true
 }
 
-// smsSender picks how login codes go out: the site's own function, or SENS with the A-215 settings
-// read at that moment (요청 안에서 — 발송 고루틴이 돌 때는 풀이 닫혔을 수 있다).
+// smsSender picks how login codes go out: the site's own function, or SENS with the A-215 settings read
+// at send time — 저장하면 다음 문자부터 바로 쓴다.
 func smsSender(custom func(context.Context, string, string) error,
 	settings func(context.Context, ...string) (map[string]string, error),
-) func(context.Context) func(context.Context, string, string) error {
+) func(context.Context, string, string) error {
 	if custom != nil {
-		return func(context.Context) func(context.Context, string, string) error { return custom }
+		return custom
 	}
-	return func(ctx context.Context) func(context.Context, string, string) error {
+	return func(ctx context.Context, to, text string) error {
 		kv, err := settings(ctx, admin.SMSSettingKeys...)
 		if err != nil {
-			return func(context.Context, string, string) error {
-				return fmt.Errorf("문자 설정을 읽지 못했다: %w", err)
-			}
+			return fmt.Errorf("문자 설정을 읽지 못했다: %w", err)
 		}
-		return admin.SENSFrom(kv).Send
+		return admin.SENSFrom(kv).Send(ctx, to, text)
 	}
 }
 

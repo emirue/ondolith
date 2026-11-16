@@ -36,6 +36,9 @@ type Limiter struct {
 type bucket struct {
 	tokens float64
 	last   time.Time
+	// window is the bucket's Limit.Window — 정리가 「가득 찼는가」를 판단한다. 한 시간보다 긴 창(앱 문자 하루 10통,
+	// D42 8절)은 한 시간 쉬어도 비어 있다.
+	window time.Duration
 }
 
 // NewLimiter returns a limiter reading the clock. Pass a fake clock with
@@ -61,10 +64,10 @@ func (l *Limiter) Allow(key string, lim Limit) bool {
 
 	b, ok := l.buckets[key]
 	if !ok {
-		// 새 키를 넣기 전에 커진 지도를 비운다. 한 시간 넘게 쉰 버킷은 D15
-		// 4.3-2 의 어느 창(최대 1시간)에서도 이미 가득 찼으므로 지우는 것과
-		// 있는 것이 같다 — 손실 없는 정리다. 이것이 없으면 IP 마다 하나씩
-		// 영원히 남는다: Sweep 을 부르는 곳이 실제로 없었다.
+		// 새 키를 넣기 전에 커진 지도를 비운다. 한 시간 넘게, 그리고 자기 창보다
+		// 오래 쉰 버킷은 이미 가득 찼으므로 지우는 것과 있는 것이 같다 — 손실
+		// 없는 정리다. 이것이 없으면 IP 마다 하나씩 영원히 남는다: Sweep 을
+		// 부르는 곳이 실제로 없었다.
 		if len(l.buckets) >= sweepAt && !now.Before(l.nextSweep) {
 			l.sweepLocked(now, time.Hour)
 			// A map full of active clients has nothing to remove. Scanning it
@@ -72,7 +75,7 @@ func (l *Limiter) Allow(key string, lim Limit) bool {
 			l.nextSweep = now.Add(time.Minute)
 		}
 		// A new key starts full, then immediately spends one.
-		l.buckets[key] = &bucket{tokens: float64(lim.Burst) - 1, last: now}
+		l.buckets[key] = &bucket{tokens: float64(lim.Burst) - 1, last: now, window: lim.Window}
 		return true
 	}
 
@@ -111,10 +114,10 @@ func (l *Limiter) Forget(key string) {
 const sweepAt = 4096
 
 func (l *Limiter) sweepLocked(now time.Time, maxIdle time.Duration) int {
-	cutoff := now.Add(-maxIdle)
 	n := 0
 	for k, b := range l.buckets {
-		if b.last.Before(cutoff) {
+		// 자기 창이 다 지나야 가득 찬다 — 그 전에 지우면 다음 요청이 가득 찬 새 버킷을 받는다.
+		if idle := now.Sub(b.last); idle > maxIdle && idle >= b.window {
 			delete(l.buckets, k)
 			n++
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/emirue/ondolith/internal/apikeys"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/siteext"
+	"github.com/emirue/ondolith/internal/sms"
 )
 
 // fakeLogin is applogin.Store in memory: one code per phone, tokens by value.
@@ -54,7 +55,18 @@ type sentSMS struct{ to, text string }
 // loginSite is the gate with phone login: 01011112222 is the worker w-1, every other number is refused.
 func loginSite(t *testing.T, lookups *int, sent *[]sentSMS, sendErr error, failed *[]string, routes ...siteext.Route) (http.Handler, *fakeLogin) {
 	t.Helper()
+	h, store, _ := loginSiteWith(t, lookups, sent, sendErr, failed, nil, routes...)
+	return h, store
+}
+
+// loginSiteWith is loginSite with the send step and the spawn under the test's control. spawn nil runs in place.
+func loginSiteWith(t *testing.T, lookups *int, sent *[]sentSMS, sendErr error, failed *[]string,
+	spawn func(func()), routes ...siteext.Route) (http.Handler, *fakeLogin, *siteAPI) {
+	t.Helper()
 	store := &fakeLogin{codes: map[string]string{}, sessions: map[string]string{}}
+	if spawn == nil {
+		spawn = func(f func()) { f() } // 시험은 발송을 기다린다 — 실제로는 응답 밖 고루틴이다
+	}
 	s := &siteAPI{
 		routes:  routes,
 		enabled: func(context.Context) (bool, error) { return true, nil },
@@ -73,16 +85,14 @@ func loginSite(t *testing.T, lookups *int, sent *[]sentSMS, sendErr error, faile
 		}},
 		login:    store,
 		siteName: func() string { return "주원산림" },
-		sender: func(context.Context) func(context.Context, string, string) error {
-			return func(_ context.Context, to, text string) error {
-				*sent = append(*sent, sentSMS{to, text})
-				return sendErr
-			}
+		send: func(_ context.Context, to, text string) error {
+			*sent = append(*sent, sentSMS{to, text})
+			return sendErr
 		},
-		sendFailed: func(phone string, err error) { *failed = append(*failed, phone) },
-		spawn:      func(f func()) { f() }, // 시험은 발송을 기다린다 — 실제로는 응답 밖 고루틴이다
+		sendFailed: func(phone string, err error) { *failed = append(*failed, phone+" "+err.Error()) },
+		spawn:      spawn,
 	}
-	return s.handler(), store
+	return s.handler(), store, s
 }
 
 func apiPost(h http.Handler, path, body string, hdr ...string) *httptest.ResponseRecorder {
@@ -155,7 +165,7 @@ func TestPhoneLoginRoundTrip(t *testing.T) {
 }
 
 // **등록되지 않은 번호에도 똑같이 답한다** (D42 11절). 상태·본문·머리글이 같고, 그 번호에는 인증번호를 만들지도
-// 보내지도 않는다. 발송은 응답 밖이라 걸리는 시간도 같다 — 실패도 응답에 드러나지 않는다.
+// 보내지도 않는다. 발송 실패도 응답에 드러나지 않는다. 응답 전에 하는 일이 같다는 것은 TestCodeRequestAnswersBeforeLookingUp 이 본다.
 func TestCodeRequestLooksTheSameForUnknownNumbers(t *testing.T) {
 	var lookups int
 	var sent []sentSMS
@@ -176,7 +186,7 @@ func TestCodeRequestLooksTheSameForUnknownNumbers(t *testing.T) {
 		t.Errorf("인증번호 %d개·문자 %+v — 등록된 번호에만", store.issued, sent)
 	}
 	// 발송이 실패해도 응답은 202 이고, 실패는 남는다(번호는 코어가 가린다).
-	if known.Code != http.StatusAccepted || len(failed) != 1 || failed[0] != "01011112222" {
+	if known.Code != http.StatusAccepted || len(failed) != 1 || !strings.HasPrefix(failed[0], "01011112222 ") {
 		t.Errorf("발송 실패: 응답 %d, 남긴 것 %v", known.Code, failed)
 	}
 	if rec := apiPost(h, "/api/site/auth/code", `{"phone":"02-123-4567"}`); rec.Code != http.StatusBadRequest {
@@ -209,16 +219,20 @@ func TestCodeRequestLimits(t *testing.T) {
 	if lookups != 6 {
 		t.Errorf("Lookup %d번, want 6 — 막힌 요청은 Lookup 전에 끝난다", lookups)
 	}
-	// IP 상한: 지금까지 8번(막힌 2번 포함) — 번호를 바꿔 가며 20번째까지 되고 21번째는 막힌다.
-	got := 0
-	for i := 0; i < 20; i++ {
+	// IP 상한: 지금까지 이 IP 로 8번(막힌 2번 포함) 썼다 — 번호를 바꿔 가며 12번이 더 되고 그 뒤는 막힌다.
+	var codes []int
+	for i := 0; i < 14; i++ {
 		phone := "0102000" + string(rune('0'+i/10)) + string(rune('0'+i%10)) + "00"
-		if apiPost(h, "/api/site/auth/code", `{"phone":"`+phone+`"}`).Code == http.StatusTooManyRequests {
-			got++
-		}
+		codes = append(codes, apiPost(h, "/api/site/auth/code", `{"phone":"`+phone+`"}`).Code)
 	}
-	if got == 0 {
-		t.Error("IP 하나에서 시간당 20통을 넘겨도 막지 않는다")
+	for i, c := range codes {
+		want := http.StatusAccepted
+		if i >= 12 {
+			want = http.StatusTooManyRequests
+		}
+		if c != want {
+			t.Errorf("IP 의 %d번째 요청 = %d, want %d (시간당 20통)", 9+i, c, want)
+		}
 	}
 }
 
@@ -255,5 +269,115 @@ func TestAuthAddressesNeedPhoneLogin(t *testing.T) {
 	h := testSiteAPI(&on)
 	if code, _, _ := call(h, "POST", "/api/site/auth/code", "ondo_good", `{"phone":"01011112222"}`); code != http.StatusNotFound {
 		t.Errorf("문자 로그인 없는 사이트의 /auth/code = %d, want 404", code)
+	}
+}
+
+// **응답 전에는 상한만 본다** (D42 11절) — Lookup·인증번호 저장·설정 읽기·발송은 모두 응답 밖이다. 응답 전에 하는
+// 일이 등록 여부에 따라 다르면 걸리는 시간으로 등록된 번호를 가려낼 수 있다. Lookup 이 실패해도 응답은 같은 202 다.
+func TestCodeRequestAnswersBeforeLookingUp(t *testing.T) {
+	var lookups int
+	var sent []sentSMS
+	var failed []string
+	var queued []func()
+	h, store, _ := loginSiteWith(t, &lookups, &sent, nil, &failed, func(f func()) { queued = append(queued, f) })
+	rec := apiPost(h, "/api/site/auth/code", `{"phone":"01011112222"}`)
+	if rec.Code != http.StatusAccepted || lookups != 0 || store.issued != 0 || len(sent) != 0 || len(queued) != 1 {
+		t.Fatalf("응답 때: %d, Lookup %d번, 인증번호 %d개, 문자 %d통, 미룬 일 %d개 — 응답 전에는 아무것도 하지 않는다",
+			rec.Code, lookups, store.issued, len(sent), len(queued))
+	}
+	queued[0]()
+	if lookups != 1 || store.issued != 1 || len(sent) != 1 {
+		t.Errorf("응답 뒤: Lookup %d번, 인증번호 %d개, 문자 %d통", lookups, store.issued, len(sent))
+	}
+}
+
+// **응답 밖의 일은 사이트 코드가 패닉해도 서버를 죽이지 않는다** — 문지기가 사이트 처리기의 패닉을 막듯이. 실패로
+// 남긴다. Lookup 이 오류를 내도 그렇다.
+func TestCodeSendSurvivesSiteCode(t *testing.T) {
+	var lookups int
+	var sent []sentSMS
+	var failed []string
+	h, _, s := loginSiteWith(t, &lookups, &sent, nil, &failed, nil)
+	s.send = func(context.Context, string, string) error { panic("사이트 발송 함수의 실수") }
+	if rec := apiPost(h, "/api/site/auth/code", `{"phone":"01011112222"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("응답 = %d", rec.Code)
+	}
+	if len(failed) != 1 || !strings.Contains(failed[0], "패닉") {
+		t.Errorf("발송 함수 패닉이 실패로 남지 않았다: %v", failed)
+	}
+	s.phone.Lookup = func(context.Context, string) (string, bool, error) { return "", false, errors.New("DB 끊김") }
+	if rec := apiPost(h, "/api/site/auth/code", `{"phone":"01011112223"}`); rec.Code != http.StatusAccepted {
+		t.Errorf("Lookup 오류 = %d, want 202 — 등록된 번호만 겪는 실패가 응답에 드러나면 안 된다", rec.Code)
+	}
+}
+
+// 발송 오류 문구에 인증번호·번호 원문이 섞여도 작업 로그에는 남지 않는다 — 업체 SDK 가 요청을 오류에 담는 일이 있다.
+func TestSendFailureHidesTheCodeAndNumber(t *testing.T) {
+	var lookups int
+	var sent []sentSMS
+	var failed []string
+	h, _, s := loginSiteWith(t, &lookups, &sent, nil, &failed, nil)
+	s.send = func(_ context.Context, to, text string) error {
+		return errors.New("업체 거절: to=" + to + " body=" + text)
+	}
+	apiPost(h, "/api/site/auth/code", `{"phone":"01011112222"}`)
+	if len(failed) != 1 {
+		t.Fatalf("실패 %v", failed)
+	}
+	msg := strings.TrimPrefix(failed[0], "01011112222 ")
+	if strings.Contains(msg, "123456") || strings.Contains(msg, "01011112222") || !strings.Contains(msg, "010****2222") {
+		t.Errorf("남긴 오류 = %q — 인증번호와 번호 원문이 없고 가린 번호가 있어야 한다", msg)
+	}
+}
+
+// 확인도 IP 마다 센다 — 번호마다는 인증번호의 다섯 번이 막지만, 한 곳에서 여러 번호를 두드리는 것은 이것이 막는다.
+func TestVerifyIsLimitedPerIP(t *testing.T) {
+	var lookups int
+	var sent []sentSMS
+	var failed []string
+	h, _ := loginSite(t, &lookups, &sent, nil, &failed)
+	for i := 1; i <= 31; i++ {
+		rec := apiPost(h, "/api/site/auth/verify", `{"phone":"01011112222","code":"000000"}`)
+		want := http.StatusUnauthorized
+		if i == 31 {
+			want = http.StatusTooManyRequests
+		}
+		if rec.Code != want {
+			t.Fatalf("%d번째 확인 = %d, want %d (10분 30번)", i, rec.Code, want)
+		}
+	}
+}
+
+// 보낼 설정이 비어 있는 것은 작업 로그에 남기지 않는다 — 부팅 경고와 A-215 가 말하고, 그 문장은 작업 로그가
+// 거부하는 낱말(시크릿)을 담는다. 그 밖의 실패는 가린 번호로 남는다.
+func TestSMSFailureEntry(t *testing.T) {
+	if _, ok := smsFailureEntry("01011112222", sms.ErrNotConfigured); ok {
+		t.Error("설정이 비어 있는 것을 작업 로그에 남기려 한다")
+	}
+	e, ok := smsFailureEntry("01011112222", errors.New("HTTP 401"))
+	if !ok || e.Action != "sms.failed" || e.TargetID != "010****2222" || strings.Contains(e.Summary, "01011112222") ||
+		!strings.Contains(e.Summary, "HTTP 401") {
+		t.Errorf("작업 로그 = %+v", e)
+	}
+}
+
+// SENS 설정을 읽지 못하면 보내지 않고 그 까닭을 말한다. 사이트 발송 함수가 있으면 설정을 읽지도 않는다.
+func TestSMSSenderReadsSettingsAtSendTime(t *testing.T) {
+	read := 0
+	broken := func(context.Context, ...string) (map[string]string, error) {
+		read++
+		return nil, errors.New("DB 끊김")
+	}
+	if err := smsSender(nil, broken)(context.Background(), "01011112222", "x"); err == nil || !strings.Contains(err.Error(), "DB 끊김") {
+		t.Errorf("설정 읽기 실패 = %v", err)
+	}
+	empty := func(context.Context, ...string) (map[string]string, error) { read++; return map[string]string{}, nil }
+	if err := smsSender(nil, empty)(context.Background(), "01011112222", "x"); !errors.Is(err, sms.ErrNotConfigured) {
+		t.Errorf("빈 설정 = %v, want ErrNotConfigured", err)
+	}
+	custom := func(context.Context, string, string) error { return nil }
+	read = 0
+	if err := smsSender(custom, broken)(context.Background(), "01011112222", "x"); err != nil || read != 0 {
+		t.Errorf("사이트 발송 함수 = %v, 설정 읽기 %d번 — 읽지 않아야 한다", err, read)
 	}
 }

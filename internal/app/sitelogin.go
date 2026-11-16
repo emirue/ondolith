@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/emirue/ondolith/internal/applogin"
@@ -41,8 +44,9 @@ type appLogin interface {
 
 // authCode is POST /api/site/auth/code {"phone"} (D42 8절 1).
 //
-// **허락한 번호와 아닌 번호에 똑같이 답한다** — 상태·본문이 같고, 발송은 응답 밖이라 걸리는 시간도 같다. 발송이
-// 실패해도 응답에 드러나지 않는다(그것도 등록 여부다). 실패는 작업 로그에 남는다.
+// **허락한 번호와 아닌 번호에 똑같이 답한다** — 상태·본문이 같고, 응답 전에 하는 일도 같다(번호 읽기와 상한뿐).
+// Lookup·인증번호 저장·설정 읽기·발송은 모두 응답 밖이다 — 응답 전에 하는 일이 등록 여부에 따라 다르면 걸리는
+// 시간으로 등록된 번호를 가려낼 수 있다. 실패도 응답에 드러나지 않고 로그·작업 로그에 남는다.
 func (s *siteAPI) authCode(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Phone string `json:"phone"`
@@ -61,33 +65,48 @@ func (s *siteAPI) authCode(w http.ResponseWriter, r *http.Request) {
 		siteext.WriteError(w, http.StatusTooManyRequests, "인증번호 요청이 너무 많습니다. 잠시 후 다시 시도하세요.")
 		return
 	}
-	_, allowed, err := s.phone.Lookup(r.Context(), phone)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if allowed {
-		s.sendCode(r, phone)
-	}
+	// 요청이 끝나도 취소되지 않는 문맥 — 값(코어가 확인한 Caller)은 남아 Lookup 이 site.FromContext 로 DB 를 꺼낸다.
+	ctx := context.WithoutCancel(r.Context())
+	s.spawn(func() { s.sendCode(ctx, phone) })
 	siteext.WriteJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
 }
 
-// sendCode makes the code and sends it outside the response. 저장이나 발송이 실패해도 응답은 같다 — 로그와 작업
-// 로그에 남는다. 설정은 요청 안에서 읽는다.
-func (s *siteAPI) sendCode(r *http.Request, phone string) {
-	code, err := s.login.IssueCode(r.Context(), phone)
+// sendCode runs outside the response: Lookup, the code, the send. 사이트 코드(Lookup·발송 함수)의 패닉은 실패로
+// 남기고 서버를 죽이지 않는다 — 문지기가 사이트 처리기의 패닉을 막는 것과 같다. 재조립으로 풀이 막 닫혔으면 그 한
+// 건은 로그에만 남는다.
+func (s *siteAPI) sendCode(parent context.Context, phone string) {
+	ctx, cancel := context.WithTimeout(parent, smsSendTimeout)
+	defer cancel()
+	defer func() {
+		if v := recover(); v != nil {
+			s.sendFailed(phone, fmt.Errorf("사이트 코드 패닉: %v", v))
+		}
+	}()
+	_, allowed, err := s.phone.Lookup(ctx, phone)
+	if err != nil {
+		s.log.Error("인증번호: Lookup", "to", sms.Mask(phone), "err", err)
+		return
+	}
+	if !allowed {
+		return
+	}
+	code, err := s.login.IssueCode(ctx, phone)
 	if err != nil {
 		s.log.Error("인증번호 저장", "to", sms.Mask(phone), "err", err)
 		return
 	}
-	send, text := s.sender(r.Context()), sms.LoginText(s.siteName(), code)
-	s.spawn(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), smsSendTimeout)
-		defer cancel()
-		if err := send(ctx, phone, text); err != nil {
-			s.sendFailed(phone, err)
-		}
-	})
+	if err := s.send(ctx, phone, sms.LoginText(s.siteName(), code)); err != nil {
+		s.sendFailed(phone, scrubbed(err, phone, code))
+	}
+}
+
+// scrubbed takes the code and the number out of a send error — 업체 SDK 가 요청을 오류 문구에 담는 일이 있고, 이
+// 문구는 작업 로그(지워지지 않는다)와 서버 로그로 간다. 「설정이 비어 있음」은 알아볼 수 있게 그대로 둔다.
+func scrubbed(err error, phone, code string) error {
+	if errors.Is(err, sms.ErrNotConfigured) || code == "" {
+		return err
+	}
+	return errors.New(strings.NewReplacer(code, "******", phone, sms.Mask(phone)).Replace(err.Error()))
 }
 
 // authVerify is POST /api/site/auth/verify {"phone","code"} (D42 8절 2). 맞으면 앱 토큰을 준다.

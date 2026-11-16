@@ -10,13 +10,23 @@ import (
 	"time"
 )
 
-const deleteCode = `-- name: DeleteCode :exec
-DELETE FROM app_login_codes WHERE phone = $1
+const deleteCode = `-- name: DeleteCode :execrows
+DELETE FROM app_login_codes WHERE phone = $1 AND code_hash = $2
 `
 
-func (q *Queries) DeleteCode(ctx context.Context, phone string) error {
-	_, err := q.db.Exec(ctx, deleteCode, phone)
-	return err
+type DeleteCodeParams struct {
+	Phone    string
+	CodeHash []byte
+}
+
+// **그 해시가 남아 있을 때만** 지운다 — 같은 번호로 동시에 맞힌 요청 중 하나만 지우고(하나만 토큰을 받는다), 그 사이
+// 새로 받은 번호는 건드리지 않는다.
+func (q *Queries) DeleteCode(ctx context.Context, arg DeleteCodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCode, arg.Phone, arg.CodeHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteExpiredCodes = `-- name: DeleteExpiredCodes :exec

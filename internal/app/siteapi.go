@@ -43,9 +43,8 @@ type siteAPI struct {
 	login appLogin
 	// siteName is the 「[사이트 이름]」 of the SMS.
 	siteName func() string
-	// sender reads the SMS settings **in the request** and returns a send bound to them — 발송은 응답 밖
-	// 고루틴이고, 그때는 재조립으로 풀이 닫혔을 수 있다.
-	sender func(context.Context) func(ctx context.Context, to, text string) error
+	// send delivers one SMS — 사이트의 발송 함수나, A-215 설정을 그때 읽는 SENS.
+	send func(ctx context.Context, to, text string) error
 	// sendFailed records a send that did not go out (작업 로그). 응답은 이미 나갔다.
 	sendFailed func(phone string, err error)
 	// spawn runs the send outside the response; tests run it in place.
