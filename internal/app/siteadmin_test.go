@@ -57,6 +57,7 @@ func TestSiteAdminPageIsGuardedAndGetsTheCoreServices(t *testing.T) {
 			got = rendered{name, code, data.(map[string]any)}
 		},
 		caller:      func(*http.Request) admin.Caller { return caller },
+		needsReauth: func(*http.Request, *Actor) bool { return caller.needs },
 		db:          db,
 		log:         slog.New(slog.DiscardHandler),
 		record:      func(_ context.Context, e content.Entry) error { entries = append(entries, e); return nil },

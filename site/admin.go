@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/emirue/ondolith/internal/siteext"
@@ -61,13 +62,28 @@ func RenderAdmin(w http.ResponseWriter, r *http.Request, status int, title strin
 // to 는 관리자 트리 안의 주소다(`/admin/…`). 밖이면 보내지 않고 500 이다 — 폼 값을 그대로 넘긴 열린 리다이렉트를 막는다.
 func Done(w http.ResponseWriter, r *http.Request, to, notice string) {
 	a, ok := siteext.AdminFrom(r.Context())
-	if !ok || !strings.HasPrefix(to, "/admin/") || strings.Contains(to, `\`) {
+	if !ok || !insideAdmin(to) {
 		logger(r).Error("site.Done: 관리자 트리 밖으로 보내려 했다", "to", to)
 		http.Error(w, "일시적인 오류입니다.", http.StatusInternalServerError)
 		return
 	}
 	a.Notify(to, notice)
 	http.Redirect(w, r, to, http.StatusSeeOther)
+}
+
+// insideAdmin reports whether to stays in the admin tree. `.`·`..` 마디는 받지 않는다 — http.Redirect 와 브라우저가
+// 정리하면 `/admin/../logout` 은 `/logout` 이다. 마디는 디코딩한 경로로 본다(`%2e%2e` 도 브라우저에게는 `..` 다).
+func insideAdmin(to string) bool {
+	u, err := url.Parse(to)
+	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(to, "/admin/") {
+		return false
+	}
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // Reauth reports whether the administrator has re-entered the password within 15 minutes, or did so in

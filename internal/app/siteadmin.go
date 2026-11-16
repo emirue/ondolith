@@ -17,9 +17,13 @@ import (
 type siteAdmin struct {
 	render func(w http.ResponseWriter, r *http.Request, name string, code int, data any)
 	caller func(*http.Request) admin.Caller
-	db     *sql.DB
-	log    *slog.Logger
-	record func(context.Context, content.Entry) error
+	// needsReauth is adminRenderer.needsReauth — **세션을 다시 읽는다.** Caller.NeedsReauth 는 요청이 들어올 때의
+	// Actor 를 보므로, 같은 요청에서 방금 확인한 비밀번호를 모른다. 그러면 422 로 다시 그린 폼에 칸이 또 나오고,
+	// 사이트가 Reauth 를 두 번 부르면 비밀번호를 두 번 대조한다.
+	needsReauth func(*http.Request, *Actor) bool
+	db          *sql.DB
+	log         *slog.Logger
+	record      func(context.Context, content.Entry) error
 	// reauthField is the layout's reauth-field drawn open — 사이트 템플릿은 코어 템플릿 묶음 밖이라 그대로 못 부른다.
 	reauthField template.HTML
 }
@@ -44,7 +48,7 @@ func (d siteAdmin) page(p siteext.AdminPage) http.HandlerFunc {
 				d.render(w, r, "admin/site.html", status, map[string]any{"Title": title, "SiteBody": body})
 			},
 			Notify:        c.Notify,
-			NeedsReauth:   c.NeedsReauth,
+			NeedsReauth:   func() bool { return d.needsReauth(r, actor) },
 			ConfirmReauth: c.ConfirmReauth,
 			ReauthField:   d.reauthField,
 			Record: func(action, target, summary string) error {

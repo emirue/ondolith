@@ -621,7 +621,7 @@ func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion strin
 		if err != nil {
 			return fail(fmt.Errorf("app: 재확인 칸: %w", err))
 		}
-		sa := siteAdmin{render: adminUI.Render, caller: ad.Caller, db: db, log: log,
+		sa := siteAdmin{render: adminUI.Render, caller: ad.Caller, needsReauth: adminUI.needsReauth, db: db, log: log,
 			record: contentStore.OpLog().Record, reauthField: field}
 		for _, p := range ext.Admin {
 			h := sa.page(p)

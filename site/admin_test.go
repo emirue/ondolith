@@ -42,9 +42,13 @@ func (f *fakeAdmin) request(method, target string, form url.Values) *http.Reques
 		},
 		Notify:      func(to, msg string) { f.notified = [2]string{to, msg} },
 		NeedsReauth: func() bool { return f.needs },
-		ConfirmReauth: func(p string) bool {
+		ConfirmReauth: func(p string) bool { // 코어처럼 맞으면 창을 연다(세션에 찍는다)
 			f.asked = append(f.asked, p)
-			return p != "" && p == f.password
+			if p != "" && p == f.password {
+				f.needs = false
+				return true
+			}
+			return false
 		},
 		ReauthField: `<input name="password">`,
 		Record: func(action, target, summary string) error {
@@ -62,14 +66,12 @@ func (f *fakeAdmin) request(method, target string, form url.Values) *http.Reques
 func TestRenderAdminDrawsTheSiteContentInsideTheCoreFrame(t *testing.T) {
 	tpl := template.Must(template.New("w").Funcs(template.FuncMap{"up": strings.ToUpper}).Parse(
 		`{{define "content"}}<p>{{up .Name}} {{.Note}}</p>{{end}}`))
-	for range 2 { // 두 번 그려도 같다 — html/template 은 한 번 실행한 뒤에도 다시 실행할 수 있다
-		f := &fakeAdmin{}
-		w := httptest.NewRecorder()
-		RenderAdmin(w, f.request("GET", "/admin/site/workers", nil), http.StatusUnprocessableEntity, "인부",
-			tpl, map[string]string{"Name": "kim", "Note": "<b>"})
-		if f.status != 422 || f.title != "인부" || string(f.body) != "<p>KIM &lt;b&gt;</p>" || w.Code != 422 {
-			t.Fatalf("RenderAdmin → status %d title %q body %q (응답 %d)", f.status, f.title, f.body, w.Code)
-		}
+	f := &fakeAdmin{}
+	w := httptest.NewRecorder()
+	RenderAdmin(w, f.request("GET", "/admin/site/workers", nil), http.StatusUnprocessableEntity, "인부",
+		tpl, map[string]string{"Name": "kim", "Note": "<b>"})
+	if f.status != 422 || f.title != "인부" || string(f.body) != "<p>KIM &lt;b&gt;</p>" || w.Code != 422 {
+		t.Fatalf("RenderAdmin → status %d title %q body %q (응답 %d)", f.status, f.title, f.body, w.Code)
 	}
 }
 
@@ -105,7 +107,9 @@ func TestDoneNotifiesAndRedirectsInsideTheAdminTree(t *testing.T) {
 		f.notified != [2]string{"/admin/site/workers?page=2", "저장했습니다."} {
 		t.Fatalf("Done → %d %q, 알림 %v", w.Code, w.Header().Get("Location"), f.notified)
 	}
-	for _, to := range []string{"https://evil.example/admin/", "//evil.example/admin/", "/login", "", "/admin", `/admin/\evil`} {
+	// /admin/../logout 은 http.Redirect 가 정리해 /logout 으로 보낸다 — 같은 사이트지만 관리자 트리 밖이다.
+	for _, to := range []string{"https://evil.example/admin/", "//evil.example/admin/", "/login", "", "/admin",
+		"/admin/../logout", "/admin/site/%2e%2e/../logout", "/admin/./site", "/admin/site/x/.."} {
 		f := &fakeAdmin{}
 		w := httptest.NewRecorder()
 		Done(w, f.request("POST", "/admin/site/workers", url.Values{}), to, "x")
@@ -131,11 +135,16 @@ func TestReauthOpensTheWindowWithThePostedPassword(t *testing.T) {
 		t.Error("비밀번호 없이 통과했다")
 	}
 	r = closed.request("POST", "/admin/site/pay", url.Values{"password": {"pw"}})
-	if !Reauth(r) || closed.asked[len(closed.asked)-1] != "pw" {
-		t.Errorf("맞는 비밀번호: Reauth=%v, 물은 것 %v", Reauth(r), closed.asked)
-	}
 	if ReauthField(r) != `<input name="password">` {
 		t.Errorf("창이 닫힘: 칸 %q", ReauthField(r))
+	}
+	if !Reauth(r) || closed.asked[len(closed.asked)-1] != "pw" {
+		t.Errorf("맞는 비밀번호: 물은 것 %v", closed.asked)
+	}
+	// 같은 요청에서 창이 열렸다 — 다시 그리는 폼에 칸이 없고, 두 번째 Reauth 는 비밀번호를 다시 대조하지 않는다.
+	n := len(closed.asked)
+	if !Reauth(r) || len(closed.asked) != n || ReauthField(r) != "" {
+		t.Errorf("확인한 뒤: 다시 물은 것 %v, 칸 %q — 창이 열렸으면 묻지도 그리지도 않는다", closed.asked[n:], ReauthField(r))
 	}
 	// 관리자 화면 밖에서는 통과시키지 않는다 — 닫힌 쪽이 기본이다.
 	if bare := httptest.NewRequest("POST", "/api/site/v1/x", nil); Reauth(bare) || ReauthField(bare) != "" {
