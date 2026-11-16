@@ -172,7 +172,9 @@ func Save(ctx context.Context, dump func(context.Context, io.Writer) error,
 	if err != nil {
 		return Saved{}, err
 	}
-	return Saved{File: File{Name: name, Size: info.Size(), Time: info.ModTime()}, Where: "local"}, remoteErr
+	// 시각은 시작한 시각(now)이다 — 버킷 쪽과 같다. 스케줄러가 이 날짜로 「오늘은 만들었다」를 판단하므로, 자정을
+	// 넘겨 끝난 백업의 파일 시각을 적으면 다음 날 백업을 건너뛴다.
+	return Saved{File: File{Name: name, Size: info.Size(), Time: now}, Where: "local"}, remoteErr
 }
 
 func prune(dir string, keep int) error {
