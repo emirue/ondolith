@@ -8,7 +8,7 @@
 # 부르는 쪽이 미리 정해야 하는 것:
 #   PORT DB WORK BIN ADMIN_PW JAR   그리고 헬퍼 code() want() ok() bad() sql()
 # 부르고 나면 쓸 수 있는 것:
-#   CID PGPORT SRV PROD VAR  그리고 함수 start()
+#   CID PGPORT SRV PROD VAR CHECKIN  그리고 함수 start()
 
 # ---- 준비 -------------------------------------------------------------------
 
@@ -22,7 +22,10 @@ docker exec "$CID" psql -U ondolith -d postgres -q -c \
 docker exec "$CID" psql -U ondolith -d postgres -q \
 	-c "DROP DATABASE IF EXISTS $DB" -c "CREATE DATABASE $DB OWNER ondolith" || exit 1
 
-go build -o "$BIN" ./cmd/ondolith || exit 1
+# **예제 사이트 실행 파일로 잰다** (D42 14절). 코어 화면 전부에 사이트 관리자 화면(A-214)이 더해진 상위집합이라,
+# 사이트 화면의 틀·폭까지 같은 검사가 재고 확장이 코어 화면을 바꾸지 않는지도 함께 본다. 확장 없는 코어 실행
+# 파일은 make e2e 가 처음부터 끝까지 밟는다.
+go build -o "$BIN" ./examples/site || exit 1
 
 if lsof -ti ":$PORT" >/dev/null 2>&1; then
 	lsof -ti ":$PORT" | xargs kill -9 2>/dev/null
@@ -155,6 +158,12 @@ want "테마 화면을 선언한 테마가 켜졌다" qa "$(sql "select value fr
 code POST /admin/theme/partners/new --data-urlencode "name=가나상사" \
 	--data-urlencode "url=https://example.com" --data-urlencode "_sort=1" >/dev/null
 want "테마 화면에 행이 있다" 1 "$(sql "select count(*) from theme_items where screen_key='partners'")"
+
+# 사이트 관리자 화면(A-214)의 목록이 비지 않게 예제 사이트 표에 한 줄 — 앱 API 를 켜고 키를 받는 길은 site-e2e 가
+# 밟으므로 여기서는 표에 바로 넣는다. 상세 화면은 이 줄의 id 로 연다.
+sql "insert into site_example_checkins (worker, kind, app) values ('홍길동', 'in', 'seed')" >/dev/null
+CHECKIN=$(sql "select id from site_example_checkins order by id limit 1")
+[ -n "$CHECKIN" ] && ok "사이트 표에 기록이 있다" || bad "사이트 표에 기록을 넣지 못했다"
 
 
 # **필수 약관에 동의하지 않으면 주문이 만들어지지 않는다** (FR-619).

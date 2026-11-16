@@ -46,7 +46,10 @@ docker exec "$CID" psql -U ondolith -d postgres -q -c \
 docker exec "$CID" psql -U ondolith -d postgres -q \
 	-c "DROP DATABASE IF EXISTS $DB" -c "CREATE DATABASE $DB OWNER ondolith" || exit 1
 
-go build -o "$BIN" ./cmd/ondolith || exit 1
+# **예제 사이트 실행 파일로 잰다** (D42 14절). 코어 화면 전부에 사이트 관리자 화면(A-214)이 더해진 상위집합이라,
+# 사이트 화면의 틀·폭까지 같은 검사가 재고 확장이 코어 화면을 바꾸지 않는지도 함께 본다. 확장 없는 코어 실행
+# 파일은 make e2e 가 처음부터 끝까지 밟는다.
+go build -o "$BIN" ./examples/site || exit 1
 if lsof -ti ":$PORT" >/dev/null 2>&1; then
 	lsof -ti ":$PORT" | xargs kill -9 2>/dev/null
 	sleep 1
@@ -198,6 +201,8 @@ path_for() {
 	P-203 | P-204 | P-205 | P-206 | P-207 | P-208) echo "$2" | sed "s|{slug}|notice|" ;;
 	P-303 | P-304) echo "$2" | sed "s|{slug}|mat|" ;;
 	P-302) echo "$2" | sed "s|{slug}|matcat|" ;;
+	# 사이트 관리자 화면 — 예제 사이트(examples/site)의 출퇴근 목록이다 (D42 7절).
+	A-214) echo "/admin/site/checkins" ;;
 	*) echo "$2" ;;
 	esac
 }

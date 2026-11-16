@@ -257,6 +257,8 @@ cat "$PUBLIC_URLS" >>"$ANON_URLS"
 	# 테마 화면 (A-212) — lib-seed 가 켠 qa 테마의 설정형·모음형 목록·행 추가·행 수정
 	printf '%s\n' /admin/theme/hero /admin/theme/partners /admin/theme/partners/new
 	printf '/admin/theme/partners/%s\n' "$(sql "select id from theme_items where screen_key='partners' limit 1")"
+	# 사이트 관리자 화면 (A-214) — 예제 사이트의 목록(메뉴)과 상세(메뉴 없음, 지우기 폼)
+	printf '/admin/site/checkins\n/admin/site/checkins/%s\n' "$CHECKIN"
 } >"$ADMIN_URLS"
 # `/admin/` 은 끝이 슬래시라 위 목록에서 함께 적기 어렵다 — 따로 넣는다.
 printf '/admin/\n' >>"$ADMIN_URLS"
