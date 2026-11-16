@@ -53,6 +53,8 @@ type adminRenderer struct {
 	// themeScreens is the active theme's admin.json screens (D41) — 메뉴에 화면 단위 판정을
 	// 통과한 것만 붙인다. nil 이면 테마 화면이 없다.
 	themeScreens func() []theme.Screen
+	// siteNav is the site binary's admin pages (D42 7절) — 권한은 Nav 가 칸마다 거른다.
+	siteNav []admin.NavItem
 	// hiddenNav are the core screens A-201 hides for everyone (FR-720). 조립 때 읽고, 바뀌면
 	// A-201 이 트리를 다시 조립한다 — 관리자 배색과 같은 길이다.
 	hiddenNav map[string]bool
@@ -158,6 +160,7 @@ var adminScreenTitles = map[string]string{
 	"admin/storage.html":          "파일 저장소",
 	"admin/api.html":              "커스텀 API",
 	"admin/theme-screen.html":     "테마 화면", // 처리기가 선언의 title 로 덮어쓴다 (D41 5절)
+	"admin/site.html":             "사이트",   // 사이트 처리기가 RenderAdmin 의 title 로 덮어쓴다 (D42 7절)
 	"admin/pages.html":            "페이지",
 	"admin/page-edit.html":        "페이지 편집",
 	"admin/menus.html":            "메뉴",
@@ -223,9 +226,10 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	if a.themeScreens != nil {
 		screens = a.themeScreens()
 	}
-	groups := admin.Nav(actor.Can, a.shop, a.hiddenNav, admin.ThemeNav(screens, func(key string) bool {
+	extra := append(admin.ThemeNav(screens, func(key string) bool {
 		return actor.CanOnScreen(auth.ThemeContentPermission, key)
-	})...)
+	}), a.siteNav...)
+	groups := admin.Nav(actor.Can, a.shop, a.hiddenNav, extra...)
 	view := map[string]any{
 		"Title":      adminScreenTitles[name],
 		"SiteName":   a.site(),
@@ -272,6 +276,21 @@ func (a *adminRenderer) Render(w http.ResponseWriter, r *http.Request, name stri
 	if _, err := w.Write(buf.Bytes()); err != nil {
 		a.log.Error("관리자 응답 쓰기", "screen", name, "err", err)
 	}
+}
+
+// reauthField is the layout's reauth-field drawn as when the window is closed — 사이트 템플릿은 코어 템플릿 묶음
+// 밖에서 실행되므로(site.RenderAdmin) 그 칸을 부를 수 없다. 같은 글자를 쓰게 한 번 그려 둔다.
+func (a *adminRenderer) reauthField() (template.HTML, error) {
+	t, err := a.lookup("admin/site.html")
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, "reauth-field", map[string]any{"NeedsReauth": true}); err != nil {
+		return "", err
+	}
+	// 우리 layout.html 의 칸을 우리 값으로 그린 결과다 — 사용자 입력이 없다. 사이트 템플릿이 폼 안에 그대로 넣는다.
+	return template.HTML(buf.String()), nil
 }
 
 // needsReauth 는 비밀번호 재확인 칸을 그릴지다 (FR-726, D15 5.3-1).

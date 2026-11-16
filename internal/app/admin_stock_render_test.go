@@ -506,12 +506,15 @@ func TestUserDetailOffersTheOppositeState(t *testing.T) {
 // 화면이다. 역할이 가진 권한도 보인다.
 func TestRolesScreenOffersChoices(t *testing.T) {
 	out := renderAdmin(t, "admin/roles.html", map[string]any{
-		"Roles":       []auth.Role{{Key: "editor", Permissions: []string{"post.moderate"}}, {Key: "admin", Superuser: true}},
-		"Permissions": []string{"post.moderate", "page.publish"},
-		"Boards":      []map[string]any{{"ID": "b1", "Name": "공지"}},
-		"NeedsReauth": false, "Error": ""})
+		"Roles":           []auth.Role{{Key: "editor", Permissions: []string{"post.moderate"}}, {Key: "admin", Superuser: true}},
+		"Permissions":     []string{"post.moderate", "page.publish"},
+		"PermissionNames": map[string]string{"page.publish": "페이지 게시"},
+		"Boards":          []map[string]any{{"ID": "b1", "Name": "공지"}},
+		"NeedsReauth":     false, "Error": ""})
+	// 권한은 키 옆에 설명이 보인다 — 사이트 권한(D42 7절)은 키만으로는 무슨 화면인지 모른다. 설명이 없으면 키만.
 	for _, want := range []string{`<select name="role"`, `<select name="permission"`, `<select name="board_id"`,
-		`<option value="page.publish">`, `<option value="b1">공지</option>`, `name="email"`, "post.moderate"} {
+		`<option value="page.publish">page.publish — 페이지 게시</option>`, `<option value="post.moderate">post.moderate</option>`,
+		`<option value="b1">공지</option>`, `name="email"`, "post.moderate"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("역할 화면에 %q 가 없다", want)
 		}
@@ -532,7 +535,7 @@ func TestRolesScreenOffersChoices(t *testing.T) {
 func TestRoleFormsStartUnselected(t *testing.T) {
 	roles := []auth.Role{{Key: "anonymous"}, {Key: "editor", Assignable: true}, {Key: "member"}}
 	out := renderAdmin(t, "admin/roles.html", map[string]any{"Roles": roles,
-		"Permissions": []string{"admin.access"}, "Boards": nil, "NeedsReauth": false, "Error": ""})
+		"Permissions": []string{"admin.access"}, "PermissionNames": map[string]string{}, "Boards": nil, "NeedsReauth": false, "Error": ""})
 	if n := strings.Count(out, `required><option value="">선택하세요</option>`); n != 3 {
 		t.Errorf("「선택하세요」로 시작하는 선택칸 %d개, want 3 (역할·권한·부여할 역할)", n)
 	}

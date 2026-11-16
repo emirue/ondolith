@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/emirue/ondolith/internal/siteext"
 	"github.com/emirue/ondolith/internal/theme"
 )
 
@@ -214,6 +215,21 @@ func ThemeNav(screens []theme.Screen, canScreen func(key string) bool) []NavItem
 		if canScreen(s.Key) {
 			out = append(out, NavItem{Screen: "A-212", Title: s.Title, Path: "/admin/theme/" + s.Key,
 				Group: s.Group, Order: s.Order})
+		}
+	}
+	return out
+}
+
+// SiteNav is the menu entries for a site binary's admin pages (D42 7절): 「사이트」 묶음, 등록 순서대로, 대시보드 바로
+// 아래. 사이트 화면은 사이트가 하는 일 자체라 설정 묶음 뒤로 밀지 않는다. Menu 가 빈 화면(상세)은 메뉴에 없다.
+// 경로는 부팅 점검(NavPaths)에 들지 않는다 — 같은 목록에서 라우트를 만들므로 어긋날 수 없다.
+func SiteNav(pages []siteext.AdminPage) []NavItem {
+	var out []NavItem
+	for _, p := range pages {
+		if p.Menu != "" {
+			// Order 1 은 대시보드(0) 다음이다. 같은 값끼리는 안정 정렬이라 등록 순서가 남는다.
+			out = append(out, NavItem{Screen: "A-214", Title: p.Menu, Path: siteext.AdminPrefix + p.Path,
+				Group: "사이트", Permission: p.Permission, Order: 1})
 		}
 	}
 	return out

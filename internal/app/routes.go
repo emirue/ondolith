@@ -132,8 +132,11 @@ func (r *Registry) Mount(mux *http.ServeMux) {
 //
 // 404 다. "그런 것은 없다" 는 형식이 깨진 값에 대해서도 참이고, 400 과 달리
 // 존재 여부를 추측할 단서를 주지 않는다 (SC-1 4항).
+//
+// **사이트 관리자 화면(A-214)은 대상이 아니다.** 「`{id}` 는 uuid」는 코어 표의 약속이고, 사이트 표는 bigserial
+// 을 쓸 수 있다 — 막으면 사이트 작성자는 까닭 모를 404 를 받는다. 사이트 처리기가 자기 표의 형식을 본다 (D42 7절).
 func guardID(rt Route) http.HandlerFunc {
-	if !strings.Contains(rt.Pattern, "{id}") {
+	if rt.Screen == "A-214" || !strings.Contains(rt.Pattern, "{id}") {
 		return rt.Handler
 	}
 	return func(w http.ResponseWriter, r *http.Request) {

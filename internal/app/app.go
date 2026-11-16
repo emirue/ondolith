@@ -121,12 +121,13 @@ func poolConfig(dsn string) (*pgxpool.Config, error) {
 func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
 	rebuild func() error,
 ) (http.Handler, func(), error) {
-	return NewSite(ctx, cfg, version, log, rebuild, siteext.Extension{})
+	return NewSite(ctx, cfg, version, "", log, rebuild, siteext.Extension{})
 }
 
-// NewSite is New with a site binary's extension (D42): its migrations run after the core's, and
-// its API is served under /api/site/. The zero Extension is the core's own binary.
-func NewSite(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
+// NewSite is New with a site binary's extension (D42): its migrations run after the core's, its
+// API is served under /api/site/ and its admin pages under /admin/site/. The zero Extension is the
+// core's own binary. siteVersion is the site build A-602 shows, "" for the core's own.
+func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion string, log *slog.Logger,
 	rebuild func() error, ext siteext.Extension,
 ) (http.Handler, func(), error) {
 	pcfg, err := poolConfig(cfg.DatabaseURL)
@@ -440,6 +441,8 @@ func NewSite(ctx context.Context, cfg *config.Config, version string, log *slog.
 	adminUI.hiddenNav = admin.ParseHiddenNav(setting("admin.hidden_menus")["admin.hidden_menus"])
 	// 저장 성공 알림 (FR-724) — 처리기가 adminCaller.Notify 로 실은 것을 돌아간 화면이 꺼낸다.
 	adminUI.sm = sessions
+	// 사이트 관리자 화면 (D42 7절) — 대시보드 바로 아래 「사이트」 묶음.
+	adminUI.siteNav = admin.SiteNav(ext.Admin)
 	// 선언 오류는 활성화(A-202)가 보여 주지만, 이미 켜진 테마로 부팅할 때는 로그가 유일한 자리다.
 	if _, warns := theme.ReadAdmin(bootDir); len(warns) > 0 {
 		log.Warn("테마 화면 선언 (admin.json)", "경고", strings.Join(warns, " · "))
@@ -486,6 +489,7 @@ func NewSite(ctx context.Context, cfg *config.Config, version string, log *slog.
 		Logger:        log,
 		BaseURL:       baseURL,
 		Version:       version,
+		SiteVersion:   siteVersion,
 		Migrations:    func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
 		ValidateTheme: func(name string) (string, error) {
 			// 이름을 테마 루트 아래 디렉터리로 푼다 — 로더가 쓰는 것과 같은
@@ -608,6 +612,31 @@ func NewSite(ctx context.Context, cfg *config.Config, version string, log *slog.
 	for _, rt := range ext.API {
 		registry.Add(Route{Screen: "P-908", Method: rt.Method, Pattern: siteext.APIPrefix + rt.Path,
 			Class: SC9, Handler: siteHandler.ServeHTTP})
+	}
+
+	// 사이트 관리자 화면 (D42 7절, A-214). **본 트리 안이다** — 관리자 문·교차 출처 보호·요청 상한이 그대로 붙는다.
+	// 한 처리기가 폼(GET)과 제출(POST)을 받는다. 권한은 감싸개가 본다(siteadmin.go).
+	if len(ext.Admin) > 0 {
+		field, err := adminUI.reauthField()
+		if err != nil {
+			return fail(fmt.Errorf("app: 재확인 칸: %w", err))
+		}
+		sa := siteAdmin{render: adminUI.Render, caller: ad.Caller, db: db, log: log,
+			record: contentStore.OpLog().Record, reauthField: field}
+		for _, p := range ext.Admin {
+			h := sa.page(p)
+			registry.Add(Route{Screen: "A-214", Method: "GET", Pattern: siteext.AdminPrefix + p.Path, Class: SC4,
+				Permission: p.Permission, Handler: h})
+			registry.Add(Route{Screen: "A-214", Method: "POST", Pattern: siteext.AdminPrefix + p.Path, Class: SC5,
+				Permission: p.Permission, Handler: h})
+		}
+	}
+	// 사이트 권한을 넣는다 — 아래 부팅 검사가 표의 권한 키와 라우트를 대조하므로 그 앞이다. 코드에서 빠진 권한은
+	// 지우지 않는다(준 역할이 남아 있을 수 있다). 부팅이 「어떤 라우트도 쓰지 않는 권한」으로 알린다.
+	for _, p := range ext.Permissions {
+		if err := authStore.EnsurePermission(ctx, p.Key, strings.TrimSpace(p.Name)); err != nil {
+			return fail(fmt.Errorf("app: 사이트 권한 %s: %w", p.Key, err))
+		}
 	}
 
 	perms, err := authStore.PermissionKeys(ctx)
