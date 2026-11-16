@@ -1,11 +1,13 @@
 #!/bin/sh
-# 사이트 실행 파일 한 바퀴 (D42 1·2단계).
+# 사이트 실행 파일 한 바퀴 (D42 1·2·3단계).
 #
 # 코어를 Go 모듈로 가져와 빌드한 사이트 실행 파일(examples/site)을 빈 DB 에 띄워, 설치부터 앱 요청까지 사람과 앱이
 # 하는 순서대로 밟는다. Go 시험은 조립 함수를 직접 부른다 — 이것은 진짜 실행 파일과 진짜 HTTP 다:
 #   설치 직후(재시작 없이) 사이트 표가 있다 → 관리자가 A-213 에서 켜고 키를 발급한다 → 앱이 그 키로 쓰고 읽는다 →
 #   키 없음·틀린 키 401, 없는 주소 JSON 404 → 관리자가 사이트 화면에서 그 기록을 보고 지운다(알림·작업 로그) →
-#   A-201 저장으로 트리를 다시 조립해도 사이트 화면이 남는다 → 키를 폐기하면 401 → 끄면 404
+#   A-201 저장으로 트리를 다시 조립해도 사이트 화면이 남는다 → 인부를 등록하고 앱이 문자 인증으로 토큰을 받아 자기
+#   출근을 찍는다(등록 안 된 번호도 같은 응답, 다섯 번 틀리면 잠김) → 그만둔 인부의 토큰은 401, 문자 상한 429 →
+#   키를 폐기하면 401 → 끄면 404
 #
 # 실행: make e2e (scripts/e2e.sh 뒤에 이어 돈다)
 set -u
@@ -66,7 +68,8 @@ case "$("$BIN" -version)" in
 *) bad "-version: $("$BIN" -version)" ;;
 esac
 
-(cd "$WORK" && exec "$BIN" -addr "127.0.0.1:$PORT" -config ./ondolith.json >>"$WORK/log" 2>&1) &
+# 인증번호는 문자 대신 로그로 나간다 — 예제의 개발용 발송(EXAMPLE_SMS=log). SENS 는 단위 시험의 가짜 서버가 본다.
+(cd "$WORK" && EXAMPLE_SMS=log exec "$BIN" -addr "127.0.0.1:$PORT" -config ./ondolith.json >>"$WORK/log" 2>&1) &
 SRV=$!
 i=0
 until curl -s -o /dev/null "$BASE/"; do
@@ -131,6 +134,53 @@ want "A-201 관리자 배색 바꾸기 (트리 재조립)" 303 "$(code POST /adm
 want "다시 조립한 트리의 사이트 화면" 200 "$(page /admin/site/checkins)"
 grep -q 'data-admin-theme="1c"' "$WORK/page" && grep -q 'href="/admin/site/checkins"' "$WORK/page" &&
 	ok "다시 조립한 트리에도 사이트 화면과 메뉴가 있다 (새 배색으로)" || bad "다시 조립한 트리에서 사이트 화면이나 메뉴가 빠졌다"
+
+# ---- 문자 인증 로그인 (D42 8절, P-909) ----------------------------------------
+# smscode 는 그 번호로 나간 마지막 인증번호다. 문자는 응답 밖에서 나가므로 잠깐 기다린다. 둘째 인자와 같은 번호는
+# 앞의 것이라 더 기다린다.
+smscode() {
+	i=0
+	while [ "$i" -lt 50 ]; do
+		c=$(grep "\[EXAMPLE_SMS\] to=$1 " "$WORK/log" | tail -1 | sed -n 's/.*인증번호 \([0-9]\{6\}\).*/\1/p')
+		if [ -n "$c" ] && [ "$c" != "${2:-}" ]; then echo "$c"; return; fi
+		i=$((i + 1))
+		sleep 0.1
+	done
+}
+other() { [ "$1" = 000000 ] && echo 111111 || echo 000000; }
+verify() { app POST /api/site/auth/verify "$KEY" --data "{\"phone\":\"01011112222\",\"code\":\"$1\"}"; }
+want "인부 추가 (사이트 관리자 화면)" 303 "$(code POST /admin/site/workers --data-urlencode "name=김인부" --data-urlencode "phone=010-1111-2222")"
+WID=$(sql "select id from site_example_workers where phone = '01011112222'")
+want "앱: 인증번호 요청" 202 "$(app POST /api/site/auth/code "$KEY" --data '{"phone":"010-1111-2222"}')"
+cp "$WORK/body" "$WORK/known"
+CODE1=$(smscode 01011112222)
+[ -n "$CODE1" ] && ok "인증번호가 나갔다 (개발용 로그 발송)" || bad "인증번호가 나가지 않았다"
+want "앱: 등록되지 않은 번호도 같은 상태" 202 "$(app POST /api/site/auth/code "$KEY" --data '{"phone":"01099998888"}')"
+cmp -s "$WORK/known" "$WORK/body" && ok "앱: 등록·미등록 응답 본문이 같다" || bad "앱: 응답 본문이 다르다"
+sleep 0.5
+grep -q "to=01099998888" "$WORK/log" && bad "등록되지 않은 번호에 문자가 나갔다" || ok "등록되지 않은 번호에는 문자가 없다"
+want "앱: 틀린 인증번호 401" 401 "$(verify "$(other "$CODE1")")"
+want "앱: 맞는 인증번호로 토큰" 200 "$(verify "$CODE1")"
+TOKEN=$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' "$WORK/body")
+want "앱: 토큰으로 내 정보 (site.Person)" 200 "$(app GET /api/site/v1/me "$KEY" -H "X-Ondolith-Session: $TOKEN")"
+grep -q '"name":"김인부"' "$WORK/body" && ok "앱: 처리기가 로그인한 사람을 안다" || bad "앱: 내 정보가 아니다 — $(cat "$WORK/body")"
+want "앱: 내 출근" 201 "$(app POST /api/site/v1/me/checkins "$KEY" -H "X-Ondolith-Session: $TOKEN" --data '{"kind":"in"}')"
+want "그 출근이 그 인부를 가리킨다" 1 "$(sql "select count(*) from site_example_checkins where worker_id = $WID")"
+want "앱: 토큰 없이 내 정보 401" 401 "$(app GET /api/site/v1/me "$KEY")"
+want "앱: 쓴 인증번호로 다시 401" 401 "$(verify "$CODE1")"
+app POST /api/site/auth/code "$KEY" --data '{"phone":"01011112222"}' >/dev/null
+CODE2=$(smscode 01011112222 "$CODE1")
+for _ in 1 2 3 4 5; do verify "$(other "$CODE2")" >/dev/null; done
+want "앱: 다섯 번 틀린 뒤에는 맞는 번호도 401" 401 "$(verify "$CODE2")"
+want "작업 로그에 인증번호 원문이 없다" 0 "$(sql "select count(*) from operation_logs where position('$CODE1' in summary) > 0")"
+want "인부 그만둠" 303 "$(code POST "/admin/site/workers/$WID/leave")"
+want "그만둔 인부의 토큰은 401" 401 "$(app GET /api/site/v1/me "$KEY" -H "X-Ondolith-Session: $TOKEN")"
+want "작업 로그에 그만둠이 남는다" 1 "$(sql "select count(*) from operation_logs where action = 'site.worker_leave' and target_id = '$WID'")"
+SENT=$(grep -c "to=01011112222 " "$WORK/log")
+want "그만둔 인부의 인증번호 요청도 같은 응답" 202 "$(app POST /api/site/auth/code "$KEY" --data '{"phone":"01011112222"}')"
+sleep 0.5
+want "그만둔 인부에게는 문자가 없다" "$SENT" "$(grep -c "to=01011112222 " "$WORK/log")"
+want "번호당 10분 3통 — 넷째는 429" 429 "$(app POST /api/site/auth/code "$KEY" --data '{"phone":"01011112222"}')"
 
 KID=$(sql "select id from api_keys where name='e2e'")
 want "A-213 키 폐기" 303 "$(code POST /admin/settings/api/keys/revoke --data-urlencode "id=$KID")"

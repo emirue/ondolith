@@ -230,7 +230,7 @@ cat "$PUBLIC_URLS" >>"$ANON_URLS"
 		/admin/boards /admin/boards/new \
 		/admin/menus /admin/users /admin/users/new \
 		/admin/user-fields /admin/roles /admin/settings /admin/settings/mail \
-		/admin/settings/payment /admin/settings/social /admin/settings/storage /admin/settings/seo /admin/settings/api \
+		/admin/settings/payment /admin/settings/social /admin/settings/storage /admin/settings/seo /admin/settings/api /admin/settings/sms \
 		/admin/themes /admin/themes/upload /admin/oplog /admin/system /admin/backup \
 		/admin/webhooks /admin/products /admin/products/new /admin/categories \
 		/admin/orders /admin/terms /admin/commerce/policy /admin/reconcile \
@@ -258,7 +258,7 @@ cat "$PUBLIC_URLS" >>"$ANON_URLS"
 	printf '%s\n' /admin/theme/hero /admin/theme/partners /admin/theme/partners/new
 	printf '/admin/theme/partners/%s\n' "$(sql "select id from theme_items where screen_key='partners' limit 1")"
 	# 사이트 관리자 화면 (A-214) — 예제 사이트의 목록(메뉴)과 상세(메뉴 없음, 지우기 폼)
-	printf '/admin/site/checkins\n/admin/site/checkins/%s\n' "$CHECKIN"
+	printf '/admin/site/checkins\n/admin/site/checkins/%s\n/admin/site/workers\n' "$CHECKIN"
 } >"$ADMIN_URLS"
 # `/admin/` 은 끝이 슬래시라 위 목록에서 함께 적기 어렵다 — 따로 넣는다.
 printf '/admin/\n' >>"$ADMIN_URLS"
