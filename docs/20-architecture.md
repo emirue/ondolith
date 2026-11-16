@@ -64,8 +64,9 @@ func (r *root) ServeHTTP(w, req)      { r.t.Load().handler.ServeHTTP(w, req) }
 ## 패키지 구조
 
 ```
-cmd/ondolith/          main. 플래그, 부팅 분기, 핸들러 교체, graceful shutdown
+cmd/ondolith/          main. 버전을 찍어 internal/boot 를 부른다
 internal/
+  boot/                플래그, 부팅 분기, 핸들러 교체, graceful shutdown, 버전 결정 (사이트 실행 파일도 쓴다, D42)
   config/              설정 파일 읽기·쓰기. 파일 존재 = 설치 완료 플래그
   httpsec/             모든 응답이 지는 보안 헤더. 설치·운영 **양 트리**가 같은 것을 쓴다
   secretbox/           자격증명 봉인(AES-256-GCM). `settings` 의 자격증명(목록은 `content.IsSecretSetting`)을 `ondolith.json` 의 `secret_key` 로 봉인·개봉 (D60 「저장된 자격증명」)

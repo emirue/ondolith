@@ -174,7 +174,7 @@ OAuth 외부 요청 시한, 속도 제한기 정리 비용, 결제 선점·만�
 
 | # | 점검 항목 | 어디 | 확인 방법 | 상태 |
 |---|---|---|---|---|
-| 8.1 | 서버 시한: 헤더 10초·읽기 30초·쓰기 60초·유휴 120초, 종료 15초 | `cmd/ondolith/main.go` | 코드 읽기 | ✓ `MaxHeaderBytes` 는 기본 1 MiB |
+| 8.1 | 서버 시한: 헤더 10초·읽기 30초·쓰기 60초·유휴 120초, 종료 15초 | `internal/boot/boot.go` | 코드 읽기 | ✓ `MaxHeaderBytes` 는 기본 1 MiB |
 | 8.2 | 템플릿은 한 번 파싱·캐시, `asset` 함수는 해당 로더에 귀속 | `theme/loader.go`·`app.go` | `TestAssetFunctionBelongsToItsLoader`·기존 캐시 테스트 | ✓ 2026-09-30: 개발 모드에서는 템플릿·자산 해시 모두 다시 읽음(FR-306). 자산 해시는 스트림으로 계산 |
 | 8.3 | 정적 자산 캐시: 현재 해시와 일치하면 `immutable` 1년, 버전 없는 주소 1시간. 개발 모드·다른 해시는 `no-store`, 404는 캐시 힌트 없음 | `theme/static.go` | `TestStaticCachePolicyMatchesContentAndMode` | ✓ 2026-09-30 |
 | 8.4 | 아웃바운드 시한: 토스 30초, SMTP 접속 10초·교환 최대 30초, OAuth 요청당 15초 | `commerce/payment.go`·`app/mail.go`·`auth/social_provider.go` | SMTP `net.Pipe` 테스트·프로바이더 클라이언트 검사 | ✓ 2026-09-30: SMTP TLS 모드 적용·인증서 검증·STARTTLS 지원 필수·접속 후 취소도 확인 |

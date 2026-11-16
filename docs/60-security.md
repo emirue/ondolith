@@ -261,7 +261,7 @@ siteverify 에 보내, 각각 통과·거부·거부·우리 쪽 오류로 읽�
 
 순서 불변식도 지킨다: `ReadHeaderTimeout ≤ ReadTimeout ≤ WriteTimeout ≤ IdleTimeout`.
 `ReadTimeout`이 헤더 예산보다 짧으면 헤더 예산에 도달할 수 없다.
-값과 순서 모두 `cmd/ondolith` 테스트가 고정하며, 필드를 하나라도 지우면 실패한다.
+값과 순서 모두 `internal/boot` 테스트가 고정하며, 필드를 하나라도 지우면 실패한다.
 
 ## 비밀이 든 주소
 
