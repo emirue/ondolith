@@ -8,8 +8,9 @@
 ## 1. 패키지 구조와 경계
 
 ```
-cmd/ondolith/        main. 플래그, 부팅 분기, 핸들러 교체, graceful shutdown
+cmd/ondolith/        main. 버전을 찍어 internal/boot 를 부른다
 internal/
+  boot/              플래그, 부팅 분기, 핸들러 교체, graceful shutdown, 버전 결정 (사이트 실행 파일도 쓴다, D42)
   config/            설정 파일 읽기·쓰기
   install/           설치 트리
   app/               운영 트리 조립

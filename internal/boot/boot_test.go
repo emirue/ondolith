@@ -1,4 +1,4 @@
-package main
+package boot
 
 import (
 	"errors"
@@ -347,7 +347,7 @@ func TestDecideBootNeverStartsWizardOnBrokenConfig(t *testing.T) {
 }
 
 // `go test` builds record no vcs.revision, so these cases drive the decision
-// directly rather than through versionString(); otherwise both the stamped and
+// directly rather than through currentVersions(); otherwise both the stamped and
 // unstamped branches return the same thing and the test proves nothing.
 func TestFormatVersion(t *testing.T) {
 	const rev = "80813d3fffaa1234"
@@ -375,18 +375,14 @@ func TestFormatVersion(t *testing.T) {
 
 // The wiring, separate from the decision: whatever the build recorded, the
 // binary must never report an empty version.
-func TestVersionStringIsNeverEmpty(t *testing.T) {
-	orig := version
-	t.Cleanup(func() { version = orig })
-
+func TestCurrentVersionsIsNeverEmpty(t *testing.T) {
 	for _, v := range []string{"dev", "v9.9.9"} {
-		version = v
-		got := versionString()
+		got := currentVersions(v).Core
 		if got == "" {
-			t.Errorf("version=%q → versionString() 이 비어 있다", v)
+			t.Errorf("stamped=%q → 코어 버전이 비어 있다", v)
 		}
 		if !strings.HasPrefix(got, v) {
-			t.Errorf("version=%q → versionString() = %q, %q 로 시작해야 한다", v, got, v)
+			t.Errorf("stamped=%q → 코어 버전 %q, %q 로 시작해야 한다", v, got, v)
 		}
 	}
 }

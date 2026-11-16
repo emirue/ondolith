@@ -146,7 +146,7 @@ var servedOutsideTree = map[string]bool{
 	// P-001 설치 마법사 · P-002 설치 유도: **설치 트리**가 받는다. 운영 트리에
 	// 이 둘이 있으면 설치가 끝난 사이트에서 다시 설치를 시작할 수 있다는 뜻이고,
 	// 그것이 CLAUDE.md 3번(설치 트리와 운영 트리는 별개)이 막는 것이다.
-	// 검증은 `internal/install` 과 cmd/ondolith 의 트리 교체 테스트가 한다.
+	// 검증은 `internal/install` 과 internal/boot 의 트리 교체 테스트가 한다.
 	"P-001": true,
 	"P-002": true,
 
