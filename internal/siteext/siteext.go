@@ -5,6 +5,7 @@
 package siteext
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -29,6 +30,17 @@ type Extension struct {
 	Permissions []Permission
 	// Admin pages are mounted under AdminPrefix, in this order in the sidebar's 「사이트」 group.
 	Admin []AdminPage
+	// Phone turns on phone login under APIPrefix/auth/ (D42 8절); zero means none.
+	Phone PhoneLogin
+	// SMS sends the login code; nil means the SENS settings in A-215.
+	SMS func(ctx context.Context, to, text string) error
+}
+
+// PhoneLogin is the site's say on who may log in by phone.
+type PhoneLogin struct {
+	// Lookup gets a normalized number (digits only, 01…) and returns the subject that logs in — 사이트가 정한
+	// 대상(인부 id 등). ok 가 false 면 그 번호로는 로그인하지 못한다 — 응답은 허락한 번호와 같다.
+	Lookup func(ctx context.Context, phone string) (subject string, ok bool, err error)
 }
 
 // Permission is a site permission (D42 3절). Key is "site.이름"; Name is what the role editor shows.
@@ -69,6 +81,8 @@ type Auth uint8
 const (
 	// AuthApp is the app key alone: 「어느 앱인지」. 사람을 가리지 않는 기능에만 쓴다.
 	AuthApp Auth = 1
+	// AuthPerson is the app key and a phone-login token: 「누구인지」 (D42 8절).
+	AuthPerson Auth = 2
 )
 
 // reservedSeg is the first path segment the core keeps for itself — 문자 인증 로그인 (D42 8절).
@@ -124,8 +138,15 @@ func (e Extension) Validate() error {
 			errs = append(errs, where+": 처리기가 없다")
 			bad = true
 		}
-		if r.Auth != AuthApp {
-			errs = append(errs, where+": 인증 방식을 정하지 않았다 — site.App(앱 키)을 적는다. 빈 값은 받지 않는다")
+		switch r.Auth {
+		case AuthApp:
+		case AuthPerson:
+			if e.Phone.Lookup == nil {
+				errs = append(errs, where+": site.Person 라우트는 문자 로그인(Phone.Lookup)이 있어야 한다 — 없으면 토큰을 받을 길이 없다")
+				bad = true
+			}
+		default:
+			errs = append(errs, where+": 인증 방식을 정하지 않았다 — site.App(앱 키) 또는 site.Person(앱 키 + 로그인)을 적는다. 빈 값은 받지 않는다")
 			bad = true
 		}
 		if first, _, _ := strings.Cut(strings.TrimPrefix(r.Path, "/"), "/"); first == reservedSeg {

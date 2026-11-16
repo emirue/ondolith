@@ -2,6 +2,7 @@ package site
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"html/template"
 	"log/slog"
@@ -25,6 +26,7 @@ type fakeAdmin struct {
 	asked     []string
 	recorded  [][3]string
 	recordErr error
+	ended     []string
 }
 
 func (f *fakeAdmin) request(method, target string, form url.Values) *http.Request {
@@ -54,6 +56,10 @@ func (f *fakeAdmin) request(method, target string, form url.Values) *http.Reques
 		Record: func(action, target, summary string) error {
 			f.recorded = append(f.recorded, [3]string{action, target, summary})
 			return f.recordErr
+		},
+		EndSessions: func(_ context.Context, subject string) error {
+			f.ended = append(f.ended, subject)
+			return nil
 		},
 	}
 	ctx := siteext.WithAdmin(r.Context(), a)
@@ -171,5 +177,21 @@ func TestOpLogRecordsSiteActions(t *testing.T) {
 	OpLog(r, "site.worker_pay", "w-1", "x")
 	if !strings.Contains(logged.String(), "db down") {
 		t.Errorf("기록 실패를 알리지 않았다: %s", logged.String())
+	}
+}
+
+// **그만둔 사람의 앱 토큰을 모두 끊는다** (D42 8절) — 사이트 관리자 화면에서 부른다. 화면 밖이면 끊을 길이 없다는
+// 오류다 — 조용히 넘어가면 그만둔 사람이 30일 동안 앱을 쓴다.
+func TestEndSessionsEndsTheSubject(t *testing.T) {
+	f := &fakeAdmin{}
+	r := f.request("POST", "/admin/site/workers/7", url.Values{})
+	if err := EndSessions(r.Context(), "w-7"); err != nil || len(f.ended) != 1 || f.ended[0] != "w-7" {
+		t.Fatalf("EndSessions = %v, 끊은 것 %v", err, f.ended)
+	}
+	if err := EndSessions(r.Context(), ""); err == nil || len(f.ended) != 1 {
+		t.Error("빈 대상을 끊으려 했다")
+	}
+	if err := EndSessions(context.Background(), "w-7"); err == nil {
+		t.Error("관리자 화면 밖에서 오류 없이 넘어갔다")
 	}
 }

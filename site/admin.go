@@ -2,6 +2,8 @@ package site
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -121,6 +123,19 @@ func OpLog(r *http.Request, action, target, summary string) {
 			logger(r).Error("작업 로그 기록 실패", "action", action, "target", target, "err", err)
 		}
 	}
+}
+
+// EndSessions ends every app token of subject — 인부가 그만둘 때 사이트 관리자 화면에서 부른다. Lookup 이 그 번호를
+// 더 허락하지 않아도 이미 받은 토큰은 30일 동안 살아 있으므로 둘 다 한다. 관리자 화면 밖이면 오류다.
+func EndSessions(ctx context.Context, subject string) error {
+	a, ok := siteext.AdminFrom(ctx)
+	switch {
+	case !ok:
+		return errors.New("site.EndSessions: 사이트 관리자 화면 밖에서 불렀다")
+	case subject == "":
+		return errors.New("site.EndSessions: 대상이 비었다")
+	}
+	return a.EndSessions(ctx, subject)
 }
 
 func logger(r *http.Request) *slog.Logger {

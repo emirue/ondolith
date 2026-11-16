@@ -20,6 +20,8 @@ type Caller struct {
 	Log *slog.Logger
 	// Actor is the administrator on a site admin page; zero on the app API.
 	Actor Actor
+	// Subject is who logged in by phone, on an AuthPerson route; "" elsewhere.
+	Subject string
 }
 
 // Actor is who opened a site admin page — 이메일은 넣지 않는다(화면에 찍히면 캡처 한 장으로 샌다).
@@ -42,6 +44,8 @@ type Admin struct {
 	ReauthField template.HTML
 	// Record writes one op-log line (A-601).
 	Record func(action, target, summary string) error
+	// EndSessions ends every app token of subject (D42 8절) — 그만둔 사람.
+	EndSessions func(ctx context.Context, subject string) error
 }
 
 type adminKey struct{}
