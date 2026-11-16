@@ -253,3 +253,65 @@ func TestBackupScreenShowsTheLastBackupAndWhereItGoes(t *testing.T) {
 		t.Errorf("S3 에서 개수 0 = HTTP %d (%v), want 422 「서버에 남길 개수는 1~30개입니다.」", rec.Code, data["Error"])
 	}
 }
+
+// **내려받기가 시작되면 화면이 안다** (FR-727). 내려받기 응답은 화면을 넘기지 않아, 두 번 누르기를 막으려고 잠근
+// 단추를 풀 때가 없다 — 그러면 다시 받으려면 새로 고쳐야 한다. 화면이 보낸 표(download_token)를 파일을 보내기
+// 직전에 쿠키로 돌려준다. 오류 화면에는 싣지 않는다 — 그때는 화면이 넘어가 단추가 저절로 풀린다. 표가 우리가 만든
+// 모양이 아니면 돌려주지 않는다.
+func TestBackupDownloadTellsThePageItStarted(t *testing.T) {
+	su := &fakeCaller{superuser: true, email: "su@example.com"}
+	d, _ := fixture(t, su)
+	d.BackupDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(d.BackupDir, "auto-20261001-0300.zip"), []byte("저장된 zip"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d.DumpDB = func(_ context.Context, w io.Writer) error { _, err := w.Write([]byte("dump")); return err }
+	d.UploadDir = t.TempDir()
+	d.SecureCookies = true
+	const tok = "0123456789abcdef0123456789abcdef"
+	told := func(rec interface{ Result() *http.Response }) *http.Cookie {
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == "ondolith_download" {
+				return c
+			}
+		}
+		return nil
+	}
+
+	for _, tc := range []struct {
+		name string
+		form url.Values
+	}{
+		{"지금 내려받기", url.Values{"download_token": {tok}}},
+		{"저장된 백업", url.Values{"action": {"file"}, "name": {"auto-20261001-0300.zip"}, "download_token": {tok}}},
+	} {
+		rec := post(d.BackupDownload, "/admin/backup", tc.form)
+		c := told(rec)
+		if rec.Code != http.StatusOK || c == nil {
+			t.Fatalf("%s = HTTP %d, 쿠키 %v — 내려받기가 시작됐다고 알려야 한다", tc.name, rec.Code, c)
+		}
+		// 화면의 스크립트가 읽어야 하므로 HttpOnly 가 아니다. 관리자 화면에만 가고 곧 사라진다. Secure 는 세션 쿠키를 따른다.
+		if c.Value != tok || c.Path != "/admin" || c.HttpOnly || c.MaxAge <= 0 || c.MaxAge > 60 ||
+			c.SameSite != http.SameSiteStrictMode || !c.Secure {
+			t.Errorf("%s 쿠키 = %+v", tc.name, c)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		form url.Values
+	}{
+		{"표 없이", url.Values{"action": {"file"}, "name": {"auto-20261001-0300.zip"}}},
+		{"모양이 다른 표", url.Values{"action": {"file"}, "name": {"auto-20261001-0300.zip"}, "download_token": {"x; Path=/"}}},
+		{"너무 긴 표", url.Values{"action": {"file"}, "name": {"auto-20261001-0300.zip"}, "download_token": {strings.Repeat("a", 65)}}},
+		{"없는 파일", url.Values{"action": {"file"}, "name": {"auto-20261002-0300.zip"}, "download_token": {tok}}},
+	} {
+		if c := told(post(d.BackupDownload, "/admin/backup", tc.form)); c != nil {
+			t.Errorf("%s: 쿠키 %+v, want 없음", tc.name, c)
+		}
+	}
+	d.DumpDB = func(context.Context, io.Writer) error { return errors.New("pg_dump 실패") }
+	if c := told(post(d.BackupDownload, "/admin/backup", url.Values{"download_token": {tok}})); c != nil {
+		t.Errorf("덤프 실패: 쿠키 %+v, want 없음", c)
+	}
+}

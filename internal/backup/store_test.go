@@ -253,6 +253,27 @@ func TestSaveKeepsTheBackupLocallyWhenTheBucketRefuses(t *testing.T) {
 	}
 }
 
+// **저장한 백업의 시각은 시작한 시각이다** — 파일을 다 쓴 시각이 아니다. 스케줄러는 그 시각(backup.last_at)의
+// 날짜로 「오늘은 이미 만들었다」를 판단한다. 23시에 시작한 백업이 자정을 넘겨 끝나 다음 날로 적히면 다음 날 백업을
+// 건너뛴다. 버킷으로 간 백업은 이미 시작 시각을 적고 있었다 — 로컬에 남은 백업만 파일 시각을 적었다.
+func TestSavedTimeIsWhenTheBackupStarted(t *testing.T) {
+	at := time.Date(2026, 11, 14, 23, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		remote Remote
+	}{
+		{"로컬", nil},
+		{"버킷이 거부해 로컬에 남음", &memBucket{fail: errors.New("AccessDenied")}},
+		{"버킷", &memBucket{}},
+	} {
+		n := 0
+		saved, _ := Save(context.Background(), fakeDump(&n, nil), uploadsWithOneFile(t), t.TempDir(), at, 7, tc.remote)
+		if !saved.Time.Equal(at) {
+			t.Errorf("%s: 저장 시각 %v, want 시작 시각 %v", tc.name, saved.Time, at)
+		}
+	}
+}
+
 // 스케줄러: 버킷을 고르는 쪽이 오류(예: 봉인이 풀리지 않는 시크릿)여도 로컬에 백업을 남기고 실패로 기록한다.
 // 성공한 날은 Done 이 받아 저장한다 — 재시작한 같은 날 다시 만들지 않는 근거가 그 값이다(버킷 백업은 로컬
 // 폴더에 흔적이 없다).
