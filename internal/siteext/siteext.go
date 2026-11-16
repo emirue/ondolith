@@ -15,13 +15,42 @@ import (
 // APIPrefix is where every site API route lives. 코어 주소를 덮지 못하게 고정한다 (D42 지배 원칙 3).
 const APIPrefix = "/api/site"
 
+// AdminPrefix is where every site admin page lives (D42 7절). 관리자 트리 안이라 문(admin.access)·교차 출처 보호·
+// 요청 상한이 그대로 붙는다.
+const AdminPrefix = "/admin/site"
+
 // Extension is what a site binary adds to the core. The zero value is the core's own binary.
 type Extension struct {
 	// Migrations holds the site's goose SQL files at its root; nil means none.
 	Migrations fs.FS
 	// API is mounted under APIPrefix.
 	API []Route
+	// Permissions are put into the permission table at boot, so the role editor can grant them.
+	Permissions []Permission
+	// Admin pages are mounted under AdminPrefix, in this order in the sidebar's 「사이트」 group.
+	Admin []AdminPage
 }
+
+// Permission is a site permission (D42 3절). Key is "site.이름"; Name is what the role editor shows.
+type Permission struct {
+	Key  string
+	Name string
+}
+
+// AdminPage is one site admin screen. Path follows AdminPrefix; one Handler takes GET and POST.
+// Menu 가 비면 사이드바에 없다 — 목록에서 눌러 들어가는 상세 화면이다.
+type AdminPage struct {
+	Menu       string
+	Path       string
+	Permission string
+	Handler    http.HandlerFunc
+}
+
+var siteKey = regexp.MustCompile(`^site\.[a-z][a-z0-9_]*$`)
+
+// ValidKey reports whether k is a site permission key or op-log action: "site." and one more
+// segment. DB 가 두 마디만 받는다(permissions.key·op_log.action 의 CHECK) — 여기서 같은 모양을 요구한다.
+func ValidKey(k string) bool { return siteKey.MatchString(k) }
 
 // Route is one site API endpoint. Path follows APIPrefix and uses http.ServeMux's wildcards.
 type Route struct {
@@ -109,10 +138,57 @@ func (e Extension) Validate() error {
 			}
 		}
 	}
+	errs = append(errs, e.validateAdmin()...)
 	if len(errs) > 0 {
 		return fmt.Errorf("사이트 확장 라우트가 틀렸다:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 	return nil
+}
+
+// validateAdmin checks Permissions and Admin (D42 7절).
+func (e Extension) validateAdmin() []string {
+	var errs []string
+	declared := map[string]bool{}
+	for _, p := range e.Permissions {
+		where := "권한 " + p.Key
+		switch n := len([]rune(strings.TrimSpace(p.Name))); {
+		case !ValidKey(p.Key):
+			errs = append(errs, where+": 키는 site. 다음에 소문자로 시작하는 마디 하나다 (예: site.workers)")
+		case n == 0 || n > 60:
+			errs = append(errs, where+": 이름은 1~60자다 — 역할 편집기에 보인다")
+		case declared[p.Key]:
+			errs = append(errs, where+": 두 번 적었다")
+		}
+		declared[p.Key] = true
+	}
+	mux := http.NewServeMux()
+	for _, a := range e.Admin {
+		where := AdminPrefix + a.Path
+		bad := false
+		if !validPath(a.Path) {
+			errs = append(errs, where+": 경로는 / 로 시작하고, 마디는 글자·숫자·._~- 이거나 {이름}·맨 끝의 {이름...} 이다")
+			bad = true
+		}
+		if a.Handler == nil {
+			errs = append(errs, where+": 처리기가 없다")
+			bad = true
+		}
+		if !declared[a.Permission] {
+			errs = append(errs, where+": 권한 "+a.Permission+"을 Permissions 에 선언하지 않았다")
+		}
+		if strings.Contains(a.Path, "{") && a.Menu != "" {
+			errs = append(errs, where+": 변수가 든 주소는 메뉴에 걸 수 없다 — Menu 를 비운다")
+		}
+		if len([]rune(a.Menu)) > 30 {
+			errs = append(errs, where+": 메뉴 글자는 30자까지다")
+		}
+		if !bad {
+			if err := register(mux, where); err != nil {
+				errs = append(errs, where+": 다른 화면과 겹친다 — "+err.Error())
+			}
+		}
+	}
+	return errs
 }
 
 // register asks the real ServeMux, which panics on a duplicate or ambiguous pattern — the
