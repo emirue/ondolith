@@ -66,6 +66,7 @@ var nav = []NavItem{
 	{Screen: "A-206", Title: "소셜 로그인", Path: "/admin/settings/social", Group: "설정", Permission: "settings.update", Order: 65},
 	{Screen: "A-210", Title: "파일 저장소", Path: "/admin/settings/storage", Group: "설정", Permission: "settings.update", Order: 70},
 	{Screen: "A-213", Title: "커스텀 API", Path: "/admin/settings/api", Group: "설정", Permission: "settings.update", Order: 72},
+	{Screen: "A-215", Title: "문자(SMS)", Path: "/admin/settings/sms", Group: "설정", Permission: "settings.update", Order: 73},
 	{Screen: "A-202", Title: "테마", Path: "/admin/themes", Group: "설정", Permission: "theme.view", Order: 80},
 	{Screen: "A-601", Title: "작업 로그", Path: "/admin/oplog", Group: "설정", Permission: "log.view", Order: 85},
 	{Screen: "A-604", Title: "백업", Path: "/admin/backup", Group: "설정", Permission: "settings.update", Order: 88},

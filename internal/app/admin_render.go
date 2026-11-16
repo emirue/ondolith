@@ -159,6 +159,7 @@ var adminScreenTitles = map[string]string{
 	"admin/mail.html":             "메일 설정",
 	"admin/storage.html":          "파일 저장소",
 	"admin/api.html":              "커스텀 API",
+	"admin/sms.html":              "문자(SMS)",
 	"admin/theme-screen.html":     "테마 화면", // 처리기가 선언의 title 로 덮어쓴다 (D41 5절)
 	"admin/site.html":             "사이트",   // 사이트 처리기가 RenderAdmin 의 title 로 덮어쓴다 (D42 7절)
 	"admin/pages.html":            "페이지",

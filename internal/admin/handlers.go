@@ -145,6 +145,11 @@ type Deps struct {
 	// "METHOD /api/site/…" lines — 확장이 없는 실행 파일이면 비어 있다.
 	APIKeys *apikeys.Store
 	SiteAPI []string
+	// SMSPhoneLogin, SMSCustom and SendSMSTest are A-215's (D42 9절): whether this binary has phone login,
+	// whether the site brought its own sender (then SENS is unused), and a send with the saved settings.
+	SMSPhoneLogin bool
+	SMSCustom     bool
+	SendSMSTest   func(ctx context.Context, to, text string) error
 	// SecureCookies is config.SecureCookies — A-604 가 내려받기 시작을 알리는 쿠키도 세션 쿠키와 같은 Secure 를 단다 (FR-727).
 	SecureCookies bool
 	// Files is where uploads live (FR-717) — A-210 「옮기기」가 쓴다.

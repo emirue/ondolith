@@ -199,6 +199,14 @@ func buildTree(pub *publicDeps, lg *loginDeps, acc *accountDeps, bd *boardDeps,
 		Permission: "settings.update", Handler: ad.APIKeyIssue})
 	r.Add(Route{Screen: "A-213", Method: "POST", Pattern: "/admin/settings/api/keys/revoke", Class: SC5,
 		Permission: "settings.update", Handler: ad.APIKeyRevoke})
+	// A-215 문자(SMS) (D42 9절). 사이트 앱의 인증번호가 나가는 SENS 설정 — A-213 처럼 늘 있고, 문자 로그인이 없는
+	// 실행 파일이면 화면이 그렇게 말한다. 저장은 최고 관리자 + 재확인, 시험 발송은 계정당 시간 5통.
+	r.Add(Route{Screen: "A-215", Method: "GET", Pattern: "/admin/settings/sms", Class: SC4,
+		Permission: "settings.update", Handler: ad.SMSSettingsForm})
+	r.Add(Route{Screen: "A-215", Method: "POST", Pattern: "/admin/settings/sms", Class: SC5,
+		Permission: "settings.update", Handler: ad.SMSSettingsSave})
+	r.Add(Route{Screen: "A-215", Method: "POST", Pattern: "/admin/settings/sms/test", Class: SC5,
+		Permission: "settings.update", Handler: ad.SMSTest})
 
 	r.Add(Route{Screen: "A-202", Method: "GET", Pattern: "/admin/themes", Class: SC4,
 		Permission: "theme.view", Handler: ad.ThemeList})

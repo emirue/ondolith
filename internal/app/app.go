@@ -25,6 +25,7 @@ import (
 
 	"github.com/emirue/ondolith/internal/admin"
 	"github.com/emirue/ondolith/internal/apikeys"
+	"github.com/emirue/ondolith/internal/applogin"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/backup"
 	"github.com/emirue/ondolith/internal/commerce"
@@ -34,6 +35,7 @@ import (
 	"github.com/emirue/ondolith/internal/migrations"
 	"github.com/emirue/ondolith/internal/secretbox"
 	"github.com/emirue/ondolith/internal/siteext"
+	"github.com/emirue/ondolith/internal/sms"
 	"github.com/emirue/ondolith/internal/theme"
 )
 
@@ -484,13 +486,19 @@ func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion strin
 		BackupDir:     cfg.Backups(),
 		SecureCookies: cfg.SecureCookies,
 		APIKeys:       apikeys.New(pool),
-		SiteAPI:       siteAPILines(ext.API),
-		OpLog:         contentStore.OpLog(),
-		Logger:        log,
-		BaseURL:       baseURL,
-		Version:       version,
-		SiteVersion:   siteVersion,
-		Migrations:    func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
+		SiteAPI:       siteAPILines(ext),
+		SMSPhoneLogin: ext.Phone.Lookup != nil,
+		SMSCustom:     ext.SMS != nil,
+		// 시험 발송은 앱의 인증번호와 같은 길로 보낸다 — 사이트 함수가 있으면 그것이다.
+		SendSMSTest: func(ctx context.Context, to, text string) error {
+			return smsSender(ext.SMS, contentStore.Settings)(ctx)(ctx, to, text)
+		},
+		OpLog:       contentStore.OpLog(),
+		Logger:      log,
+		BaseURL:     baseURL,
+		Version:     version,
+		SiteVersion: siteVersion,
+		Migrations:  func(c context.Context) ([]string, int, error) { return migrations.Status(c, db) },
 		ValidateTheme: func(name string) (string, error) {
 			// 이름을 테마 루트 아래 디렉터리로 푼다 — 로더가 쓰는 것과 같은
 			// 방식이어야, 검증에 통과한 것과 실제로 그려지는 것이 같아진다.
@@ -596,6 +604,7 @@ func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion strin
 	// 등록되지 않고, 등록되지 않은 것은 404 다.
 	registry := buildTree(pub, lg, acc, bd, ad, sh, soc, shopMode, static)
 
+	loginStore := applogin.New(pool)
 	// 사이트 API (D42 5절, P-908). 본 트리 밖에서 받는다 — 아래 문 나누기. 라우트 표에는 부팅 검사(D11·SC-9)를 위해
 	// 올리되 처리기는 문지기를 거친 것이다: 본 트리로 새어 들어와도 키 검사를 건너뛰지 못한다.
 	siteHandler := (&siteAPI{
@@ -608,10 +617,40 @@ func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion strin
 		limiter: limiter,
 		db:      db,
 		log:     log,
+		// 문자 인증 로그인 (D42 8절). 사이트가 발송 함수를 주면 그것, 아니면 A-215 의 SENS 설정.
+		phone:    ext.Phone,
+		login:    loginStore,
+		siteName: siteName,
+		sender:   smsSender(ext.SMS, contentStore.Settings),
+		sendFailed: func(phone string, err error) {
+			log.Error("인증번호 문자 발송 실패", "to", sms.Mask(phone), "err", err)
+			e, ok := smsFailureEntry(phone, err)
+			if !ok {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if rerr := contentStore.OpLog().Record(ctx, e); rerr != nil {
+				log.Error("작업 로그 기록 실패", "action", "sms.failed", "err", rerr)
+			}
+		},
+		spawn: func(f func()) { go f() },
 	}).handler()
+	// 문자 로그인을 켰는데 보낼 길이 없으면 코드 요청은 늘 202 인데 문자가 나가지 않는다 — 조용히 고장 난 로그인이다.
+	if ext.Phone.Lookup != nil && ext.SMS == nil {
+		if kv, err := contentStore.Settings(ctx, admin.SMSSettingKeys...); err == nil && !admin.SMSConfigured(kv) {
+			log.Warn("문자 로그인이 켜졌는데 문자(SMS) 설정이 비어 있어 인증번호가 나가지 않습니다 — 관리자 「설정 → 문자(SMS)」에서 넣으세요")
+		}
+	}
 	for _, rt := range ext.API {
 		registry.Add(Route{Screen: "P-908", Method: rt.Method, Pattern: siteext.APIPrefix + rt.Path,
 			Class: SC9, Handler: siteHandler.ServeHTTP})
+	}
+	if ext.Phone.Lookup != nil {
+		for _, op := range []string{"code", "verify", "logout"} {
+			registry.Add(Route{Screen: "P-909", Method: "POST", Pattern: siteext.APIPrefix + "/auth/" + op,
+				Class: SC9, Handler: siteHandler.ServeHTTP})
+		}
 	}
 
 	// 사이트 관리자 화면 (D42 7절, A-214). **본 트리 안이다** — 관리자 문·교차 출처 보호·요청 상한이 그대로 붙는다.
@@ -622,7 +661,8 @@ func NewSite(ctx context.Context, cfg *config.Config, version, siteVersion strin
 			return fail(fmt.Errorf("app: 재확인 칸: %w", err))
 		}
 		sa := siteAdmin{render: adminUI.Render, caller: ad.Caller, needsReauth: adminUI.needsReauth, db: db, log: log,
-			record: contentStore.OpLog().Record, reauthField: field}
+			endSubject: loginStore.EndSubject,
+			record:     contentStore.OpLog().Record, reauthField: field}
 		for _, p := range ext.Admin {
 			h := sa.page(p)
 			registry.Add(Route{Screen: "A-214", Method: "GET", Pattern: siteext.AdminPrefix + p.Path, Class: SC4,
@@ -908,6 +948,35 @@ func mailFailureEntry(to, subject string, err error) (content.Entry, bool) {
 	}
 	return content.Entry{ActorEmail: "system", Action: "mail.failed", TargetType: "mail",
 		TargetID: subject, Summary: to + " 에 메일을 보내지 못했습니다 — " + truncate(err.Error(), 300)}, true
+}
+
+// smsFailureEntry is the op-log line for a login code that did not go out — 번호는 가리고 인증번호는 넣지 않는다.
+// 설정이 비어 있는 것은 남기지 않는다(부팅 경고와 A-215 가 말한다) — 메일과 같다.
+func smsFailureEntry(phone string, err error) (content.Entry, bool) {
+	if errors.Is(err, sms.ErrNotConfigured) {
+		return content.Entry{}, false
+	}
+	return content.Entry{ActorEmail: "system", Action: "sms.failed", TargetType: "sms", TargetID: sms.Mask(phone),
+		Summary: "인증번호 문자를 보내지 못했습니다 — " + truncate(err.Error(), 300)}, true
+}
+
+// smsSender picks how login codes go out: the site's own function, or SENS with the A-215 settings
+// read at that moment (요청 안에서 — 발송 고루틴이 돌 때는 풀이 닫혔을 수 있다).
+func smsSender(custom func(context.Context, string, string) error,
+	settings func(context.Context, ...string) (map[string]string, error),
+) func(context.Context) func(context.Context, string, string) error {
+	if custom != nil {
+		return func(context.Context) func(context.Context, string, string) error { return custom }
+	}
+	return func(ctx context.Context) func(context.Context, string, string) error {
+		kv, err := settings(ctx, admin.SMSSettingKeys...)
+		if err != nil {
+			return func(context.Context, string, string) error {
+				return fmt.Errorf("문자 설정을 읽지 못했다: %w", err)
+			}
+		}
+		return admin.SENSFrom(kv).Send
+	}
 }
 
 func truncate(s string, n int) string {

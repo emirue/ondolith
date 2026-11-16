@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -24,6 +25,8 @@ type siteAdmin struct {
 	db          *sql.DB
 	log         *slog.Logger
 	record      func(context.Context, content.Entry) error
+	// endSubject ends a subject's app tokens (site.EndSessions, D42 8절).
+	endSubject func(context.Context, string) (int64, error)
 	// reauthField is the layout's reauth-field drawn open — 사이트 템플릿은 코어 템플릿 묶음 밖이라 그대로 못 부른다.
 	reauthField template.HTML
 }
@@ -51,6 +54,13 @@ func (d siteAdmin) page(p siteext.AdminPage) http.HandlerFunc {
 			NeedsReauth:   func() bool { return d.needsReauth(r, actor) },
 			ConfirmReauth: c.ConfirmReauth,
 			ReauthField:   d.reauthField,
+			EndSessions: func(ctx context.Context, subject string) error {
+				if d.endSubject == nil {
+					return errors.New("app: 문자 로그인 저장소가 없다")
+				}
+				_, err := d.endSubject(ctx, subject)
+				return err
+			},
 			Record: func(action, target, summary string) error {
 				// 요청이 끊겨도 남긴다 — 일은 이미 했다 (D15 7절). 코어 화면의 d.log 와 같은 모양이다.
 				return d.record(context.WithoutCancel(r.Context()), content.Entry{
