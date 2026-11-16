@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"fmt"
+	"io/fs"
 
 	"github.com/pressly/goose/v3"
 )
@@ -21,6 +23,26 @@ func Run(ctx context.Context, db *sql.DB) error {
 	}
 	_, err = p.Up(ctx)
 	return err
+}
+
+// SiteVersionTable is where a site binary's migrations record themselves (D42 4절 3). 코어의
+// goose_db_version 과 나누지 않으면 사이트의 00001 과 코어의 00001 이 서로를 「이미 했다」고 본다.
+const SiteVersionTable = "site_goose_db_version"
+
+// RunSite applies a site's migrations after the core's. fsys holds the .sql files at its root;
+// nil means the binary has no site extension.
+func RunSite(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+	if fsys == nil {
+		return nil
+	}
+	p, err := goose.NewProvider(goose.DialectPostgres, db, fsys, goose.WithTableName(SiteVersionTable))
+	if err != nil {
+		return fmt.Errorf("사이트 마이그레이션: %w", err)
+	}
+	if _, err := p.Up(ctx); err != nil {
+		return fmt.Errorf("사이트 마이그레이션: %w", err)
+	}
+	return nil
 }
 
 // Status reports what A-602 shows: the migrations already applied, and how many
