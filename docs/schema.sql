@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict WhdqhzaUW5hE6RiB0Yk3Sl0ChwrnKqNCZon9KY50VQmAh4IdLZAMB7FA6n6ueI6
+\restrict y5dg6E4ylx3U7LT73497Iq8rM7zmCvMJn14sevh6gjvfYUas3mNCoZFdB5IOjBb
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -74,6 +74,36 @@ CREATE TABLE public.api_keys (
     revoked_at timestamp with time zone,
     CONSTRAINT api_keys_key_hash_check CHECK ((octet_length(key_hash) = 32)),
     CONSTRAINT api_keys_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 60)))
+);
+
+
+--
+-- Name: app_login_codes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_login_codes (
+    phone text NOT NULL,
+    code_hash bytea NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    CONSTRAINT app_login_codes_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT app_login_codes_code_hash_check CHECK ((octet_length(code_hash) = 32)),
+    CONSTRAINT app_login_codes_phone_check CHECK ((phone ~ '^01[0-9]{8,9}$'::text))
+);
+
+
+--
+-- Name: app_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_sessions (
+    token_hash bytea NOT NULL,
+    subject text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    last_used_at timestamp with time zone,
+    CONSTRAINT app_sessions_subject_check CHECK (((char_length(subject) >= 1) AND (char_length(subject) <= 200))),
+    CONSTRAINT app_sessions_token_hash_check CHECK ((octet_length(token_hash) = 32))
 );
 
 
@@ -912,6 +942,22 @@ ALTER TABLE ONLY public.api_keys
 
 
 --
+-- Name: app_login_codes app_login_codes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_login_codes
+    ADD CONSTRAINT app_login_codes_pkey PRIMARY KEY (phone);
+
+
+--
+-- Name: app_sessions app_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_sessions
+    ADD CONSTRAINT app_sessions_pkey PRIMARY KEY (token_hash);
+
+
+--
 -- Name: attachments attachments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1485,6 +1531,20 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.webhook_events
     ADD CONSTRAINT webhook_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: app_sessions_expires_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX app_sessions_expires_idx ON public.app_sessions USING btree (expires_at);
+
+
+--
+-- Name: app_sessions_subject_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX app_sessions_subject_idx ON public.app_sessions USING btree (subject);
 
 
 --
@@ -2401,5 +2461,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict WhdqhzaUW5hE6RiB0Yk3Sl0ChwrnKqNCZon9KY50VQmAh4IdLZAMB7FA6n6ueI6
+\unrestrict y5dg6E4ylx3U7LT73497Iq8rM7zmCvMJn14sevh6gjvfYUas3mNCoZFdB5IOjBb
 

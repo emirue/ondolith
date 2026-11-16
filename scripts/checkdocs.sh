@@ -1372,9 +1372,9 @@ if [ ! -s "$T"/cd_scr_want ] || [ ! -s "$T"/cd_scr_have ]; then
 	err "D11 표 또는 tree.go 의 라우트를 읽지 못했다 (검사가 헛돌았다)"
 else
 	# 다른 문으로 서비스되는 화면과 와일드카드는 대조 대상이 아니다
-	# (internal/app/screens.go servedOutsideTree). P-908 사이트 API·A-214 사이트 관리자 화면의 라우트는 사이트 실행
-	# 파일이 정한다 (D42).
-	grep -vE '^(P-001|P-002|P-903|P-904|P-905|P-908|A-102|A-214)\b' "$T"/cd_scr_want |
+	# (internal/app/screens.go servedOutsideTree). P-908 사이트 API·P-909 앱 문자 로그인·A-214 사이트 관리자 화면의
+	# 라우트는 사이트 실행 파일이 정한다 (D42).
+	grep -vE '^(P-001|P-002|P-903|P-904|P-905|P-908|P-909|A-102|A-214)\b' "$T"/cd_scr_want |
 		grep -v '\*' >"$T"/cd_scr_want2
 	for row in $(comm -23 "$T"/cd_scr_want2 "$T"/cd_scr_have | tr '\t' '|'); do
 		err "D11 이 적은 라우트가 구현에 없다: $(echo "$row" | tr '|' ' ')"
