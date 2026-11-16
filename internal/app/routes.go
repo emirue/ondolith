@@ -17,7 +17,7 @@ import (
 // of the boot checks below can see it. The 20-line helper DEC-1 promised
 // instead of a router dependency is this file.
 
-// SecurityClass is D15 6절's SC-1..SC-8.
+// SecurityClass is D15 6절's SC-1..SC-9.
 type SecurityClass string
 
 const (
@@ -29,9 +29,10 @@ const (
 	SC6 SecurityClass = "SC-6" // 결제·금액
 	SC7 SecurityClass = "SC-7" // 파일 업로드·다운로드
 	SC8 SecurityClass = "SC-8" // 웹훅
+	SC9 SecurityClass = "SC-9" // 앱 API (사이트 확장, D42)
 )
 
-var allClasses = []SecurityClass{SC1, SC2, SC3, SC4, SC5, SC6, SC7, SC8}
+var allClasses = []SecurityClass{SC1, SC2, SC3, SC4, SC5, SC6, SC7, SC8, SC9}
 
 // isSafeMethod is P5's set: these must not change permission-bearing state.
 func isSafeMethod(m string) bool {
@@ -191,7 +192,7 @@ func (r *Registry) Check(knownPerms []string, inventory map[string]SecurityClass
 		// 2. an unclassified screen has no checklist, so nobody reviewed it.
 		if !slices.Contains(allClasses, rt.Class) {
 			res.Errors = append(res.Errors,
-				where+": 화면 유형이 SC-1..SC-8 이 아니다 ("+string(rt.Class)+")")
+				where+": 화면 유형이 SC-1..SC-9 이 아니다 ("+string(rt.Class)+")")
 		}
 
 		// 3. P5: safe methods do not change state. A GET that deletes is

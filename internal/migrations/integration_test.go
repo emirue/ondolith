@@ -167,6 +167,7 @@ func TestAllMigrationsApply(t *testing.T) {
 	// D30 §3-3 Phase 0 + Phase 1 + Phase 2 게시판.
 	// goose_db_version is goose's own bookkeeping.
 	want := []string{
+		"api_keys", // D42 6절 — 사이트 API 의 앱 키
 		"attachments", "board_fields", "boards", "cart_items", "carts",
 		"categories", "comments", "email_verification_tokens", "goose_db_version",
 		"media", "menus", "operation_logs", "order_agreements", "order_items", "orders",

@@ -194,7 +194,7 @@ else
 		for ($acc, $mut, $cls) { s/^\s+//; s/\s+$// }
 		print "접근 값이 허용 목록에 없다 ($id): [$acc]"     unless $acc =~ /^(공개|로그인|본인|권한:[a-z][a-z0-9]*\.[a-z][a-z0-9_]*)$/;
 		print "상태변경 값이 허용 목록에 없다 ($id): [$mut]"  unless $mut =~ /^(있음|없음)$/;
-		print "화면 유형이 SC-1..SC-8 이 아니다 ($id): [$cls]" unless $cls =~ /^SC-[1-8]$/;
+		print "화면 유형이 SC-1..SC-9 이 아니다 ($id): [$cls]" unless $cls =~ /^SC-[1-9]$/;
 		# An admin screen reachable without a permission is the accident this
 		# whole table exists to prevent.
 		print "관리자 화면인데 접근이 권한이 아니다 ($id): [$acc]" if $id =~ /^A-/ && $acc !~ /^권한:/;
@@ -598,7 +598,7 @@ else
 			next unless $l[$i] =~ /^### ([PA]-\d{3})/;
 			my $id = $1;
 			my $head = join " ", @l[$i .. ($i + 3 > $#l ? $#l : $i + 3)];
-			my ($cls) = $head =~ /(SC-[1-8])/;
+			my ($cls) = $head =~ /(SC-[1-9])\b/;
 			my ($acc) = $head =~ /`(공개|로그인|본인)`/;
 			($acc) = $head =~ /`(?:권한:)?([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`/ unless $acc;
 			print "$id\t", ($acc // "?"), "\t", ($cls // "?"), "\n";
@@ -1372,8 +1372,8 @@ if [ ! -s "$T"/cd_scr_want ] || [ ! -s "$T"/cd_scr_have ]; then
 	err "D11 표 또는 tree.go 의 라우트를 읽지 못했다 (검사가 헛돌았다)"
 else
 	# 다른 문으로 서비스되는 화면과 와일드카드는 대조 대상이 아니다
-	# (internal/app/screens.go servedOutsideTree).
-	grep -vE '^(P-001|P-002|P-903|P-904|P-905|A-102)\b' "$T"/cd_scr_want |
+	# (internal/app/screens.go servedOutsideTree). P-908 사이트 API 의 라우트는 사이트 실행 파일이 정한다 (D42).
+	grep -vE '^(P-001|P-002|P-903|P-904|P-905|P-908|A-102)\b' "$T"/cd_scr_want |
 		grep -v '\*' >"$T"/cd_scr_want2
 	for row in $(comm -23 "$T"/cd_scr_want2 "$T"/cd_scr_have | tr '\t' '|'); do
 		err "D11 이 적은 라우트가 구현에 없다: $(echo "$row" | tr '|' ' ')"

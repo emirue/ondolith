@@ -58,10 +58,10 @@ func TestCheckCatchesEachViolation(t *testing.T) {
 			name: "화면 유형이 SC 범위 밖",
 			build: func() *Registry {
 				return NewRegistry().Add(Route{Screen: "P-201", Method: "GET",
-					Pattern: "/", Class: "SC-9", Handler: noop})
+					Pattern: "/", Class: "SC-10", Handler: noop})
 			},
-			inv:  inv("P-201", SecurityClass("SC-9")),
-			want: "SC-1..SC-8 이 아니다",
+			inv:  inv("P-201", SecurityClass("SC-10")),
+			want: "SC-1..SC-9 이 아니다",
 		},
 		{
 			// GET /post/123/delete is reachable by a crawler and by a browser
@@ -176,7 +176,10 @@ func TestNoDirectMuxRegistrationOutsideRegistry(t *testing.T) {
 		"internal/install/install.go\tmux.HandleFunc(\"POST /install\", h.submit)":                          "설치 트리는 운영 트리와 별개다 (CLAUDE.md 규칙 3)",
 		"internal/install/install.go\tmux.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {": "설치 전에는 모든 경로가 /install 로 간다 (FR-101)",
 
-		"internal/app/handler_webhook.go\tmux.HandleFunc(\"POST /webhooks/payment/{pg}\", d.receive)": "P-905 의 별도 서브트리 — 세션·CSRF·액터가 붙지 않는 것이 목적이다 (D15 SC-8 1항)",
+		"internal/app/handler_webhook.go\tmux.HandleFunc(\"POST /webhooks/payment/{pg}\", d.receive)":        "P-905 의 별도 서브트리 — 세션·CSRF·액터가 붙지 않는 것이 목적이다 (D15 SC-8 1항)",
+		"internal/app/siteapi.go\tmux.Handle(rt.Method+\" \"+siteext.APIPrefix+rt.Path, s.gate(rt.Handler))": "P-908 사이트 API 의 별도 서브트리 — 세션·액터가 붙지 않고 앱 키로 막는다 (D15 SC-9). 부팅 검사는 app.NewSite 가 같은 라우트를 Registry 에도 올려 받는다",
+		"internal/app/siteapi.go\tmux.Handle(siteext.APIPrefix+\"/\", s.gate(nil))":                          "P-908 받이 — 등록되지 않은 /api/site/ 주소도 문지기를 지나 JSON 404 가 된다 (D15 SC-9)",
+		"internal/siteext/siteext.go\tmux.HandleFunc(pattern, func(http.ResponseWriter, *http.Request) {})":  "라우트를 서비스하지 않는다 — 버리는 ServeMux 에 등록해 보고 겹침 패닉을 받는 부팅 검사다 (D42 4절 5)",
 	}
 
 	root, err := filepath.Abs("../..")

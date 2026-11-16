@@ -52,14 +52,14 @@ juwon_forestry/
 
 ```go
 //go:embed migrations/*.sql
-var migrations embed.FS
+var migrationFiles embed.FS
 
 //go:embed admin/*.html
 var adminPages embed.FS
 
 func main() {
 	site.Main(site.Extension{
-		Migrations:  migrations,
+		Migrations:  mustSub(migrationFiles, "migrations"), // fs.Sub — 맨 위에 .sql 이 없으면 부팅 전에 거부한다
 		Permissions: []site.Permission{{Key: "site.workers.manage", Name: "인부 관리"}},
 		Admin: []site.AdminPage{
 			{Menu: "인부 관리", Path: "/workers", Permission: "site.workers.manage", Handler: workersPage},
@@ -73,7 +73,9 @@ func main() {
 }
 ```
 
-빌드·배포는 13절. 테마는 지금처럼 따로 올린다.
+`site.Person`(문자 인증으로 로그인한 사람)은 3단계에서 생긴다 — 1단계의 라우트는 모두 `Auth: site.App` 이다. 인증
+방식을 적지 않은 라우트는 부팅 검사가 거부한다(빈 값이 열린 쪽이 되지 않게). `mustSub` 는 `fs.Sub` 의 오류를 패닉으로
+바꾸는 사이트 쪽 한 줄 도우미다. 빌드·배포는 13절. 테마는 지금처럼 따로 올린다.
 
 ## 3. 공개 패키지 `github.com/emirue/ondolith/site`
 
@@ -81,11 +83,11 @@ func main() {
 |---|---|
 | `Main(Extension)` | 지금 `cmd/ondolith` 이 하는 일 전부(플래그·설정·설치 화면·운영 트리) + 확장. 실패하면 로그를 남기고 종료 코드 1 |
 | `Extension` | `Migrations fs.FS`, `Permissions []Permission`, `Admin []AdminPage`, `API []Route`, `Phone PhoneLogin`, `SMS Sender`(비우면 관리자 SENS 설정을 쓴다) |
-| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Auth`(`site.App` = 앱 키만, `site.Person` = 앱 키 + 문자 인증 토큰), `Handler http.HandlerFunc` |
+| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Handler http.HandlerFunc`. 3단계에서 `Auth`(`site.App` = 앱 키만 — 빈 값, `site.Person` = 앱 키 + 문자 인증 토큰)가 붙는다 — 빈 값이 지금 동작이라 기존 사이트 코드가 깨지지 않는다 |
 | `AdminPage` | `Menu`(사이드바 글자), `Path`(`/admin/site` 뒤), `Permission`(`site.` 로 시작하는 키), `Handler`. GET 과 POST 를 한 처리기가 받는다 |
 | `Permission` | `Key`(`site.` 로 시작), `Name`(역할 편집기에 보이는 이름) |
 | `PhoneLogin` | `Lookup func(ctx, phone string) (subject string, ok bool, err error)` — 정규화한 번호(숫자만)를 받아 로그인할 대상을 돌려준다. 비우면 문자 로그인을 쓰지 않는다 |
-| `From(r) Context` | 처리기 안에서: `DB`(`*pgxpool.Pool`), `App`(부른 앱 키의 이름), `Subject`(`site.Person` 일 때 로그인한 대상), `Actor`(관리자 화면일 때 관리자 id·이름), `Log`(`*slog.Logger`) |
+| `From(r) Context` | 처리기 안에서: `DB`(`*sql.DB` — database/sql. pgx 의 주 판이 공개 약속에 들어가지 않게), `App`(부른 앱 키의 이름), `Subject`(`site.Person` 일 때 로그인한 대상), `Actor`(관리자 화면일 때 관리자 id·이름), `Log`(`*slog.Logger`) |
 | `RenderAdmin(w, r, title, t *template.Template, data any)` | 사이트 템플릿을 코어 관리자 틀(머리글·사이드바·알림·`admin.js`) 안에 그린다. `t` 는 `content` 블록을 정의해야 한다 |
 | `Done(w, r, to, notice)` | 성공한 관리자 POST 의 끝. 알림을 싣고 303 ([D19](19-screen-io.md) C11) |
 | `Reauth(r) bool` | 비밀번호 재확인 창이 열려 있는지 — 돈·자격증명을 다루는 사이트 화면이 쓴다 ([D15](15-access-control.md) 5.3-1) |
@@ -115,9 +117,10 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 
 | 순서 | 코어가 보는 것 | 실패하면 |
 |---|---|---|
+| 0 | 같은 IP 에서 분당 600회 — DB 를 읽기 전이다(「켜짐」 확인도 DB 를 읽는다). 꺼진 문·틀린 키로 두드려도 DB 조회가 끝없이 늘지 않게 | 429 |
 | 1 | 관리자 「커스텀 API」 가 켜져 있다 | 404 |
-| 2 | 앱 키가 있고 폐기되지 않았다 (SHA-256 해시로 찾는다) | 401 |
-| 3 | 키별 요청 상한 — 분당 120회 | 429 |
+| 2 | 앱 키가 있고 폐기되지 않았다 (SHA-256 해시로 찾는다). 인증 방식 이름은 대소문자를 가리지 않는다 | 401 |
+| 3 | (키, IP) 묶음마다 분당 120회 — **키 하나에 걸지 않는다.** 키는 비밀이 아니라서 키 전체에 걸면 키를 꺼낸 한 사람이 그 앱의 모든 사용자를 막는다 | 429 |
 | 4 | `site.Person` 이면 토큰이 있고 만료·폐기되지 않았다 | 401 |
 | 5 | 본문 1MB 이하 | 413 |
 | 6 | 사이트 처리기. 패닉은 500 으로 막고 로그를 남긴다 | 500 |
@@ -152,10 +155,13 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 
 | 단계 | 요청 | 코어가 하는 일 |
 |---|---|---|
-| 1 | `POST /api/site/login/code` `{"phone":"010…"}` (앱 키) | 번호를 숫자만 남겨 정규화한다. `Phone.Lookup` 이 허락한 번호면 6자리 인증번호를 만들어(crypto/rand) 해시로 저장하고 문자로 보낸다. **허락하지 않은 번호에도 같은 응답** — 등록 여부를 알려 주지 않는다 |
-| 2 | `POST /api/site/login/verify` `{"phone":"…","code":"123456"}` | 5분 안, 틀린 입력 5번 미만이면 확인한다. 맞으면 앱 토큰(32바이트 난수, 해시로 저장, 30일)을 돌려준다 |
+| 1 | `POST /api/site/auth/code` `{"phone":"010…"}` (앱 키) | 번호를 숫자만 남겨 정규화한다. `Phone.Lookup` 이 허락한 번호면 6자리 인증번호를 만들어(crypto/rand) 해시로 저장하고 문자로 보낸다. **허락하지 않은 번호에도 같은 응답** — 등록 여부를 알려 주지 않는다 |
+| 2 | `POST /api/site/auth/verify` `{"phone":"…","code":"123456"}` | 5분 안, 틀린 입력 5번 미만이면 확인한다. 맞으면 앱 토큰(32바이트 난수, 해시로 저장, 30일)을 돌려준다 |
 | 3 | 이후 요청 | `X-Ondolith-Session: <토큰>`. 쓸 때마다 마지막 사용 시각을 고친다 |
-| 4 | `POST /api/site/logout` | 그 토큰을 끊는다 |
+| 4 | `POST /api/site/auth/logout` | 그 토큰을 끊는다 |
+
+**`/api/site/auth/` 는 코어 몫이다.** 1단계부터 사이트 라우트의 첫 마디 `auth` 를 부팅 검사가 거부한다 — 사이트가 먼저
+쓰면 코어를 올리는 순간 겹쳐 부팅이 깨진다.
 
 - **상한**: 같은 번호로 10분에 3통·하루 10통, 같은 IP 에서 시간당 20통 — 문자는 돈이고 남의 번호로 폭탄을 보낼 수
   있다. 넘으면 429. 기존 요청 상한기(`auth.Limiter`)를 쓴다.
@@ -218,7 +224,7 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 | 코어 버전 (사이트 실행 파일) | 빌드 정보(`runtime/debug.ReadBuildInfo`)의 의존 모듈 `github.com/emirue/ondolith` 의 버전. 찍어 넣을 것이 없다 — `go.mod` 가 곧 버전이다. `replace` 로 로컬 코어를 쓰면 `dev` |
 | 코어 버전 (코어 릴리즈 실행 파일) | 지금처럼 `-X main.version` |
 | 사이트 버전 | 빌드 정보의 주 모듈 경로·버전, 없으면 VCS 커밋 앞 12자리 |
-| 보이는 곳 | `-version` 출력(`ondolith v0.8.0 · 사이트 …/juwon (커밋 abc123…) linux/amd64`), 시스템 화면, 테마 `requires` 검사 |
+| 보이는 곳 | `-version` 출력(`ondolith v0.8.0 linux/amd64 · 사이트 …/juwon v1.2.0`), 테마 `requires` 검사. 시스템 화면(A-602)은 코어 버전만 보인다 — 사이트 버전은 2단계에서 더한다 |
 
 - **결정은 순수 함수 하나**(`*debug.BuildInfo` 를 받아 코어·사이트 버전을 돌려준다)로 두고 시험한다 — `go test` 빌드에는
   의존 버전이 기록되지 않아, 실행 파일을 거쳐서는 이 분기를 물 수 없다(지금 `formatVersion` 과 같은 이유).
@@ -226,6 +232,8 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
   수 버전. `site` 패키지를 비호환으로 바꾸면 `⚠️ 파괴적 변경` 과 함께 부 버전을 올린다(v0 동안. v1 뒤로는 주 버전).
 - **사이트 저장소**는 `go.mod` 의 코어 버전과 `CORE_VERSION` 파일을 같게 둔다. 둘이 다르면 어느 쪽이 도는지 알 수
   없다 — 사이트의 빌드가 둘을 비교해 다르면 멈추게 한다(사이트 저장소의 일, 예제 사이트가 그 검사를 보여 준다).
+- **사이트는 코어의 태그를 쓴다.** 태그 없는 커밋을 고르면 의존 판이 의사 판(`v0.8.1-0.…-abc`)이 되고, 테마 `requires`
+  비교가 그것을 0.8.1 로 읽는다 — 아직 없는 기능을 있다고 볼 수 있다
 - **앱 API 경로에 판을 넣기를 권한다**(`/api/site/v1/...`). 사람들 휴대폰에 깔린 옛 앱은 바로 바뀌지 않는다 — 경로를
   바꿀 때 옛 경로를 옛 앱이 사라질 때까지 남긴다. 코어는 경로 모양을 강제하지 않는다.
 

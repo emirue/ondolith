@@ -503,6 +503,7 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | W6-46 | 관리자 파괴적 동작 확인 창 **(완료 — `TestAdminDestructiveButtonsAsk`, `scripts/admin-notice.mjs` 실제 Chrome 에서 확인 창 취소·확인과 저장 알림·새로 고침·휴대폰 폭, 2026-11-14)** | W6-45 | 관리자 템플릿의 파괴적 폼 단추, `internal/app/admin_contract_test.go` | 지우기·빼기·비활성화·재설정 강제·상태 변경·취소·환불·거부·확정·교환 완료·결제 반영·버킷으로 옮기기 단추를 누르면 확인 창이 뜨고, 취소하면 아무것도 바뀌지 않으며, 확인하면 처리되고 저장 알림이 뜬다. 새 파괴적 폼이 확인 창을 빠뜨리면 시험이 잡는다 (FR-725) |
 | W6-47 | 관리자 비밀번호 재확인 통일 **(완료 — `TestReauthIsAskedExactlyWhereD15Says`·`TestRoutineSavesDoNotAskForThePassword`·`TestGeneralSiteSaveLeavesTheTypeAlone`·`TestReauthFieldOnlyWhereTheServerAsks`·`TestReauthFieldShowsOnlyWhenTheWindowIsClosed`, Codex 검토(Orca), 2026-11-14)** | W6-46 | `internal/app/templates/admin/layout.html` `reauth-field`, `internal/app/admin_render.go`, 재확인 대상 템플릿, `internal/admin/backup.go`·`internal/admin/handlers.go`·`internal/admin/handlers_board.go`·`internal/admin/handlers_rbac.go`, D15 5.3-1 | D15 5.3-1 표의 동작만 재확인하고, 칸은 15분 안에 확인하지 않았을 때만 필수로 한 가지 모양으로 보인다. 자동 백업 설정 저장·메일 시험 발송은 비밀번호 없이 된다. 받지 못하면 403 과 그 화면이 칸과 함께 다시 그려진다. 사이트 유형 전환은 폼이 따로다. 처리기나 폼이 표와 어긋나면 시험이 잡는다 (FR-726) |
 | W6-48 | 관리자 폼 두 번 보내기 방지 **(완료 — `TestBackupDownloadTellsThePageItStarted`, `scripts/admin-busy.mjs` 실제 Chrome 에서 요청을 붙잡고 다시 누르기·내려받기 뒤 다시 받기·확인 창 취소·bfcache 복귀(흉내), 2026-11-15)** | W6-47 | `internal/app/templates/admin/admin.js`·`layout.html`·`admin.css`·`backup.html`, `internal/app/admin_render.go`, `internal/admin/backup.go` | 관리자 POST 폼은 응답을 기다리는 동안 다시 눌러도 한 번만 가고 단추가 「처리 중…」을 말한다. A-604 내려받기는 파일이 오기 시작하면 단추가 다시 살아나 또 받을 수 있다. 확인 창을 취소한 제출은 잠그지 않는다. 막는 줄을 지우면 브라우저 시험이 POST 둘을 잡는다 (FR-727) |
+| W6-49 | 사이트 확장 골격 (선택) **(완료 — `TestResolveVersions`·`TestValidateRefusesBadRoutes`·`TestCheckMigrationsWantsSitePrefixedTables`·`TestRunSiteKeepsItsOwnVersionTable`·`TestIssuedKeyIsFoundOnlyByItsRawValue`·`TestSiteAPIGate`·`TestSiteExtensionServesTheAppThroughTheCore`·`TestCustomAPIScreen`, `scripts/site-e2e.sh`, 2026-11-16)** | W6-48 | `site/`, `internal/boot`·`internal/siteext`·`internal/apikeys`, `internal/app/siteapi.go`, `internal/admin/handlers_api.go`, `00032_api_keys`, `examples/site` | 사이트 저장소가 `site.Main` 으로 빌드한 실행 파일에서 (P-908·A-213) 사이트 표가 설치 직후 생기고, A-213 에서 켜고 발급한 키로 `/api/site/…` 가 답한다. 끄면 404, 폐기한 키는 401, 키 원문은 발급 화면에만. 코어 실행 파일의 `-version` 은 그대로다 (FR-728) |
 
 ## 작업 수 요약
 
@@ -513,5 +514,5 @@ W3-05(결제 제약 마이그레이션)가 두 번째 목이다. **멱등성·�
 | Phase 3 — 커머스 | 45 | 0 | W3-01 토스페이먼츠 사양 재확인 |
 | Phase 4 — 배포 패키징 | 15 | 0 | W4-01 릴리즈 파이프라인 검증 |
 | Phase 5 — 질의 타입 안전화 | 7 | 0 | W5-01 기반 |
-| Phase 6 — 편집·운영 편의 | 48 | 2 (W6-04, W6-07) | W6-01 본문 HTML 저장과 정화 |
-| **합계** | **186** | **9** | — |
+| Phase 6 — 편집·운영 편의 | 49 | 3 (W6-04, W6-07, W6-49) | W6-01 본문 HTML 저장과 정화 |
+| **합계** | **187** | **10** | — |

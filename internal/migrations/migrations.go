@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"fmt"
+	"io/fs"
 
 	"github.com/pressly/goose/v3"
 )
@@ -13,14 +15,39 @@ import (
 //go:embed *.sql
 var FS embed.FS
 
+// noGlobal keeps goose's process-wide registry of Go migrations out of every provider. 코어와 사이트는 SQL 만
+// 쓴다. 사이트 코드가 init() 에서 goose.AddMigrationContext 로 Go 마이그레이션을 전역 등록하면, 그것이 코어 쪽
+// provider 에 섞여 코어 버전 표에 적히거나 번호가 겹쳐 부팅이 깨진다 (D42).
+var noGlobal = goose.WithDisableGlobalRegistry(true)
+
 // Run applies all pending migrations.
 func Run(ctx context.Context, db *sql.DB) error {
-	p, err := goose.NewProvider(goose.DialectPostgres, db, FS)
+	p, err := goose.NewProvider(goose.DialectPostgres, db, FS, noGlobal)
 	if err != nil {
 		return err
 	}
 	_, err = p.Up(ctx)
 	return err
+}
+
+// SiteVersionTable is where a site binary's migrations record themselves (D42 4절 3). 코어의
+// goose_db_version 과 나누지 않으면 사이트의 00001 과 코어의 00001 이 서로를 「이미 했다」고 본다.
+const SiteVersionTable = "site_goose_db_version"
+
+// RunSite applies a site's migrations after the core's. fsys holds the .sql files at its root;
+// nil means the binary has no site extension.
+func RunSite(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+	if fsys == nil {
+		return nil
+	}
+	p, err := goose.NewProvider(goose.DialectPostgres, db, fsys, goose.WithTableName(SiteVersionTable), noGlobal)
+	if err != nil {
+		return fmt.Errorf("사이트 마이그레이션: %w", err)
+	}
+	if _, err := p.Up(ctx); err != nil {
+		return fmt.Errorf("사이트 마이그레이션: %w", err)
+	}
+	return nil
 }
 
 // Status reports what A-602 shows: the migrations already applied, and how many
@@ -30,7 +57,7 @@ func Run(ctx context.Context, db *sql.DB) error {
 // screen is read rarely and a long-lived provider would hold a connection for
 // the life of the process to answer a question nobody is asking.
 func Status(ctx context.Context, db *sql.DB) (applied []string, pending int, err error) {
-	p, err := goose.NewProvider(goose.DialectPostgres, db, FS)
+	p, err := goose.NewProvider(goose.DialectPostgres, db, FS, noGlobal)
 	if err != nil {
 		return nil, 0, err
 	}

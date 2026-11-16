@@ -24,6 +24,7 @@ import (
 	"github.com/markbates/goth"
 
 	"github.com/emirue/ondolith/internal/admin"
+	"github.com/emirue/ondolith/internal/apikeys"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/backup"
 	"github.com/emirue/ondolith/internal/commerce"
@@ -32,6 +33,7 @@ import (
 	"github.com/emirue/ondolith/internal/httpsec"
 	"github.com/emirue/ondolith/internal/migrations"
 	"github.com/emirue/ondolith/internal/secretbox"
+	"github.com/emirue/ondolith/internal/siteext"
 	"github.com/emirue/ondolith/internal/theme"
 )
 
@@ -119,6 +121,14 @@ func poolConfig(dsn string) (*pgxpool.Config, error) {
 func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
 	rebuild func() error,
 ) (http.Handler, func(), error) {
+	return NewSite(ctx, cfg, version, log, rebuild, siteext.Extension{})
+}
+
+// NewSite is New with a site binary's extension (D42): its migrations run after the core's, and
+// its API is served under /api/site/. The zero Extension is the core's own binary.
+func NewSite(ctx context.Context, cfg *config.Config, version string, log *slog.Logger,
+	rebuild func() error, ext siteext.Extension,
+) (http.Handler, func(), error) {
 	pcfg, err := poolConfig(cfg.DatabaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app: pool: %w", err)
@@ -137,6 +147,13 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		_ = db.Close()
 		pool.Close()
 		return nil, nil, fmt.Errorf("app: 마이그레이션: %w", err)
+	}
+	// 사이트 표는 코어 뒤에, 버전 표를 따로 써서 만든다 (D42 4절 3). 실패하면 서버가 뜨지 않는다 — 표 없이 뜬 사이트
+	// 기능은 요청마다 500 이다.
+	if err := migrations.RunSite(ctx, db, ext.Migrations); err != nil {
+		_ = db.Close()
+		pool.Close()
+		return nil, nil, fmt.Errorf("app: %w", err)
 	}
 
 	sessionStore := pgxstore.New(pool)
@@ -463,6 +480,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 		UploadDir:     cfg.Uploads(),
 		BackupDir:     cfg.Backups(),
 		SecureCookies: cfg.SecureCookies,
+		APIKeys:       apikeys.New(pool),
+		SiteAPI:       siteAPILines(ext.API),
 		OpLog:         contentStore.OpLog(),
 		Logger:        log,
 		BaseURL:       baseURL,
@@ -573,6 +592,24 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 등록되지 않고, 등록되지 않은 것은 404 다.
 	registry := buildTree(pub, lg, acc, bd, ad, sh, soc, shopMode, static)
 
+	// 사이트 API (D42 5절, P-908). 본 트리 밖에서 받는다 — 아래 문 나누기. 라우트 표에는 부팅 검사(D11·SC-9)를 위해
+	// 올리되 처리기는 문지기를 거친 것이다: 본 트리로 새어 들어와도 키 검사를 건너뛰지 못한다.
+	siteHandler := (&siteAPI{
+		routes: ext.API,
+		enabled: func(c context.Context) (bool, error) {
+			kv, err := contentStore.Settings(c, admin.SettingAPIEnabled)
+			return kv[admin.SettingAPIEnabled] == "1", err
+		},
+		lookup:  apikeys.New(pool).Lookup,
+		limiter: limiter,
+		db:      db,
+		log:     log,
+	}).handler()
+	for _, rt := range ext.API {
+		registry.Add(Route{Screen: "P-908", Method: rt.Method, Pattern: siteext.APIPrefix + rt.Path,
+			Class: SC9, Handler: siteHandler.ServeHTTP})
+	}
+
 	perms, err := authStore.PermissionKeys(ctx)
 	if err != nil {
 		return fail(fmt.Errorf("app: 권한 목록: %w", err))
@@ -645,6 +682,9 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 	// 공유 캐시도 막았다. 보안 헤더는 그대로 진다. 라우트 등록(P-906)은 남긴다
 	// — 기동 검사가 D11 과 대조하는 것이 그 표다.
 	staticOutside := httpsec.Headers(http.HandlerFunc(static))
+	// **사이트 API 도 본 트리 밖이다** (D15 SC-9). 앱에는 쿠키가 없고, 세션 조회·액터 로드는 앱 요청마다 쓸모없는 DB
+	// 왕복이다. 막는 것은 앱 키다 — 교차 출처 보호가 이 요청을 통과시키는 것은 브라우저 헤더가 없어서다.
+	siteOutside := httpsec.Headers(siteHandler)
 	main := h
 	h = withProxyClientIP(cfg.ProxyIPHeader)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -652,6 +692,8 @@ func New(ctx context.Context, cfg *config.Config, version string, log *slog.Logg
 			staticOutside.ServeHTTP(w, r)
 		case hooks != nil && strings.HasPrefix(r.URL.Path, "/webhooks/"):
 			hooks.ServeHTTP(w, r)
+		case strings.HasPrefix(r.URL.Path, siteext.APIPrefix+"/"):
+			siteOutside.ServeHTTP(w, r)
 		default:
 			main.ServeHTTP(w, r)
 		}

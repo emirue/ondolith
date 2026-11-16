@@ -33,6 +33,18 @@ sql:
             go_type: { type: "time.Time", pointer: true }
   - engine: "postgresql"
     schema: "internal/migrations"
+    queries: "internal/apikeys/queries"
+    gen:
+      go:
+        package: "apikeysq"
+        out: "internal/apikeys/apikeysq"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - engine: "postgresql"
+    schema: "internal/migrations"
     queries: "internal/auth/queries"
     gen:
       go:

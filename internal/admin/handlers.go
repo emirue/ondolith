@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/emirue/ondolith/internal/apikeys"
 	"github.com/emirue/ondolith/internal/auth"
 	"github.com/emirue/ondolith/internal/commerce"
 	"github.com/emirue/ondolith/internal/content"
@@ -138,6 +139,10 @@ type Deps struct {
 	UploadDir string
 	// BackupDir holds the automatic backups A-604 lists and hands out (FR-715).
 	BackupDir string
+	// APIKeys and SiteAPI are A-213's (D42 6절): the app keys, and this binary's site API as
+	// "METHOD /api/site/…" lines — 확장이 없는 실행 파일이면 비어 있다.
+	APIKeys *apikeys.Store
+	SiteAPI []string
 	// SecureCookies is config.SecureCookies — A-604 가 내려받기 시작을 알리는 쿠키도 세션 쿠키와 같은 Secure 를 단다 (FR-727).
 	SecureCookies bool
 	// Files is where uploads live (FR-717) — A-210 「옮기기」가 쓴다.

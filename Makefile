@@ -68,8 +68,9 @@ ui: ## 모든 화면을 375·768·1280px 에 그려 놓고 레이아웃을 잰�
 shots: ## 화면을 실제 브라우저로 찍어 shots/ 에 남긴다 — 눈으로 보기 위한 것
 	UI_SHOTS=1 UI_PORT=8102 UI_DB=ondolith_shots sh scripts/ui.sh
 
-e2e: ## D83 시나리오 재실행 — 빌드된 바이너리에 빈 DB 를 붙여 설치부터 한 바퀴
+e2e: ## D83 시나리오 재실행 — 빌드된 바이너리에 빈 DB 를 붙여 설치부터 한 바퀴, 이어서 사이트 실행 파일 한 바퀴 (D42)
 	sh scripts/e2e.sh
+	sh scripts/site-e2e.sh
 
 schema: ## docs/schema.sql 재생성 — ERD 도구에 올리는 통합 스키마
 	sh scripts/schema-sql.sh

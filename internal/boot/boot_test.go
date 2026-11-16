@@ -12,9 +12,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/emirue/ondolith/internal/config"
+	"github.com/emirue/ondolith/internal/siteext"
 )
 
 func body(t *testing.T, h http.Handler) string {
@@ -468,6 +470,28 @@ func TestServerReadTimeoutActuallyDisconnects(t *testing.T) {
 		var ne net.Error
 		if errors.As(err, &ne) && ne.Timeout() {
 			t.Fatal("읽기 시한을 넘겼는데 서버가 연결을 끊지 않았다 — ReadTimeout 이 적용되지 않는다")
+		}
+	}
+}
+
+// **사이트 확장이 틀렸으면 아무것도 띄우지 않는다** (D42 4절 5). 설치 화면이 뜬 뒤에 드러나면 사이트 주인은 이미
+// 배포를 마쳤고, 설치를 끝낸 사이트가 운영 전환에서 멈춘다. 플래그를 읽기 전에 끝나야 한다 — 그래서 이 시험이
+// Run 을 그대로 부를 수 있다.
+func TestRunRefusesABrokenExtensionBeforeAnything(t *testing.T) {
+	ok := func(http.ResponseWriter, *http.Request) {}
+	for _, tc := range []struct {
+		name string
+		ext  siteext.Extension
+		want string
+	}{
+		{"틀린 라우트", siteext.Extension{API: []siteext.Route{{Method: "GET", Path: "v1", Auth: siteext.AuthApp, Handler: ok}}}, "라우트"},
+		{"fs.Sub 를 빠뜨린 마이그레이션", siteext.Extension{Migrations: fstest.MapFS{
+			"migrations/00001_a.sql": {Data: []byte("-- +goose Up\nCREATE TABLE site_a (id int);\n")}}}, "fs.Sub"},
+		{"코어 표를 건드리는 마이그레이션", siteext.Extension{Migrations: fstest.MapFS{
+			"00001_a.sql": {Data: []byte("-- +goose Up\nDROP TABLE users;\n")}}}, "site_"},
+	} {
+		if err := Run(Options{Ext: tc.ext}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want 「%s」 를 짚는 오류", tc.name, err, tc.want)
 		}
 	}
 }

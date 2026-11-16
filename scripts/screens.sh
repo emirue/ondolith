@@ -232,7 +232,7 @@ echo "D11 화면 훑기 ($BASE)"
 while IFS="$(printf '\t')" read -r id name path methods; do
 	case "$methods" in *GET*) ;; *) continue ;; esac
 	# 다른 문으로 서비스되는 것들 (internal/app/screens.go servedOutsideTree).
-	case "$id" in P-001 | P-002 | P-903 | P-904 | A-102 | P-905) continue ;; esac
+	case "$id" in P-001 | P-002 | P-903 | P-904 | A-102 | P-905 | P-908) continue ;; esac
 
 	# **자원이 있어야만 열리는 화면.** 이 스윕이 만들 수 없는 상태를 요구한다 —
 	# 유효한 일회용 토큰(P-105·P-112), 프로바이더가 돌려준 인가 코드(P-107),

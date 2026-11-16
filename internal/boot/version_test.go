@@ -33,6 +33,9 @@ func TestResolveVersions(t *testing.T) {
 		{"로컬 코어로 바꿔 끼운 사이트는 dev", "", site("v1.2.0", &debug.Module{Path: coreModule, Version: "v0.8.0",
 			Replace: &debug.Module{Path: "../ondolith"}}), Versions{Core: "dev", Site: "example.com/juwon v1.2.0"}},
 		{"의존 목록에 코어가 없으면 dev", "", site("v1.2.0"), Versions{Core: "dev", Site: "example.com/juwon v1.2.0"}},
+		{"go.work 로 빌드해 의존 판이 (devel)", "", site("v1.2.0", &debug.Module{Path: coreModule, Version: "(devel)"}),
+			Versions{Core: "dev", Site: "example.com/juwon v1.2.0"}},
+		{"주 모듈 경로가 없으면 코어로 본다", "v0.8.0", &debug.BuildInfo{Settings: vcs}, Versions{Core: "v0.8.0"}},
 		{"빌드 정보가 없으면 찍힌 값", "", nil, Versions{Core: "dev"}},
 		{"빌드 정보가 없는 릴리즈", "v0.8.0", nil, Versions{Core: "v0.8.0"}},
 	} {
