@@ -230,7 +230,7 @@ cat "$PUBLIC_URLS" >>"$ANON_URLS"
 		/admin/boards /admin/boards/new \
 		/admin/menus /admin/users /admin/users/new \
 		/admin/user-fields /admin/roles /admin/settings /admin/settings/mail \
-		/admin/settings/payment /admin/settings/social /admin/settings/storage /admin/settings/seo \
+		/admin/settings/payment /admin/settings/social /admin/settings/storage /admin/settings/seo /admin/settings/api \
 		/admin/themes /admin/themes/upload /admin/oplog /admin/system /admin/backup \
 		/admin/webhooks /admin/products /admin/products/new /admin/categories \
 		/admin/orders /admin/terms /admin/commerce/policy /admin/reconcile \
@@ -336,6 +336,7 @@ ui_skip_reason() {
 	P-904) echo "주소가 없다 — 오류가 났을 때 그려진다" ;;
 	P-906) echo "정적 자산" ;;
 	P-907) echo "헬스체크 — 본문이 한 줄이다" ;;
+	P-908) echo "사이트 API — JSON 응답이라 그릴 것이 없다 (site-e2e 가 응답을 본다)" ;;
 	A-102) echo "복구 화면 — 본 트리 밖" ;;
 	A-513) echo "QR 라벨은 상품 화면에서 잰다" ;;
 	A-601 | A-602) echo "운영 감시 — A-603 과 같은 표를 쓴다" ;;
