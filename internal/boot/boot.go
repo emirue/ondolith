@@ -181,7 +181,7 @@ func Run(opts Options) error {
 	// (FR-710) reassembles and swaps the same way the install did (D20).
 	var startOperating func(cfg *config.Config) error
 	startOperating = func(cfg *config.Config) error {
-		h, cleanup, err := app.NewSite(ctx, cfg, v.Core, log,
+		h, cleanup, err := app.NewSite(ctx, cfg, v.Core, v.Site, log,
 			func() error { return startOperating(cfg) }, opts.Ext)
 		if err != nil {
 			return err

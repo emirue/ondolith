@@ -80,7 +80,7 @@ func TestSiteExtensionServesTheAppThroughTheCore(t *testing.T) {
 		}
 	}
 	cfg := &config.Config{DatabaseURL: dsn, SiteName: "사이트", UploadDir: t.TempDir()}
-	h, cleanup, err := NewSite(ctx, cfg, "1.0.0", slog.New(slog.DiscardHandler), nil, notesExtension())
+	h, cleanup, err := NewSite(ctx, cfg, "1.0.0", "", slog.New(slog.DiscardHandler), nil, notesExtension())
 	if err != nil {
 		t.Fatalf("기동 실패 — 부팅 검사가 사이트 라우트를 받아들여야 한다: %v", err)
 	}

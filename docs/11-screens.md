@@ -203,6 +203,7 @@
 | A-211 | 검색 노출 | `/admin/settings/seo` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-718, FR-511, FR-714 |
 | A-212 | 테마 화면 | `/admin/theme/{key}` | GET, POST | 권한:theme.edit_content | 있음 | SC-7 | FR-311, FR-721 |
 | A-213 | 커스텀 API | `/admin/settings/api` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-728 |
+| A-214 | 사이트 관리자 화면 | `/admin/site/{path...}` | GET, POST | 권한:admin.access | 있음 | SC-5 | FR-729 |
 
 ### A-3xx 콘텐츠 관리
 

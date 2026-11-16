@@ -145,6 +145,21 @@ func (s *Store) PermissionKeys(ctx context.Context) ([]string, error) {
 	return s.q.PermissionKeys(ctx)
 }
 
+// PermissionNames maps each permission key to its description — A-403 shows it next to the key.
+func (s *Store) PermissionNames(ctx context.Context) (map[string]string, error) {
+	rows, err := s.q.PermissionNames(ctx)
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.Key] = r.Description
+	}
+	return out, err
+}
+
+// EnsurePermission puts a site permission into the table, or renames it (D42 7절). 지우는 함수는 없다.
+func (s *Store) EnsurePermission(ctx context.Context, key, name string) error {
+	return s.q.EnsurePermission(ctx, authq.EnsurePermissionParams{Key: key, Description: name})
+}
+
 // UserRow is one line of A-401. It is deliberately narrower than User: a list
 // screen has no use for the session cutoff, and `password_hash` has no business
 // leaving the database at all (D19 A-401).

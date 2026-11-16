@@ -192,6 +192,12 @@ func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, cod
 		d.serverError(w, r, err)
 		return
 	}
+	// 고르는 칸에 키와 설명을 함께 보인다 — 사이트 권한(D42 7절)은 키만으로는 무슨 화면인지 모른다.
+	names, err := d.Auth.PermissionNames(ctx)
+	if err != nil {
+		d.serverError(w, r, err)
+		return
+	}
 	boards, err := d.Content.Boards(ctx)
 	if err != nil {
 		d.serverError(w, r, err)
@@ -228,7 +234,7 @@ func (d *Deps) renderRoles(w http.ResponseWriter, r *http.Request, c Caller, cod
 		revokable = append(revokable, v)
 	}
 	d.Render(w, r, "admin/roles.html", code, map[string]any{
-		"Roles": roles, "Permissions": perms, "Boards": boards, "ThemeScreens": d.themeScreens(),
+		"Roles": roles, "Permissions": perms, "PermissionNames": names, "Boards": boards, "ThemeScreens": d.themeScreens(),
 		"Grants": grants, "Revokable": revokable,
 		"Error": msg})
 }

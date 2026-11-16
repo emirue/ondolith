@@ -88,3 +88,64 @@ func TestCheckMigrationsWantsSitePrefixedTables(t *testing.T) {
 		}
 	}
 }
+
+// **사이트 관리자 화면과 권한도 부팅 전에 거른다** (D42 7절). 권한 키·작업 로그 동작은 DB 가 「두 마디」만 받으므로
+// 여기서 같은 모양을 요구한다 — 아니면 설치를 마친 뒤 INSERT 가 실패하고서야 안다. 변수가 든 주소는 메뉴에 걸 수
+// 없다(눌러 갈 주소가 없다). 화면이 쓰는 권한은 선언한 것이어야 한다 — 선언하지 않은 키는 권한 표에 없다.
+func TestValidateRefusesBadAdminPages(t *testing.T) {
+	perms := []Permission{{Key: "site.workers", Name: "인부 관리"}, {Key: "site.pay_2", Name: "입금 기록"}}
+	good := []AdminPage{
+		{Menu: "인부", Path: "/workers", Permission: "site.workers", Handler: ok},
+		{Path: "/workers/{id}", Permission: "site.workers", Handler: ok}, // 메뉴 없는 상세 화면
+		{Menu: "입금", Path: "/pay", Permission: "site.pay_2", Handler: ok},
+	}
+	if err := (Extension{Permissions: perms, Admin: good}).Validate(); err != nil {
+		t.Fatalf("맞는 화면을 거부했다: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		perm *Permission
+		page *AdminPage
+		want string
+	}{
+		{"권한 키 접두사", &Permission{Key: "workers.view", Name: "x"}, nil, "site."},
+		{"권한 키 세 마디", &Permission{Key: "site.workers.view", Name: "x"}, nil, "site."},
+		{"권한 키 대문자", &Permission{Key: "site.Workers", Name: "x"}, nil, "site."},
+		{"권한 키 숫자로 시작", &Permission{Key: "site.1x", Name: "x"}, nil, "site."},
+		{"권한 이름 없음", &Permission{Key: "site.x", Name: "  "}, nil, "이름"},
+		{"권한 이름 61자", &Permission{Key: "site.x", Name: strings.Repeat("가", 61)}, nil, "이름"},
+		{"권한 두 번", &Permission{Key: "site.workers", Name: "또"}, nil, "두 번"},
+		{"화면 경로", nil, &AdminPage{Menu: "x", Path: "/a/../b", Permission: "site.workers", Handler: ok}, "경로"},
+		{"화면 처리기 없음", nil, &AdminPage{Menu: "x", Path: "/x", Permission: "site.workers"}, "처리기"},
+		{"선언하지 않은 권한", nil, &AdminPage{Menu: "x", Path: "/x", Permission: "site.other", Handler: ok}, "선언"},
+		{"권한 없음", nil, &AdminPage{Menu: "x", Path: "/x", Handler: ok}, "선언"},
+		{"변수 주소에 메뉴", nil, &AdminPage{Menu: "x", Path: "/x/{id}", Permission: "site.workers", Handler: ok}, "메뉴"},
+		{"메뉴 31자", nil, &AdminPage{Menu: strings.Repeat("가", 31), Path: "/x", Permission: "site.workers", Handler: ok}, "메뉴"},
+		{"같은 주소 두 번", nil, &AdminPage{Menu: "또", Path: "/workers", Permission: "site.workers", Handler: ok}, "겹친다"},
+		{"패턴이 겹침", nil, &AdminPage{Path: "/workers/{other}", Permission: "site.workers", Handler: ok}, "겹친다"},
+	} {
+		e := Extension{Permissions: append([]Permission{}, perms...), Admin: append([]AdminPage{}, good...)}
+		if tc.perm != nil {
+			e.Permissions = append(e.Permissions, *tc.perm)
+		}
+		if tc.page != nil {
+			e.Admin = append(e.Admin, *tc.page)
+		}
+		if err := e.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want 「%s」 오류", tc.name, err, tc.want)
+		}
+	}
+}
+
+// 작업 로그 동작도 권한과 같은 모양이다 — DB 가 두 마디만 받는다. site. 로 시작해야 코어 동작과 섞이지 않는다.
+func TestValidKey(t *testing.T) {
+	for k, want := range map[string]bool{
+		"site.worker_pay": true, "site.a": true, "site.a1_b": true,
+		"": false, "site.": false, "site": false, "worker.pay": false, "site.a.b": false,
+		"site.Pay": false, "site.1a": false, "site.a-b": false, " site.a": false,
+	} {
+		if got := ValidKey(k); got != want {
+			t.Errorf("ValidKey(%q) = %v, want %v", k, got, want)
+		}
+	}
+}

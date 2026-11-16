@@ -64,8 +64,10 @@ type Deps struct {
 	// Version and Migrations feed A-602. They are values rather than a
 	// database read so that the system screen works even when the database is
 	// the thing that is unwell.
-	Version    string
-	Migrations func(context.Context) (applied []string, pending int, err error)
+	Version string
+	// SiteVersion is the site binary's build (D42 12절), "" in the core's own.
+	SiteVersion string
+	Migrations  func(context.Context) (applied []string, pending int, err error)
 	// ThemeFallback is why boot served the built-in theme instead of the active one
 	// (FR-313), or "" — A-602 shows it. nil reads as "".
 	ThemeFallback func() string
@@ -1331,10 +1333,11 @@ func (d *Deps) System(w http.ResponseWriter, r *http.Request) {
 	}
 	applied, pending, err := d.Migrations(r.Context())
 	data := map[string]any{
-		"Version":    d.Version,
-		"Applied":    applied,
-		"Pending":    pending,
-		"DBReadable": err == nil,
+		"Version":     d.Version,
+		"SiteVersion": d.SiteVersion,
+		"Applied":     applied,
+		"Pending":     pending,
+		"DBReadable":  err == nil,
 	}
 	// 레이아웃의 경고 띠로 나간다 — 부팅이 활성 테마 대신 내장 테마로 띄웠다는 것 (FR-313).
 	if msg := d.themeFallback(); msg != "" {

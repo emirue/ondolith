@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"html/template"
 	"log/slog"
 	"net/http"
 )
@@ -17,16 +18,53 @@ type Caller struct {
 	App string
 	// Log already carries the app name.
 	Log *slog.Logger
+	// Actor is the administrator on a site admin page; zero on the app API.
+	Actor Actor
+}
+
+// Actor is who opened a site admin page — 이메일은 넣지 않는다(화면에 찍히면 캡처 한 장으로 샌다).
+type Actor struct {
+	ID   string
+	Name string
+}
+
+// Admin is what the core lends a site admin page (D42 7절). app 이 채워 요청에 붙이고, 공개 패키지 site 가 쓴다.
+type Admin struct {
+	// Render draws body inside the admin layout with that status and heading.
+	Render func(w http.ResponseWriter, r *http.Request, status int, title string, body template.HTML)
+	// Notify carries a notice to the screen at path to (FR-724).
+	Notify func(to, msg string)
+	// NeedsReauth reports whether the 15-minute reauth window is closed (D15 5.3-1).
+	NeedsReauth func() bool
+	// ConfirmReauth checks the administrator's password — 계정당 상한을 거친다 — and opens the window.
+	ConfirmReauth func(password string) bool
+	// ReauthField is the core's password field that a form sends with a guarded action.
+	ReauthField template.HTML
+	// Record writes one op-log line (A-601).
+	Record func(action, target, summary string) error
+}
+
+type adminKey struct{}
+
+// WithAdmin attaches a to ctx; the core's wrapper around a site admin page calls it.
+func WithAdmin(ctx context.Context, a Admin) context.Context {
+	return context.WithValue(ctx, adminKey{}, a)
+}
+
+// AdminFrom reads what WithAdmin attached. ok is false outside a site admin page.
+func AdminFrom(ctx context.Context) (Admin, bool) {
+	a, ok := ctx.Value(adminKey{}).(Admin)
+	return a, ok
 }
 
 type callerKey struct{}
 
-// WithCaller attaches c to ctx; the /api/site/ gate calls it.
+// WithCaller attaches c to ctx; the /api/site/ gate and the site admin wrapper call it.
 func WithCaller(ctx context.Context, c Caller) context.Context {
 	return context.WithValue(ctx, callerKey{}, c)
 }
 
-// CallerFrom reads what WithCaller attached. ok is false outside a site API request.
+// CallerFrom reads what WithCaller attached. ok is false outside a site request.
 func CallerFrom(ctx context.Context) (Caller, bool) {
 	c, ok := ctx.Value(callerKey{}).(Caller)
 	return c, ok

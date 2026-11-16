@@ -36,6 +36,11 @@ type Extension struct {
 	Migrations fs.FS
 	// API is mounted under /api/site. 관리자가 A-213 에서 켜고 앱 키를 발급해야 열린다.
 	API []Route
+	// Permissions are added to the permission table at boot. 코드에서 빼도 표에서 지우지 않는다 — 이미 준 역할이
+	// 있을 수 있다. 부팅이 「어떤 라우트도 쓰지 않는 권한」으로 알린다.
+	Permissions []Permission
+	// Admin pages are mounted under /admin/site, in this order under the sidebar's 「사이트」.
+	Admin []AdminPage
 }
 
 // Route is one endpoint of the site's app API.
@@ -61,7 +66,7 @@ const (
 	App Auth = Auth(siteext.AuthApp)
 )
 
-// Context is what the core already checked about a site API request.
+// Context is what the core already checked about a site API request or site admin page.
 type Context struct {
 	// DB is the site database through database/sql — 코어가 쓰는 pgx 판이 바뀌어도 사이트 코드가 깨지지 않게.
 	// **그 요청 안에서만 쓴다.** 전역 변수나 고루틴에 담아 두면, 관리자가 사이트 유형을 바꿔 코어가 다시 조립될 때
@@ -71,12 +76,14 @@ type Context struct {
 	App string
 	// Log already carries the app name.
 	Log *slog.Logger
+	// Actor is the administrator on a site admin page; zero on the app API.
+	Actor Actor
 }
 
-// From returns what the core checked about r. Outside a site API handler it is the zero Context.
+// From returns what the core checked about r. Outside a site handler it is the zero Context.
 func From(r *http.Request) Context {
 	c, _ := siteext.CallerFrom(r.Context())
-	return Context{DB: c.DB, App: c.App, Log: c.Log}
+	return Context{DB: c.DB, App: c.App, Log: c.Log, Actor: Actor(c.Actor)}
 }
 
 // JSON answers with v as JSON, not stored by shared caches.
@@ -99,5 +106,13 @@ func (e Extension) internal() siteext.Extension {
 	for _, r := range e.API {
 		routes = append(routes, siteext.Route{Method: r.Method, Path: r.Path, Auth: siteext.Auth(r.Auth), Handler: r.Handler})
 	}
-	return siteext.Extension{Migrations: e.Migrations, API: routes}
+	perms := make([]siteext.Permission, 0, len(e.Permissions))
+	for _, p := range e.Permissions {
+		perms = append(perms, siteext.Permission(p))
+	}
+	pages := make([]siteext.AdminPage, 0, len(e.Admin))
+	for _, p := range e.Admin {
+		pages = append(pages, siteext.AdminPage(p))
+	}
+	return siteext.Extension{Migrations: e.Migrations, API: routes, Permissions: perms, Admin: pages}
 }

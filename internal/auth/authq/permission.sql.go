@@ -9,6 +9,24 @@ import (
 	"context"
 )
 
+const ensurePermission = `-- name: EnsurePermission :exec
+INSERT INTO permissions (key, description) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description, updated_at = now()
+WHERE permissions.description IS DISTINCT FROM EXCLUDED.description
+`
+
+type EnsurePermissionParams struct {
+	Key         string
+	Description string
+}
+
+// 사이트 권한을 넣는다 (D42 7절). 이름은 코드가 정하므로 바뀌었으면 덮어쓴다. 코드에서 빠진 권한은 지우지 않는다 —
+// 그 권한을 준 역할이 남아 있을 수 있고(role_permissions 는 RESTRICT), 부팅이 「쓰지 않는 권한」으로 알린다.
+func (q *Queries) EnsurePermission(ctx context.Context, arg EnsurePermissionParams) error {
+	_, err := q.db.Exec(ctx, ensurePermission, arg.Key, arg.Description)
+	return err
+}
+
 const permissionKeys = `-- name: PermissionKeys :many
 SELECT key FROM permissions ORDER BY key
 `
@@ -26,6 +44,36 @@ func (q *Queries) PermissionKeys(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 		items = append(items, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const permissionNames = `-- name: PermissionNames :many
+SELECT key, description FROM permissions ORDER BY key
+`
+
+type PermissionNamesRow struct {
+	Key         string
+	Description string
+}
+
+// 역할 편집기(A-403)가 키 옆에 설명을 보인다 — 사이트 권한(D42 7절)은 키만으로는 무슨 화면인지 모른다.
+func (q *Queries) PermissionNames(ctx context.Context) ([]PermissionNamesRow, error) {
+	rows, err := q.db.Query(ctx, permissionNames)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PermissionNamesRow{}
+	for rows.Next() {
+		var i PermissionNamesRow
+		if err := rows.Scan(&i.Key, &i.Description); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

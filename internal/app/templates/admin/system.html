@@ -4,6 +4,11 @@
     <div class="adm-stat-label">버전</div>
     <div class="adm-stat-value" style="font-size:20px">{{.Version}}</div>
   </div>
+  {{/* 사이트 실행 파일이면 어느 사이트 빌드인지 (D42 12절). 모듈 경로가 길어 폭이 좁으면 아무 데서나 접는다. */}}
+  {{with .SiteVersion}}<div class="adm-card">
+    <div class="adm-stat-label">사이트</div>
+    <div class="adm-stat-value" style="font-size:15px;overflow-wrap:anywhere">{{.}}</div>
+  </div>{{end}}
   <div class="adm-card">
     <div class="adm-stat-label">데이터베이스</div>
     <div class="adm-stat-value" style="font-size:20px">{{if .DBReadable}}정상{{else}}읽을 수 없음{{end}}</div>

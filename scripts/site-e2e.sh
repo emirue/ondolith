@@ -1,10 +1,11 @@
 #!/bin/sh
-# 사이트 실행 파일 한 바퀴 (D42 1단계).
+# 사이트 실행 파일 한 바퀴 (D42 1·2단계).
 #
 # 코어를 Go 모듈로 가져와 빌드한 사이트 실행 파일(examples/site)을 빈 DB 에 띄워, 설치부터 앱 요청까지 사람과 앱이
 # 하는 순서대로 밟는다. Go 시험은 조립 함수를 직접 부른다 — 이것은 진짜 실행 파일과 진짜 HTTP 다:
 #   설치 직후(재시작 없이) 사이트 표가 있다 → 관리자가 A-213 에서 켜고 키를 발급한다 → 앱이 그 키로 쓰고 읽는다 →
-#   키 없음·틀린 키 401, 없는 주소 JSON 404 → 키를 폐기하면 401 → 끄면 404
+#   키 없음·틀린 키 401, 없는 주소 JSON 404 → 관리자가 사이트 화면에서 그 기록을 보고 지운다(알림·작업 로그) →
+#   A-201 저장으로 트리를 다시 조립해도 사이트 화면이 남는다 → 키를 폐기하면 401 → 끄면 404
 #
 # 실행: make e2e (scripts/e2e.sh 뒤에 이어 돈다)
 set -u
@@ -100,6 +101,36 @@ want "앱: 키 없음 401" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/
 want "앱: 틀린 키 401" 401 "$(app GET /api/site/v1/checkins ondo_wrong)"
 want "앱: 없는 주소 404" 404 "$(app GET /api/site/v1/nothing "$KEY")"
 grep -q '"error"' "$WORK/body" && ok "앱: 오류는 JSON" || bad "앱: 오류가 JSON 이 아니다 — $(cat "$WORK/body")"
+
+# ---- 사이트 관리자 화면 (D42 7절, A-214) -------------------------------------
+page() { curl -s -o "$WORK/page" -w '%{http_code}' -b "$JAR" -c "$JAR" "$BASE$1"; }
+page /admin/ >/dev/null
+grep -q 'href="/admin/site/checkins"' "$WORK/page" && grep -q '>사이트</div>' "$WORK/page" &&
+	ok "사이드바 「사이트」 묶음에 사이트 화면이 있다" || bad "사이드바에 사이트 화면이 없다"
+want "사이트 화면: 목록" 200 "$(page /admin/site/checkins)"
+grep -q '홍길동' "$WORK/page" && grep -q '<title>출퇴근 기록 — 관리자</title>' "$WORK/page" &&
+	ok "사이트 화면이 코어 관리자 틀 안에 사이트 표를 그린다" || bad "사이트 화면에 틀이나 기록이 없다"
+CHK=$(sql "select id from site_example_checkins order by id limit 1")
+want "사이트 화면: 상세 — 숫자 id (코어의 uuid 검사를 받지 않는다)" 200 "$(page "/admin/site/checkins/$CHK")"
+want "사이트 화면: 숫자가 아닌 id 는 사이트가 404" 404 "$(page /admin/site/checkins/abc)"
+want "사이트 화면: 기록 지우기" 303 "$(code POST "/admin/site/checkins/$CHK")"
+page /admin/site/checkins >/dev/null
+grep -q '기록을 지웠습니다.' "$WORK/page" && ok "돌아간 화면에 저장 알림이 한 번 보인다" || bad "저장 알림이 없다"
+want "지운 기록은 없다" 0 "$(sql "select count(*) from site_example_checkins where id = $CHK")"
+want "작업 로그에 사이트 동작이 관리자 이름으로 남는다" 1 "$(sql "select count(*) from operation_logs l join users u on u.id = l.actor_user_id
+	where l.action = 'site.checkin_delete' and l.target_type = 'site' and l.target_id = '$CHK' and u.email = 'admin@example.com'")"
+page /admin/roles >/dev/null
+grep -q 'site.checkins — 출퇴근 관리' "$WORK/page" && ok "역할 편집기가 사이트 권한을 이름과 함께 보인다" || bad "역할 편집기에 사이트 권한 이름이 없다"
+page /admin/system >/dev/null
+grep -q 'example.com/sitee2e' "$WORK/page" && ok "시스템 정보에 사이트 빌드가 보인다" || bad "시스템 정보에 사이트 빌드가 없다"
+# 관리자 배색은 조립 때 읽는 값이라 A-201 이 운영 트리를 다시 조립한다 (D20). 다시 조립한 트리에도 사이트 화면이 있어야 한다.
+TYPE=$(sql "select value from settings where key = 'site.type'")
+want "A-201 관리자 배색 바꾸기 (트리 재조립)" 303 "$(code POST /admin/settings --data-urlencode "site.name=사이트 확장" \
+	--data-urlencode "site.type=${TYPE:-cms}" --data-urlencode "admin.theme=1c" \
+	--data-urlencode "site.dev_mode=" --data-urlencode "auth.email_verification_required=")"
+want "다시 조립한 트리의 사이트 화면" 200 "$(page /admin/site/checkins)"
+grep -q 'data-admin-theme="1c"' "$WORK/page" && grep -q 'href="/admin/site/checkins"' "$WORK/page" &&
+	ok "다시 조립한 트리에도 사이트 화면과 메뉴가 있다 (새 배색으로)" || bad "다시 조립한 트리에서 사이트 화면이나 메뉴가 빠졌다"
 
 KID=$(sql "select id from api_keys where name='e2e'")
 want "A-213 키 폐기" 303 "$(code POST /admin/settings/api/keys/revoke --data-urlencode "id=$KID")"
