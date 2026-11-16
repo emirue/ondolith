@@ -83,15 +83,16 @@ func main() {
 |---|---|
 | `Main(Extension)` | 지금 `cmd/ondolith` 이 하는 일 전부(플래그·설정·설치 화면·운영 트리) + 확장. 실패하면 로그를 남기고 종료 코드 1 |
 | `Extension` | `Migrations fs.FS`, `Permissions []Permission`, `Admin []AdminPage`, `API []Route`, `Phone PhoneLogin`, `SMS Sender`(비우면 관리자 SENS 설정을 쓴다) |
-| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Handler http.HandlerFunc`. 3단계에서 `Auth`(`site.App` = 앱 키만 — 빈 값, `site.Person` = 앱 키 + 문자 인증 토큰)가 붙는다 — 빈 값이 지금 동작이라 기존 사이트 코드가 깨지지 않는다 |
-| `AdminPage` | `Menu`(사이드바 글자), `Path`(`/admin/site` 뒤), `Permission`(`site.` 로 시작하는 키), `Handler`. GET 과 POST 를 한 처리기가 받는다 |
-| `Permission` | `Key`(`site.` 로 시작), `Name`(역할 편집기에 보이는 이름) |
+| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Auth`, `Handler http.HandlerFunc`. `Auth` 는 **반드시 적는다** — `site.App`(앱 키만). 3단계에서 `site.Person`(앱 키 + 문자 인증 토큰)이 붙는다. 빈 값은 부팅 검사가 거부한다 |
+| `AdminPage` | `Menu`(사이드바 글자, 30자까지 — 비우면 메뉴에 없는 상세 화면), `Path`(`/admin/site` 뒤, ServeMux 변수 가능 — 변수가 있으면 `Menu` 를 비운다), `Permission`(`Permissions` 에 적은 키), `Handler`. GET 과 POST 를 한 처리기가 받는다 |
+| `Permission` | `Key`(`site.` 다음에 소문자로 시작하는 마디 하나 — DB 가 두 마디만 받는다), `Name`(역할 편집기에 키와 함께 보이는 이름, 1~60자) |
 | `PhoneLogin` | `Lookup func(ctx, phone string) (subject string, ok bool, err error)` — 정규화한 번호(숫자만)를 받아 로그인할 대상을 돌려준다. 비우면 문자 로그인을 쓰지 않는다 |
 | `From(r) Context` | 처리기 안에서: `DB`(`*sql.DB` — database/sql. pgx 의 주 판이 공개 약속에 들어가지 않게), `App`(부른 앱 키의 이름), `Subject`(`site.Person` 일 때 로그인한 대상), `Actor`(관리자 화면일 때 관리자 id·이름), `Log`(`*slog.Logger`) |
-| `RenderAdmin(w, r, title, t *template.Template, data any)` | 사이트 템플릿을 코어 관리자 틀(머리글·사이드바·알림·`admin.js`) 안에 그린다. `t` 는 `content` 블록을 정의해야 한다 |
-| `Done(w, r, to, notice)` | 성공한 관리자 POST 의 끝. 알림을 싣고 303 ([D19](19-screen-io.md) C11) |
-| `Reauth(r) bool` | 비밀번호 재확인 창이 열려 있는지 — 돈·자격증명을 다루는 사이트 화면이 쓴다 ([D15](15-access-control.md) 5.3-1) |
-| `OpLog(r, action, target, summary)` | 작업 로그(A-601 화면)에 한 줄 |
+| `RenderAdmin(w, r, status, title, t *template.Template, data any)` | `t` 의 `content` 블록을 `data` 로 실행해 코어 관리자 틀(머리글·사이드바·알림·`admin.js`) 안에 그린다. `status` 는 그대로 나간다 — 폼을 다시 그리면 422, 재확인 실패는 403. 오류 문장은 사이트 템플릿이 그린다(코어의 모양 `adm-toast adm-toast--error`). 사이트 템플릿은 코어 템플릿 묶음 밖에서 실행되므로 이름이 부딪히지 않고 사이트의 함수맵을 그대로 쓴다 |
+| `Done(w, r, to, notice)` | 성공한 관리자 POST 의 끝. 알림을 싣고 303 ([D19](19-screen-io.md) C11). `to` 는 `/admin/` 로 시작해야 한다 — 아니면 보내지 않고 500(열린 리다이렉트 방지) |
+| `Reauth(r) bool` | 비밀번호 재확인을 통과했는지 — 15분 창이 열려 있거나, 이 폼의 `password` 가 맞으면 참이고 창을 연다(계정당 분당 5회). 돈·자격증명·되돌릴 수 없는 삭제를 하는 POST 가 처음에 부른다 ([D15](15-access-control.md) 5.3-1). 창만 보고 거짓을 주면 15분 지난 관리자는 그 동작을 영원히 못 한다 |
+| `ReauthField(r) template.HTML` | 코어의 비밀번호 칸. 창이 열려 있으면 빈 값이다. 템플릿 데이터에 실어 폼 안에 그린다 |
+| `OpLog(r, action, target, summary)` | 작업 로그(A-601 화면)에 한 줄. `action` 은 `site.이름`, 대상 종류는 `site`. 기록 실패는 요청을 망치지 않고 오류 로그로 남는다 |
 | `EndSessions(ctx, subject)` | 그 대상의 앱 토큰을 모두 끊는다 — 인부가 그만둘 때 |
 | `JSON(w, status, v)`, `Error(w, status, msg)` | 앱 API 응답. 오류는 언제나 `{"error": "..."}` |
 
@@ -143,13 +144,24 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 
 ## 7. 관리자 확장
 
-- 사이드바에 「사이트」 묶음이 생기고 `AdminPage` 가 등록 순서대로 들어간다. 메뉴는 그 권한이 있는 관리자에게만 보인다.
-- 주소는 `/admin/site/<Path>`. 관리자 트리의 문(`admin.access`)과 그 화면의 권한을 코어가 먼저 확인한다.
-- `RenderAdmin` 은 코어 `layout.html` 의 `content` 블록 자리에 사이트 템플릿을 넣는다. 그래서 저장 알림(C11)·두 번
-  누르기 방지(C13)·관리자 테마·휴대폰 폭이 그대로 따라온다. 확인 창(C12)은 사이트 템플릿이 단추에 단다 —
-  코어 템플릿과 같은 `onclick="return confirm(...)"` 이다.
+- 사이드바에 「사이트」 묶음이 **대시보드 바로 아래** 생기고 `AdminPage` 가 등록 순서대로 들어간다 — 사이트 화면은 그
+  사이트가 하는 일 자체라 설정 묶음 뒤로 밀지 않는다. 메뉴는 그 권한이 있는 관리자에게만 보인다. `Menu` 가 빈 화면은
+  메뉴에 없다(목록에서 눌러 들어가는 상세). 메뉴 숨김(FR-720)은 코어 화면에만 걸린다.
+- 주소는 `/admin/site/<Path>` 이고 **본 트리 안**이다(화면 A-214). 관리자 트리의 문(`admin.access`)·교차 출처 보호·요청
+  상한이 그대로 붙고, **그 화면의 권한은 코어의 감싸개가 사이트 처리기보다 먼저 본다** — 라우트 표의 권한 칸은 부팅 검사용
+  선언이라 거절하지 않는다. 없으면 관리자 틀 안의 403 이다.
+- 코어 라우트의 「`{id}` 는 uuid」 관문(형식이 깨지면 404)은 사이트 화면에 걸지 않는다 — 사이트 표는 bigserial 을 쓸 수
+  있다. 사이트 처리기가 자기 표의 id 형식을 본다.
+- `RenderAdmin` 은 사이트 템플릿을 따로 실행해 그 결과를 코어 `layout.html` 의 `content` 자리에 넣는다. 그래서 저장
+  알림(C11)·두 번 누르기 방지(C13)·관리자 배색·휴대폰 폭이 그대로 따라온다. 확인 창(C12)은 사이트 템플릿이 단추에
+  단다 — 코어 템플릿과 같은 `onclick="return confirm(...)"` 이다.
 - 사이트 화면의 POST 도 교차 출처 보호를 그대로 받는다. 성공하면 `site.Done` 으로 끝낸다 — 코어의
   `TestAdminChangesReturnThroughDone` 같은 검사는 사이트 코드에 닿지 않으므로 예제 사이트가 그 모양을 보여 준다.
+- 사이트 권한은 부팅 때 권한 표에 들어간다(이름이 바뀌었으면 고친다). 역할 편집기(A-403)의 권한 고르기 칸은 키 옆에
+  이름을 보인다. 코드에서 뺀 권한은 지우지 않는다 — 그 권한을 준 역할이 있을 수 있다. 부팅이 「어떤 라우트도 쓰지 않는
+  권한」으로 알린다.
+- A-201 이 관리자 배색·메뉴 숨김·사이트 유형을 바꾸면 운영 트리를 다시 조립하는데, 같은 확장으로 다시 조립하므로 사이트
+  화면과 메뉴가 그대로 남는다.
 
 ## 8. 전화번호 문자 인증 로그인
 
@@ -224,7 +236,7 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 | 코어 버전 (사이트 실행 파일) | 빌드 정보(`runtime/debug.ReadBuildInfo`)의 의존 모듈 `github.com/emirue/ondolith` 의 버전. 찍어 넣을 것이 없다 — `go.mod` 가 곧 버전이다. `replace` 로 로컬 코어를 쓰면 `dev` |
 | 코어 버전 (코어 릴리즈 실행 파일) | 지금처럼 `-X main.version` |
 | 사이트 버전 | 빌드 정보의 주 모듈 경로·버전, 없으면 VCS 커밋 앞 12자리 |
-| 보이는 곳 | `-version` 출력(`ondolith v0.8.0 linux/amd64 · 사이트 …/juwon v1.2.0`), 테마 `requires` 검사. 시스템 화면(A-602)은 코어 버전만 보인다 — 사이트 버전은 2단계에서 더한다 |
+| 보이는 곳 | `-version` 출력(`ondolith v0.8.0 linux/amd64 · 사이트 …/juwon v1.2.0`), 테마 `requires` 검사, 시스템 화면(A-602)의 「버전」(코어)과 「사이트」 카드 |
 
 - **결정은 순수 함수 하나**(`*debug.BuildInfo` 를 받아 코어·사이트 버전을 돌려준다)로 두고 시험한다 — `go test` 빌드에는
   의존 버전이 기록되지 않아, 실행 파일을 거쳐서는 이 분기를 물 수 없다(지금 `formatVersion` 과 같은 이유).
@@ -258,7 +270,7 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 | SENS | 서명 문자열과 값, 요청 본문·머리글, `202` 성공, 4xx·5xx·시간 초과 오류 | 서명은 공식 문서의 규칙대로 손으로 계산한 값과 비교한다. 가짜 SENS 서버(`httptest`)가 받은 요청을 검사한다 |
 | 통합 | 사이트 마이그레이션(별도 버전 표, 실패 시 부팅 중단), 권한 넣기, `api_keys`·`app_sessions`·`app_login_codes`, 관리자 화면의 권한·재확인·작업 로그 | 시험 DB(`make test-integration`) |
 | 예제 사이트 한 바퀴 | `examples/site` 실행 파일을 띄워: 설치 → 사이트 표 생성 → 관리자 사이트 화면 → 「커스텀 API」 켜기·키 발급 → 문자 인증(로그 발송에서 번호를 읽음) → `site.Person` API → 키 폐기 401·끄기 404·토큰 끊기 401 | 셸 시나리오(`make e2e` 와 같은 방식). 요청은 Flutter 앱이 보내는 것과 같은 모양(JSON·`Authorization`·`X-Ondolith-Session`, `Origin` 없음) |
-| 화면 | 사이트 관리자 화면·「커스텀 API」·「문자(SMS)」 화면의 레이아웃, 키를 한 번만 보이기, 폐기 확인 창 | `make ui`(전 화면 3폭) + 실제 Chrome 시험 |
+| 화면 | 사이트 관리자 화면·「커스텀 API」·「문자(SMS)」 화면의 레이아웃, 키를 한 번만 보이기, 폐기 확인 창 | `make ui`(전 화면 3폭) + 실제 Chrome 시험. 화면 검사 셋(screens·crawl·ui)은 예제 사이트 실행 파일로 돈다 — 코어 화면 전부에 사이트 화면이 더해진 상위집합이다 |
 | 실제 SENS | 실제 문자 한 통 | 운영자 키가 있어야 한다 — 그때 운영자와 함께 시험 발송 단추로 확인하고, 결과를 기록한다. 키는 저장소에 넣지 않는다 |
 
 ## 15. 구현 순서
