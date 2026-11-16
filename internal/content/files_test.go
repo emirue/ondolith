@@ -29,12 +29,16 @@ type memRemote struct {
 
 func newMemRemote() *memRemote { return &memRemote{objects: map[string][]byte{}} }
 
-func (m *memRemote) Put(_ context.Context, key string, body io.ReadSeeker, size int64) error {
+func (m *memRemote) Put(ctx context.Context, key string, body io.ReadSeeker, size int64) error {
 	if m.failPut != nil {
 		return m.failPut
 	}
 	if m.onPut != nil {
 		m.onPut(key)
+	}
+	// 진짜 버킷처럼 보내는 사이 끊긴 요청은 실패한다.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	b, err := io.ReadAll(body)
 	if err != nil {
@@ -345,7 +349,7 @@ func TestMigrateStopsAtTheDeadline(t *testing.T) {
 }
 
 // **옮기기는 여러 파일을 함께 보낸다** (FR-717). 하나씩 보내면 버킷까지의 왕복이 그대로 쌓여, 한 번 누를 때
-// (migrateBudget) 옮기는 수가 그 왕복에 묶인다. 버킷이 0.5초씩 답하지 않게 붙잡고 그동안 겹친 수를 잰다 — 정확히
+// (migrateBudget) 옮기는 수가 그 왕복에 묶인다. 버킷이 1초씩 답하지 않게 붙잡고 그동안 겹친 수를 잰다 — 정확히
 // migrateWorkers 개다. 하나씩 보내면 1, 제한이 없으면 하나 더 들어와 기다림이 바로 풀린다.
 func TestMigrateSendsSeveralAtOnce(t *testing.T) {
 	root, rem := t.TempDir(), newMemRemote()
@@ -376,7 +380,7 @@ func TestMigrateSendsSeveralAtOnce(t *testing.T) {
 		mu.Unlock()
 		select {
 		case <-full:
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(time.Second):
 		}
 		mu.Lock()
 		inflight--
@@ -507,10 +511,10 @@ func TestMigrateLeavesFilesBeingWritten(t *testing.T) {
 func TestMigrateSkipsFilesThatVanished(t *testing.T) {
 	root, rem := t.TempDir(), newMemRemote()
 	ctx := context.Background()
-	// **함께 보내도 b 가 사라진 뒤에 시작하게 한다.** 앞의 파일들이 보내는 자리(migrateWorkers)를 다 채우고, 그중
-	// 하나가 끝나야 b 의 자리가 난다 — 끝나는 것은 모두 b 를 지운 뒤다.
+	// **b 는 자리가 나기 전에 사라진다.** 앞의 파일들이 보내는 자리(migrateWorkers)를 다 채우고 하나가 더 기다리므로,
+	// 걷기는 b 에 닿기 전에 멈춘다. 자리는 보내기가 끝나야 나고, 끝나는 것은 모두 b 를 지운 뒤다.
 	var first []string
-	for i := range migrateWorkers {
+	for i := range migrateWorkers + 1 {
 		first = append(first, fmt.Sprintf("2026/10/a%07d-aaaa-4aaa-8aaa-aaaaaaaaaaaa", i))
 	}
 	b := "2026/10/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -528,6 +532,64 @@ func TestMigrateSkipsFilesThatVanished(t *testing.T) {
 	res, err := NewFiles(root, remoteOf(rem, true)).Migrate(ctx, time.Now().Add(time.Minute))
 	if err != nil || res != (MigrateResult{Moved: len(first)}) {
 		t.Fatalf("Migrate = %+v, %v — a vanished file is not a failure", res, err)
+	}
+}
+
+// 보내는 사이 로컬 사본이 사라졌다(업로드가 직접 올리고 지웠다) — 지울 것이 없을 뿐 실패가 아니다.
+func TestMigrateSkipsAFileRemovedWhileSending(t *testing.T) {
+	root, rem := t.TempDir(), newMemRemote()
+	ctx := context.Background()
+	rel := "2026/10/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	if err := LocalFiles(root).Write(ctx, rel, []byte(rel)); err != nil {
+		t.Fatal(err)
+	}
+	age(t, root, rel)
+	rem.onPut = func(string) { _ = os.Remove(filepath.Join(root, filepath.FromSlash(rel))) }
+	res, err := NewFiles(root, remoteOf(rem, true)).Migrate(ctx, time.Now().Add(time.Minute))
+	if err != nil || res != (MigrateResult{}) {
+		t.Fatalf("Migrate = %+v, %v — a file removed while sending is not a failure", res, err)
+	}
+}
+
+// **시한이나 요청이 끊은 파일은 남은 것이다** (FR-717). 넷이 대역을 나누면 하나일 때보다 시한 직전에 끊기기 쉽다 —
+// 그것을 실패로 세면 운영자는 정상 진행을 502 오류 화면으로 본다. 로컬에 남아 다음 번에 다시 보낸다.
+func TestMigrateCountsCutFilesAsLeft(t *testing.T) {
+	root, rem := t.TempDir(), newMemRemote()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rel := "2026/10/cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	if err := LocalFiles(root).Write(ctx, rel, []byte(rel)); err != nil {
+		t.Fatal(err)
+	}
+	age(t, root, rel)
+	rem.onPut = func(string) { cancel() }
+	res, err := NewFiles(root, remoteOf(rem, true)).Migrate(ctx, time.Now().Add(time.Minute))
+	if err != nil || res != (MigrateResult{Left: 1}) {
+		t.Fatalf("Migrate = %+v, %v — a file cut by the deadline is left, not failed", res, err)
+	}
+	if !localExists(t, root, rel) {
+		t.Fatal("a file that was cut lost its local copy")
+	}
+}
+
+// **자리를 기다리는 동안 시한이 지나면 시작하지 않는다.** 넷이 0.6초씩 보내는 동안 다섯째가 자리를 기다리고, 그
+// 사이 0.3초 시한이 지난다 — 다섯째는 남은 것이다. 시한 뒤에 시작하면 한 요청이 WriteTimeout 을 넘을 수 있다.
+func TestMigrateDoesNotStartAfterTheDeadlineWhileWaiting(t *testing.T) {
+	root, rem := t.TempDir(), newMemRemote()
+	ctx := context.Background()
+	var rels []string
+	for i := range migrateWorkers + 1 {
+		rel := fmt.Sprintf("2026/10/d%07d-dddd-4ddd-8ddd-dddddddddddd", i)
+		if err := LocalFiles(root).Write(ctx, rel, []byte(rel)); err != nil {
+			t.Fatal(err)
+		}
+		rels = append(rels, rel)
+	}
+	age(t, root, rels...)
+	rem.onPut = func(string) { time.Sleep(600 * time.Millisecond) }
+	res, err := NewFiles(root, remoteOf(rem, true)).Migrate(ctx, time.Now().Add(300*time.Millisecond))
+	if err != nil || res != (MigrateResult{Moved: migrateWorkers, Left: 1}) {
+		t.Fatalf("Migrate = %+v, %v — want %d moved, 1 left", res, err, migrateWorkers)
 	}
 }
 

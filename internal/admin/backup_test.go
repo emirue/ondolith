@@ -267,6 +267,7 @@ func TestBackupDownloadTellsThePageItStarted(t *testing.T) {
 	}
 	d.DumpDB = func(_ context.Context, w io.Writer) error { _, err := w.Write([]byte("dump")); return err }
 	d.UploadDir = t.TempDir()
+	d.SecureCookies = true
 	const tok = "0123456789abcdef0123456789abcdef"
 	told := func(rec interface{ Result() *http.Response }) *http.Cookie {
 		for _, c := range rec.Result().Cookies() {
@@ -289,8 +290,9 @@ func TestBackupDownloadTellsThePageItStarted(t *testing.T) {
 		if rec.Code != http.StatusOK || c == nil {
 			t.Fatalf("%s = HTTP %d, 쿠키 %v — 내려받기가 시작됐다고 알려야 한다", tc.name, rec.Code, c)
 		}
-		// 화면의 스크립트가 읽어야 하므로 HttpOnly 가 아니다. 관리자 화면에만 가고 곧 사라진다.
-		if c.Value != tok || c.Path != "/admin" || c.HttpOnly || c.MaxAge <= 0 || c.MaxAge > 60 || c.SameSite != http.SameSiteStrictMode {
+		// 화면의 스크립트가 읽어야 하므로 HttpOnly 가 아니다. 관리자 화면에만 가고 곧 사라진다. Secure 는 세션 쿠키를 따른다.
+		if c.Value != tok || c.Path != "/admin" || c.HttpOnly || c.MaxAge <= 0 || c.MaxAge > 60 ||
+			c.SameSite != http.SameSiteStrictMode || !c.Secure {
 			t.Errorf("%s 쿠키 = %+v", tc.name, c)
 		}
 	}

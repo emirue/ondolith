@@ -173,7 +173,7 @@ func (d *Deps) migrateStorage(w http.ResponseWriter, r *http.Request, c Caller) 
 	}
 	until := time.Now().Add(migrateBudget)
 	// 시한은 새 파일을 시작하지 않는 선이고, 이미 보내는 파일은 이 ctx 가 끊는다 — 끊긴 파일은
-	// 실패로 세고 로컬에 남는다.
+	// 남은 것으로 세고 로컬에 남아 다음 번에 다시 보낸다 (content.Files.Migrate).
 	ctx, cancel := context.WithDeadline(r.Context(), until.Add(migrateGrace))
 	defer cancel()
 	res, err := d.Files.Migrate(ctx, until)

@@ -173,15 +173,31 @@ check('파일이 오기 시작하면 단추가 다시 살아난다', back && sta
 check('내려받는 동안 화면은 그대로다', (await ev('location.pathname')) === '/admin/backup' &&
   (await ev(`document.querySelector('.adm-main > [role=alert]')`)) === null)
 check('알림 쿠키는 쓰고 지운다', !(await ev(`document.cookie.includes('ondolith_download')`)))
-posts = 0
-const p2 = await at('선택한 백업 내려받기')
-for (const type of ['mousePressed', 'mouseReleased']) {
-  await cdp.send('Input.dispatchMouseEvent', { type, x: p2.x, y: p2.y, button: 'left', clickCount: 1 }, sessionId)
+const click = async (p) => {
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await cdp.send('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 }, sessionId)
+  }
 }
+posts = 0
+await click(await at('선택한 백업 내려받기'))
 await wait(400)
 await release()
 for (let i = 0; i < 30 && started < 2; i++) await wait(100)
 check('다시 누르면 또 받는다', posts === 1 && started === 2, `POST ${posts}번, 내려받기 ${started}번`)
+
+// ---- 다른 폼을 누르면 앞 폼은 풀린다 — 브라우저가 앞 요청을 끊으므로 기다릴 것이 없다 -------------------------------
+// 저장을 붙잡아 둔 채 저장된 백업을 받는다. 앞 폼이 「처리 중…」으로 남으면 새로 고칠 때까지 저장할 수 없다.
+// 위치는 누르기 전에 구한다 — 저장이 붙잡혀 있는 동안에는 그 화면을 읽을 수 없다(위 probe 주석).
+const [save, get] = [await at('저장'), await at('선택한 백업 내려받기')]
+await click(save)
+await wait(300)
+await click(get)
+await wait(300)
+await release()
+for (let i = 0; i < 30 && started < 3; i++) await wait(100)
+const left = await busy('input[name="backup.hour"]')
+check('다른 폼을 누르면 앞 폼의 단추가 풀린다', started === 3 && !left.busy && left.label === '저장',
+  `내려받기 ${started}번, ${JSON.stringify(left)}`)
 
 // ---- 확인 창을 취소하면 잠기지 않는다 ------------------------------------------------------------------
 await cdp.send('Fetch.disable', {}, sessionId)

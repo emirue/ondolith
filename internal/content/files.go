@@ -314,6 +314,10 @@ func (f *Files) Migrate(ctx context.Context, until time.Time) (MigrateResult, er
 			switch err := push(ctx, rt, rem, p); {
 			case errors.Is(err, fs.ErrNotExist):
 				// 걷는 사이 지워졌거나 업로드가 직접 올리고 지웠다 — 실패가 아니다.
+			case err != nil && ctx.Err() != nil:
+				// 시한이나 요청이 끊었다 — 버킷의 실패가 아니다. 로컬에 남아 다음 번에 다시 보낸다. 넷이 대역을 나누면
+				// 하나일 때보다 시한 직전에 끊기기 쉽고, 그것을 실패로 세면 운영자가 정상 진행을 오류 화면으로 본다.
+				tally(&res.Left, nil)
 			case err != nil:
 				tally(&res.Failed, fmt.Errorf("%s: %w", p, err))
 			default:
