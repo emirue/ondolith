@@ -204,9 +204,9 @@ inject "접근이 역할로 표기됨 (권한이어야 함)" docs/11-screens.md 
 inject "상태변경 값이 허용 목록 밖" docs/11-screens.md \
 	'printf "| P-996 | 나쁜상태 | \`/y\` | GET | 공개 | 어쩌면 | SC-1 | FR-510 |\n" >> docs/11-screens.md' \
 	'상태변경 값이 허용 목록에 없다 (P-996)'
-inject "화면 유형이 SC-1..SC-8 밖" docs/11-screens.md \
-	'printf "| P-993 | 미분류 | \`/v\` | GET | 공개 | 없음 | SC-9 | FR-510 |\n" >> docs/11-screens.md' \
-	'화면 유형이 SC-1..SC-8 이 아니다 (P-993)'
+inject "화면 유형이 SC-1..SC-9 밖" docs/11-screens.md \
+	'printf "| P-993 | 미분류 | \`/v\` | GET | 공개 | 없음 | SC-10 | FR-510 |\n" >> docs/11-screens.md' \
+	'화면 유형이 SC-1..SC-9 이 아니다 (P-993)'
 inject "관리자 화면이 권한 없이 접근 가능" docs/11-screens.md \
 	'printf "| A-999 | 무방비 관리자 | \`/admin/x\` | GET | 공개 | 없음 | SC-4 | FR-701 |\n" >> docs/11-screens.md' \
 	'관리자 화면인데 접근이 권한이 아니다 (A-999)'

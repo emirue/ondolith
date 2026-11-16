@@ -58,10 +58,10 @@ func TestCheckCatchesEachViolation(t *testing.T) {
 			name: "화면 유형이 SC 범위 밖",
 			build: func() *Registry {
 				return NewRegistry().Add(Route{Screen: "P-201", Method: "GET",
-					Pattern: "/", Class: "SC-9", Handler: noop})
+					Pattern: "/", Class: "SC-10", Handler: noop})
 			},
-			inv:  inv("P-201", SecurityClass("SC-9")),
-			want: "SC-1..SC-8 이 아니다",
+			inv:  inv("P-201", SecurityClass("SC-10")),
+			want: "SC-1..SC-9 이 아니다",
 		},
 		{
 			// GET /post/123/delete is reachable by a crawler and by a browser

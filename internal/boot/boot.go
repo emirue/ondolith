@@ -22,6 +22,7 @@ import (
 	"github.com/emirue/ondolith/internal/app"
 	"github.com/emirue/ondolith/internal/config"
 	"github.com/emirue/ondolith/internal/install"
+	"github.com/emirue/ondolith/internal/siteext"
 )
 
 // tree is a route tree together with the resources it owns. The two travel as
@@ -135,6 +136,8 @@ type Options struct {
 	// in cmd/ondolith. A site binary leaves it empty: its core version comes from
 	// the build info (D42 12절).
 	Version string
+	// Ext is a site binary's extension (site.Main); zero for cmd/ondolith.
+	Ext siteext.Extension
 }
 
 // Run parses the flags, boots the install or operating tree and serves until
@@ -158,6 +161,15 @@ func Run(opts Options) error {
 		return nil
 	}
 
+	// 사이트 확장이 틀렸으면 설치 화면도 띄우지 않는다 — 설치가 끝난 뒤에야 드러나면 사이트 주인은 이미 배포한 뒤다
+	// (D42 4절 5). 둘 다 DB 없이 볼 수 있는 검사다.
+	if err := opts.Ext.Validate(); err != nil {
+		return err
+	}
+	if err := siteext.CheckMigrations(opts.Ext.Migrations); err != nil {
+		return err
+	}
+
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -170,8 +182,8 @@ func Run(opts Options) error {
 	// (FR-710) reassembles and swaps the same way the install did (D20).
 	var startOperating func(cfg *config.Config) error
 	startOperating = func(cfg *config.Config) error {
-		h, cleanup, err := app.New(ctx, cfg, v.Core, log,
-			func() error { return startOperating(cfg) })
+		h, cleanup, err := app.NewSite(ctx, cfg, v.Core, log,
+			func() error { return startOperating(cfg) }, opts.Ext)
 		if err != nil {
 			return err
 		}

@@ -194,7 +194,7 @@ else
 		for ($acc, $mut, $cls) { s/^\s+//; s/\s+$// }
 		print "접근 값이 허용 목록에 없다 ($id): [$acc]"     unless $acc =~ /^(공개|로그인|본인|권한:[a-z][a-z0-9]*\.[a-z][a-z0-9_]*)$/;
 		print "상태변경 값이 허용 목록에 없다 ($id): [$mut]"  unless $mut =~ /^(있음|없음)$/;
-		print "화면 유형이 SC-1..SC-8 이 아니다 ($id): [$cls]" unless $cls =~ /^SC-[1-8]$/;
+		print "화면 유형이 SC-1..SC-9 이 아니다 ($id): [$cls]" unless $cls =~ /^SC-[1-9]$/;
 		# An admin screen reachable without a permission is the accident this
 		# whole table exists to prevent.
 		print "관리자 화면인데 접근이 권한이 아니다 ($id): [$acc]" if $id =~ /^A-/ && $acc !~ /^권한:/;
@@ -598,7 +598,7 @@ else
 			next unless $l[$i] =~ /^### ([PA]-\d{3})/;
 			my $id = $1;
 			my $head = join " ", @l[$i .. ($i + 3 > $#l ? $#l : $i + 3)];
-			my ($cls) = $head =~ /(SC-[1-8])/;
+			my ($cls) = $head =~ /(SC-[1-9])\b/;
 			my ($acc) = $head =~ /`(공개|로그인|본인)`/;
 			($acc) = $head =~ /`(?:권한:)?([a-z][a-z0-9]*\.[a-z][a-z0-9_]*)`/ unless $acc;
 			print "$id\t", ($acc // "?"), "\t", ($cls // "?"), "\n";
