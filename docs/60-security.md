@@ -293,7 +293,7 @@ siteverify 에 보내, 각각 통과·거부·거부·우리 쪽 오류로 읽�
 | 자리 | 두는 값 | 예 | 목록 |
 |---|---|---|---|
 | ① 화면 → `settings` 평문 | 비밀이 아닌 값. 방문자 브라우저에 어차피 실리는 키도 여기다 | 토스 클라이언트 키, 지도 키, GA4 측정 ID, Turnstile 사이트 키, 소셜 client_id, SMTP 호스트·포트·아이디, S3 엔드포인트·버킷·액세스 키 | 화면마다 — [D19](19-screen-io.md) 각 화면의 입력 명세 |
-| ② 화면 → `settings` 봉인 | 서버만 쓰는 비밀. 새면 남이 이 사이트 이름으로 결제사·메일 서버·외부 API 를 부른다 | PG 시크릿 키, SMTP 비밀번호, Turnstile 비밀 키, 소셜 client_secret, S3 시크릿 키 | `content.IsSecretSetting` |
+| ② 화면 → `settings` 봉인 | 서버만 쓰는 비밀. 새면 남이 이 사이트 이름으로 결제사·메일 서버·외부 API 를 부른다 | PG 시크릿 키, SMTP 비밀번호, Turnstile 비밀 키, 소셜 client_secret, S3 시크릿 키, SENS 시크릿 키 | `content.IsSecretSetting` |
 | ③ 설정 파일 `ondolith.json` (0600) | 아래 1·2 에 걸리는 값 | DB 접속 정보, `secret_key`, `site_url`, 폴더 경로, `proxy_ip_header`, `secure_cookies` | `config.Config` ([D20](20-architecture.md) 「설정」) |
 
 **고르는 순서** — 위에서부터 먼저 걸리는 자리에 둔다.

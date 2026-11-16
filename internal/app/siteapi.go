@@ -37,21 +37,38 @@ type siteAPI struct {
 	limiter *auth.Limiter
 	db      *sql.DB
 	log     *slog.Logger
+
+	// 문자 인증 로그인 (D42 8절, sitelogin.go). phone.Lookup 이 nil 이면 /auth/ 주소가 없다.
+	phone siteext.PhoneLogin
+	login appLogin
+	// siteName is the 「[사이트 이름]」 of the SMS.
+	siteName func() string
+	// send delivers one SMS — 사이트의 발송 함수나, A-215 설정을 그때 읽는 SENS.
+	send func(ctx context.Context, to, text string) error
+	// sendFailed records a send that did not go out (작업 로그). 응답은 이미 나갔다.
+	sendFailed func(phone string, err error)
+	// spawn runs the send outside the response; tests run it in place.
+	spawn func(func())
 }
 
 func (s *siteAPI) handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, rt := range s.routes {
-		mux.Handle(rt.Method+" "+siteext.APIPrefix+rt.Path, s.gate(rt.Handler))
+		mux.Handle(rt.Method+" "+siteext.APIPrefix+rt.Path, s.gate(rt.Handler, rt.Auth))
+	}
+	if s.phone.Lookup != nil {
+		mux.Handle("POST "+siteext.APIPrefix+"/auth/code", s.gate(s.authCode, siteext.AuthApp))
+		mux.Handle("POST "+siteext.APIPrefix+"/auth/verify", s.gate(s.authVerify, siteext.AuthApp))
+		mux.Handle("POST "+siteext.APIPrefix+"/auth/logout", s.gate(s.authLogout, siteext.AuthApp))
 	}
 	// 등록되지 않은 주소와 메서드는 키를 확인한 뒤 404 다 — 키 없이 무엇이 있는지 알아내지 못하게. 이 패턴이
 	// 모든 메서드를 받으므로 ServeMux 의 평문 405 도 나가지 않는다.
-	mux.Handle(siteext.APIPrefix+"/", s.gate(nil))
+	mux.Handle(siteext.APIPrefix+"/", s.gate(nil, siteext.AuthApp))
 	return mux
 }
 
 // gate runs D42 5절's checks in order; next == nil is an unregistered address.
-func (s *siteAPI) gate(next http.HandlerFunc) http.Handler {
+func (s *siteAPI) gate(next http.HandlerFunc, need siteext.Auth) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		if !s.limiter.Allow("siteapi-ip:"+ip, auth.Limit{Burst: siteAPIPerIP, Window: time.Minute}) {
@@ -89,13 +106,27 @@ func (s *siteAPI) gate(next http.HandlerFunc) http.Handler {
 			siteext.WriteError(w, http.StatusNotFound, "없는 주소입니다.")
 			return
 		}
+		// 사람 인증 (D42 5절 4): 문자 로그인으로 받은 토큰. 없거나 지났거나 끊긴 토큰은 처리기를 부르지 않는다.
+		var subject string
+		if need == siteext.AuthPerson {
+			sub, ok, err := s.login.LookupSession(r.Context(), r.Header.Get(sessionHeader))
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			if !ok {
+				siteext.WriteError(w, http.StatusUnauthorized, "로그인이 필요합니다.")
+				return
+			}
+			subject = sub
+		}
 		if r.ContentLength > siteAPIMaxBody {
 			siteext.WriteError(w, http.StatusRequestEntityTooLarge, "본문이 너무 큽니다.")
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, siteAPIMaxBody) // 길이를 밝히지 않는 본문도 같은 선에서 끊는다
 		log := s.log.With("app", key.Name)
-		ctx := siteext.WithCaller(r.Context(), siteext.Caller{DB: s.db, App: key.Name, Log: log})
+		ctx := siteext.WithCaller(r.Context(), siteext.Caller{DB: s.db, App: key.Name, Log: log, Subject: subject})
 		rw := &wroteWriter{ResponseWriter: w}
 		defer func() {
 			if v := recover(); v != nil {
@@ -149,11 +180,21 @@ func (w *wroteWriter) Write(b []byte) (int, error) {
 // Unwrap lets http.ResponseController reach the real writer (flush, deadlines).
 func (w *wroteWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// siteAPILines is A-213's list of this binary's site API, "METHOD /api/site/…".
-func siteAPILines(routes []siteext.Route) []string {
-	lines := make([]string, 0, len(routes))
-	for _, rt := range routes {
-		lines = append(lines, rt.Method+" "+siteext.APIPrefix+rt.Path)
+// siteAPILines is A-213's list of this binary's site API, "METHOD /api/site/… (인증 방식)". 문자 로그인이 있으면
+// 코어의 /auth/ 주소도 적는다 — 앱 개발자가 보는 목록이다.
+func siteAPILines(ext siteext.Extension) []string {
+	var lines []string
+	if ext.Phone.Lookup != nil {
+		for _, op := range []string{"code", "verify", "logout"} {
+			lines = append(lines, "POST "+siteext.APIPrefix+"/auth/"+op+" (문자 로그인 — 코어)")
+		}
+	}
+	for _, rt := range ext.API {
+		how := "앱 키"
+		if rt.Auth == siteext.AuthPerson {
+			how = "앱 키 + 로그인"
+		}
+		lines = append(lines, rt.Method+" "+siteext.APIPrefix+rt.Path+" ("+how+")")
 	}
 	return lines
 }

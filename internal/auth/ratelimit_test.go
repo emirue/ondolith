@@ -245,3 +245,36 @@ func BenchmarkLimiterNewKeyWithActiveBuckets(b *testing.B) {
 		l.Forget("new-key")
 	}
 }
+
+// **한 시간보다 긴 창은 정리에 지워지지 않는다** — 정리는 「쉰 버킷은 이미 가득 찼다」는 가정으로 지우는데, 하루 창
+// (앱 문자 하루 10통, D42 8절)은 한 시간 쉬어도 거의 비어 있다. 지우면 다음 요청이 가득 찬 새 버킷을 받아 하루
+// 상한이 사라진다. 버킷은 자기 창이 다 지나야(그래야 가득 찬다) 지운다.
+func TestSweepKeepsBucketsWithLongerWindows(t *testing.T) {
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	l := NewLimiterAt(func() time.Time { return now })
+	day := Limit{Burst: 10, Window: 24 * time.Hour}
+	for i := 0; i < 10; i++ {
+		if !l.Allow("sms-day:01011112222", day) {
+			t.Fatalf("%d번째가 막혔다", i+1)
+		}
+	}
+	// 정리가 돌 만큼 다른 키를 넣고 한 시간 반 쉰다.
+	for i := 0; i < sweepAt; i++ {
+		l.Allow(fmt.Sprintf("siteapi-ip:10.2.%d.%d", i/256, i%256), Limit{Burst: 600, Window: time.Minute})
+	}
+	now = now.Add(90 * time.Minute)
+	l.Allow("siteapi-ip:203.0.113.20", Limit{Burst: 600, Window: time.Minute}) // 새 키 — 정리가 돈다
+	if l.Allow("sms-day:01011112222", day) {
+		t.Error("한 시간 반 뒤 하루 상한이 다시 찼다 — 정리가 하루 창 버킷을 지웠다")
+	}
+	// 하루가 다 지나면 가득 찼으므로 지워도 같다. 정리는 지도가 클 때만 돈다 — 다시 채운다.
+	now = now.Add(24 * time.Hour)
+	for i := 0; i < sweepAt; i++ {
+		l.Allow(fmt.Sprintf("siteapi-ip:10.3.%d.%d", i/256, i%256), Limit{Burst: 600, Window: time.Minute})
+	}
+	now = now.Add(2 * time.Hour)
+	l.Allow("siteapi-ip:203.0.113.21", Limit{Burst: 600, Window: time.Minute})
+	if _, kept := l.buckets["sms-day:01011112222"]; kept {
+		t.Error("하루가 지난 버킷이 남았다 — 지도가 자란다")
+	}
+}

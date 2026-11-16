@@ -1410,6 +1410,35 @@ CREATE INDEX theme_items_screen_sort_idx ON theme_items (screen_key, sort_order)
   기록된다 (D42 4절 3). 백업(A-604)은 DB 전체라 사이트 표도 들어간다
 - 내리면(`Down`) 표가 사라진다 — 발급한 키는 모두 무효가 되고 앱에 새로 넣어야 한다
 
+### Phase 6 — 앱 문자 로그인 (FR-730, [D42](42-site-extension.md) 8절)
+
+`00033_app_login.sql`. 인부가 앱에서 휴대폰 번호로 인증번호를 받아 앱 토큰을 얻는다. 시한은 DB 의 `now()` 로 잰다 —
+서버의 시계가 어긋나도 판정이 같다.
+
+**`app_login_codes`** — 번호마다 마지막 인증번호 하나
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `phone` | text | PK, `CHECK (phone ~ '^01[0-9]{8,9}$')` — 정규화한 휴대폰 번호 |
+| `code_hash` | bytea | NOT NULL, `CHECK (octet_length(code_hash) = 32)` — SHA-256(번호, 인증번호) |
+| `expires_at` | timestamptz | NOT NULL — 만든 때 + 5분 |
+| `attempts` | integer | NOT NULL DEFAULT 0, `CHECK (attempts >= 0)` — **한 문장(UPDATE … WHERE attempts < 5 RETURNING)으로 센다** |
+
+**`app_sessions`** — 앱 토큰
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `token_hash` | bytea | PK, `CHECK (octet_length(token_hash) = 32)` — 원문은 응답에만 |
+| `subject` | text | NOT NULL, `CHECK (char_length(subject) BETWEEN 1 AND 200)` — 사이트가 정한 대상. 색인 |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() |
+| `expires_at` | timestamptz | NOT NULL — 만든 때 + 30일. 색인 |
+| `last_used_at` | timestamptz | NULL — 1분에 한 번만 고친다 |
+
+- 6자리라 해시가 맞히기를 막지는 못한다(10^6) — DB 를 읽은 사람이 5분 안에 쓸 값을 평문으로 두지 않는 정도다. 맞히기는
+  5분·다섯 번·문자 상한이 막는다
+- 지난 행은 발급할 때 함께 지운다(값싼 DELETE) — 따로 도는 작업을 두지 않는다
+- 내리면(`Down`) 두 표가 사라진다 — 모든 인부가 다시 문자 인증을 해야 한다
+
 ### 돈·재고 불변식을 DB가 강제하는 목록
 
 **애플리케이션 검사만으로는 동시 요청을 막지 못한다.** 아래는 전부 DB가 막는다.

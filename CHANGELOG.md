@@ -17,6 +17,7 @@
 백업 복원을 따른다 ([D70](docs/70-operations.md), NFR-308).
 
 마이그레이션 `00032_api_keys.sql` — 앱 키 표 하나를 더한다. 내리면 발급한 키가 모두 사라진다(앱에 새로 넣어야 한다).
+마이그레이션 `00033_app_login.sql` — 앱 문자 로그인의 인증번호·토큰 표 둘을 더한다. 내리면 모든 인부가 다시 문자 인증을 해야 한다.
 
 ### Added
 
@@ -35,7 +36,6 @@
   - 사이트 실행 파일에서도 코어 버전을 빌드 정보에서 정확히 읽는다 — 테마 `requires` 검사가 건너뛰어지지 않는다
   - 라우트마다 인증 방식(`Auth: site.App`)을 반드시 적는다 — 빈 값은 부팅 검사가 거부한다. 첫 마디 `auth` 는 코어 몫이다
   - 예제 사이트 `examples/site`
-  - 문자 인증 로그인은 다음 단계다
 - **사이트 확장: 사이트 관리자 화면과 권한** (FR-729, [D42](docs/42-site-extension.md) 7절). 사이트가 `site.Extension` 의
   `Admin`·`Permissions` 에 적은 화면이 `/admin/site/` 아래에 붙는다.
   - 사이드바 「사이트」 묶음(대시보드 바로 아래)에 보인다. 주소에 변수가 든 상세 화면은 메뉴 없이 둔다
@@ -44,6 +44,15 @@
   - 사이트 코드가 쓰는 것: `site.RenderAdmin`(코어 관리자 틀 안에 그리기), `site.Done`(저장 알림 + 303),
     `site.Reauth`·`site.ReauthField`(비밀번호 재확인), `site.OpLog`(작업 로그), `site.From(r).Actor`(관리자)
   - 시스템 정보(A-602)가 사이트 빌드(모듈 경로·판)를 보인다
+- **사이트 확장: 앱 문자 인증 로그인** (FR-730, [D42](docs/42-site-extension.md) 8·9절). 사이트가 `Phone.Lookup` 을 주면
+  앱이 휴대폰 번호로 로그인한다.
+  - `/api/site/auth/code` 로 인증번호(6자리·5분·다섯 번·한 번만)를 받고, `verify` 로 30일 앱 토큰을 받는다
+  - 토큰(`X-Ondolith-Session`)이 있어야 `Auth: site.Person` 라우트가 열리고, 처리기는 `site.From(r).Subject` 로 그 사람을 안다
+  - 등록되지 않은 번호에도 같은 응답이고, 확인 실패는 이유와 관계없이 같은 401 이다
+  - 문자는 번호당 10분 3통·하루 10통, IP 당 시간 20통. 인증번호·토큰은 해시로만 저장한다
+  - 인부가 그만두면 사이트 화면에서 `site.EndSessions` 로 그 사람의 토큰을 끊는다
+  - 관리자 「설정 → 문자(SMS)」(A-215): 네이버 클라우드 SENS 키·서비스 ID·발신번호(최고 관리자·재확인), 시험 발송
+  - 사이트가 `Extension.SMS` 로 발송 함수를 주면 SENS 대신 그것을 쓴다. `site.FromContext`·`site.NormalizePhone` 도 더했다
 
 ---
 

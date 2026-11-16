@@ -34,6 +34,7 @@ func TestReauthIsAskedExactlyWhereD15Says(t *testing.T) {
 		"RoleGrantPermission",  // A-404
 		"RoleRevoke",           // A-405
 		"RoleRevokePermission", // A-404
+		"SMSSettingsSave",      // A-215 저장 (시험 발송은 묻지 않는다)
 		"SettingsSave",         // A-201 사이트 유형을 바꿀 때만
 		"SocialSettingsSave",   // A-206
 		"StorageSettingsSave",  // A-210 저장·연결 확인·옮기기

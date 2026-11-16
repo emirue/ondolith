@@ -1,6 +1,7 @@
 package siteext
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -147,5 +148,21 @@ func TestValidKey(t *testing.T) {
 		if got := ValidKey(k); got != want {
 			t.Errorf("ValidKey(%q) = %v, want %v", k, got, want)
 		}
+	}
+}
+
+// **사람 인증 라우트는 문자 로그인이 있어야 한다** (D42 4절 5). Lookup 없이 site.Person 을 적으면 토큰을 받을 길이
+// 없어 그 라우트는 영영 401 이다 — 부팅에서 알린다.
+func TestPersonRoutesNeedPhoneLogin(t *testing.T) {
+	person := Route{Method: "GET", Path: "/v1/me", Auth: AuthPerson, Handler: ok}
+	if err := (Extension{API: []Route{person}}).Validate(); err == nil || !strings.Contains(err.Error(), "Phone.Lookup") {
+		t.Errorf("Lookup 없는 site.Person = %v, want Phone.Lookup 오류", err)
+	}
+	lookup := func(context.Context, string) (string, bool, error) { return "", false, nil }
+	if err := (Extension{API: []Route{person}, Phone: PhoneLogin{Lookup: lookup}}).Validate(); err != nil {
+		t.Errorf("Lookup 있는 site.Person = %v", err)
+	}
+	if err := (Extension{API: []Route{{Method: "GET", Path: "/v1/x", Auth: Auth(3), Handler: ok}}}).Validate(); err == nil {
+		t.Error("모르는 인증 방식을 받았다")
 	}
 }

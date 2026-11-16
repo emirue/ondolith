@@ -73,8 +73,8 @@ func main() {
 }
 ```
 
-`site.Person`(문자 인증으로 로그인한 사람)은 3단계에서 생긴다 — 1단계의 라우트는 모두 `Auth: site.App` 이다. 인증
-방식을 적지 않은 라우트는 부팅 검사가 거부한다(빈 값이 열린 쪽이 되지 않게). `mustSub` 는 `fs.Sub` 의 오류를 패닉으로
+`site.Person`(문자 인증으로 로그인한 사람)은 `Phone.Lookup` 이 있어야 쓸 수 있다 — 없으면 부팅 검사가 거부한다. 인증
+방식을 적지 않은 라우트도 부팅 검사가 거부한다(빈 값이 열린 쪽이 되지 않게). `mustSub` 는 `fs.Sub` 의 오류를 패닉으로
 바꾸는 사이트 쪽 한 줄 도우미다. 빌드·배포는 13절. 테마는 지금처럼 따로 올린다.
 
 ## 3. 공개 패키지 `github.com/emirue/ondolith/site`
@@ -82,18 +82,20 @@ func main() {
 | 이름 | 하는 일 |
 |---|---|
 | `Main(Extension)` | 지금 `cmd/ondolith` 이 하는 일 전부(플래그·설정·설치 화면·운영 트리) + 확장. 실패하면 로그를 남기고 종료 코드 1 |
-| `Extension` | `Migrations fs.FS`, `Permissions []Permission`, `Admin []AdminPage`, `API []Route`, `Phone PhoneLogin`, `SMS Sender`(비우면 관리자 SENS 설정을 쓴다) |
-| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Auth`, `Handler http.HandlerFunc`. `Auth` 는 **반드시 적는다** — `site.App`(앱 키만). 3단계에서 `site.Person`(앱 키 + 문자 인증 토큰)이 붙는다. 빈 값은 부팅 검사가 거부한다 |
+| `Extension` | `Migrations fs.FS`, `Permissions []Permission`, `Admin []AdminPage`, `API []Route`, `Phone PhoneLogin`, `SMS func(ctx, to, text string) error`(비우면 관리자 SENS 설정을 쓴다. 받는 ctx 는 요청과 떨어져 있고 30초 시한이 있다) |
+| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Auth`, `Handler http.HandlerFunc`. `Auth` 는 **반드시 적는다** — `site.App`(앱 키만) 또는 `site.Person`(앱 키 + 문자 인증 토큰). 빈 값은 부팅 검사가 거부한다 |
 | `AdminPage` | `Menu`(사이드바 글자, 30자까지 — 비우면 메뉴에 없는 상세 화면), `Path`(`/admin/site` 뒤, ServeMux 변수 가능 — 변수가 있으면 `Menu` 를 비운다), `Permission`(`Permissions` 에 적은 키), `Handler`. GET 과 POST 를 한 처리기가 받는다 |
 | `Permission` | `Key`(`site.` 다음에 소문자로 시작하는 마디 하나 — DB 가 두 마디만 받는다), `Name`(역할 편집기에 키와 함께 보이는 이름, 1~60자) |
-| `PhoneLogin` | `Lookup func(ctx, phone string) (subject string, ok bool, err error)` — 정규화한 번호(숫자만)를 받아 로그인할 대상을 돌려준다. 비우면 문자 로그인을 쓰지 않는다 |
+| `PhoneLogin` | `Lookup func(ctx, phone string) (subject string, ok bool, err error)` — 정규화한 번호(숫자만)를 받아 로그인할 대상을 돌려준다. 비우면 문자 로그인을 쓰지 않는다. **ctx 는 그 앱 요청의 문맥이다** — `site.FromContext(ctx).DB` 로 사이트 표를 읽는다. 인증번호를 보낼 때와 확인할 때 두 번 부른다(그 사이 그만뒀을 수 있다) |
+| `FromContext(ctx) Context` | `From(r)` 과 같다 — ctx 만 받는 곳(`Lookup`)에서 쓴다 |
+| `NormalizePhone(s) (string, bool)` | `Lookup` 이 받는 모양(숫자만, `01…`)으로 바꾼다. 사이트가 인부 번호를 저장할 때 이것을 거쳐야 찾는다 |
 | `From(r) Context` | 처리기 안에서: `DB`(`*sql.DB` — database/sql. pgx 의 주 판이 공개 약속에 들어가지 않게), `App`(부른 앱 키의 이름), `Subject`(`site.Person` 일 때 로그인한 대상), `Actor`(관리자 화면일 때 관리자 id·이름), `Log`(`*slog.Logger`) |
 | `RenderAdmin(w, r, status, title, t *template.Template, data any)` | `t` 의 `content` 블록을 `data` 로 실행해 코어 관리자 틀(머리글·사이드바·알림·`admin.js`) 안에 그린다. `status` 는 그대로 나간다 — 폼을 다시 그리면 422, 재확인 실패는 403. 오류 문장은 사이트 템플릿이 그린다(코어의 모양 `adm-toast adm-toast--error`). 사이트 템플릿은 코어 템플릿 묶음 밖에서 실행되므로 이름이 부딪히지 않고 사이트의 함수맵을 그대로 쓴다 |
 | `Done(w, r, to, notice)` | 성공한 관리자 POST 의 끝. 알림을 싣고 303 ([D19](19-screen-io.md) C11). `to` 는 `/admin/` 로 시작해야 한다 — 아니면 보내지 않고 500(열린 리다이렉트 방지) |
 | `Reauth(r) bool` | 비밀번호 재확인을 통과했는지 — 15분 창이 열려 있거나, 이 폼의 `password` 가 맞으면 참이고 창을 연다(계정당 분당 5회). 돈·자격증명·되돌릴 수 없는 삭제를 하는 POST 가 처음에 부른다 ([D15](15-access-control.md) 5.3-1). 창만 보고 거짓을 주면 15분 지난 관리자는 그 동작을 영원히 못 한다 |
 | `ReauthField(r) template.HTML` | 코어의 비밀번호 칸. 창이 열려 있으면 빈 값이다. 템플릿 데이터에 실어 폼 안에 그린다 |
 | `OpLog(r, action, target, summary)` | 작업 로그(A-601 화면)에 한 줄. `action` 은 `site.이름`, 대상 종류는 `site`. 기록 실패는 요청을 망치지 않고 오류 로그로 남는다 |
-| `EndSessions(ctx, subject)` | 그 대상의 앱 토큰을 모두 끊는다 — 인부가 그만둘 때 |
+| `EndSessions(ctx, subject) error` | 그 대상의 앱 토큰을 모두 끊는다 — 인부가 그만둘 때. 사이트 관리자 화면 안에서 부른다(밖이면 오류) |
 | `JSON(w, status, v)`, `Error(w, status, msg)` | 앱 API 응답. 오류는 언제나 `{"error": "..."}` |
 
 `From(r)` 이 돌려주는 것은 코어가 앞에서 확인을 마친 값이다. 처리기가 다시 확인할 필요가 없다.
@@ -167,23 +169,35 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 
 | 단계 | 요청 | 코어가 하는 일 |
 |---|---|---|
-| 1 | `POST /api/site/auth/code` `{"phone":"010…"}` (앱 키) | 번호를 숫자만 남겨 정규화한다. `Phone.Lookup` 이 허락한 번호면 6자리 인증번호를 만들어(crypto/rand) 해시로 저장하고 문자로 보낸다. **허락하지 않은 번호에도 같은 응답** — 등록 여부를 알려 주지 않는다 |
-| 2 | `POST /api/site/auth/verify` `{"phone":"…","code":"123456"}` | 5분 안, 틀린 입력 5번 미만이면 확인한다. 맞으면 앱 토큰(32바이트 난수, 해시로 저장, 30일)을 돌려준다 |
-| 3 | 이후 요청 | `X-Ondolith-Session: <토큰>`. 쓸 때마다 마지막 사용 시각을 고친다 |
+| 1 | `POST /api/site/auth/code` `{"phone":"010…"}` (앱 키) | 번호를 숫자만 남겨 정규화하고 문자 상한을 본 뒤 **바로 202 `{"accepted":true}`** 로 답한다 — 응답 전에 하는 일은 번호와 관계없이 같다. 그 뒤 응답 밖에서 `Phone.Lookup` 이 허락한 번호면 6자리 인증번호를 만들어(crypto/rand) 해시로 저장하고 문자로 보낸다. Lookup 오류·발송 실패·사이트 코드의 패닉도 응답에 드러나지 않는다 — 로그와 작업 로그(`sms.failed`, 번호는 가리고 오류 문구의 인증번호·번호 원문은 지운다)에 남는다 |
+| 2 | `POST /api/site/auth/verify` `{"phone":"…","code":"123456"}` | 5분 안, 틀린 입력 5번 미만이면 확인한다 — 틀린 횟수는 한 문장(UPDATE)으로 세어 동시에 보낸 추측도 다섯 번에서 멈춘다. 맞으면 `Lookup` 을 다시 불러 대상을 받고 앱 토큰(32바이트 난수, 해시로 저장, 30일)을 돌려준다. **실패는 이유와 관계없이 같은 401** 이다. IP 당 10분 30번 |
+| 3 | 이후 요청 | `X-Ondolith-Session: <토큰>`. 마지막 사용 시각은 1분에 한 번 고친다 |
 | 4 | `POST /api/site/auth/logout` | 그 토큰을 끊는다 |
 
 **`/api/site/auth/` 는 코어 몫이다.** 1단계부터 사이트 라우트의 첫 마디 `auth` 를 부팅 검사가 거부한다 — 사이트가 먼저
 쓰면 코어를 올리는 순간 겹쳐 부팅이 깨진다.
 
 - **상한**: 같은 번호로 10분에 3통·하루 10통, 같은 IP 에서 시간당 20통 — 문자는 돈이고 남의 번호로 폭탄을 보낼 수
-  있다. 넘으면 429. 기존 요청 상한기(`auth.Limiter`)를 쓴다.
+  있다. 넘으면 429. 기존 요청 상한기(`auth.Limiter`)를 쓰고 `Lookup` 보다 먼저 건다(429 로도 등록 여부가 새지 않게).
+  상한기는 메모리라 재시작·A-201 재조립 때 풀린다 — 비용이 문제되면 DB 로 센다. 상한은 토큰 버킷이라 「하루 10통」은
+  첫 24시간에 최대 약 20통(가득 찬 10통 + 하루에 걸쳐 다시 차는 10통)이다. 한 시간보다 긴 창의 버킷은 상한기의 정리가
+  지우지 않는다(창이 다 지나 가득 찬 뒤에만 지운다). IP 당 시간 20통은 한 현장의 휴대폰이 통신사 NAT·와이파이 하나로
+  나오면 21번째 사람을 막는다 — 알려진 한계다.
+- **인증번호는 한 번만 통한다** — 맞으면 그 해시가 남아 있을 때만 지우고, 지운 요청만 토큰을 받는다. 같은 번호로 동시에
+  맞혀도 토큰은 하나다.
+- 확인과 그만둠이 몇 ms 사이로 겹치면(확인의 Lookup 이 「아직 일한다」를 본 직후 관리자가 그만둠과 `EndSessions` 를
+  하고 그 뒤에 토큰이 만들어지면) 그만둔 사람에게 토큰이 남을 수 있다 — 코어가 막기 어렵다. 사이트가 site.Person
+  처리기에서 대상의 상태를 한 번 더 보면 닫힌다.
 - 문자 내용: `[사이트 이름] 인증번호 123456 (5분)`. SENS 의 SMS 는 EUC-KR 90바이트까지다 — 사이트 이름이 길면 줄인다.
 - 인부가 그만두면 사이트 코드가 `site.EndSessions` 를 부르고 `Lookup` 이 그 번호를 더 허락하지 않는다.
+- 문자 로그인을 켰는데 `Extension.SMS` 도 SENS 설정도 없으면 인증번호 요청은 늘 202 인데 문자가 나가지 않는다 — 부팅
+  경고와 A-215 화면 경고가 말한다.
 
 ## 9. 관리자 「문자(SMS)」 설정 — 네이버 클라우드 SENS
 
-메일(A-205)과 같은 모양이다. 최고 관리자만, 저장할 때 비밀번호 재확인. 시크릿 키는 봉인해 저장하고 화면에 다시
-보이지 않는다.
+화면 A-215(`/admin/settings/sms`). 메일(A-205)과 같은 모양이다. 최고 관리자만, 저장할 때 비밀번호 재확인. 시크릿 키는
+봉인해 저장하고 화면에 다시 보이지 않는다. 「커스텀 API」(A-213)처럼 코어 실행 파일에도 있고, 문자 로그인이 없는 실행
+파일이면 화면이 그렇게 말한다.
 
 | 칸 | 비고 |
 |---|---|
@@ -191,7 +205,10 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 | 서비스 ID | `ncp:sms:kr:…:…` 모양 |
 | 발신번호 | SENS 콘솔에 등록한 번호만 쓸 수 있다 |
 
-- **시험 발송**: 그 관리자가 넣은 번호로 한 통, 시간당 5번. 결과(성공 또는 SENS 가 돌려준 오류)를 화면에 그린다.
+- **시험 발송**: 그 관리자가 넣은 번호로 정한 문구 한 통, 계정당 시간 5번. 결과(접수 또는 SENS 가 돌려준 오류)를 화면에
+  그린다. 사이트가 발송 함수를 주었으면 그것으로 보낸다(앱의 인증번호와 같은 길).
+- 서비스 ID 는 API 경로에 들어가므로 `/ ? # .` 를 받지 않는다. 서명하는 경로는 실제로 나가는 경로다(서비스 ID 의 `:` 는
+  인코딩되지 않는다) — 시험은 openssl 로 따로 계산한 서명과, 받은 경로로 서명을 다시 계산하는 가짜 서버로 본다.
 - **보내는 방법** (공식 문서 `https://api.ncloud-docs.com/docs/en/sens-sms-send`, `…/common-ncpapi`, 2026-11-16 확인):
   `POST https://sens.apigw.ntruss.com/sms/v2/services/{serviceId}/messages`, 본문
   `{"type":"SMS","from":발신번호,"content":내용,"messages":[{"to":번호}]}`. 머리글 `x-ncp-apigw-timestamp`(밀리초, 5분
@@ -205,8 +222,8 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 | 표 | 칸 | 비고 |
 |---|---|---|
 | `api_keys` | id, name, key_hash(unique), created_by, created_at, last_used_at, revoked_at | 6절 |
-| `app_sessions` | token_hash(PK), subject, created_at, expires_at, last_used_at | 8절. 지난 행은 하루 한 번 지운다 |
-| `app_login_codes` | phone, code_hash, expires_at, attempts | 8절. 번호당 마지막 하나만 |
+| `app_sessions` | token_hash(PK), subject, created_at, expires_at, last_used_at | 8절. 지난 행은 새 토큰을 만들 때 함께 지운다 |
+| `app_login_codes` | phone(PK), code_hash, expires_at, attempts | 8절. 번호당 마지막 하나만. 지난 행은 새 인증번호를 만들 때 지운다 |
 
 설정 키: `api.enabled`, `sms.sens.*`(시크릿은 봉인). 사이트 표는 사이트 마이그레이션이 만든다. 백업(A-604)은 DB 전체라
 사이트 표도 들어간다.
@@ -218,7 +235,7 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 | 사이트 주소가 코어 화면을 가로챔 | 접두사 고정 + 부팅 검사(4절 5) |
 | 앱 키 유출 | 사람 데이터는 토큰이 있어야 열린다(지배 원칙 5). 키는 폐기할 수 있다 |
 | 인증번호 맞히기 | 6자리·5분·5회, 번호·IP 상한. 해시로만 저장 |
-| 문자 폭탄·비용 | 8절 상한. 허락되지 않은 번호에는 보내지 않는다 |
+| 문자 폭탄·비용 | 8절 상한. 허락되지 않은 번호에는 보내지 않는다. **알려진 한계**: 상한기가 메모리라 재시작 때 풀리고, 번호당 상한 때문에 앱 키(비밀 아님)를 가진 누구나 남의 재로그인을 막거나 진행 중인 인증번호를 무효로 만들 수 있다 — 이미 받은 토큰은 그대로다 |
 | 등록된 번호 알아내기 | 허락 여부와 관계없이 같은 응답 |
 | 토큰 탈취 | 해시로만 저장, 30일 만료, `EndSessions`. HTTPS 는 운영 설정이 맡는다([D70](70-operations.md)) |
 | 사이트 처리기 패닉·큰 본문 | 앱 API(`/api/site/`)는 500 으로 막고 본문 1MB 상한. 사이트 관리자 화면은 코어 관리자 화면과 같다 — 관리자 문·사이트 권한·같은 출처를 다 지난 요청만 온다 |

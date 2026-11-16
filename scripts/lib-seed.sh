@@ -162,6 +162,7 @@ want "테마 화면에 행이 있다" 1 "$(sql "select count(*) from theme_items
 # 사이트 관리자 화면(A-214)의 목록이 비지 않게 예제 사이트 표에 한 줄 — 앱 API 를 켜고 키를 받는 길은 site-e2e 가
 # 밟으므로 여기서는 표에 바로 넣는다. 상세 화면은 이 줄의 id 로 연다.
 sql "insert into site_example_checkins (worker, kind, app) values ('홍길동', 'in', 'seed')" >/dev/null
+sql "insert into site_example_workers (name, phone) values ('홍길동', '01011112222')" >/dev/null
 CHECKIN=$(sql "select id from site_example_checkins order by id limit 1")
 [ -n "$CHECKIN" ] && ok "사이트 표에 기록이 있다" || bad "사이트 표에 기록을 넣지 못했다"
 

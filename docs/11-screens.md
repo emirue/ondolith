@@ -170,6 +170,7 @@
 | P-906 | 테마 정적 자산 | `/static/{path...}` | GET | 공개 | 없음 | SC-7 | FR-301, FR-309, NFR-206 |
 | P-907 | 헬스체크 | `/healthz` | GET | 공개 | 없음 | SC-1 | NFR-101, NFR-210 |
 | P-908 | 사이트 API | `/api/site/{path...}` | GET, POST, PUT, PATCH, DELETE | 공개 | 있음 | SC-9 | FR-728 |
+| P-909 | 앱 문자 로그인 | `/api/site/auth/{op}` | POST | 공개 | 있음 | SC-9 | FR-730 |
 
 ---
 
@@ -204,6 +205,7 @@
 | A-212 | 테마 화면 | `/admin/theme/{key}` | GET, POST | 권한:theme.edit_content | 있음 | SC-7 | FR-311, FR-721 |
 | A-213 | 커스텀 API | `/admin/settings/api` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-728 |
 | A-214 | 사이트 관리자 화면 | `/admin/site/{path...}` | GET, POST | 권한:admin.access | 있음 | SC-5 | FR-729 |
+| A-215 | 문자(SMS) | `/admin/settings/sms` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-730 |
 
 ### A-3xx 콘텐츠 관리
 
