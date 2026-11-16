@@ -22,7 +22,8 @@ const sessionHeader = "X-Ondolith-Session"
 // 관계없이 같은 순간에 막혀야 429 로도 등록 여부가 새지 않는다.
 //
 // ponytail: 상한기는 메모리다. 재시작·A-201 재조립 때 풀리고, 번호당 상한은 앱 키(비밀 아님)를 가진 누구나 남의
-// 재로그인을 막을 수 있다(이미 받은 토큰은 그대로다). 비용이 문제되면 DB 로 센다.
+// 재로그인을 막을 수 있다(이미 받은 토큰은 그대로다). 하루 창 버킷은 24시간 남아 번호·IP 를 돌려 두드리면 메모리가
+// 한 시간 창보다 오래 쌓인다. 비용·메모리가 문제되면 DB 로 센다.
 var (
 	smsPerPhone10m = auth.Limit{Burst: 3, Window: 10 * time.Minute}
 	smsPerPhoneDay = auth.Limit{Burst: 10, Window: 24 * time.Hour}
