@@ -81,11 +81,11 @@ func main() {
 |---|---|
 | `Main(Extension)` | 지금 `cmd/ondolith` 이 하는 일 전부(플래그·설정·설치 화면·운영 트리) + 확장. 실패하면 로그를 남기고 종료 코드 1 |
 | `Extension` | `Migrations fs.FS`, `Permissions []Permission`, `Admin []AdminPage`, `API []Route`, `Phone PhoneLogin`, `SMS Sender`(비우면 관리자 SENS 설정을 쓴다) |
-| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Auth`(`site.App` = 앱 키만, `site.Person` = 앱 키 + 문자 인증 토큰), `Handler http.HandlerFunc` |
+| `Route` | `Method`(GET·POST·PUT·PATCH·DELETE), `Path`(`/` 로 시작, `/api/site` 뒤에 붙는다), `Handler http.HandlerFunc`. 3단계에서 `Auth`(`site.App` = 앱 키만 — 빈 값, `site.Person` = 앱 키 + 문자 인증 토큰)가 붙는다 — 빈 값이 지금 동작이라 기존 사이트 코드가 깨지지 않는다 |
 | `AdminPage` | `Menu`(사이드바 글자), `Path`(`/admin/site` 뒤), `Permission`(`site.` 로 시작하는 키), `Handler`. GET 과 POST 를 한 처리기가 받는다 |
 | `Permission` | `Key`(`site.` 로 시작), `Name`(역할 편집기에 보이는 이름) |
 | `PhoneLogin` | `Lookup func(ctx, phone string) (subject string, ok bool, err error)` — 정규화한 번호(숫자만)를 받아 로그인할 대상을 돌려준다. 비우면 문자 로그인을 쓰지 않는다 |
-| `From(r) Context` | 처리기 안에서: `DB`(`*pgxpool.Pool`), `App`(부른 앱 키의 이름), `Subject`(`site.Person` 일 때 로그인한 대상), `Actor`(관리자 화면일 때 관리자 id·이름), `Log`(`*slog.Logger`) |
+| `From(r) Context` | 처리기 안에서: `DB`(`*sql.DB` — database/sql. pgx 의 주 판이 공개 약속에 들어가지 않게), `App`(부른 앱 키의 이름), `Subject`(`site.Person` 일 때 로그인한 대상), `Actor`(관리자 화면일 때 관리자 id·이름), `Log`(`*slog.Logger`) |
 | `RenderAdmin(w, r, title, t *template.Template, data any)` | 사이트 템플릿을 코어 관리자 틀(머리글·사이드바·알림·`admin.js`) 안에 그린다. `t` 는 `content` 블록을 정의해야 한다 |
 | `Done(w, r, to, notice)` | 성공한 관리자 POST 의 끝. 알림을 싣고 303 ([D19](19-screen-io.md) C11) |
 | `Reauth(r) bool` | 비밀번호 재확인 창이 열려 있는지 — 돈·자격증명을 다루는 사이트 화면이 쓴다 ([D15](15-access-control.md) 5.3-1) |
@@ -117,6 +117,7 @@ Flutter 앱이 `Authorization: Bearer <앱 키>` (그리고 로그인했으면 `
 |---|---|---|
 | 1 | 관리자 「커스텀 API」 가 켜져 있다 | 404 |
 | 2 | 앱 키가 있고 폐기되지 않았다 (SHA-256 해시로 찾는다) | 401 |
+| 2-1 | (2 앞에서) 같은 IP 에서 분당 600회 — 틀린 키로 두드려도 키 조회가 끝없이 늘지 않게 | 429 |
 | 3 | 키별 요청 상한 — 분당 120회 | 429 |
 | 4 | `site.Person` 이면 토큰이 있고 만료·폐기되지 않았다 | 401 |
 | 5 | 본문 1MB 이하 | 413 |

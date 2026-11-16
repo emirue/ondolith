@@ -169,6 +169,7 @@
 | P-905 | 결제 웹훅 수신 | `/webhooks/payment/{pg}` | POST | 공개 | 있음 | SC-8 | FR-610 |
 | P-906 | 테마 정적 자산 | `/static/{path...}` | GET | 공개 | 없음 | SC-7 | FR-301, FR-309, NFR-206 |
 | P-907 | 헬스체크 | `/healthz` | GET | 공개 | 없음 | SC-1 | NFR-101, NFR-210 |
+| P-908 | 사이트 API | `/api/site/{path...}` | GET, POST, PUT, PATCH, DELETE | 공개 | 있음 | SC-9 | FR-728 |
 
 ---
 
@@ -201,6 +202,7 @@
 | A-210 | 파일 저장소 설정 | `/admin/settings/storage` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-717 |
 | A-211 | 검색 노출 | `/admin/settings/seo` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-718, FR-511, FR-714 |
 | A-212 | 테마 화면 | `/admin/theme/{key}` | GET, POST | 권한:theme.edit_content | 있음 | SC-7 | FR-311, FR-721 |
+| A-213 | 커스텀 API | `/admin/settings/api` | GET, POST | 권한:settings.update | 있음 | SC-5 | FR-728 |
 
 ### A-3xx 콘텐츠 관리
 

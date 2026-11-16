@@ -1388,6 +1388,28 @@ CREATE INDEX theme_items_screen_sort_idx ON theme_items (screen_key, sort_order)
 - 화면당 200행은 저장소가 같은 `INSERT` 문에서 센다 (`MaxThemeItems`)
 - 내리면(`Down`) 두 테이블이 사라진다 — 값을 지키는 길은 백업 복원이다 (D41 「마이그레이션」)
 
+### Phase 6 — 사이트 확장의 앱 키 (FR-728, [D42](42-site-extension.md))
+
+`00032_api_keys.sql`. 모바일 앱이 `Authorization: Bearer <키>` 로 사이트 API(P-908)를 부르는 키다. **키 원문은 저장하지
+않는다** — 32바이트 난수라 SHA-256 하나로 충분하고(사람이 고른 값이 아니라 맞히기 대상이 아니다), 원문은 A-213 발급
+화면에서 한 번만 보인다.
+
+**`api_keys`**
+
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| `id` | uuid | PK |
+| `name` | text | NOT NULL, `CHECK (char_length(name) BETWEEN 1 AND 60)` |
+| `key_hash` | bytea | NOT NULL **UNIQUE**, `CHECK (octet_length(key_hash) = 32)` |
+| `created_by` | uuid | FK → `users.id` **ON DELETE SET NULL** — 발급한 관리자가 지워져도 키는 남는다 |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() |
+| `last_used_at` | timestamptz | NULL — 1분에 한 번만 고친다(앱 요청마다 쓰기가 생기지 않게) |
+| `revoked_at` | timestamptz | NULL — 폐기는 행을 지우지 않고 시각을 적는다. 폐기된 키는 없는 키와 같다(401) |
+
+- 사이트 표(`site_` 로 시작)는 이 문서가 정하지 않는다 — 사이트 마이그레이션이 만들고 `site_goose_db_version` 에
+  기록된다 (D42 4절 3). 백업(A-604)은 DB 전체라 사이트 표도 들어간다
+- 내리면(`Down`) 표가 사라진다 — 발급한 키는 모두 무효가 되고 앱에 새로 넣어야 한다
+
 ### 돈·재고 불변식을 DB가 강제하는 목록
 
 **애플리케이션 검사만으로는 동시 요청을 막지 못한다.** 아래는 전부 DB가 막는다.

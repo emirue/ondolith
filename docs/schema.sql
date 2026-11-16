@@ -13,7 +13,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Tft6St473o8jEmQRbnKQjWp9FMQE8u5Xa9uuwfjfPBc7dXmaceQRsoeGP4zNDFo
+\restrict WhdqhzaUW5hE6RiB0Yk3Sl0ChwrnKqNCZon9KY50VQmAh4IdLZAMB7FA6n6ueI6
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -59,6 +59,23 @@ $$;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: api_keys; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.api_keys (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    key_hash bytea NOT NULL,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    CONSTRAINT api_keys_key_hash_check CHECK ((octet_length(key_hash) = 32)),
+    CONSTRAINT api_keys_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 60)))
+);
+
 
 --
 -- Name: attachments; Type: TABLE; Schema: public; Owner: -
@@ -876,6 +893,22 @@ CREATE TABLE public.webhook_events (
     CONSTRAINT webhook_events_pg_check CHECK (((length(pg) >= 1) AND (length(pg) <= 32))),
     CONSTRAINT webhook_events_status_known CHECK ((status = ANY (ARRAY['수신'::text, '처리완료'::text, '실패'::text])))
 );
+
+
+--
+-- Name: api_keys api_keys_key_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_keys
+    ADD CONSTRAINT api_keys_key_hash_key UNIQUE (key_hash);
+
+
+--
+-- Name: api_keys api_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_keys
+    ADD CONSTRAINT api_keys_pkey PRIMARY KEY (id);
 
 
 --
@@ -1973,6 +2006,14 @@ CREATE TRIGGER refunds_no_delete BEFORE DELETE ON public.refunds FOR EACH ROW EX
 
 
 --
+-- Name: api_keys api_keys_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.api_keys
+    ADD CONSTRAINT api_keys_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
 -- Name: attachments attachments_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2360,5 +2401,5 @@ ALTER TABLE ONLY public.webhook_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Tft6St473o8jEmQRbnKQjWp9FMQE8u5Xa9uuwfjfPBc7dXmaceQRsoeGP4zNDFo
+\unrestrict WhdqhzaUW5hE6RiB0Yk3Sl0ChwrnKqNCZon9KY50VQmAh4IdLZAMB7FA6n6ueI6
 
