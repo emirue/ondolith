@@ -19,9 +19,9 @@ RETURNING code_hash;
 DELETE FROM app_login_codes WHERE phone = $1 AND code_hash = $2;
 
 -- name: InsertSession :one
--- 30일은 D42 8절이다.
+-- 유휴 180일은 D42 8절이다. 쓰는 동안 TouchSession 이 늘린다 — 두 문장의 기간은 같아야 한다.
 INSERT INTO app_sessions (token_hash, subject, expires_at)
-VALUES ($1, $2, now() + interval '30 days')
+VALUES ($1, $2, now() + interval '180 days')
 RETURNING expires_at;
 
 -- name: DeleteExpiredSessions :exec
@@ -31,7 +31,9 @@ DELETE FROM app_sessions WHERE expires_at <= now();
 SELECT subject, last_used_at FROM app_sessions WHERE token_hash = $1 AND expires_at > now();
 
 -- name: TouchSession :exec
-UPDATE app_sessions SET last_used_at = now() WHERE token_hash = $1;
+-- 마지막 사용과 만료를 함께 고친다. **끝난 토큰은 건드리지 않는다** — 조회가 「살아 있다」를 본 직후 끝났어도 되살리지 않는다.
+UPDATE app_sessions SET last_used_at = now(), expires_at = now() + interval '180 days'
+WHERE token_hash = $1 AND expires_at > now();
 
 -- name: DeleteSession :exec
 DELETE FROM app_sessions WHERE token_hash = $1;

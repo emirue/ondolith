@@ -1,7 +1,7 @@
 // Package applogin holds the site app's phone login: one-time codes and app tokens
 // ([D42](../../docs/42-site-extension.md) 8절).
 //
-// 인증번호와 토큰 모두 원문을 저장하지 않는다 — 표에는 SHA-256 만 있다. 시한(5분·30일)은 DB 의 now() 로 잰다:
+// 인증번호와 토큰 모두 원문을 저장하지 않는다 — 표에는 SHA-256 만 있다. 시한(5분·유휴 180일)은 DB 의 now() 로 잰다:
 // 서버 여럿이나 시계가 어긋난 서버가 한 표를 봐도 판정이 같다.
 package applogin
 
@@ -110,8 +110,8 @@ func (s *Store) StartSession(ctx context.Context, subject string) (token string,
 	return token, expires, err
 }
 
-// LookupSession finds the subject of a live token. 마지막 사용 시각은 1분에 한 번만 고친다 — 요청마다 쓰면
-// 화면 하나가 쓰기 하나를 더 한다.
+// LookupSession finds the subject of a live token. 마지막 사용 시각과 만료(지금 + 180일)는 1분에 한 번만 고친다 —
+// 요청마다 쓰면 화면 하나가 쓰기 하나를 더 한다. 쓰는 동안은 로그인이 풀리지 않는다.
 func (s *Store) LookupSession(ctx context.Context, token string) (string, bool, error) {
 	if token == "" {
 		return "", false, nil

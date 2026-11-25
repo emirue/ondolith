@@ -1431,7 +1431,7 @@ CREATE INDEX theme_items_screen_sort_idx ON theme_items (screen_key, sort_order)
 | `token_hash` | bytea | PK, `CHECK (octet_length(token_hash) = 32)` — 원문은 응답에만 |
 | `subject` | text | NOT NULL, `CHECK (char_length(subject) BETWEEN 1 AND 200)` — 사이트가 정한 대상. 색인 |
 | `created_at` | timestamptz | NOT NULL DEFAULT now() |
-| `expires_at` | timestamptz | NOT NULL — 만든 때 + 30일. 색인 |
+| `expires_at` | timestamptz | NOT NULL — 만든 때 + 180일, 쓸 때마다 「지금 + 180일」(`last_used_at` 과 함께, 끝난 행은 그대로). 색인 |
 | `last_used_at` | timestamptz | NULL — 1분에 한 번만 고친다 |
 
 - 6자리라 해시가 맞히기를 막지는 못한다(10^6) — DB 를 읽은 사람이 5분 안에 쓸 값을 평문으로 두지 않는 정도다. 맞히기는

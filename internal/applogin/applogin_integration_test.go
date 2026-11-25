@@ -147,7 +147,7 @@ func TestConcurrentGuessesStillStopAtFive(t *testing.T) {
 	}
 }
 
-// **앱 토큰: 30일, 해시로만, 대상마다 끊을 수 있다** (D42 8절). 그만둔 사람은 사이트가 대상을 끊는다.
+// **앱 토큰: 유휴 180일, 해시로만, 대상마다 끊을 수 있다** (D42 8절). 그만둔 사람은 사이트가 대상을 끊는다.
 func TestSessionsAreHashedAndEndBySubject(t *testing.T) {
 	s, pool := store(t)
 	ctx := context.Background()
@@ -156,8 +156,8 @@ func TestSessionsAreHashedAndEndBySubject(t *testing.T) {
 		t.Fatalf("StartSession = %q, %v", tok, err)
 	}
 	var days float64
-	if err := pool.QueryRow(ctx, `SELECT extract(epoch from ($1::timestamptz - now())) / 86400`, exp).Scan(&days); err != nil || days < 29.9 || days > 30.1 {
-		t.Errorf("만료까지 %.2f일, want 30", days)
+	if err := pool.QueryRow(ctx, `SELECT extract(epoch from ($1::timestamptz - now())) / 86400`, exp).Scan(&days); err != nil || days < 179.9 || days > 180.1 {
+		t.Errorf("만료까지 %.2f일, want 180", days)
 	}
 	var plain int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM app_sessions WHERE position(convert_to($1, 'UTF8') in token_hash) > 0`, tok).Scan(&plain)
@@ -199,7 +199,7 @@ func TestSessionsAreHashedAndEndBySubject(t *testing.T) {
 	if _, ok, _ := s.LookupSession(ctx, keep); !ok {
 		t.Error("다른 대상의 토큰까지 끊었다")
 	}
-	// 30일이 지나면 안 되고, 다음 발급이 치운다.
+	// 만료가 지나면 안 되고, 다음 발급이 치운다.
 	if _, err := pool.Exec(ctx, `UPDATE app_sessions SET expires_at = now() - interval '1 second'`); err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +216,70 @@ func TestSessionsAreHashedAndEndBySubject(t *testing.T) {
 	}
 	if _, _, err := s.StartSession(ctx, ""); err == nil {
 		t.Error("빈 대상으로 토큰을 만들었다")
+	}
+}
+
+// **쓰는 동안 연장된다** (D42 8절) — 살아 있는 토큰을 쓰면 만료가 「지금 + 180일」이 된다. 쓰기는 지금처럼 1분에 한
+// 번이다. 끝난 토큰은 늘리지 않는다 — 조회가 「살아 있다」를 본 직후 끝났어도 고치기 문장이 그 행을 건드리지 않는다.
+func TestSessionsSlideWhileUsed(t *testing.T) {
+	s, pool := store(t)
+	ctx := context.Background()
+	tok, _, err := s.StartSession(ctx, "worker-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(assign string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE app_sessions SET `+assign+` WHERE token_hash = $1`, sum(tok)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	daysLeft := func() float64 {
+		t.Helper()
+		var d float64
+		if err := pool.QueryRow(ctx, `SELECT extract(epoch from (expires_at - now())) / 86400 FROM app_sessions WHERE token_hash = $1`, sum(tok)).Scan(&d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	live := func() bool {
+		t.Helper()
+		_, ok, err := s.LookupSession(ctx, tok)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	// 하루 남은 토큰(지난 판이 만든 30일 토큰도 같다)을 2분 만에 쓰면 180일로 늘어난다.
+	set(`created_at = now() - interval '29 days', expires_at = now() + interval '1 day', last_used_at = now() - interval '2 minutes'`)
+	if !live() {
+		t.Fatal("살아 있는 토큰이 안 통했다")
+	}
+	if d := daysLeft(); d < 179.9 || d > 180.1 {
+		t.Errorf("쓴 뒤 만료까지 %.2f일, want 180", d)
+	}
+
+	// 1분 안에 다시 쓰면 고치지 않는다 — 요청마다 쓰기를 하나 더하지 않는다.
+	set(`expires_at = now() + interval '1 day'`)
+	if !live() {
+		t.Fatal("살아 있는 토큰이 안 통했다")
+	}
+	if d := daysLeft(); d > 1.1 {
+		t.Errorf("1분 안의 두 번째 사용이 만료를 고쳤다 — %.2f일", d)
+	}
+
+	// 끝난 토큰은 되살리지 않는다. 조회는 끝난 토큰을 이미 거르므로, 조회를 지난 직후 끝난 경우(그 사이 지난 토큰
+	// 치우기와 겹친 경우도)는 고치기 문장을 바로 불러 흉내 낸다 — 그 WHERE 를 빼면 여기가 빨강이다.
+	set(`expires_at = now() - interval '1 second', last_used_at = now() - interval '2 minutes'`)
+	if live() {
+		t.Error("끝난 토큰이 통했다")
+	}
+	if err := s.q.TouchSession(ctx, sum(tok)); err != nil {
+		t.Fatal(err)
+	}
+	if d := daysLeft(); d > 0 {
+		t.Errorf("끝난 토큰이 되살아났다 — 만료까지 %.2f일", d)
 	}
 }
 
