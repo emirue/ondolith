@@ -70,7 +70,7 @@ func (q *Queries) DeleteSubjectSessions(ctx context.Context, subject string) (in
 
 const insertSession = `-- name: InsertSession :one
 INSERT INTO app_sessions (token_hash, subject, expires_at)
-VALUES ($1, $2, now() + interval '30 days')
+VALUES ($1, $2, now() + interval '180 days')
 RETURNING expires_at
 `
 
@@ -79,7 +79,7 @@ type InsertSessionParams struct {
 	Subject   string
 }
 
-// 30일은 D42 8절이다.
+// 유휴 180일은 D42 8절이다. 쓰는 동안 TouchSession 이 늘린다 — 두 문장의 기간은 같아야 한다.
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) (time.Time, error) {
 	row := q.db.QueryRow(ctx, insertSession, arg.TokenHash, arg.Subject)
 	var expires_at time.Time
@@ -140,9 +140,11 @@ func (q *Queries) SpendAttempt(ctx context.Context, arg SpendAttemptParams) ([]b
 }
 
 const touchSession = `-- name: TouchSession :exec
-UPDATE app_sessions SET last_used_at = now() WHERE token_hash = $1
+UPDATE app_sessions SET last_used_at = now(), expires_at = now() + interval '180 days'
+WHERE token_hash = $1 AND expires_at > now()
 `
 
+// 마지막 사용과 만료를 함께 고친다. **끝난 토큰은 건드리지 않는다** — 조회가 「살아 있다」를 본 직후 끝났어도 되살리지 않는다.
 func (q *Queries) TouchSession(ctx context.Context, tokenHash []byte) error {
 	_, err := q.db.Exec(ctx, touchSession, tokenHash)
 	return err

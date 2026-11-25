@@ -181,7 +181,7 @@ func TestOpLogRecordsSiteActions(t *testing.T) {
 }
 
 // **그만둔 사람의 앱 토큰을 모두 끊는다** (D42 8절) — 사이트 관리자 화면에서 부른다. 화면 밖이면 끊을 길이 없다는
-// 오류다 — 조용히 넘어가면 그만둔 사람이 30일 동안 앱을 쓴다.
+// 오류다 — 조용히 넘어가면 그만둔 사람이 앱을 계속 쓴다(쓰는 동안 토큰이 늘어난다).
 func TestEndSessionsEndsTheSubject(t *testing.T) {
 	f := &fakeAdmin{}
 	r := f.request("POST", "/admin/site/workers/7", url.Values{})

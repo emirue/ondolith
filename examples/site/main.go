@@ -383,7 +383,7 @@ func adminWorkers(w http.ResponseWriter, r *http.Request) {
 }
 
 // adminWorkerLeave marks a worker as gone: Lookup 이 그 번호를 더 허락하지 않고, 이미 받은 앱 토큰도 끊는다
-// (site.EndSessions). 둘 다 해야 한다 — 토큰은 30일 동안 살아 있다.
+// (site.EndSessions). 둘 다 해야 한다 — 토큰은 쓰는 동안 계속 살아 있다.
 func adminWorkerLeave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "허용되지 않는 메서드입니다.", http.StatusMethodNotAllowed)

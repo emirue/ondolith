@@ -126,7 +126,8 @@ func OpLog(r *http.Request, action, target, summary string) {
 }
 
 // EndSessions ends every app token of subject — 인부가 그만둘 때 사이트 관리자 화면에서 부른다. Lookup 이 그 번호를
-// 더 허락하지 않아도 이미 받은 토큰은 30일 동안 살아 있으므로 둘 다 한다. 관리자 화면 밖이면 오류다.
+// 더 허락하지 않아도 이미 받은 토큰은 쓰는 동안 계속 살아 있으므로 둘 다 한다. 잃어버린 휴대폰도 이것으로 끊는다.
+// 관리자 화면 밖이면 오류다.
 func EndSessions(ctx context.Context, subject string) error {
 	a, ok := siteext.AdminFrom(ctx)
 	switch {
